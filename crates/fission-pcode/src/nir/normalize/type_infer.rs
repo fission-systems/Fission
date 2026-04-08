@@ -1,0 +1,392 @@
+/// Intra-function type inference pass.
+///
+/// Ghidra's `ActionInferTypes::propagateOneType` follows data-flow edges in the
+/// full SSA graph. Here we approximate the same idea using Fission's already-
+/// structured HIR: since the HIR is in near-SSA form (most variables are
+/// single-assignment after normalization), we can reconstruct types by walking
+/// the def map without a full data-flow framework.
+///
+/// Algorithm:
+/// 1. `scan_def_types(body)` — build a `HashMap<name, HirExpr>` from the first
+///    assignment to each variable anywhere in the body tree.
+/// 2. `infer_type_for_binding(name, defs, visited)` — recursively derive the
+///    type of a named binding.  If the definition is `Var(other)` we follow the
+///    chain (cycle-protected with a `HashSet`); otherwise we call `expr_type`.
+/// 3. `apply_type_inference_pass(func)` — for every `NirBinding` whose `ty` is
+///    `Unknown` _and_ whose `surface_type_name` is unset, replace `ty` with the
+///    inferred result.  Also re-derives `HirFunction.return_type` for the common
+///    `return <var>;` pattern that previously always produced `undefined`.
+///
+/// This pass is binary-independent and heuristic-free: it only propagates types
+/// that are already embedded in typed sub-expressions (Const, Cast, Binary, …).
+use super::*;
+use std::collections::{HashMap, HashSet};
+
+/// Collect the first assignment expression type for each named variable in the
+/// body.  We store `(NirType, Option<String>)` where the Option carries the
+/// target variable name when the RHS is a `Var` — so we can chain-resolve later.
+///
+/// Storing owned types (not references) avoids lifetime conflicts when we
+/// later mutate `func` to apply the inferred types.
+fn scan_def_types(stmts: &[HirStmt], defs: &mut HashMap<String, DefEntry>) {
+    for stmt in stmts {
+        scan_def_types_stmt(stmt, defs);
+    }
+}
+
+/// Either a concrete type inferred from the expression, or the name of another
+/// variable whose type we still need to chase (for `x = y` patterns).
+enum DefEntry {
+    Known(NirType),
+    Alias(String),
+}
+
+fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } => {
+            if defs.contains_key(name.as_str()) {
+                // Only record the first definition (near-SSA assumption).
+                return;
+            }
+            let entry = match rhs {
+                HirExpr::Var(src) => DefEntry::Alias(src.clone()),
+                other => {
+                    let ty = expr_type(other);
+                    DefEntry::Known(ty)
+                }
+            };
+            defs.insert(name.clone(), entry);
+        }
+        HirStmt::Block(stmts) => scan_def_types(stmts, defs),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            scan_def_types(then_body, defs);
+            scan_def_types(else_body, defs);
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            scan_def_types(body, defs)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(i) = init {
+                scan_def_types_stmt(i, defs);
+            }
+            if let Some(u) = update {
+                scan_def_types_stmt(u, defs);
+            }
+            scan_def_types(body, defs);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                scan_def_types(&case.body, defs);
+            }
+            scan_def_types(default, defs);
+        }
+        _ => {}
+    }
+}
+
+/// Infer the type of a named binding by following its definition chain.
+///
+/// Returns `NirType::Unknown` when:
+/// - the name has no definition in `defs`
+/// - the definition's type is `Unknown` (e.g. another unresolved Var)
+/// - a cycle is detected in the Var-chain
+fn infer_type_for_binding(
+    name: &str,
+    defs: &HashMap<String, DefEntry>,
+    visited: &mut HashSet<String>,
+) -> NirType {
+    if !visited.insert(name.to_owned()) {
+        return NirType::Unknown;
+    }
+    match defs.get(name) {
+        None => NirType::Unknown,
+        Some(DefEntry::Known(ty)) => ty.clone(),
+        Some(DefEntry::Alias(src)) => {
+            let src = src.clone();
+            infer_type_for_binding(&src, defs, visited)
+        }
+    }
+}
+
+/// Re-derive the function's return type from its `return` statements.
+///
+/// The builder sets `return_type` to `expr_type(return_expr)`, but
+/// `expr_type(Var(_)) = Unknown`.  This pass re-runs the same scan after type
+/// inference so that `return x;` where `x` has a resolved type propagates
+/// correctly.
+fn rederive_return_type(
+    return_type: &mut NirType,
+    surface_return_type_name: &Option<String>,
+    body: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+) {
+    if *return_type != NirType::Unknown || surface_return_type_name.is_some() {
+        return;
+    }
+    let inferred = infer_return_type_from_body(body, defs);
+    if inferred != NirType::Unknown {
+        *return_type = inferred;
+    }
+}
+
+fn infer_return_type_from_body(
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+) -> NirType {
+    for stmt in stmts {
+        if let Some(ty) = infer_return_type_stmt(stmt, defs) {
+            return ty;
+        }
+    }
+    NirType::Unknown
+}
+
+fn infer_return_type_stmt(
+    stmt: &HirStmt,
+    defs: &HashMap<String, DefEntry>,
+) -> Option<NirType> {
+    match stmt {
+        HirStmt::Return(Some(expr)) => {
+            let ty = match expr {
+                HirExpr::Var(name) => {
+                    let mut visited = HashSet::new();
+                    infer_type_for_binding(name, defs, &mut visited)
+                }
+                other => expr_type(other),
+            };
+            if ty != NirType::Unknown { Some(ty) } else { None }
+        }
+        HirStmt::Block(stmts) => infer_return_type_stmts(stmts, defs),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => infer_return_type_stmts(then_body, defs)
+            .or_else(|| infer_return_type_stmts(else_body, defs)),
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            infer_return_type_stmts(body, defs)
+        }
+        HirStmt::For { body, .. } => infer_return_type_stmts(body, defs),
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                if let Some(ty) = infer_return_type_stmts(&case.body, defs) {
+                    return Some(ty);
+                }
+            }
+            infer_return_type_stmts(default, defs)
+        }
+        _ => None,
+    }
+}
+
+fn infer_return_type_stmts(
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+) -> Option<NirType> {
+    for stmt in stmts.iter().rev() {
+        if let Some(ty) = infer_return_type_stmt(stmt, defs) {
+            return Some(ty);
+        }
+    }
+    None
+}
+
+/// Apply the type inference pass to a function.
+///
+/// - Updates `NirBinding.ty` for all `locals` and `params` that have
+///   `ty == Unknown` and no `surface_type_name` override.
+/// - Re-derives `HirFunction.return_type` when it is `Unknown`.
+///
+/// This is idempotent — running it twice produces the same result.
+pub(super) fn apply_type_inference_pass(func: &mut HirFunction) {
+    // Build the owned def map (no lifetime ties to func).
+    let mut defs: HashMap<String, DefEntry> = HashMap::new();
+    scan_def_types(&func.body, &mut defs);
+
+    // Infer types for locals whose ty is Unknown.
+    for binding in func.locals.iter_mut() {
+        if binding.ty != NirType::Unknown || binding.surface_type_name.is_some() {
+            continue;
+        }
+        let mut visited = HashSet::new();
+        let inferred = infer_type_for_binding(&binding.name, &defs, &mut visited);
+        if inferred != NirType::Unknown {
+            binding.ty = inferred;
+        }
+    }
+
+    // Also update params (some params start as Unknown when they aren't
+    // explicitly typed by hints).
+    for binding in func.params.iter_mut() {
+        if binding.ty != NirType::Unknown || binding.surface_type_name.is_some() {
+            continue;
+        }
+        let mut visited = HashSet::new();
+        let inferred = infer_type_for_binding(&binding.name, &defs, &mut visited);
+        if inferred != NirType::Unknown {
+            binding.ty = inferred;
+        }
+    }
+
+    // Re-derive the return type (no lifetime conflict — defs owns its data).
+    rederive_return_type(
+        &mut func.return_type,
+        &func.surface_return_type_name,
+        &func.body,
+        &defs,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_assign(name: &str, rhs: HirExpr) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name.to_owned()),
+            rhs,
+        }
+    }
+
+    fn make_binding(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_owned(),
+            ty: NirType::Unknown,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn make_func(
+        locals: Vec<NirBinding>,
+        body: Vec<HirStmt>,
+        return_type: NirType,
+    ) -> HirFunction {
+        HirFunction {
+            name: "test".to_owned(),
+            params: vec![],
+            locals,
+            return_type,
+            surface_return_type_name: None,
+            body,
+        }
+    }
+
+    /// `x = Const(42, uint)` → x.ty inferred as `uint`
+    #[test]
+    fn infers_type_from_const_assign() {
+        let body = vec![make_assign(
+            "x",
+            HirExpr::Const(42, NirType::Int { bits: 32, signed: false }),
+        )];
+        let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
+        apply_type_inference_pass(&mut func);
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int { bits: 32, signed: false }
+        );
+    }
+
+    /// Chain: `y = x`, `x = Const(1, bool)` → y.ty inferred as `bool`
+    #[test]
+    fn infers_type_through_var_chain() {
+        let body = vec![
+            make_assign("x", HirExpr::Const(1, NirType::Bool)),
+            make_assign("y", HirExpr::Var("x".to_owned())),
+        ];
+        let mut func = make_func(
+            vec![make_binding("x"), make_binding("y")],
+            body,
+            NirType::Unknown,
+        );
+        apply_type_inference_pass(&mut func);
+        assert_eq!(func.locals[1].ty, NirType::Bool);
+    }
+
+    /// Cycle: `a = b`, `b = a` → should not panic, both remain Unknown
+    #[test]
+    fn cycle_protection_does_not_panic() {
+        let body = vec![
+            make_assign("a", HirExpr::Var("b".to_owned())),
+            make_assign("b", HirExpr::Var("a".to_owned())),
+        ];
+        let mut func = make_func(
+            vec![make_binding("a"), make_binding("b")],
+            body,
+            NirType::Unknown,
+        );
+        apply_type_inference_pass(&mut func); // must not panic
+        assert_eq!(func.locals[0].ty, NirType::Unknown);
+        assert_eq!(func.locals[1].ty, NirType::Unknown);
+    }
+
+    /// `return x` where `x = Const(0, int)` → return_type inferred as `int`
+    #[test]
+    fn rederives_return_type_from_var() {
+        let body = vec![
+            make_assign("x", HirExpr::Const(0, NirType::Int { bits: 32, signed: true })),
+            HirStmt::Return(Some(HirExpr::Var("x".to_owned()))),
+        ];
+        let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
+        apply_type_inference_pass(&mut func);
+        assert_eq!(func.return_type, NirType::Int { bits: 32, signed: true });
+    }
+
+    /// If return_type is already known, do not overwrite it.
+    #[test]
+    fn does_not_overwrite_known_return_type() {
+        let body = vec![HirStmt::Return(Some(HirExpr::Const(
+            1,
+            NirType::Int { bits: 64, signed: false },
+        )))];
+        let existing_type = NirType::Int { bits: 32, signed: false };
+        let mut func = make_func(vec![], body, existing_type.clone());
+        apply_type_inference_pass(&mut func);
+        // return_type was non-Unknown going in — should NOT be changed by the pass
+        // (the pass only updates when return_type is Unknown)
+        assert_eq!(func.return_type, existing_type);
+    }
+
+    /// Cast expression: `x = (ulonglong)y` → x.ty inferred as `ulonglong`
+    #[test]
+    fn infers_type_from_cast_rhs() {
+        let body = vec![make_assign(
+            "x",
+            HirExpr::Cast {
+                ty: NirType::Int { bits: 64, signed: false },
+                expr: Box::new(HirExpr::Var("y".to_owned())),
+            },
+        )];
+        let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
+        apply_type_inference_pass(&mut func);
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int { bits: 64, signed: false }
+        );
+    }
+
+    /// surface_type_name set → ty must NOT be overwritten by inference.
+    #[test]
+    fn respects_surface_type_name_override() {
+        let body = vec![make_assign(
+            "x",
+            HirExpr::Const(0, NirType::Int { bits: 32, signed: false }),
+        )];
+        let mut binding = make_binding("x");
+        binding.surface_type_name = Some("DWORD".to_owned());
+        let mut func = make_func(vec![binding], body, NirType::Unknown);
+        apply_type_inference_pass(&mut func);
+        // ty must remain Unknown — only surface_type_name is authoritative
+        assert_eq!(func.locals[0].ty, NirType::Unknown);
+    }
+}

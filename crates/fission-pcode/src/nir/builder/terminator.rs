@@ -167,10 +167,19 @@ impl<'a> PreviewBuilder<'a> {
                             Ok(LoweredTerminator::Unsupported)
                         } else {
                             let default_target = this.infer_switch_default_target(idx, &targets);
+                            // Attempt to recover the real switch discriminant from the
+                            // jump-table load pattern: `Load(table + sel * scale)`.
+                            let (expr, min_val) =
+                                super::switch_table::recover_switch_discriminant(
+                                    &switch_expr,
+                                    &this.options,
+                                )
+                                .unwrap_or((switch_expr, 0));
                             Ok(LoweredTerminator::Switch {
-                                expr: switch_expr,
+                                expr,
                                 targets,
                                 default_target,
+                                min_val,
                             })
                         }
                     }

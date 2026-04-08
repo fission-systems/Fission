@@ -9,6 +9,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
+pub mod fid_hash;
 pub mod fidbf;
 pub mod win_api;
 pub mod win_constants;
@@ -26,9 +27,17 @@ pub use database::{IdentifyResult, SignatureDatabase};
 pub use relation::{CallGraph, RelationValidation, validate_relation};
 pub use signature::FunctionSignature;
 
+/// Process-wide singleton `SignatureDatabase`.
+///
+/// Initialised lazily on first access so that crates that only use
+/// `WIN_API_DB` or `WIN_CONSTANTS_DB` pay no startup cost.
+pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =
+    std::sync::LazyLock::new(SignatureDatabase::new);
+
 // Re-export lazily-initialized global databases for efficient reuse
+pub use fid_hash::{FidHashQuad, FnvHasher64, compute_fid_hash};
 pub use fidbf::{
-    FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfRelation, discover_fidbf_paths,
+    FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation, discover_fidbf_paths,
     parse_all_fidbf_for_arch, parse_fidbf,
 };
 pub use win_api::WIN_API_DB;

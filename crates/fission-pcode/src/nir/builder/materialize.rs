@@ -171,6 +171,7 @@ impl<'a> PreviewBuilder<'a> {
                         | MlilPreviewError::UnsupportedExprPieceShape
                         | MlilPreviewError::UnsupportedExprPtrArithmetic
                         | MlilPreviewError::UnsupportedExprMemoryBackedVarnode
+                        | MlilPreviewError::UnsupportedExprMultiequal
                 ) =>
             {
                 self.debug_lowering_error(

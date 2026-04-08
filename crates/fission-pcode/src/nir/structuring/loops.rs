@@ -54,6 +54,51 @@ fn rewrite_loop_control_gotos_in_stmts(
     }
 }
 
+/// CFG-aware variant: rewrites gotos to any label in `break_labels` as `Break`,
+/// and gotos to any label in `continue_labels` as `Continue`.
+/// Used for multi-exit loops where all exits share the same post-loop region.
+fn rewrite_loop_control_gotos_multi(
+    stmts: &mut [HirStmt],
+    continue_labels: &std::collections::HashSet<String>,
+    break_labels: &std::collections::HashSet<String>,
+    stats: &mut LoopControlRewriteStats,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Goto(label) => {
+                if break_labels.contains(label.as_str()) {
+                    *stmt = HirStmt::Break;
+                    stats.break_rewrites += 1;
+                    continue;
+                }
+                if continue_labels.contains(label.as_str()) {
+                    *stmt = HirStmt::Continue;
+                    stats.continue_rewrites += 1;
+                }
+            }
+            HirStmt::If { then_body, else_body, .. } => {
+                rewrite_loop_control_gotos_multi(then_body, continue_labels, break_labels, stats);
+                rewrite_loop_control_gotos_multi(else_body, continue_labels, break_labels, stats);
+            }
+            HirStmt::Block(body) => {
+                rewrite_loop_control_gotos_multi(body, continue_labels, break_labels, stats);
+            }
+            HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Switch { .. } => {
+                stats.skipped_nested_scope_count += 1;
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn get_loop_body(&self, head_idx: usize) -> Option<&crate::nir::structuring::loop_analysis::LoopBody> {
         self.loop_bodies.iter().find(|lb| lb.head == head_idx)
@@ -792,14 +837,14 @@ impl<'a> PreviewBuilder<'a> {
                     // Propagate as an unsupported marker; caller will fall back.
                     return Ok(None);
                 }
-                LoweredTerminator::Switch { expr, targets, default_target } => {
+                LoweredTerminator::Switch { expr, targets, default_target, min_val } => {
                     // Switch inside loop body: emit as switch with gotos, rewrite pass will clean
                     let cases = targets
                         .into_iter()
                         .filter(|t| Some(*t) != default_target)
                         .enumerate()
                         .map(|(i, t)| HirSwitchCase {
-                            values: vec![i as i64],
+                            values: vec![min_val + i as i64],
                             body: vec![HirStmt::Goto(block_label(t))],
                         })
                         .collect();
@@ -820,13 +865,38 @@ impl<'a> PreviewBuilder<'a> {
 
         // Apply break/continue rewriting to catch any Goto labels that escaped the fallback
         // (e.g. produced by nested if/else structuring that still emits gotos).
-        let break_label_str = break_addr.map(block_label);
+        //
+        // CFG-based: build break_labels from ALL exits of this loop body, not just the
+        // canonical one.  This converts multi-exit gotos to `break` when they all exit
+        // the loop, keeping the generated code clean without changing semantics.
         let continue_label_str = block_label(head_addr);
+        let continue_set: std::collections::HashSet<String> =
+            std::iter::once(continue_label_str.clone()).collect();
+        let break_labels: std::collections::HashSet<String> = {
+            if let Some(lb) = self.get_loop_body(head_idx) {
+                let all_exits_labels: std::collections::HashSet<String> = lb
+                    .all_exits
+                    .iter()
+                    .filter_map(|&exit| self.pcode.blocks.get(exit).map(|b| block_label(b.start_address)))
+                    .collect();
+                if !all_exits_labels.is_empty() {
+                    all_exits_labels
+                } else if let Some(ref bstr) = break_addr.map(block_label) {
+                    std::iter::once(bstr.clone()).collect()
+                } else {
+                    std::collections::HashSet::new()
+                }
+            } else if let Some(ref bstr) = break_addr.map(block_label) {
+                std::iter::once(bstr.clone()).collect()
+            } else {
+                std::collections::HashSet::new()
+            }
+        };
         let mut stats = LoopControlRewriteStats::default();
-        rewrite_loop_control_gotos_in_stmts(
+        rewrite_loop_control_gotos_multi(
             &mut result_stmts,
-            Some(&continue_label_str),
-            break_label_str.as_deref(),
+            &continue_set,
+            &break_labels,
             &mut stats,
         );
         self.track_loop_control_rewrite_stats(stats);
@@ -839,6 +909,55 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         Ok(Some(result_stmts))
+    }
+
+    /// Structures a **multi-block infinite loop** — a loop whose `all_exits` is empty,
+    /// meaning no edge inside the body ever leaves the loop.
+    ///
+    /// These are not caught by `try_lower_infloop` (single-block self-loop) or
+    /// `try_lower_while` (requires a conditional exit at the head).  This reducer
+    /// detects them via `LoopBody::is_infinite_loop_candidate` and emits
+    /// `while(true) { body }`.
+    pub(super) fn try_lower_multiblock_infloop(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let body_blocks: Vec<usize> = {
+            let Some(loop_body) = self.get_loop_body(idx) else {
+                return Ok(None);
+            };
+            if !loop_body.is_infinite_loop_candidate() {
+                return Ok(None);
+            }
+            if loop_body.body.len() < 2 {
+                // Single-block infinite loops are handled by try_lower_infloop.
+                return Ok(None);
+            }
+            loop_body.body.clone()
+        };
+
+        // Include ALL body blocks (including the head) in the subgraph so that the head
+        // block's statements are naturally emitted first.  The head block is the start.
+        let body_set: HashSet<usize> = body_blocks.iter().copied().collect();
+
+        let Some(lowered) = self.lower_loop_body_subgraph(
+            &body_set,
+            idx,   // start at the loop head
+            None,  // no break exit — truly infinite
+            idx,   // head for continue detection
+        )?
+        else {
+            return Ok(None);
+        };
+
+        let max_body_idx = body_blocks.iter().copied().max().unwrap_or(idx);
+        Ok(Some((
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body: lowered,
+            },
+            max_body_idx + 1,
+        )))
     }
 }
 

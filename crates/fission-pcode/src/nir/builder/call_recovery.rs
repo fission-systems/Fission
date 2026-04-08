@@ -54,9 +54,9 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        const WIN64_PARAM_REGS: &[(u64, u32)] = &[(0x08, 8), (0x10, 8), (0x80, 8), (0x88, 8)];
-        let mut recovered: Vec<Option<HirExpr>> = vec![None; WIN64_PARAM_REGS.len()];
-        let mut outcomes: Vec<PopOutcome> = vec![PopOutcome::FailedDef; WIN64_PARAM_REGS.len()];
+        let param_regs = self.options.calling_convention.param_reg_slots_64();
+        let mut recovered: Vec<Option<HirExpr>> = vec![None; param_regs.len()];
+        let mut outcomes: Vec<PopOutcome> = vec![PopOutcome::FailedDef; param_regs.len()];
 
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
@@ -70,7 +70,8 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            let Some((_, Some(param_index))) = register_name_with_param(output.offset, output.size)
+            let Some((_, Some(param_index))) =
+                register_name_with_param(output.offset, output.size, self.options.calling_convention)
             else {
                 continue;
             };
@@ -111,7 +112,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
-        for (param_index, (offset, size)) in WIN64_PARAM_REGS.iter().enumerate() {
+        for (param_index, (offset, size)) in param_regs.iter().enumerate() {
             if param_index > highest_recovered || recovered[param_index].is_some() {
                 continue;
             }

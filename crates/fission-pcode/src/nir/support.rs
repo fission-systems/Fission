@@ -88,6 +88,10 @@ pub(crate) enum LoweredTerminator {
         expr: HirExpr,
         targets: Vec<u64>,
         default_target: Option<u64>, // Usually the last target or something specific
+        /// Offset to add to ordinal case indices when the switch selector was
+        /// adjusted by the compiler (e.g. `sel = orig - min_val`).
+        /// case value = `min_val + ordinal_index`.  Zero when unknown/unrecovered.
+        min_val: i64,
     },
     Return(Option<HirExpr>),
     Unsupported,
@@ -256,35 +260,120 @@ pub(crate) fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
     name
 }
 
-pub(crate) fn register_name_with_param(
-    offset: u64,
-    _size: u32,
-) -> Option<(&'static str, Option<usize>)> {
+/// x64 calling convention used when identifying parameter registers.
+///
+/// This affects which REGISTER-space varnodes are labelled `param_1`, `param_2`, etc.
+/// in decompiled output. It does **not** affect hardware register names (rax, rbx, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CallingConvention {
+    /// Windows x64 fastcall: first four integer args in RCX, RDX, R8, R9.
+    WindowsX64,
+    /// System V AMD64 ABI (Linux / macOS): first six integer args in RDI, RSI, RDX, RCX, R8, R9.
+    SystemVAmd64,
+}
+
+impl Default for CallingConvention {
+    fn default() -> Self {
+        Self::WindowsX64
+    }
+}
+
+impl CallingConvention {
+    /// Returns the ordered list of Ghidra REGISTER-space offsets for integer parameter registers.
+    pub(crate) fn param_offsets(self) -> &'static [u64] {
+        match self {
+            Self::WindowsX64 => &[
+                0x08, // rcx → param_1
+                0x10, // rdx → param_2
+                0x80, // r8  → param_3
+                0x88, // r9  → param_4
+            ],
+            Self::SystemVAmd64 => &[
+                0x38, // rdi → param_1
+                0x30, // rsi → param_2
+                0x10, // rdx → param_3
+                0x08, // rcx → param_4
+                0x80, // r8  → param_5
+                0x88, // r9  → param_6
+            ],
+        }
+    }
+
+    /// Returns the (REGISTER-space offset, 64-bit size) pairs for all integer
+    /// parameter registers in 64-bit mode — used for call argument recovery.
+    pub(crate) fn param_reg_slots_64(self) -> &'static [(u64, u32)] {
+        match self {
+            Self::WindowsX64 => &[
+                (0x08, 8), // rcx  → param_1
+                (0x10, 8), // rdx  → param_2
+                (0x80, 8), // r8   → param_3
+                (0x88, 8), // r9   → param_4
+            ],
+            Self::SystemVAmd64 => &[
+                (0x38, 8), // rdi  → param_1
+                (0x30, 8), // rsi  → param_2
+                (0x10, 8), // rdx  → param_3
+                (0x08, 8), // rcx  → param_4
+                (0x80, 8), // r8   → param_5
+                (0x88, 8), // r9   → param_6
+            ],
+        }
+    }
+}
+
+/// Maps a Ghidra REGISTER-space offset to the hardware register name for x86-64.
+///
+/// This is ABI-independent — offset 0x08 is always RCX regardless of calling convention.
+pub(crate) fn x64_ghidra_reg_name(offset: u64) -> Option<&'static str> {
     match offset {
-        0x08 => Some(("param_1", Some(0))),
-        0x10 => Some(("param_2", Some(1))),
-        0x80 => Some(("param_3", Some(2))),
-        0x88 => Some(("param_4", Some(3))),
-        0x00 => Some(("rax", None)),
-        0x18 => Some(("rbx", None)),
-        0x20 => Some(("rsp", None)),
-        0x28 => Some(("rbp", None)),
-        0x30 => Some(("rsi", None)),
-        0x38 => Some(("rdi", None)),
-        0x90 => Some(("r10", None)),
-        0x98 => Some(("r11", None)),
-        0xa0 => Some(("r12", None)),
-        0xa8 => Some(("r13", None)),
-        0xb0 => Some(("r14", None)),
-        0xb8 => Some(("r15", None)),
+        0x00 => Some("rax"),
+        0x08 => Some("rcx"),
+        0x10 => Some("rdx"),
+        0x18 => Some("rbx"),
+        0x20 => Some("rsp"),
+        0x28 => Some("rbp"),
+        0x30 => Some("rsi"),
+        0x38 => Some("rdi"),
+        0x80 => Some("r8"),
+        0x88 => Some("r9"),
+        0x90 => Some("r10"),
+        0x98 => Some("r11"),
+        0xa0 => Some("r12"),
+        0xa8 => Some("r13"),
+        0xb0 => Some("r14"),
+        0xb8 => Some("r15"),
         _ => None,
     }
 }
 
-pub(crate) fn register_name(offset: u64, size: u32) -> &'static str {
-    register_name_with_param(offset, size)
-        .map(|(name, _)| name)
-        .unwrap_or("reg")
+/// Static `param_N` names for up to 6 parameters (enough for System V AMD64).
+const PARAM_NAMES: [&str; 6] = [
+    "param_1", "param_2", "param_3", "param_4", "param_5", "param_6",
+];
+
+/// Returns `(display_name, param_index)` for a Ghidra REGISTER-space varnode.
+///
+/// - If the offset is a parameter register for `abi`, returns `("param_N", Some(N-1))`.
+/// - Otherwise returns the hardware register name with `None`.
+pub(crate) fn register_name_with_param(
+    offset: u64,
+    _size: u32,
+    abi: CallingConvention,
+) -> Option<(&'static str, Option<usize>)> {
+    let hw_name = x64_ghidra_reg_name(offset)?;
+    let param_idx = abi
+        .param_offsets()
+        .iter()
+        .position(|&param_offset| param_offset == offset);
+    match param_idx {
+        Some(idx) => Some((PARAM_NAMES[idx], Some(idx))),
+        None => Some((hw_name, None)),
+    }
+}
+
+/// Returns the hardware register name for a Ghidra REGISTER-space offset, ABI-independently.
+pub(crate) fn register_name(offset: u64, _size: u32) -> &'static str {
+    x64_ghidra_reg_name(offset).unwrap_or("reg")
 }
 
 pub(crate) fn x86_register_name(offset: u64, size: u32) -> Option<&'static str> {

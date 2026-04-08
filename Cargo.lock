@@ -1489,6 +1489,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "fission-core",
+ "iced-x86",
  "log",
  "once_cell",
  "regex",

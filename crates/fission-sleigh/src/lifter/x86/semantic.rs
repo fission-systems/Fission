@@ -3,7 +3,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use super::common::{
     const_u64, x86_flag_af, x86_flag_cf, x86_flag_df, x86_flag_if, x86_flag_of, x86_flag_pf,
     x86_flag_sf, x86_flag_zf,
-    x86_reg, x86_xmm_reg, x86_seg,
+    x86_reg, x86_xmm_reg, x86_ymm_reg, x86_mxcsr, x86_seg,
     RAM_SPACE_ID,
     X86TempFactory,
 };
@@ -40,6 +40,10 @@ const X86_AAA_POLICY_ID: u64 = 0x37_00;
 const X86_AAS_POLICY_ID: u64 = 0x3F_00;
 const X86_INS_POLICY_ID: u64 = 0x6C_00;
 const X86_OUTS_POLICY_ID: u64 = 0x6E_00;
+const X86_WAIT_POLICY_ID: u64 = 0x9B_00;
+const X86_IRET_POLICY_ID: u64 = 0xCF_00;
+const X86_INTO_POLICY_ID: u64 = 0xCE_00;
+const X86_INT1_POLICY_ID: u64 = 0xF1_00;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AluKind {
@@ -2290,6 +2294,60 @@ pub(crate) fn decode_semantic_with_state(
             inputs: vec![const_u64(X86_OUTS_POLICY_ID, 8)],
             asm_mnemonic: Some("OUTS_POLICY".to_string()),
         }],
+
+        // Phase A: remaining 1-byte stubs
+
+        // WAIT / FWAIT: serialize pending x87 FP exceptions
+        0x9B => vec![PcodeOp {
+            seq_num: next_seq(&mut seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: None,
+            inputs: vec![const_u64(X86_WAIT_POLICY_ID, 8)],
+            asm_mnemonic: Some("WAIT_POLICY".to_string()),
+        }],
+
+        // INTO: interrupt on overflow
+        0xCE => vec![PcodeOp {
+            seq_num: next_seq(&mut seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: None,
+            inputs: vec![const_u64(X86_INTO_POLICY_ID, 8)],
+            asm_mnemonic: Some("INTO_POLICY".to_string()),
+        }],
+
+        // IRET / IRETD / IRETQ: return from interrupt
+        0xCF => vec![PcodeOp {
+            seq_num: next_seq(&mut seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: None,
+            inputs: vec![const_u64(X86_IRET_POLICY_ID, 8)],
+            asm_mnemonic: Some("IRET_POLICY".to_string()),
+        }],
+
+        // INT1 / ICEBP: single-step ICE breakpoint
+        0xF1 => vec![PcodeOp {
+            seq_num: next_seq(&mut seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: None,
+            inputs: vec![const_u64(X86_INT1_POLICY_ID, 8)],
+            asm_mnemonic: Some("INT1_POLICY".to_string()),
+        }],
+
+        // MOV r/m16, Sreg — segment register read (reverse of 0x8E)
+        0x8C => {
+            let mut ops = Vec::new();
+            let decoded = match decode_modrm_operand(insn, op_idx, &prefix, 2, address, &mut temp, &mut ops, &mut seq) {
+                Some(d) => d,
+                None => return Vec::new(),
+            };
+            let src = x86_seg(u32::from(decoded.reg_field));
+            ops = write_rm_value(&decoded.rm, src, address, &mut ops, &mut seq, "MOV_RM_SEG");
+            ops
+        }
 
         _ => Vec::new(),
     }

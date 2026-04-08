@@ -77,6 +77,234 @@ pub(super) fn decode_clflush_policy(
     ops
 }
 
+// Policy IDs for 0x0F 0xAE group
+const X86_FXSAVE_POLICY_ID: u64 = 0x0FAE00;
+const X86_FXRSTOR_POLICY_ID: u64 = 0x0FAE01;
+const X86_LDMXCSR_POLICY_ID: u64 = 0x0FAE02;
+const X86_STMXCSR_POLICY_ID: u64 = 0x0FAE03;
+const X86_XSAVE_POLICY_ID: u64 = 0x0FAE04;
+const X86_XRSTOR_POLICY_ID: u64 = 0x0FAE05;
+const X86_XSAVEOPT_POLICY_ID: u64 = 0x0FAE06;
+const X86_LFENCE_POLICY_ID: u64 = 0x0FAE_E8;
+const X86_MFENCE_POLICY_ID: u64 = 0x0FAE_F0;
+const X86_SFENCE_POLICY_ID: u64 = 0x0FAE_F8;
+
+/// Full 0x0F 0xAE dispatcher: handles all variants based on reg field and mod.
+///
+/// reg | mod  | instruction
+///  0  | mem  | FXSAVE
+///  1  | mem  | FXRSTOR
+///  2  | mem  | LDMXCSR
+///  3  | mem  | STMXCSR
+///  4  | mem  | XSAVE
+///  5  | mem  | XRSTOR
+///  5  | 11   | LFENCE
+///  6  | mem  | XSAVEOPT
+///  6  | 11   | MFENCE
+///  7  | mem  | CLFLUSH
+///  7  | 11   | SFENCE
+pub(super) fn decode_0fae_group(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    // The caller (ext.rs) passes op_idx pointing to the 0x0F prefix byte.
+    // Thus: insn[op_idx]=0x0F, insn[op_idx+1]=0xAE, insn[op_idx+2]=ModRM.
+    let modrm_idx = op_idx + 2;
+
+    // CLFLUSHOPT: 66 0F AE /7 → same layout as CLFLUSH but distinct policy
+    if prefix.operand_size_override {
+        let mut ops = Vec::new();
+        let decoded = match decode_modrm_operand(insn, modrm_idx - 1, prefix, 1, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+        if decoded.reg_field == 7 {
+            if let RmOperand::Mem(addr_vn) = decoded.rm {
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::CallOther,
+                    address,
+                    output: None,
+                    inputs: vec![const_u64(X86_CLFLUSHOPT_POLICY_ID, 8), addr_vn],
+                    asm_mnemonic: Some("CLFLUSHOPT_POLICY".to_string()),
+                });
+                return ops;
+            }
+        }
+        return ops;
+    }
+
+    let modrm = match insn.get(modrm_idx) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let reg_field = (modrm >> 3) & 0x7;
+    let mod_field = (modrm >> 6) & 0x3;
+
+    // Fence instructions: mod=11 (register operand field)
+    if mod_field == 0x3 {
+        let (policy_id, mnemonic) = match reg_field {
+            5 => (X86_LFENCE_POLICY_ID, "LFENCE_POLICY"),
+            6 => (X86_MFENCE_POLICY_ID, "MFENCE_POLICY"),
+            7 => (X86_SFENCE_POLICY_ID, "SFENCE_POLICY"),
+            _ => return Vec::new(),
+        };
+        return vec![PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: None,
+            inputs: vec![const_u64(policy_id, 8)],
+            asm_mnemonic: Some(mnemonic.to_string()),
+        }];
+    }
+
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, modrm_idx - 1, prefix, 8, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    match reg_field {
+        0 => {
+            // FXSAVE: save x87/MMX/XMM state to memory
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_FXSAVE_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("FXSAVE_POLICY".to_string()),
+            });
+        }
+        1 => {
+            // FXRSTOR: restore x87/MMX/XMM state from memory
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_FXRSTOR_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("FXRSTOR_POLICY".to_string()),
+            });
+        }
+        2 => {
+            // LDMXCSR: load MXCSR from memory (m32)
+            let mem_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            let loaded = temp.alloc(4);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Load,
+                address,
+                output: Some(loaded.clone()),
+                inputs: vec![const_u64(0, 4), mem_vn],
+                asm_mnemonic: Some("LDMXCSR_LOAD".to_string()),
+            });
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Copy,
+                address,
+                output: Some(x86_mxcsr()),
+                inputs: vec![loaded],
+                asm_mnemonic: Some("LDMXCSR_WRITE".to_string()),
+            });
+        }
+        3 => {
+            // STMXCSR: store MXCSR to memory (m32)
+            let mem_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Store,
+                address,
+                output: None,
+                inputs: vec![const_u64(0, 4), mem_vn, x86_mxcsr()],
+                asm_mnemonic: Some("STMXCSR_STORE".to_string()),
+            });
+        }
+        4 => {
+            // XSAVE: save processor state
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_XSAVE_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("XSAVE_POLICY".to_string()),
+            });
+        }
+        5 => {
+            // XRSTOR: restore processor state
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_XRSTOR_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("XRSTOR_POLICY".to_string()),
+            });
+        }
+        6 => {
+            // XSAVEOPT: save processor state (optimized)
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_XSAVEOPT_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("XSAVEOPT_POLICY".to_string()),
+            });
+        }
+        7 => {
+            // CLFLUSH: cache line flush
+            let addr_vn = match decoded.rm {
+                RmOperand::Mem(a) => a,
+                RmOperand::Reg(_) => return Vec::new(),
+            };
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: None,
+                inputs: vec![const_u64(X86_CLFLUSH_POLICY_ID, 8), addr_vn],
+                asm_mnemonic: Some("CLFLUSH_POLICY".to_string()),
+            });
+        }
+        _ => {}
+    }
+
+    ops
+}
+
 pub(super) fn decode_nop_extended(
     insn: &[u8],
     op_idx: usize,
@@ -495,13 +723,24 @@ pub(crate) fn decode_x87_policy(
                             5 => X86_FPREM1_POLICY_ID,
                             _ => X86_FNOP_POLICY_ID,
                         };
+                        let st0_input = x87_st(0);
+                        let mnemonic = match rm_low {
+                            0 => "F2XM1",
+                            1 => "FYL2X",
+                            2 => "FPTAN",
+                            3 => "FPATAN",
+                            4 => "FXTRACT",
+                            5 => "FPREM1",
+                            6 => "FDECSTP",
+                            _ => "FINCSTP",
+                        };
                         ops.push(PcodeOp {
                             seq_num: next_seq(seq),
                             opcode: PcodeOpcode::CallOther,
                             address,
-                            output: None,
-                            inputs: vec![const_u64(policy_id, 8)],
-                            asm_mnemonic: Some("X87_TRANSCENDENTAL".to_string()),
+                            output: Some(st0.clone()),
+                            inputs: vec![const_u64(policy_id, 8), st0_input],
+                            asm_mnemonic: Some(mnemonic.to_string()),
                         });
                     }
                     7 => {
@@ -518,22 +757,23 @@ pub(crate) fn decode_x87_policy(
                                 asm_mnemonic: Some("FSQRT".to_string()),
                             });
                         } else {
-                            let policy_id = match rm_low {
-                                0 => X86_FPREM_POLICY_ID,
-                                1 => X86_FYL2XP1_POLICY_ID,
-                                4 => X86_FNOP_POLICY_ID, // FRNDINT
-                                5 => X86_FSCALE_POLICY_ID,
-                                6 => X86_FSIN_POLICY_ID,
-                                7 => X86_FCOS_POLICY_ID,
-                                _ => X86_FNOP_POLICY_ID,
+                            let (policy_id, mnemonic) = match rm_low {
+                                0 => (X86_FPREM_POLICY_ID, "FPREM"),
+                                1 => (X86_FYL2XP1_POLICY_ID, "FYL2XP1"),
+                                4 => (X86_FSCALE_POLICY_ID, "FRNDINT"),
+                                5 => (X86_FSCALE_POLICY_ID, "FSCALE"),
+                                6 => (X86_FSIN_POLICY_ID, "FSIN"),
+                                7 => (X86_FCOS_POLICY_ID, "FCOS"),
+                                _ => (X86_FNOP_POLICY_ID, "FSINCOS"),
                             };
+                            let st0_input = x87_st(0);
                             ops.push(PcodeOp {
                                 seq_num: next_seq(seq),
                                 opcode: PcodeOpcode::CallOther,
                                 address,
-                                output: None,
-                                inputs: vec![const_u64(policy_id, 8)],
-                                asm_mnemonic: Some("X87_TRANSCENDENTAL".to_string()),
+                                output: Some(st0.clone()),
+                                inputs: vec![const_u64(policy_id, 8), st0_input],
+                                asm_mnemonic: Some(mnemonic.to_string()),
                             });
                         }
                     }

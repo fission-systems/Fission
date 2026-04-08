@@ -187,6 +187,7 @@ impl<'a> PreviewBuilder<'a> {
                     expr,
                     targets,
                     default_target,
+                    min_val,
                 } => {
                     let cases = targets
                         .into_iter()
@@ -194,7 +195,7 @@ impl<'a> PreviewBuilder<'a> {
                         .enumerate()
                         .map(|(i, t)| {
                         crate::nir::types::HirSwitchCase {
-                            values: vec![i as i64],
+                            values: vec![min_val + i as i64],
                             body: vec![HirStmt::Goto(block_label(t))],
                         }
                         })
@@ -659,6 +660,19 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         if next_idx <= idx {
             return false;
+        }
+        // Dom invariant fast-path: if `idx` dominates `next_idx` in the global dominator
+        // tree AND every structural predecessor of `next_idx` is either `idx`, in the current
+        // visited set, or itself dominated by `idx`, then the inline is provably safe: every
+        // path from the CFG entry to `next_idx` goes through `idx`.
+        if self.dom_tree.dominates(idx, next_idx)
+            && self.predecessors[next_idx].iter().all(|&pred| {
+                pred == idx
+                    || visited.contains(&pred)
+                    || self.dom_tree.dominates(idx, pred)
+            })
+        {
+            return true;
         }
         if self.predecessors[next_idx]
             .iter()

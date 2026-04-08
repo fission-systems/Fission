@@ -12,6 +12,7 @@ mod lower_expr;
 mod materialize;
 mod stack_slots;
 mod stats;
+pub(super) mod switch_table;
 mod terminator;
 mod type_hints;
 
@@ -96,6 +97,7 @@ impl<'a> PreviewBuilder<'a> {
                     expr,
                     targets,
                     default_target,
+                    min_val,
                 } => {
                     let cases = targets
                         .into_iter()
@@ -103,7 +105,9 @@ impl<'a> PreviewBuilder<'a> {
                         .enumerate()
                         .map(|(i, t)| {
                         crate::nir::types::HirSwitchCase {
-                            values: vec![i as i64], // Simplistic mapping, real values need jump table
+                            // Use recovered min_val offset; for comparison-chain
+                            // switches min_val is 0 (real values come from the chain).
+                            values: vec![min_val + i as i64],
                             body: vec![HirStmt::Goto(block_label(t))],
                         }
                         })

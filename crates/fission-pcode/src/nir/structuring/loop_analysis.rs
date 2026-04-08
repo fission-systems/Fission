@@ -161,6 +161,74 @@ impl LoopBody {
         self.all_exits.binary_search(&block_idx).is_ok()
     }
 
+    /// Returns all CFG edges `(src, exit_block)` where `src` is inside the loop body
+    /// and `exit_block` is outside (a potential `break` target).
+    ///
+    /// All exits are returned, not just the canonical one.  Callers can build a set of
+    /// break-labels from this to rewrite `Goto(exit)` → `Break` for every exit that
+    /// shares the same post-loop continuation.
+    pub fn find_break_exits(
+        &self,
+        successors: &[Vec<usize>],
+        irreducible_edges: &HashSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let body_set: HashSet<usize> = self.body.iter().copied().collect();
+        let mut exits = Vec::new();
+        for &src in &self.body {
+            if src >= successors.len() {
+                continue;
+            }
+            for &succ in &successors[src] {
+                if irreducible_edges.contains(&(src, succ)) {
+                    continue;
+                }
+                if !body_set.contains(&succ) {
+                    exits.push((src, succ));
+                }
+            }
+        }
+        exits
+    }
+
+    /// Returns all CFG edges `(src, head)` where `src` is inside the loop body,
+    /// `src` is **not** a tail (natural back-edge), and the edge targets the loop header.
+    ///
+    /// These are explicit mid-body jumps back to the loop header — `continue` candidates
+    /// that are not already covered by the natural loop-closing back-edge.
+    pub fn find_continue_edges(
+        &self,
+        successors: &[Vec<usize>],
+        irreducible_edges: &HashSet<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let body_set: HashSet<usize> = self.body.iter().copied().collect();
+        let tail_set: HashSet<usize> = self.tails.iter().copied().collect();
+        let mut continues = Vec::new();
+        for &src in &self.body {
+            if tail_set.contains(&src) {
+                continue; // natural back-edge — already handled by the loop condition
+            }
+            if src >= successors.len() {
+                continue;
+            }
+            for &succ in &successors[src] {
+                if irreducible_edges.contains(&(src, succ)) {
+                    continue;
+                }
+                if succ == self.head && body_set.contains(&src) {
+                    continues.push((src, succ));
+                }
+            }
+        }
+        continues
+    }
+
+    /// Returns `true` if this loop has **no exits** from its body — i.e., it is an
+    /// infinite-loop candidate.  Callers should lower such loops as `while(true) { … }`
+    /// with any `break` statements injected inside the body.
+    pub fn is_infinite_loop_candidate(&self) -> bool {
+        self.all_exits.is_empty()
+    }
+
     fn extend(
         &mut self,
         predecessors: &[Vec<usize>],

@@ -1197,3 +1197,58 @@ fn nested_while_inner_break_does_not_escape_outer() {
         "outer loop should not produce goto to outer head: {code}"
     );
 }
+
+/// Two-block infinite loop (block 0 → block 1 → block 0) with no exits.
+/// Expected output: `while (true) { …store… }`.
+///
+/// The store writes through *rax (a non-stack pointer) so it is not dead-code-eliminated
+/// by the write-only stack-slot removal pass.
+#[test]
+fn multiblock_infloop_preview_lowers_two_block_infinite_loop() {
+    let func = PcodeFunction {
+        blocks: vec![
+            // block 0: *rax = 42, then fallthrough to block 1
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0xA000,
+                successors: vec![1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Store,
+                    address: 0xA000,
+                    output: None,
+                    // space=0 (RAM), ptr=rax (reg offset 0, size 8), value=42 (i32)
+                    inputs: vec![cst(0, 4), reg(0, 8), cst(42, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            // block 1: branch back to block 0 (back-edge, no exits)
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0xA010,
+                successors: vec![0],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0xA010,
+                    output: None,
+                    inputs: vec![cst(0xA000, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "multiblock_infloop_fn", 0xA000, &preview_options())
+        .expect("preview render");
+    // Must produce a while(true) construct rather than unstructured goto-spaghetti.
+    assert!(
+        code.contains("while (true)") || code.contains("while (1)"),
+        "expected while(true) for two-block infinite loop: {code}"
+    );
+    // The store through *rax must be present inside the loop body.
+    assert!(
+        code.contains("*rax") || code.contains("*(rax)"),
+        "expected pointer store in loop body: {code}"
+    );
+}

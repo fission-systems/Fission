@@ -122,7 +122,12 @@ fn x86_try_lower_if_still_structures_canonical_if() {
 
     let code = render_mlil_preview(&func, "x86_if", 0x4300, &preview_options_x86())
         .expect("preview render");
-    assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
+    // 32-bit mode: register_param is skipped (is_64bit guard), so the REGISTER_SPACE
+    // varnode at offset 0x08 resolves to hardware name "rcx" via x64_ghidra_reg_name.
+    assert!(
+        code.contains("if (!rcx) {") || code.contains("if (rcx) {"),
+        "expected if-branch in code:\n{code}"
+    );
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 1;"), "{code}");
 }

@@ -1,17 +1,21 @@
 use super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
-    cleanup_arithmetic_wrappers, collapse_zero_offset_cast, normalize_boolean_logic,
-    recognize_hi_lo_extract, recognize_mod_div_power_of_two, recognize_magic_number_division, recognize_wide_integer_recombine,
+    cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
+    normalize_boolean_logic, recognize_hi_lo_extract, recognize_mod_div_power_of_two,
+    recognize_magic_number_division, recognize_wide_integer_recombine, simplify_subpiece_chain,
 };
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
-    cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
+    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
     fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
     prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_fallthrough_edges,
 };
+use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
+use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
+use super::type_infer::apply_type_inference_pass;
 use super::slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
 };
@@ -39,6 +43,37 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
+    // Run constant folding after the initial cleanup so that folded constants
+    // unlock further simplifications in subsequent passes.
+    if constant_folding_pass(&mut func.body) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        eliminate_dead_local_clobber_assigns(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Function-level def-use dead assignment: removes dead writes to ANY
+    // variable (not just trivially-named temps) across the whole body tree.
+    defuse_dead_assignment_pass(func);
+    // Copy propagation: forward-substitute `x = y` (single-definition copy)
+    // to eliminate unnecessary temporaries.
+    if copy_propagation_pass(func) {
+        // A second cleanup pass to catch newly-exposed dead code.
+        defuse_dead_assignment_pass(func);
+    }
+    // Join-variable coalescing: unify parallel temporaries assigned in both
+    // branches of an if-else (SSA out-of-SSA for 2-way joins).
+    join_coalescing_pass(func);
+    // Type inference: propagate types from typed sub-expressions (Const, Cast,
+    // Binary, …) to NirBinding.ty for locals/params that are still Unknown,
+    // and re-derive the function return type for `return <var>` patterns.
+    apply_type_inference_pass(func);
+    // Cast elision: remove outer casts that are redundant given the binding's
+    // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
+    // Runs after type inference so that NirBinding.ty is maximally populated.
+    if cast_elision_pass(func) {
+        // A light cleanup pass to simplify any newly-exposed dead code.
+        defuse_dead_assignment_pass(func);
+    }
     let allow_expensive_passes = !is_large_hir_function(func);
     let mut changed = false;
     let pass_start = Instant::now();
@@ -334,6 +369,12 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
 }
 
 pub(super) fn normalize_expr(expr: &mut HirExpr) {
+    // Pre-pass: merge consecutive shifts top-down before child recursion so that
+    // Shr(Shr(x, K1), K2) → Shr(x, K1+K2) is visible before any child Shr gets
+    // converted to a division by recognize_mod_div_power_of_two.
+    if let Some(merged) = merge_consecutive_shifts(expr) {
+        *expr = merged;
+    }
     match expr {
         HirExpr::Cast { expr: inner, .. } => normalize_expr(inner),
         HirExpr::Unary { expr: inner, .. } => normalize_expr(inner),
@@ -361,6 +402,8 @@ pub(super) fn normalize_expr(expr: &mut HirExpr) {
             .or_else(|| recognize_mod_div_power_of_two(&current))
             .or_else(|| recognize_magic_number_division(&current))
             .or_else(|| recognize_hi_lo_extract(&current))
+            .or_else(|| simplify_subpiece_chain(&current))
+            .or_else(|| merge_consecutive_shifts(&current))
             .or_else(|| recognize_wide_integer_recombine(&current))
             .or_else(|| canonicalize_flag_intrinsics(&current))
             .or_else(|| normalize_boolean_logic(&current))

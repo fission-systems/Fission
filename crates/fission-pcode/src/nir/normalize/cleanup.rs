@@ -701,12 +701,16 @@ fn find_inline_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> 
         if uses > 0 && stmt_allows_inline_target(stmt) {
             return Some(scan_idx);
         }
-        if !stmt_allows_forward_scan(stmt) {
-            return None;
-        }
+        // If the variable is not mentioned at all in this statement (neither
+        // read nor redefined), we can skip past it — even if it is a loop,
+        // switch, or block that would otherwise stop the scan.
         if uses == 0 {
             scan_idx += 1;
             continue;
+        }
+        // uses > 0 but we cannot inline here (e.g., nested loop body).
+        if !stmt_allows_forward_scan(stmt) {
+            return None;
         }
         return None;
     }
@@ -1031,5 +1035,153 @@ fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
             replace_var_in_expr(index, name, replacement);
         }
         HirExpr::AggregateCopy { src, .. } => replace_var_in_expr(src, name, replacement),
+    }
+}
+
+// ── Cast elision pass ──────────────────────────────────────────────────────
+
+/// Remove casts in assignment context that are redundant given the binding
+/// type already established by type inference.
+///
+/// Two cases are handled:
+///
+/// 1. **Assignment-context cast**: `x = (T)expr` where `x.ty == T` and both
+///    are known scalar types.  The binding declaration already carries the
+///    type, so the explicit cast adds no information to the output.
+///
+/// 2. **Identity cast in expr context**: handled by `canonicalize_cast_expr`
+///    in `arith.rs` (`expr_type(inner) == ty → inner`); we rely on that
+///    existing rule and do not duplicate it here.
+///
+/// This pass is Ghidra's `option_hide_exts` / `CastStrategy::isExtensionCastImplied`
+/// equivalent: it drops casts where the surrounding context already implies the
+/// desired type.  It is purely syntactic — no semantic changes.
+///
+/// Returns `true` if any cast was removed.
+pub(super) fn cast_elision_pass(func: &mut HirFunction) -> bool {
+    // Build a map of known binding types (locals + params).
+    // We only operate on bindings with resolved, non-pointer, non-aggregate types
+    // to avoid accidentally stripping semantically significant casts.
+    let binding_types: std::collections::HashMap<String, NirType> = func
+        .locals
+        .iter()
+        .chain(func.params.iter())
+        .filter(|b| is_scalar_non_unknown(&b.ty))
+        .map(|b| (b.name.clone(), b.ty.clone()))
+        .collect();
+
+    if binding_types.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    elide_casts_in_stmts(&mut func.body, &binding_types, &mut changed);
+    changed
+}
+
+fn is_scalar_non_unknown(ty: &NirType) -> bool {
+    matches!(ty, NirType::Bool | NirType::Int { .. })
+}
+
+fn elide_casts_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    binding_types: &std::collections::HashMap<String, NirType>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        elide_casts_in_stmt(stmt, binding_types, changed);
+    }
+}
+
+fn elide_casts_in_stmt(
+    stmt: &mut HirStmt,
+    binding_types: &std::collections::HashMap<String, NirType>,
+    changed: &mut bool,
+) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } => {
+            // If the binding has a known scalar type, try to strip a redundant
+            // outer cast whose target type matches the binding.
+            if let Some(binding_ty) = binding_types.get(name.as_str()) {
+                if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
+                    *rhs = stripped;
+                    *changed = true;
+                }
+            }
+        }
+        HirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, changed),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            elide_casts_in_stmts(then_body, binding_types, changed);
+            elide_casts_in_stmts(else_body, binding_types, changed);
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            elide_casts_in_stmts(body, binding_types, changed)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(i) = init {
+                elide_casts_in_stmt(i, binding_types, changed);
+            }
+            if let Some(u) = update {
+                elide_casts_in_stmt(u, binding_types, changed);
+            }
+            elide_casts_in_stmts(body, binding_types, changed);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                elide_casts_in_stmts(&mut case.body, binding_types, changed);
+            }
+            elide_casts_in_stmts(default, binding_types, changed);
+        }
+        // Return, Expr, Label, Goto, Break, Continue — not assignment context.
+        _ => {}
+    }
+}
+
+/// If `expr` is a `Cast { ty: cast_ty, inner }` where `cast_ty == binding_ty`,
+/// return `*inner`.  Otherwise return `None`.
+///
+/// We only strip *direct* outer casts; nested casts like `(T)(U)x` where the
+/// outer cast matches are NOT stripped because the inner cast may still be
+/// needed.
+fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr> {
+    let HirExpr::Cast { ty: cast_ty, expr: inner } = expr else {
+        return None;
+    };
+    if cast_ty != binding_ty {
+        return None;
+    }
+    // Only strip when the inner expression's own type is compatible (same bit
+    // width or narrower).  We do NOT strip a cast that widens the inner type
+    // into a type that could lose information on the next read — but since we're
+    // trusting the binding's declared type, this is safe as long as the inner
+    // type is the same width or narrower than `binding_ty`.
+    let inner_ty = expr_type(inner);
+    let compatible = match (&inner_ty, binding_ty) {
+        // Unknown inner type: safe to strip (the binding type is authoritative).
+        (NirType::Unknown, _) => true,
+        // Same type: identity cast — always safe.
+        (a, b) if a == b => true,
+        // Bool → any int: safe, Bool is stored as 0/1.
+        (NirType::Bool, NirType::Int { .. }) => true,
+        // Int → Int: safe when inner bits <= outer bits (widening or same).
+        (
+            NirType::Int { bits: inner_bits, .. },
+            NirType::Int { bits: outer_bits, .. },
+        ) => inner_bits <= outer_bits,
+        _ => false,
+    };
+    if compatible {
+        Some((**inner).clone())
+    } else {
+        None
     }
 }

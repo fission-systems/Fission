@@ -269,6 +269,12 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(HirExpr::Var(param));
         }
 
+        if vn.space_id == UNIQUE_SPACE_ID {
+            if let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size) {
+                return Ok(HirExpr::Var(name.to_string()));
+            }
+        }
+
         if !self.options.is_64bit && vn.space_id == REGISTER_SPACE_ID {
             if let Some(name) = x86_register_name(vn.offset, vn.size) {
                 return Ok(HirExpr::Var(name.to_string()));
@@ -306,7 +312,13 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if !visiting.insert(key.clone()) {
-            return Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)));
+            let cycle_name = if vn.space_id == UNIQUE_SPACE_ID {
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                    .map_or_else(|| format!("tmp_{:x}", vn.offset), ToString::to_string)
+            } else {
+                format!("tmp_{:x}", vn.offset)
+            };
+            return Ok(HirExpr::Var(cycle_name));
         }
 
         let result = match def_site {
@@ -332,7 +344,11 @@ impl<'a> PreviewBuilder<'a> {
                 Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
             }
             None if self.options.is_mapped_global(vn.offset) => {
-                Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
+                if let Some(name) = self.options.global_names.get(&vn.offset) {
+                    Ok(HirExpr::Var(name.clone()))
+                } else {
+                    Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
+                }
             }
             None => Ok(HirExpr::Var(format!("var_{:x}", vn.offset))),
         };
@@ -529,16 +545,34 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
-        let mut lowered = Vec::new();
+        let mut lowered: Vec<Option<HirExpr>> = Vec::with_capacity(op.inputs.len());
         for input in &op.inputs {
-            lowered.push(self.lower_varnode(input, visiting)?);
-        }
-        if let Some(first) = lowered.first() {
-            let canonical = strip_casts(first);
-            if lowered.iter().all(|expr| strip_casts(expr) == canonical) {
-                return Ok(first.clone());
+            match self.lower_varnode(input, visiting) {
+                Ok(expr) => lowered.push(Some(expr)),
+                Err(_) => lowered.push(None),
             }
         }
+
+        // Collect only the successfully-lowered expressions.
+        let resolved: Vec<&HirExpr> = lowered.iter().filter_map(Option::as_ref).collect();
+
+        if resolved.is_empty() {
+            // All inputs failed — nothing to coalesce.
+            return Err(MlilPreviewError::UnsupportedExprMultiequal);
+        }
+
+        // Check whether all successfully-resolved inputs have the same
+        // canonical expression (ignoring cast wrappers).  If so, that value
+        // is the definitive join — this covers both the "all-same" case and
+        // the "partial failure with a unique surviving value" case (e.g. one
+        // predecessor is a loop back-edge whose def-chain failed because the
+        // back-edge varnode traces to the same MultiEqual, and the other
+        // predecessor resolves to the function-entry value).
+        let canonical = strip_casts(resolved[0]);
+        if resolved.iter().all(|e| strip_casts(e) == canonical) {
+            return Ok(resolved[0].clone());
+        }
+
         Err(MlilPreviewError::UnsupportedExprMultiequal)
     }
 

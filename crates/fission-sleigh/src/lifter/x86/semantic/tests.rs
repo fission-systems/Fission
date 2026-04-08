@@ -1247,8 +1247,15 @@ fn decode_rdtsc_and_clflush_emit_policy_markers() {
     assert!(clflush_policy.inputs[0].is_constant);
     assert_eq!(clflush_policy.inputs[0].constant_val as u64, 0x0FAE07);
 
-    let clflush_reg = decode_semantic(&[0x0F, 0xAE, 0xF8], 0x728E); // /7 but register form
-    assert!(clflush_reg.is_empty());
+    // 0F AE F8 = SFENCE (mod=11, reg=7, rm=0) — now handled as SFENCE, not CLFLUSH
+    let clflush_reg = decode_semantic(&[0x0F, 0xAE, 0xF8], 0x728E);
+    assert!(
+        clflush_reg.is_empty()
+            || clflush_reg
+                .iter()
+                .any(|op| op.asm_mnemonic.as_deref() == Some("SFENCE_POLICY")),
+        "0F AE F8 should be empty or emit SFENCE_POLICY"
+    );
 }
 
 #[test]
@@ -2987,5 +2994,1095 @@ fn decode_bsr_without_f3_prefix_still_emits_bsr() {
     assert!(
         ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")),
         "BSR without F3 should emit BSR_WRITE, not LZCNT"
+    );
+}
+
+// ── Phase A Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn decode_wait_9b_emits_callother() {
+    // 9B = WAIT/FWAIT
+    let ops = decode_semantic(&[0x9B], 0x1000);
+    assert!(!ops.is_empty(), "WAIT should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("WAIT_POLICY"));
+}
+
+#[test]
+fn decode_into_ce_emits_callother() {
+    // CE = INTO
+    let ops = decode_semantic(&[0xCE], 0x1000);
+    assert!(!ops.is_empty(), "INTO should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("INTO_POLICY"));
+}
+
+#[test]
+fn decode_iret_cf_emits_callother() {
+    // CF = IRET
+    let ops = decode_semantic(&[0xCF], 0x1000);
+    assert!(!ops.is_empty(), "IRET should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("IRET_POLICY"));
+}
+
+#[test]
+fn decode_int1_f1_emits_callother() {
+    // F1 = INT1/ICEBP
+    let ops = decode_semantic(&[0xF1], 0x1000);
+    assert!(!ops.is_empty(), "INT1 should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("INT1_POLICY"));
+}
+
+#[test]
+fn decode_mov_rm_sreg_8c_emits_copy() {
+    // 8C C8 = MOV eax, CS  (reg_field=1=CS, rm=EAX)
+    let ops = decode_semantic(&[0x8C, 0xC8], 0x1000);
+    assert!(!ops.is_empty(), "MOV r/m, Sreg should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.asm_mnemonic.as_deref() == Some("MOV_RM_SEG_WRITE")),
+        "MOV r/m, Sreg should emit copy"
+    );
+}
+
+// ── Phase B Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn decode_0f00_sldt_emits_callother() {
+    // 0F 00 C0 = SLDT eax (reg_field=0)
+    let ops = decode_semantic(&[0x0F, 0x00, 0xC0], 0x1000);
+    assert!(!ops.is_empty(), "SLDT should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("SLDT_POLICY"));
+}
+
+#[test]
+fn decode_0f00_ltr_emits_callother() {
+    // 0F 00 D8 = LTR eax (reg_field=3)
+    let ops = decode_semantic(&[0x0F, 0x00, 0xD8], 0x1000);
+    assert!(!ops.is_empty(), "LTR should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("LTR_POLICY"));
+}
+
+#[test]
+fn decode_0f_b2_lss_emits_callother() {
+    // 0F B2 00 = LSS eax, [eax] (reg=0, modrm=00)
+    let ops = decode_semantic(&[0x0F, 0xB2, 0x00], 0x1000);
+    assert!(!ops.is_empty(), "LSS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("LSS_POLICY")),
+        "LSS should emit CallOther"
+    );
+}
+
+#[test]
+fn decode_0f_b4_lfs_emits_callother() {
+    // 0F B4 00 = LFS eax, [eax]
+    let ops = decode_semantic(&[0x0F, 0xB4, 0x00], 0x1000);
+    assert!(!ops.is_empty(), "LFS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("LFS_POLICY")),
+        "LFS should emit CallOther"
+    );
+}
+
+// ── Phase C Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn decode_cmpps_0f_c2_emits_intrinsic() {
+    // 0F C2 C0 00 = CMPPS xmm0, xmm0, 0 (EQ)
+    let ops = decode_semantic(&[0x0F, 0xC2, 0xC0, 0x00], 0x2000);
+    assert!(!ops.is_empty(), "CMPPS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPPS_INTRINSIC")),
+        "CMPPS should emit CMPPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_shufps_0f_c6_emits_intrinsic() {
+    // 0F C6 C0 1B = SHUFPS xmm0, xmm0, 0x1B
+    let ops = decode_semantic(&[0x0F, 0xC6, 0xC0, 0x1B], 0x2000);
+    assert!(!ops.is_empty(), "SHUFPS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPS_INTRINSIC")),
+        "SHUFPS should emit SHUFPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_rsqrtps_0f_52_emits_intrinsic() {
+    // 0F 52 C0 = RSQRTPS xmm0, xmm0
+    let ops = decode_semantic(&[0x0F, 0x52, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "RSQRTPS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTPS_INTRINSIC")),
+        "RSQRTPS should emit RSQRTPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_rcpps_0f_53_emits_intrinsic() {
+    // 0F 53 C0 = RCPPS xmm0, xmm0
+    let ops = decode_semantic(&[0x0F, 0x53, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "RCPPS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCPPS_INTRINSIC")),
+        "RCPPS should emit RCPPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvtps2pd_0f_5a_emits_intrinsic() {
+    // 0F 5A C0 = CVTPS2PD xmm0, xmm0
+    let ops = decode_semantic(&[0x0F, 0x5A, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTPS2PD should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2PD_INTRINSIC")),
+        "CVTPS2PD should emit CVTPS2PD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvtdq2ps_0f_5b_emits_intrinsic() {
+    // 0F 5B C0 = CVTDQ2PS xmm0, xmm0 (no prefix)
+    let ops = decode_semantic(&[0x0F, 0x5B, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTDQ2PS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PS_INTRINSIC")),
+        "CVTDQ2PS should emit CVTDQ2PS_INTRINSIC"
+    );
+}
+
+// ── Phase D Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn decode_vex_andn_emits_intnegate_intand() {
+    // VEX.NDS.LZ.0F38.W0 F2 /r
+    // C4 E2 68 F2 C1 = ANDN eax, eax(vvvv=0), ecx
+    // C4 = 3-byte VEX, E2 = R=1,X=1,B=1,map=2 (0F38), 68 = W=0,vvvv=~1101=0010=2? Let me recalculate.
+    // For ANDN eax, ecx, edx: dst=eax(reg_idx=0), vvvv=ecx(1), r/m=edx(2)
+    // C4 E2 70 F2 C2:
+    //   E2 = 1110_0010 = R=1,X=1,B=1,m=2 (0F38)
+    //   70 = 0111_0000 = W=0, vvvv=~1110=0001=1 (ECX), L=0, pp=00 (None)
+    //   F2 = opcode
+    //   C2 = ModRM: mod=11, reg=0(EAX dst), rm=2(EDX)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x70, 0xF2, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "ANDN should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntNegate),
+        "ANDN should emit IntNegate for ~src1"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd
+            && op.asm_mnemonic.as_deref() == Some("ANDN")),
+        "ANDN should emit IntAnd"
+    );
+    assert!(has_flag_write(&ops, x86_flag_zf()), "ANDN should write ZF");
+    assert!(has_flag_zero_copy(&ops, x86_flag_cf()), "ANDN should clear CF");
+}
+
+#[test]
+fn decode_vex_blsr_emits_intand() {
+    // VEX.NDD.LZ.0F38.W0 F3 /1
+    // C4 E2 70 F3 C1: vvvv=1(ECX dst), r/m=EAX, reg_field=1=BLSR... wait
+    // Actually for BLSR: ModRM.reg = /1, vvvv = destination
+    // C4 E2 78 F3 C8: W=0, vvvv=~1111=0000=0 (EAX dst), modrm=C8=11_001_000 reg=1,rm=0
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x78, 0xF3, 0xC8], 0x3000);
+    assert!(!ops.is_empty(), "BLSR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSR")),
+        "BLSR should emit BLSR mnemonic"
+    );
+    assert!(has_flag_write(&ops, x86_flag_zf()), "BLSR should write ZF");
+}
+
+#[test]
+fn decode_vex_blsi_emits_int2comp_intand() {
+    // C4 E2 78 F3 D0: modrm=D0=11_010_000, reg=2=BLSI, rm=0(EAX)
+    // vvvv=~1111=0 (EAX dst)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x78, 0xF3, 0xD0], 0x3000);
+    assert!(!ops.is_empty(), "BLSI should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Int2Comp),
+        "BLSI should emit Int2Comp for negation"
+    );
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSI")),
+        "BLSI should emit BLSI mnemonic"
+    );
+}
+
+#[test]
+fn decode_vex_bzhi_emits_intleft_intsub_intand() {
+    // VEX.NDS.LZ.0F38.W0 F5 /r
+    // C4 E2 70 F5 C2: vvvv=1(ECX idx), reg=0(EAX dst), rm=2(EDX src)
+    // modrm=C2=11_000_010
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x70, 0xF5, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "BZHI should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BZHI")),
+        "BZHI should emit BZHI mnemonic"
+    );
+    assert!(has_flag_write(&ops, x86_flag_zf()), "BZHI should write ZF");
+}
+
+#[test]
+fn decode_vex_sarx_emits_intsright() {
+    // VEX.NDS.LZ.F3.0F38.W0 F7 /r (SARX)
+    // C4 E2 72 F7 C2: pp=F3(2), map=2(0F38), vvvv=1(ECX cnt), modrm=C2
+    // E2=1110_0010, 72=0111_0010=W=0,vvvv=~1110=0001=1,L=0,pp=2(F3)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x72, 0xF7, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "SARX should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSRight
+            && op.asm_mnemonic.as_deref() == Some("SARX")),
+        "SARX should emit IntSRight"
+    );
+}
+
+#[test]
+fn decode_vex_shlx_emits_intleft() {
+    // VEX.NDS.LZ.66.0F38.W0 F7 /r (SHLX)
+    // C4 E2 71 F7 C2: pp=66(1), vvvv=1(ECX cnt)
+    // 71=0111_0001=W=0,vvvv=~1110=0001=1,L=0,pp=1(66)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x71, 0xF7, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "SHLX should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntLeft
+            && op.asm_mnemonic.as_deref() == Some("SHLX")),
+        "SHLX should emit IntLeft"
+    );
+}
+
+#[test]
+fn decode_vex_shrx_emits_intright() {
+    // VEX.NDS.LZ.F2.0F38.W0 F7 /r (SHRX)
+    // C4 E2 73 F7 C2: pp=F2(3), vvvv=1(ECX cnt)
+    // 73=0111_0011=W=0,vvvv=~1110=0001=1,L=0,pp=3(F2)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x73, 0xF7, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "SHRX should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntRight
+            && op.asm_mnemonic.as_deref() == Some("SHRX")),
+        "SHRX should emit IntRight"
+    );
+}
+
+#[test]
+fn decode_vex_mulx_emits_intmult() {
+    // VEX.NDD.LZ.F2.0F38.W0 F6 /r (MULX)
+    // C4 E2 7B F6 C0: pp=F2(3), vvvv=0(EAX lo_dst), modrm=C0=11_000_000
+    // 7B=0111_1011=W=0,vvvv=~1111=0=0(EAX lo),L=0,pp=3(F2)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x7B, 0xF6, 0xC0], 0x3000);
+    assert!(!ops.is_empty(), "MULX should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntMult
+            && op.asm_mnemonic.as_deref() == Some("MULX_LO")),
+        "MULX should emit IntMult for low half"
+    );
+}
+
+// ── Phase C additional tests ───────────────────────────────────────────────────
+
+#[test]
+fn decode_cmppd_66_0f_c2_emits_intrinsic() {
+    // 66 0F C2 C0 01 = CMPPD xmm0, xmm0, 1 (LT)
+    let ops = decode_semantic(&[0x66, 0x0F, 0xC2, 0xC0, 0x01], 0x2000);
+    assert!(!ops.is_empty(), "CMPPD should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPPD_INTRINSIC")),
+        "CMPPD should emit CMPPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_shufpd_66_0f_c6_emits_intrinsic() {
+    // 66 0F C6 C0 01 = SHUFPD xmm0, xmm0, 1
+    let ops = decode_semantic(&[0x66, 0x0F, 0xC6, 0xC0, 0x01], 0x2000);
+    assert!(!ops.is_empty(), "SHUFPD should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPD_INTRINSIC")),
+        "SHUFPD should emit SHUFPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_rsqrtss_f3_0f_52_emits_intrinsic() {
+    // F3 0F 52 C0 = RSQRTSS xmm0, xmm0
+    let ops = decode_semantic(&[0xF3, 0x0F, 0x52, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "RSQRTSS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTSS_INTRINSIC")),
+        "RSQRTSS should emit RSQRTSS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_rcpss_f3_0f_53_emits_intrinsic() {
+    // F3 0F 53 C0 = RCPSS xmm0, xmm0
+    let ops = decode_semantic(&[0xF3, 0x0F, 0x53, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "RCPSS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCPSS_INTRINSIC")),
+        "RCPSS should emit RCPSS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvtps2dq_66_0f_5b_emits_intrinsic() {
+    // 66 0F 5B C0 = CVTPS2DQ xmm0, xmm0
+    let ops = decode_semantic(&[0x66, 0x0F, 0x5B, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTPS2DQ should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2DQ_INTRINSIC")),
+        "CVTPS2DQ should emit CVTPS2DQ_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvttps2dq_f3_0f_5b_emits_intrinsic() {
+    // F3 0F 5B C0 = CVTTPS2DQ xmm0, xmm0
+    let ops = decode_semantic(&[0xF3, 0x0F, 0x5B, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTTPS2DQ should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTTPS2DQ_INTRINSIC")),
+        "CVTTPS2DQ should emit CVTTPS2DQ_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvtdq2pd_f3_0f_e6_emits_intrinsic() {
+    // F3 0F E6 C0 = CVTDQ2PD xmm0, xmm0
+    let ops = decode_semantic(&[0xF3, 0x0F, 0xE6, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTDQ2PD should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PD_INTRINSIC")),
+        "CVTDQ2PD should emit CVTDQ2PD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cvtpd2dq_f2_0f_e6_emits_intrinsic() {
+    // F2 0F E6 C0 = CVTPD2DQ xmm0, xmm0
+    let ops = decode_semantic(&[0xF2, 0x0F, 0xE6, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "CVTPD2DQ should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPD2DQ_INTRINSIC")),
+        "CVTPD2DQ should emit CVTPD2DQ_INTRINSIC"
+    );
+}
+
+// ── Phase B additional tests ───────────────────────────────────────────────────
+
+#[test]
+fn decode_0f00_verr_emits_callother() {
+    // 0F 00 E0 = VERR eax (reg_field=4)
+    let ops = decode_semantic(&[0x0F, 0x00, 0xE0], 0x1000);
+    assert!(!ops.is_empty(), "VERR should produce ops");
+    assert_eq!(ops[0].opcode, PcodeOpcode::CallOther);
+    assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("VERR_POLICY"));
+}
+
+#[test]
+fn decode_0f_b5_lgs_emits_callother() {
+    // 0F B5 00 = LGS eax, [eax]
+    let ops = decode_semantic(&[0x0F, 0xB5, 0x00], 0x1000);
+    assert!(!ops.is_empty(), "LGS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("LGS_POLICY")),
+        "LGS should emit CallOther"
+    );
+}
+
+// ── Phase D additional tests ───────────────────────────────────────────────────
+
+#[test]
+fn decode_vex_blsmsk_emits_intxor() {
+    // C4 E2 78 F3 D8: modrm=D8=11_011_000, reg=3=BLSMSK, rm=0(EAX)
+    // vvvv=~1111=0 (EAX dst)
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x78, 0xF3, 0xD8], 0x3000);
+    assert!(!ops.is_empty(), "BLSMSK should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSMSK")),
+        "BLSMSK should emit BLSMSK mnemonic (IntXor)"
+    );
+    assert!(has_flag_write(&ops, x86_flag_zf()), "BLSMSK should write ZF");
+}
+
+// ── Phase D & additional tests ─────────────────────────────────────────────────
+
+#[test]
+fn decode_vex_bextr_emits_callother() {
+    // VEX.NDS.LZ.0F38.W0 F7 /r (no prefix = BEXTR)
+    // C4 E2 70 F7 C2: pp=None(0), vvvv=1(ECX ctrl), modrm=C2=11_000_010
+    // 70=0111_0000=W=0,vvvv=~1110=0001=1,L=0,pp=0
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x70, 0xF7, 0xC2], 0x3000);
+    assert!(!ops.is_empty(), "BEXTR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("BEXTR_INTRINSIC")),
+        "BEXTR should emit CallOther BEXTR_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cmpss_f3_0f_c2_emits_intrinsic() {
+    // F3 0F C2 C0 04 = CMPSS xmm0, xmm0, 4 (NEQ)
+    let ops = decode_semantic(&[0xF3, 0x0F, 0xC2, 0xC0, 0x04], 0x2000);
+    assert!(!ops.is_empty(), "CMPSS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPSS_INTRINSIC")),
+        "CMPSS should emit CMPSS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_cmpsd_f2_0f_c2_emits_intrinsic() {
+    // F2 0F C2 C0 02 = CMPSD xmm0, xmm0, 2 (LE)
+    let ops = decode_semantic(&[0xF2, 0x0F, 0xC2, 0xC0, 0x02], 0x2000);
+    assert!(!ops.is_empty(), "CMPSD should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPSD_INTRINSIC")),
+        "CMPSD should emit CMPSD_INTRINSIC"
+    );
+}
+
+// ── Phase E Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn decode_rorx_vex_f2_0f3a_f0_imm8_emits_rotate() {
+    // VEX.LZ.F2.0F3A.W0 F0 /r imm8 (RORX)
+    // RORX eax, ecx, 8
+    // C4 E3 7B F0 C1 08:
+    //   C4 = 3-byte VEX
+    //   E3 = 1110_0011 = R=1,X=1,B=1,map=3 (0F3A)
+    //   7B = 0111_1011 = W=0,vvvv=~1111=0,L=0,pp=3(F2)
+    //   F0 = opcode
+    //   C1 = ModRM: mod=11,reg=0(EAX dst),rm=1(ECX src)
+    //   08 = imm8 (rotate by 8)
+    let ops = decode_semantic(&[0xC4, 0xE3, 0x7B, 0xF0, 0xC1, 0x08], 0x4000);
+    assert!(!ops.is_empty(), "RORX should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntRight
+            && op.asm_mnemonic.as_deref() == Some("RORX_SHR")),
+        "RORX should emit IntRight for right shift part"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntLeft
+            && op.asm_mnemonic.as_deref() == Some("RORX_SHL")),
+        "RORX should emit IntLeft for left shift part"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntOr
+            && op.asm_mnemonic.as_deref() == Some("RORX_OR")),
+        "RORX should emit IntOr to combine"
+    );
+}
+
+// ─── Phase A Tests: YMM register + VEX L-bit routing ──────────────────────────
+
+#[test]
+fn decode_vmovaps_256_vex_c5_emits_intrinsic() {
+    // VEX.256.0F 28 /r: VMOVAPS ymm1, ymm2/m256
+    // C5 FC 28 C1 = 2-byte VEX, L=1(bit2 of 0xFC=1111_1100→bit2=1), pp=0, opcode=0x28
+    // ModRM C1 = mod=11,reg=0(ymm0),rm=1(ymm1)
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x28, 0xC1], 0x5000);
+    assert!(!ops.is_empty(), "VMOVAPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
+        "VMOVAPS 256-bit should emit VMOVAPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vmovups_256_vex_c5_emits_intrinsic() {
+    // C5 FC 10 C1 = VMOVUPS ymm0, ymm1 (256-bit: L=1, pp=0)
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x10, 0xC1], 0x5010);
+    assert!(!ops.is_empty(), "VMOVUPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVUPS_INTRINSIC")),
+        "VMOVUPS 256-bit should emit VMOVUPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vmovapd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 28 C1 = VMOVAPD ymm0, ymm1 (256-bit: L=1, pp=1=0x66)
+    // 0xFD = 1111_1101 → R̄=1,vvvv̄=1111,L=1,pp=01
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x28, 0xC1], 0x5020);
+    assert!(!ops.is_empty(), "VMOVAPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPD_INTRINSIC")),
+        "VMOVAPD 256-bit should emit VMOVAPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vaddps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 58 C1 = VADDPS ymm0, ymm0, ymm1 (256-bit: L=1, pp=0, op=0x58)
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x58, 0xC1], 0x5030);
+    assert!(!ops.is_empty(), "VADDPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VADDPS_INTRINSIC")),
+        "VADDPS 256-bit should emit VADDPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vaddpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 58 C1 = VADDPD ymm0, ymm0, ymm1 (256-bit: L=1, pp=1)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x58, 0xC1], 0x5040);
+    assert!(!ops.is_empty(), "VADDPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VADDPD_INTRINSIC")),
+        "VADDPD 256-bit should emit VADDPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vmulps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 59 C1 = VMULPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x59, 0xC1], 0x5050);
+    assert!(!ops.is_empty(), "VMULPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMULPS_INTRINSIC")),
+        "VMULPS 256-bit should emit VMULPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vsubps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 5C C1 = VSUBPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x5C, 0xC1], 0x5060);
+    assert!(!ops.is_empty(), "VSUBPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPS_INTRINSIC")),
+        "VSUBPS 256-bit should emit VSUBPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vdivps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 5E C1 = VDIVPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x5E, 0xC1], 0x5070);
+    assert!(!ops.is_empty(), "VDIVPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VDIVPS_INTRINSIC")),
+        "VDIVPS 256-bit should emit VDIVPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vandps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 54 C1 = VANDPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x54, 0xC1], 0x5080);
+    assert!(!ops.is_empty(), "VANDPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VANDPS_INTRINSIC")),
+        "VANDPS 256-bit should emit VANDPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vorps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 56 C1 = VORPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x56, 0xC1], 0x5090);
+    assert!(!ops.is_empty(), "VORPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VORPS_INTRINSIC")),
+        "VORPS 256-bit should emit VORPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vxorps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 57 C1 = VXORPS ymm0, ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x57, 0xC1], 0x50A0);
+    assert!(!ops.is_empty(), "VXORPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VXORPS_INTRINSIC")),
+        "VXORPS 256-bit should emit VXORPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vsqrtps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 51 C1 = VSQRTPS ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x51, 0xC1], 0x50B0);
+    assert!(!ops.is_empty(), "VSQRTPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPS_INTRINSIC")),
+        "VSQRTPS 256-bit should emit VSQRTPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vrsqrtps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 52 C1 = VRSQRTPS ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x52, 0xC1], 0x50C0);
+    assert!(!ops.is_empty(), "VRSQRTPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VRSQRTPS_INTRINSIC")),
+        "VRSQRTPS 256-bit should emit VRSQRTPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vrcpps_256_vex_c5_emits_intrinsic() {
+    // C5 FC 53 C1 = VRCPPS ymm0, ymm1
+    let ops = decode_semantic(&[0xC5, 0xFC, 0x53, 0xC1], 0x50D0);
+    assert!(!ops.is_empty(), "VRCPPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VRCPPS_INTRINSIC")),
+        "VRCPPS 256-bit should emit VRCPPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vcmpps_256_vex_c5_with_imm8_emits_intrinsic() {
+    // C5 FC C2 C1 04 = VCMPPS ymm0, ymm0, ymm1, 4 (NEQ_UQ)
+    let ops = decode_semantic(&[0xC5, 0xFC, 0xC2, 0xC1, 0x04], 0x50E0);
+    assert!(!ops.is_empty(), "VCMPPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPS_INTRINSIC")),
+        "VCMPPS 256-bit should emit VCMPPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vshufps_256_vex_c5_with_imm8_emits_intrinsic() {
+    // C5 FC C6 C1 02 = VSHUFPS ymm0, ymm0, ymm1, 2
+    let ops = decode_semantic(&[0xC5, 0xFC, 0xC6, 0xC1, 0x02], 0x50F0);
+    assert!(!ops.is_empty(), "VSHUFPS 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPS_INTRINSIC")),
+        "VSHUFPS 256-bit should emit VSHUFPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vandpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 54 C1 = VANDPD ymm0, ymm0, ymm1 (L=1, pp=01=0x66)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x54, 0xC1], 0x5100);
+    assert!(!ops.is_empty(), "VANDPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VANDPD_INTRINSIC")),
+        "VANDPD 256-bit should emit VANDPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vorpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 56 C1 = VORPD ymm0, ymm0, ymm1 (L=1, pp=01=0x66)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x56, 0xC1], 0x5110);
+    assert!(!ops.is_empty(), "VORPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VORPD_INTRINSIC")),
+        "VORPD 256-bit should emit VORPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vxorpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 57 C1 = VXORPD ymm0, ymm0, ymm1 (L=1, pp=01=0x66)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x57, 0xC1], 0x5120);
+    assert!(!ops.is_empty(), "VXORPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VXORPD_INTRINSIC")),
+        "VXORPD 256-bit should emit VXORPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vmulpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 59 C1 = VMULPD ymm0, ymm0, ymm1 (L=1, pp=01)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x59, 0xC1], 0x5130);
+    assert!(!ops.is_empty(), "VMULPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMULPD_INTRINSIC")),
+        "VMULPD 256-bit should emit VMULPD_INTRINSIC"
+    );
+}
+
+// ─── Phase B Tests: 0x0F 0xAE group ───────────────────────────────────────────
+
+#[test]
+fn decode_lfence_0f_ae_e8_emits_callother() {
+    // 0F AE E8 = LFENCE (mod=11, reg=5, rm=0 → 0xE8)
+    let ops = decode_semantic(&[0x0F, 0xAE, 0xE8], 0x6000);
+    assert!(!ops.is_empty(), "LFENCE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("LFENCE_POLICY")),
+        "LFENCE should emit LFENCE_POLICY"
+    );
+}
+
+#[test]
+fn decode_mfence_0f_ae_f0_emits_callother() {
+    // 0F AE F0 = MFENCE (mod=11, reg=6, rm=0 → 0xF0)
+    let ops = decode_semantic(&[0x0F, 0xAE, 0xF0], 0x6010);
+    assert!(!ops.is_empty(), "MFENCE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("MFENCE_POLICY")),
+        "MFENCE should emit MFENCE_POLICY"
+    );
+}
+
+#[test]
+fn decode_sfence_0f_ae_f8_emits_callother() {
+    // 0F AE F8 = SFENCE (mod=11, reg=7, rm=0 → 0xF8)
+    let ops = decode_semantic(&[0x0F, 0xAE, 0xF8], 0x6020);
+    assert!(!ops.is_empty(), "SFENCE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("SFENCE_POLICY")),
+        "SFENCE should emit SFENCE_POLICY"
+    );
+}
+
+#[test]
+fn decode_fxsave_0f_ae_00_emits_callother() {
+    // 0F AE /0 [mem]: FXSAVE m512 → mod=00(mem), reg=0, rm=0
+    // ModRM 0x00 = mod=00, reg=0, rm=0 (indirect [rax])
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x00], 0x6030);
+    assert!(!ops.is_empty(), "FXSAVE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FXSAVE_POLICY")),
+        "FXSAVE should emit FXSAVE_POLICY"
+    );
+}
+
+#[test]
+fn decode_fxrstor_0f_ae_08_emits_callother() {
+    // 0F AE /1 [mem]: FXRSTOR m512 → ModRM 0x08 = mod=00, reg=1, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x08], 0x6040);
+    assert!(!ops.is_empty(), "FXRSTOR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FXRSTOR_POLICY")),
+        "FXRSTOR should emit FXRSTOR_POLICY"
+    );
+}
+
+#[test]
+fn decode_xsave_0f_ae_20_emits_callother() {
+    // 0F AE /4 [mem]: XSAVE → ModRM 0x20 = mod=00, reg=4, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x20], 0x6050);
+    assert!(!ops.is_empty(), "XSAVE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("XSAVE_POLICY")),
+        "XSAVE should emit XSAVE_POLICY"
+    );
+}
+
+#[test]
+fn decode_xrstor_0f_ae_28_emits_callother() {
+    // 0F AE /5 [mem]: XRSTOR → ModRM 0x28 = mod=00, reg=5, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x28], 0x6060);
+    assert!(!ops.is_empty(), "XRSTOR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("XRSTOR_POLICY")),
+        "XRSTOR should emit XRSTOR_POLICY"
+    );
+}
+
+#[test]
+fn decode_xsaveopt_0f_ae_30_emits_callother() {
+    // 0F AE /6 [mem]: XSAVEOPT → ModRM 0x30 = mod=00, reg=6, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x30], 0x6070);
+    assert!(!ops.is_empty(), "XSAVEOPT should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("XSAVEOPT_POLICY")),
+        "XSAVEOPT should emit XSAVEOPT_POLICY"
+    );
+}
+
+#[test]
+fn decode_clflush_0f_ae_38_emits_callother() {
+    // 0F AE /7 [mem]: CLFLUSH → ModRM 0x38 = mod=00, reg=7, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x38], 0x6080);
+    assert!(!ops.is_empty(), "CLFLUSH should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("CLFLUSH_POLICY")),
+        "CLFLUSH should emit CLFLUSH_POLICY"
+    );
+}
+
+// ─── Phase C Tests: x87 FPU improvements ─────────────────────────────────────
+
+#[test]
+fn decode_fsin_d9_fe_emits_callother_with_st0_input() {
+    // D9 FE = FSIN: ST(0) = sin(ST(0))
+    let ops = decode_semantic(&[0xD9, 0xFE], 0x7000);
+    assert!(!ops.is_empty(), "FSIN should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FSIN")),
+        "FSIN should emit CallOther with FSIN mnemonic"
+    );
+    // Verify ST(0) is in inputs
+    let fsin_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FSIN"));
+    assert!(fsin_op.is_some(), "should have FSIN op");
+    let fsin_op = fsin_op.unwrap();
+    assert!(fsin_op.inputs.len() >= 2, "FSIN should have at least policy_id + ST(0) inputs");
+}
+
+#[test]
+fn decode_fcos_d9_ff_emits_callother_with_st0_input() {
+    // D9 FF = FCOS: ST(0) = cos(ST(0))
+    let ops = decode_semantic(&[0xD9, 0xFF], 0x7010);
+    assert!(!ops.is_empty(), "FCOS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FCOS")),
+        "FCOS should emit CallOther with FCOS mnemonic"
+    );
+    let fcos_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FCOS")).unwrap();
+    assert!(fcos_op.inputs.len() >= 2, "FCOS should have policy_id + ST(0) inputs");
+}
+
+#[test]
+fn decode_fptan_d9_f2_emits_callother_with_st0_input() {
+    // D9 F2 = FPTAN
+    let ops = decode_semantic(&[0xD9, 0xF2], 0x7020);
+    assert!(!ops.is_empty(), "FPTAN should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FPTAN")),
+        "FPTAN should emit CallOther with FPTAN mnemonic"
+    );
+    let fptan_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FPTAN")).unwrap();
+    assert!(fptan_op.inputs.len() >= 2, "FPTAN should have policy_id + ST(0) inputs");
+}
+
+#[test]
+fn decode_fpatan_d9_f3_emits_callother_with_st0_input() {
+    // D9 F3 = FPATAN
+    let ops = decode_semantic(&[0xD9, 0xF3], 0x7030);
+    assert!(!ops.is_empty(), "FPATAN should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FPATAN")),
+        "FPATAN should emit CallOther with FPATAN mnemonic"
+    );
+    let fpatan_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FPATAN")).unwrap();
+    assert!(fpatan_op.inputs.len() >= 2, "FPATAN should have policy_id + ST(0) inputs");
+}
+
+#[test]
+fn decode_f2xm1_d9_f0_emits_callother_with_st0_input() {
+    // D9 F0 = F2XM1
+    let ops = decode_semantic(&[0xD9, 0xF0], 0x7040);
+    assert!(!ops.is_empty(), "F2XM1 should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("F2XM1")),
+        "F2XM1 should emit CallOther with F2XM1 mnemonic"
+    );
+}
+
+#[test]
+fn decode_fyl2x_d9_f1_emits_callother_with_st0_input() {
+    // D9 F1 = FYL2X
+    let ops = decode_semantic(&[0xD9, 0xF1], 0x7050);
+    assert!(!ops.is_empty(), "FYL2X should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FYL2X")),
+        "FYL2X should emit CallOther with FYL2X mnemonic"
+    );
+}
+
+#[test]
+fn decode_fprem_d9_f8_emits_callother_with_st0_input() {
+    // D9 F8 = FPREM
+    let ops = decode_semantic(&[0xD9, 0xF8], 0x7060);
+    assert!(!ops.is_empty(), "FPREM should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FPREM")),
+        "FPREM should emit CallOther with FPREM mnemonic"
+    );
+}
+
+#[test]
+fn decode_fscale_d9_fd_emits_callother_with_st0_input() {
+    // D9 FD = FSCALE
+    let ops = decode_semantic(&[0xD9, 0xFD], 0x7070);
+    assert!(!ops.is_empty(), "FSCALE should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FSCALE")),
+        "FSCALE should emit CallOther with FSCALE mnemonic"
+    );
+}
+
+#[test]
+fn decode_fabs_d9_e1_emits_float_abs() {
+    // D9 E1 = FABS: ST(0) = |ST(0)|
+    let ops = decode_semantic(&[0xD9, 0xE1], 0x7080);
+    assert!(!ops.is_empty(), "FABS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatAbs
+            && op.asm_mnemonic.as_deref() == Some("FABS")),
+        "FABS should emit FloatAbs P-code"
+    );
+}
+
+#[test]
+fn decode_fchs_d9_e0_emits_float_neg() {
+    // D9 E0 = FCHS: ST(0) = -ST(0)
+    let ops = decode_semantic(&[0xD9, 0xE0], 0x7090);
+    assert!(!ops.is_empty(), "FCHS should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatNeg
+            && op.asm_mnemonic.as_deref() == Some("FCHS")),
+        "FCHS should emit FloatNeg P-code"
+    );
+}
+
+#[test]
+fn decode_fxtract_d9_f4_emits_callother_with_input() {
+    // D9 F4 = FXTRACT
+    let ops = decode_semantic(&[0xD9, 0xF4], 0x70A0);
+    assert!(!ops.is_empty(), "FXTRACT should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FXTRACT")),
+        "FXTRACT should emit CallOther with FXTRACT mnemonic"
+    );
+}
+
+#[test]
+fn decode_fprem1_d9_f5_emits_callother_with_input() {
+    // D9 F5 = FPREM1
+    let ops = decode_semantic(&[0xD9, 0xF5], 0x70B0);
+    assert!(!ops.is_empty(), "FPREM1 should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FPREM1")),
+        "FPREM1 should emit CallOther with FPREM1 mnemonic"
+    );
+}
+
+#[test]
+fn decode_fyl2xp1_d9_f9_emits_callother_with_input() {
+    // D9 F9 = FYL2XP1
+    let ops = decode_semantic(&[0xD9, 0xF9], 0x70C0);
+    assert!(!ops.is_empty(), "FYL2XP1 should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FYL2XP1")),
+        "FYL2XP1 should emit CallOther with FYL2XP1 mnemonic"
+    );
+}
+
+// ─── Phase D: VEX 3-byte map1 256-bit ─────────────────────────────────────────
+
+#[test]
+fn decode_vmovaps_256_3byte_vex_c4_emits_intrinsic() {
+    // 3-byte VEX: C4 E1 7C 28 C1
+    // C4 = 3-byte VEX leader
+    // E1 = 1110_0001 → R̄=1,X̄=1,B̄=1,map=1(0F)
+    // 7C = 0111_1100 → W=0,vvvv̄=1111,L=1(bit2=1),pp=00
+    // 28 = MOVAPS opcode
+    // C1 = ModRM: mod=11,reg=0,rm=1
+    let ops = decode_semantic(&[0xC4, 0xE1, 0x7C, 0x28, 0xC1], 0x8000);
+    assert!(!ops.is_empty(), "VMOVAPS 256-bit (3-byte VEX) should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
+        "VMOVAPS 256-bit via 3-byte VEX should emit VMOVAPS_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vsubpd_256_3byte_vex_c4_emits_intrinsic() {
+    // 3-byte VEX: C4 E1 7D 5C C1
+    // C4 = 3-byte VEX leader
+    // E1 = R̄=1,X̄=1,B̄=1,map=1(0F)
+    // 7D = W=0,vvvv̄=1111,L=1,pp=01(0x66)
+    // 5C = SUBPD opcode
+    // C1 = ModRM: mod=11,reg=0,rm=1
+    let ops = decode_semantic(&[0xC4, 0xE1, 0x7D, 0x5C, 0xC1], 0x8010);
+    assert!(!ops.is_empty(), "VSUBPD 256-bit (3-byte VEX) should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPD_INTRINSIC")),
+        "VSUBPD 256-bit via 3-byte VEX should emit VSUBPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vsqrtpd_256_vex_c5_emits_intrinsic() {
+    // C5 FD 51 C1 = VSQRTPD ymm0, ymm1 (L=1, pp=01)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0x51, 0xC1], 0x8020);
+    assert!(!ops.is_empty(), "VSQRTPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPD_INTRINSIC")),
+        "VSQRTPD 256-bit should emit VSQRTPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vcmppd_256_vex_c5_with_imm8_emits_intrinsic() {
+    // C5 FD C2 C1 02 = VCMPPD ymm0, ymm0, ymm1, 2 (LE_OS)
+    let ops = decode_semantic(&[0xC5, 0xFD, 0xC2, 0xC1, 0x02], 0x8030);
+    assert!(!ops.is_empty(), "VCMPPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPD_INTRINSIC")),
+        "VCMPPD 256-bit should emit VCMPPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_vshufpd_256_vex_c5_with_imm8_emits_intrinsic() {
+    // C5 FD C6 C1 01 = VSHUFPD ymm0, ymm0, ymm1, 1
+    let ops = decode_semantic(&[0xC5, 0xFD, 0xC6, 0xC1, 0x01], 0x8040);
+    assert!(!ops.is_empty(), "VSHUFPD 256-bit should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPD_INTRINSIC")),
+        "VSHUFPD 256-bit should emit VSHUFPD_INTRINSIC"
+    );
+}
+
+#[test]
+fn decode_ldmxcsr_0f_ae_mem_emits_load_and_copy() {
+    // 0F AE /2 [mem]: LDMXCSR → ModRM 0x10 = mod=00, reg=2, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x10], 0x8050);
+    assert!(!ops.is_empty(), "LDMXCSR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Load
+            && op.asm_mnemonic.as_deref() == Some("LDMXCSR_LOAD")),
+        "LDMXCSR should emit Load for memory read"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.asm_mnemonic.as_deref() == Some("LDMXCSR_WRITE")),
+        "LDMXCSR should emit Copy to write MXCSR"
+    );
+}
+
+#[test]
+fn decode_stmxcsr_0f_ae_mem_emits_store() {
+    // 0F AE /3 [mem]: STMXCSR → ModRM 0x18 = mod=00, reg=3, rm=0
+    let ops = decode_semantic(&[0x0F, 0xAE, 0x18], 0x8060);
+    assert!(!ops.is_empty(), "STMXCSR should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Store
+            && op.asm_mnemonic.as_deref() == Some("STMXCSR_STORE")),
+        "STMXCSR should emit Store for MXCSR write"
     );
 }

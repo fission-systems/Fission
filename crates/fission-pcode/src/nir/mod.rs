@@ -15,6 +15,7 @@ mod tests;
 mod types;
 
 pub(super) use self::support::*;
+pub use self::support::CallingConvention;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,

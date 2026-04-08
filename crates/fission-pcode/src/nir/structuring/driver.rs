@@ -1,4 +1,4 @@
-use super::cleanup::cleanup_redundant_labels;
+use super::cleanup::{cleanup_redundant_labels, eliminate_redundant_gotos};
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
@@ -31,10 +31,13 @@ impl<'a> PreviewBuilder<'a> {
             return result;
         }
 
+        // Dom and postdom are computed unconditionally and used by the primary reducer to
+        // determine follow blocks.  The diag path additionally logs edge-class statistics.
+        let dom = self.analyze_cfg_dominators();
+        let postdom = self.analyze_cfg_postdominators();
+
         if diag {
             let cfg = self.analyze_cfg_edges();
-            let dom = self.analyze_cfg_dominators();
-            let postdom = self.analyze_cfg_postdominators();
             let sample_ncd = if self.pcode.blocks.len() >= 2 {
                 dom.nearest_common_dominator(&[0, self.pcode.blocks.len() - 1])
             } else {
@@ -54,6 +57,22 @@ impl<'a> PreviewBuilder<'a> {
                 sample_ncd,
             );
         }
+
+        // Pre-compute nearest common postdominator for each block: used to determine the
+        // natural "follow" target for structured regions.  Blocks with no successors have no
+        // postdominator candidate, so `follow_block` will be `None` for them.
+        let follow_blocks: Vec<Option<usize>> = (0..self.pcode.blocks.len())
+            .map(|i| {
+                let succs = &self.successors[i];
+                if succs.len() < 2 {
+                    return None;
+                }
+                postdom.nearest_common_postdominator(succs)
+            })
+            .collect();
+        // Suppress unused warning on `dom` until more reducers consume it.
+        let _ = &dom;
+        let _ = &follow_blocks;
 
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
@@ -163,6 +182,23 @@ impl<'a> PreviewBuilder<'a> {
             }
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_infloop(idx),
+                &mut last_structuring_failure,
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
+            {
+                body.push(stmt);
+                idx = skip_to;
+                continue;
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=multiblock_infloop elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_multiblock_infloop(idx),
                 &mut last_structuring_failure,
             )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
@@ -309,18 +345,40 @@ impl<'a> PreviewBuilder<'a> {
                     expr,
                     targets,
                     default_target,
+                    min_val,
                 } => {
-                    let cases = targets
-                        .into_iter()
-                        .filter(|target| Some(*target) != default_target)
-                        .enumerate()
-                        .map(|(i, t)| {
-                        crate::nir::types::HirSwitchCase {
-                            values: vec![i as i64], // Simplistic indexing for now
-                            body: vec![HirStmt::Goto(block_label(t))],
-                        }
-                        })
-                        .collect();
+                    // Attempt comparison-chain recovery to obtain real case values.
+                    // For pure BranchInd blocks this returns None (their terminator is
+                    // not Cond), preserving the ordinal-index fallback.  For edge cases
+                    // where a chain was not consumed by try_lower_switch (e.g. region
+                    // boundary rejection) we do get actual constants.
+                    let recovered = self.parse_switch_chain(idx).ok().flatten();
+                    let cases: Vec<HirSwitchCase> = if let Some(parsed) = recovered {
+                        parsed
+                            .cases
+                            .into_iter()
+                            .filter(|(_, block_idx)| {
+                                let target = self.block_target_key(*block_idx);
+                                Some(target) != default_target
+                            })
+                            .map(|(value, block_idx)| HirSwitchCase {
+                                values: vec![value],
+                                body: vec![HirStmt::Goto(block_label(
+                                    self.block_target_key(block_idx),
+                                ))],
+                            })
+                            .collect()
+                    } else {
+                        targets
+                            .into_iter()
+                            .filter(|target| Some(*target) != default_target)
+                            .enumerate()
+                            .map(|(i, t)| HirSwitchCase {
+                                values: vec![min_val + i as i64],
+                                body: vec![HirStmt::Goto(block_label(t))],
+                            })
+                            .collect()
+                    };
                     body.push(HirStmt::Switch {
                         expr,
                         cases,
@@ -359,6 +417,7 @@ impl<'a> PreviewBuilder<'a> {
                 self.promotion_candidate_count, self.promoted_region_count
             );
         }
+        let body = eliminate_redundant_gotos(body);
         Ok(cleanup_redundant_labels(body))
     }
 
@@ -409,6 +468,8 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        global_names: Default::default(),
+        calling_convention: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     while builder.promote_single_entry_guarded_tail_regions(body) {}
@@ -432,6 +493,8 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        global_names: Default::default(),
+        calling_convention: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.discover_guarded_tail_candidates(body);

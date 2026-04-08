@@ -45,7 +45,7 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
                         opcode: PcodeOpcode::Copy,
                         address: 0x4000,
                         output: Some(cond.clone()),
-                        inputs: vec![cst(1, 1)],
+                        inputs: vec![reg(0x08, 1)],
                         asm_mnemonic: None,
                     },
                     PcodeOp {

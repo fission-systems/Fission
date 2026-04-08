@@ -1,5 +1,141 @@
 use super::*;
 
+// ---------------------------------------------------------------------------
+// Goto elimination post-pass
+// ---------------------------------------------------------------------------
+//
+// Three fixpoint rules applied in sequence until convergence:
+//
+//  1. Empty-jump removal:   `Goto(L)` immediately followed by `Label(L)` → remove the Goto.
+//  2. Single-reference inline: `Label(L)` referenced exactly once as `Goto(L)` → remove the
+//     Label and the Goto (they're already adjacent after rule 1 or after inlining).
+//  3. Conditional goto inversion: `if (cond) { Goto(L) }` directly followed by `Label(L)`
+//     and the rest of the code → replace with `if (!cond) { rest_code }`.
+//
+// Rules are applied at the TOP LEVEL only (not recursed into nested scopes) per iteration.
+// After each pass that changes anything, the whole pass restarts to reach a fixpoint.
+
+/// Apply all three goto-elimination rules at the top level of a statement list.
+/// Returns `(cleaned, changed)` where `changed` indicates whether any rule fired.
+fn goto_elim_pass(stmts: Vec<HirStmt>) -> (Vec<HirStmt>, bool) {
+    let mut changed = false;
+    let stmts = empty_jump_removal(stmts, &mut changed);
+    let stmts = single_ref_label_inline(stmts, &mut changed);
+    let stmts = cond_goto_inversion(stmts, &mut changed);
+    (stmts, changed)
+}
+
+/// Rule 1: If a `Goto(L)` is immediately followed by `Label(L)`, remove the Goto.
+fn empty_jump_removal(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+    let mut out = Vec::with_capacity(stmts.len());
+    let mut iter = stmts.into_iter().peekable();
+    while let Some(stmt) = iter.next() {
+        if let HirStmt::Goto(ref label) = stmt {
+            if let Some(HirStmt::Label(next_label)) = iter.peek() {
+                if label == next_label {
+                    *changed = true;
+                    continue; // drop the Goto; Label stays
+                }
+            }
+        }
+        out.push(stmt);
+    }
+    out
+}
+
+/// Rule 2: If a `Label(L)` is referenced exactly once (as a `Goto(L)`) in the same list,
+/// and that Goto immediately precedes the Label (after rule 1), remove both.
+fn single_ref_label_inline(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+    let ref_counts = collect_referenced_label_counts(&stmts);
+    let singleton_labels: HashSet<&str> = ref_counts
+        .iter()
+        .filter(|&(_, &count)| count == 1)
+        .map(|(label, _)| label.as_str())
+        .collect();
+    if singleton_labels.is_empty() {
+        return stmts;
+    }
+
+    let mut out = Vec::with_capacity(stmts.len());
+    let mut iter = stmts.into_iter().peekable();
+    while let Some(stmt) = iter.next() {
+        // If we see `Goto(L)` where L has exactly one reference and the next stmt is
+        // `Label(L)`, drop both (the label was already removed by rule 1 in the same
+        // pass, or the Goto and Label are genuinely adjacent here).
+        if let HirStmt::Goto(ref label) = stmt {
+            if singleton_labels.contains(label.as_str()) {
+                if let Some(HirStmt::Label(next_label)) = iter.peek() {
+                    if label == next_label {
+                        *changed = true;
+                        let _ = iter.next(); // consume the Label
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(stmt);
+    }
+    out
+}
+
+/// Rule 3: `if (cond) { Goto(L) }` directly followed by `Label(L)` + rest →
+/// `if (!cond) { rest }`.  This handles early-exit / guard patterns.
+fn cond_goto_inversion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+    let mut out = Vec::with_capacity(stmts.len());
+    let mut i = 0;
+    while i < stmts.len() {
+        // Pattern: If { cond, then=[Goto(L)], else=[] }  followed by  Label(L)  and rest
+        if let HirStmt::If { cond, then_body, else_body } = &stmts[i] {
+            if else_body.is_empty() {
+                if let [HirStmt::Goto(goto_label)] = then_body.as_slice() {
+                    // Find the immediately following Label(L) at the top level.
+                    if i + 1 < stmts.len() {
+                        if let HirStmt::Label(label) = &stmts[i + 1] {
+                            if goto_label == label {
+                                // Collect everything after the label as the inlined else body.
+                                let inverted_cond = negate_expr(cond.clone());
+                                let rest_body: Vec<HirStmt> =
+                                    stmts[i + 2..].to_vec();
+                                if !rest_body.is_empty() {
+                                    *changed = true;
+                                    out.push(HirStmt::If {
+                                        cond: inverted_cond,
+                                        then_body: rest_body,
+                                        else_body: Vec::new(),
+                                    });
+                                    break; // rest_body is now inside the if, stop iteration
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out.push(stmts[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Apply `goto_elim_pass` to fixpoint (convergence when no rule fires).
+/// Only operates at the TOP LEVEL of `stmts`; nested scopes are not recursed.
+/// Callers that need nested cleanup should call this recursively.
+pub(crate) fn eliminate_redundant_gotos(mut stmts: Vec<HirStmt>) -> Vec<HirStmt> {
+    const MAX_GOTO_ELIM_ITERS: usize = 32;
+    for _ in 0..MAX_GOTO_ELIM_ITERS {
+        let (new_stmts, changed) = goto_elim_pass(stmts);
+        stmts = new_stmts;
+        if !changed {
+            break;
+        }
+    }
+    stmts
+}
+
+// ---------------------------------------------------------------------------
+// Existing label-cleanup utilities
+// ---------------------------------------------------------------------------
+
 pub(crate) fn cleanup_redundant_labels(body: Vec<HirStmt>) -> Vec<HirStmt> {
     let aliases = adjacent_label_aliases(&body);
     let body = rewrite_stmt_labels(body, &aliases);
@@ -356,6 +492,61 @@ pub(super) fn has_non_ignorable_payload(body: &[HirStmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn goto_elim_removes_empty_jump_before_label() {
+        let stmts = vec![
+            HirStmt::Goto("exit".to_string()),
+            HirStmt::Label("exit".to_string()),
+            HirStmt::Return(None),
+        ];
+        let result = eliminate_redundant_gotos(stmts);
+        assert_eq!(
+            result,
+            vec![HirStmt::Label("exit".to_string()), HirStmt::Return(None)]
+        );
+    }
+
+    #[test]
+    fn goto_elim_removes_single_ref_label_and_goto_pair() {
+        // Goto(L) immediately before Label(L) with a single reference → both removed.
+        let stmts = vec![
+            HirStmt::Goto("lbl".to_string()),
+            HirStmt::Label("lbl".to_string()),
+            HirStmt::Return(None),
+        ];
+        let result = eliminate_redundant_gotos(stmts);
+        // After empty-jump removal, Label(lbl) + Return remains.
+        // Then single-ref inline removes both Goto and Label (they are adjacent).
+        // The result should have no Goto and no Label.
+        assert!(
+            !result.iter().any(|s| matches!(s, HirStmt::Goto(_))),
+            "goto should be eliminated: {result:?}"
+        );
+    }
+
+    #[test]
+    fn goto_elim_inverts_conditional_goto_followed_by_label() {
+        // `if (cond) { Goto(L) }; Label(L); Return` →
+        // `if (!cond) { Return }` (conditional inversion).
+        let stmts = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("tail".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("tail".to_string()),
+            HirStmt::Return(None),
+        ];
+        let result = eliminate_redundant_gotos(stmts);
+        // After inversion the Label should be gone and we should have a single If.
+        assert_eq!(result.len(), 1, "expected single If after inversion: {result:?}");
+        let HirStmt::If { else_body, then_body, .. } = &result[0] else {
+            panic!("expected If: {result:?}");
+        };
+        assert!(else_body.is_empty(), "else should be empty: {result:?}");
+        assert_eq!(then_body, &vec![HirStmt::Return(None)]);
+    }
 
     #[test]
     fn normalize_guarded_tail_layout_collapses_adjacent_labels_before_alias_rewrite() {

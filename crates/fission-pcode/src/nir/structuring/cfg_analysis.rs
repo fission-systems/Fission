@@ -269,7 +269,6 @@ impl PostDomTree {
         &self.postdominators
     }
 
-    #[cfg(test)]
     pub(crate) fn nearest_common_postdominator(&self, nodes: &[usize]) -> Option<usize> {
         nearest_common_from_sets(&self.postdominators, nodes)
     }

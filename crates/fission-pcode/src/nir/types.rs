@@ -2,6 +2,8 @@ use fission_loader::loader::LoadedBinary;
 use std::collections::HashMap;
 use thiserror::Error;
 
+use super::support::CallingConvention;
+
 pub type NirValueId = u32;
 pub type StackSlotId = u32;
 
@@ -502,6 +504,14 @@ pub struct NirRenderOptions {
     pub force_linear_structuring: bool,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
+    /// Address → symbol name for IAT slots and global data symbols.
+    /// Used to replace `DAT_<addr>` with the actual symbol name in decompiled output.
+    #[serde(default)]
+    pub global_names: HashMap<u64, String>,
+    /// Calling convention used to identify parameter registers.
+    /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
+    #[serde(default)]
+    pub calling_convention: CallingConvention,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -544,8 +554,8 @@ pub struct NirFunctionHints {
 
 impl NirRenderOptions {
     pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
-        let sections = binary
-            .inner()
+        let inner = binary.inner();
+        let sections = inner
             .sections
             .iter()
             .map(|section| {
@@ -555,16 +565,34 @@ impl NirRenderOptions {
                 )
             })
             .collect();
+
+        let mut global_names = inner.iat_symbols.clone();
+        for (addr, name) in &inner.global_symbols {
+            global_names.entry(*addr).or_insert_with(|| name.clone());
+        }
+
+        // Detect calling convention from binary format.
+        // PE (Windows) uses Windows x64 fastcall; ELF and Mach-O use System V AMD64.
+        let fmt_upper = binary.format.to_ascii_uppercase();
+        let calling_convention = if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO")
+        {
+            CallingConvention::SystemVAmd64
+        } else {
+            CallingConvention::WindowsX64
+        };
+
         Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
             pointer_size: if binary.is_64bit { 8 } else { 4 },
             format: binary.format.clone(),
-            image_base: binary.inner().image_base,
+            image_base: inner.image_base,
             sections,
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
+            global_names,
+            calling_convention,
         }
     }
 

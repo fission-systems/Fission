@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn collect_entry_register_param_aliases(pcode: &PcodeFunction) -> HashMap<u64, usize> {
+pub(super) fn collect_entry_register_param_aliases(
+    pcode: &PcodeFunction,
+    abi: CallingConvention,
+) -> HashMap<u64, usize> {
     let mut aliases = HashMap::new();
     let Some(entry) = pcode.blocks.first() else {
         return aliases;
@@ -23,7 +26,7 @@ pub(super) fn collect_entry_register_param_aliases(pcode: &PcodeFunction) -> Has
                     continue;
                 }
                 let Some((_, output_param_index)) =
-                    register_name_with_param(output.offset, output.size)
+                    register_name_with_param(output.offset, output.size, abi)
                 else {
                     continue;
                 };
@@ -36,7 +39,7 @@ pub(super) fn collect_entry_register_param_aliases(pcode: &PcodeFunction) -> Has
                 if input.space_id != REGISTER_SPACE_ID {
                     continue;
                 }
-                let alias_param_index = register_name_with_param(input.offset, input.size)
+                let alias_param_index = register_name_with_param(input.offset, input.size, abi)
                     .and_then(|(_, input_param_index)| input_param_index)
                     .or_else(|| aliases.get(&input.offset).copied());
                 if let Some(param_index) = alias_param_index {

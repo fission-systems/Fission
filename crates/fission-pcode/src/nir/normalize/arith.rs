@@ -147,12 +147,30 @@ fn extract_high_part(expr: &HirExpr, shift_amount: i64, total_bits: u32) -> Opti
     let HirExpr::Cast { ty, expr: inner } = expr else {
         return None;
     };
+    // Peel an optional intermediate (widening) cast to reach the Shr directly.
+    // Pattern: Cast(IntM, Cast(IntN, Shr(x, K))) where M >= N.
+    // When peeling, use IntN's bits as the effective data width, not IntM's.
+    let (shr_candidate, effective_ty): (&HirExpr, &NirType) = match inner.as_ref() {
+        HirExpr::Cast {
+            ty: mid_ty,
+            expr: mid_inner,
+        } => {
+            let outer_bits = int_type_bits(ty).unwrap_or(0);
+            let mid_bits = int_type_bits(mid_ty).unwrap_or(0);
+            if outer_bits >= mid_bits && mid_bits > 0 {
+                (mid_inner.as_ref(), mid_ty)
+            } else {
+                (inner.as_ref(), ty)
+            }
+        }
+        _ => (inner.as_ref(), ty),
+    };
     let HirExpr::Binary {
         op: HirBinaryOp::Shr | HirBinaryOp::Sar,
         lhs,
         rhs,
         ..
-    } = inner.as_ref()
+    } = shr_candidate
     else {
         return None;
     };
@@ -162,7 +180,7 @@ fn extract_high_part(expr: &HirExpr, shift_amount: i64, total_bits: u32) -> Opti
     if *inner_shift != shift_amount {
         return None;
     }
-    let width_bits = int_type_bits(ty)?;
+    let width_bits = int_type_bits(effective_ty)?;
     if shift_amount != i64::from(total_bits.saturating_sub(width_bits)) {
         return None;
     }
@@ -176,9 +194,23 @@ fn extract_high_part(expr: &HirExpr, shift_amount: i64, total_bits: u32) -> Opti
 fn extract_low_part(expr: &HirExpr, shift_amount: i64) -> Option<WidePart> {
     match expr {
         HirExpr::Cast { ty, expr: inner } => {
-            let width_bits = int_type_bits(ty)?;
+            // For a double cast Cast(IntM, Cast(IntN, x)) use the INNER (narrower)
+            // width as the true data width, since the outer cast is just for the
+            // Piece output type.
+            let (width_bits, real_inner) = match inner.as_ref() {
+                HirExpr::Cast { ty: inner_ty, expr: inner_inner } => {
+                    let outer_bits = int_type_bits(ty).unwrap_or(0);
+                    let mid_bits = int_type_bits(inner_ty).unwrap_or(0);
+                    if outer_bits >= mid_bits && mid_bits > 0 {
+                        (mid_bits, inner_inner.as_ref())
+                    } else {
+                        (int_type_bits(ty)?, inner.as_ref())
+                    }
+                }
+                _ => (int_type_bits(ty)?, inner.as_ref()),
+            };
             Some(WidePart {
-                source: (**inner).clone(),
+                source: real_inner.clone(),
                 width_bits,
                 shift_bits: shift_amount,
             })
@@ -1344,4 +1376,141 @@ fn is_full_mask_const(expr: &HirExpr, ty: &NirType) -> bool {
         return false;
     };
     full_mask_for_type(ty).is_some_and(|mask| mask == *value)
+}
+
+// ── SubPiece / Cast chain simplifications ─────────────────────────────────────
+
+/// Simplify `Cast(IntN, Shr(Cast(IntM, x), K))` where the inner cast is a
+/// widening zero-extension of `x` (M >= bit_width(x)), so the Shr operates on
+/// the same bits regardless of whether the cast is present.
+///
+/// Two sub-rules:
+/// 1. **Cast removal**: when both outer/inner casts are unsigned and the inner
+///    one is a pure widening, collapse it:
+///    `Cast(IntN, Shr(Cast(IntM, x), K))` → `Cast(IntN, Shr(x, K))`
+///    (only when `x_bits <= M` and `M >= x_bits`, i.e. inner cast is non-narrowing)
+///
+/// 2. **Zero extraction**: when the shift amount K is ≥ bit_width(x), the shift
+///    completely expels all data bits through zero-extension, yielding zero:
+///    `Cast(IntN, Shr(Cast(IntM, x), K))` where K >= x_bits → `Const(0, IntN)`
+pub(super) fn simplify_subpiece_chain(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Cast {
+        ty: outer_ty,
+        expr: shr_expr,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_integer_type(outer_ty) {
+        return None;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+        lhs: inner_cast_expr,
+        rhs: shift_const,
+        ..
+    } = shr_expr.as_ref()
+    else {
+        return None;
+    };
+    let HirExpr::Const(shift_amount, _) = shift_const.as_ref() else {
+        return None;
+    };
+    let HirExpr::Cast {
+        ty: mid_ty,
+        expr: source_expr,
+    } = inner_cast_expr.as_ref()
+    else {
+        return None;
+    };
+    let source_ty = expr_type(source_expr);
+    let Some(source_bits) = int_type_bits(&source_ty) else {
+        return None;
+    };
+    let Some(mid_bits) = int_type_bits(mid_ty) else {
+        return None;
+    };
+
+    // Rule 2: shift expels all real data → result is 0.
+    if *shift_amount >= i64::from(source_bits) && mid_bits >= source_bits {
+        return Some(HirExpr::Const(0, outer_ty.clone()));
+    }
+
+    // Rule 1: inner cast is a non-narrowing zero-extension — it doesn't
+    // change any bits that will end up in the final result.  Remove it.
+    if mid_bits >= source_bits {
+        let outer_bits = int_type_bits(outer_ty).unwrap_or(0);
+        // Preserve the shift result type as the wider of the two integer sizes.
+        let shr_result_ty = if mid_bits >= outer_bits { mid_ty.clone() } else { outer_ty.clone() };
+        return Some(HirExpr::Cast {
+            ty: outer_ty.clone(),
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: source_expr.clone(),
+                rhs: shift_const.clone(),
+                ty: shr_result_ty,
+            }),
+        });
+    }
+
+    None
+}
+
+/// Merge two consecutive right-shifts into one:
+/// `Shr(Shr(x, K1), K2)` → `Shr(x, K1+K2)` (unsigned)
+///
+/// This is valid for UNSIGNED (`Shr`) shifts with non-negative amounts.  We
+/// conservatively reject `Sar` (arithmetic shift) to avoid changing sign-extension
+/// semantics for the outer shift.
+pub(super) fn merge_consecutive_shifts(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr,
+        lhs,
+        rhs: rhs2,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr,
+        lhs: x,
+        rhs: rhs1,
+        ..
+    } = lhs.as_ref()
+    else {
+        return None;
+    };
+    let HirExpr::Const(k1, _) = rhs1.as_ref() else {
+        return None;
+    };
+    let HirExpr::Const(k2, _) = rhs2.as_ref() else {
+        return None;
+    };
+    if *k1 < 0 || *k2 < 0 {
+        return None;
+    }
+    let total = k1.checked_add(*k2)?;
+    // Guard against degenerate total shifts ≥ 64 bits.
+    if total >= 64 {
+        return Some(HirExpr::Const(0, ty.clone()));
+    }
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Shr,
+        lhs: x.clone(),
+        rhs: Box::new(HirExpr::Const(total, rhs1.as_ref().clone().into_const_type())),
+        ty: ty.clone(),
+    })
+}
+
+trait IntoConstType {
+    fn into_const_type(self) -> NirType;
+}
+impl IntoConstType for HirExpr {
+    fn into_const_type(self) -> NirType {
+        match self {
+            HirExpr::Const(_, ty) => ty,
+            _ => NirType::Int { bits: 64, signed: false },
+        }
+    }
 }

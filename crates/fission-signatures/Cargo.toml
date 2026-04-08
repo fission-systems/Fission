@@ -19,6 +19,7 @@ log = "0.4"
 once_cell = "1.19"
 regex = "1.10"
 rusqlite = { version = "0.31", features = ["bundled"] }
+iced-x86 = { version = "1.21", features = ["std"] }
 
 [dev-dependencies]
 criterion = "0.5"

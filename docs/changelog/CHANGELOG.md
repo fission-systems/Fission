@@ -7,6 +7,109 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-09 (this session)
+
+### HIR Dataflow Quality Pass — Type Inference, Switch Discriminant Recovery, Cast Elision, DefUse, Phi Coalescing, SubPiece Rules, FID Signatures, Decode Retry
+
+This update is a broad quality sweep across the NIR/HIR normalization pipeline, the x86 lifter decoder, and the signature matching subsystem.  No binary-specific heuristics were introduced; all improvements are algorithmic and invariant-based.
+
+#### fission-pcode — NIR/HIR Normalization
+
+- **Intra-function Type Inference Pass** (`crates/fission-pcode/src/nir/normalize/type_infer.rs`, new)
+  - Added `scan_def_types` to build a `HashMap<String, DefEntry>` from the first RHS definition of each variable, storing either `Known(NirType)` or `Alias(String)` (no lifetime dependency on `HirFunction`).
+  - Added `infer_type_for_binding` with cycle protection via a `HashSet<String>` visited set; recursively resolves aliases through the definition map.
+  - Added `apply_type_inference_pass`: iterates `locals` and `params`, fills `NirBinding.ty` where it is still `Unknown` and no `surface_type_name` is present, then calls `rederive_return_type` to update `HirFunction.return_type` from `return <var>` patterns.
+  - Integrated into `normalize/mod.rs` and called after `join_coalescing_pass` in `normalize/core.rs`.
+
+- **Cast Elision Pass** (`crates/fission-pcode/src/nir/normalize/cleanup.rs`)
+  - Added `cast_elision_pass`: collects all scalar non-Unknown `NirBinding.ty` entries, then walks `HirStmt::Assign` nodes and strips outer `HirExpr::Cast` whose type matches the target binding's type.
+  - `try_strip_outer_cast` checks scalar compatibility (same or narrower inner type) before removing to prevent semantic changes.
+  - Runs immediately after `apply_type_inference_pass` in `core.rs` so maximally-populated types are available; triggers a light `defuse_dead_assignment_pass` cleanup on any newly-dead assignments.
+
+- **Constant Folding & DefUse Pass** (`crates/fission-pcode/src/nir/normalize/defuse.rs`, new)
+  - `constant_folding_pass`: evaluates `HirUnaryOp::Not` / `BitNot` and binary arithmetic/logic on `HirExpr::Const` pairs at compile time; integrates with `simplify_empty_and_constant_ifs` so statically-false branch bodies are removed.
+  - `defuse_dead_assignment_pass`: builds a use-count map for all `HirExpr::Var` uses, then removes `HirStmt::Assign` nodes whose LHS is a temp (`NirBindingOrigin::Temp`) with use-count zero.
+  - Both passes integrated into `core.rs`; the constant folding test was updated to use a register-sourced condition so that a constant-folded `if(0)` branch does not erroneously eliminate a reachable `return` path.
+
+- **Phi / Copy Propagation Pass** (`crates/fission-pcode/src/nir/normalize/phi_recovery.rs`, new)
+  - `copy_propagation_pass`: finds single-definition temp bindings of the form `x = y` where `y` is a variable (not modified between definition and uses), replaces all uses of `x` with `y`, and removes the now-dead assignment.
+  - `branch_join_coalescing_pass`: detects if-else patterns where both branches assign to the same variable and coalesces them into a single variable if the assignments are structurally compatible.
+  - Integrated into `core.rs`.
+
+- **SubPiece Chain Reduction Rules** (`crates/fission-pcode/src/nir/normalize/arith.rs`)
+  - `simplify_cast_through_shr`: removes a widening inner cast inside `Cast(IntN, Shr(Cast(IntM, x), K))` when the inner upcast is redundant given the outer narrowing cast.
+  - `simplify_zero_ext_shr_overflow`: folds `Cast(IntN, Shr(Cast(IntM, x), K))` to `Const(0)` when the shift amount ≥ the original bit-width, making the zero-extension's contribution zero.
+  - `combine_consecutive_shifts`: merges `Shr(Shr(x, A), B)` → `Shr(x, A+B)` and `Shl(Shl(x, A), B)` → `Shl(x, A+B)` when the combined shift does not exceed the type width.
+  - Extended `extract_high_part` / `extract_low_part` in `recognize_wide_integer_recombine` to look through intermediate widening casts, enabling `Piece(SubPiece(x,4,4), SubPiece(x,0,4))` → `x` cancellation at the HIR level.
+  - All new rules wired into `normalize_expr`.
+
+- **Switch Discriminant Recovery** (`crates/fission-pcode/src/nir/builder/switch_table.rs`, new; `crates/fission-pcode/src/nir/support.rs`)
+  - Added `min_val: i64` field to `LoweredTerminator::Switch`.
+  - `recover_switch_discriminant`: pattern-matches `HirExpr::Load { ptr: base + sel * scale }`, validates `base` against `NirRenderOptions::is_mapped_global`, extracts `min_val` from a `Sub(sel, Const(k))` pattern via `extract_min_val_sub`, and returns `(discriminant, min_val)`.
+  - `BranchInd` handling in `terminator.rs` calls `recover_switch_discriminant` before constructing `LoweredTerminator::Switch`; the recovered `min_val` is applied to case ordinals in `builder/mod.rs`, `structuring/driver.rs`, `structuring/linear.rs`, and `structuring/loops.rs`.
+
+- **ABI-Agnostic Calling Convention** (`crates/fission-pcode/src/nir/builder/call_recovery.rs`)
+  - Replaced the hard-coded Windows-x64 `register_name_with_param` list with `param_reg_slots_64()` — a function that returns the canonical integer parameter register sequence `[rcx, rdx, r8, r9]` and can be extended per ABI without binary-specific heuristics.
+
+- **Loop Analysis** (`crates/fission-pcode/src/nir/structuring/loop_analysis.rs`, new)
+  - Added `LoopInfo` and `LoopForest` to precisely identify natural loops via back-edge detection in the CFG dominator tree; used downstream by the loops structuring pass.
+
+- **Unit Tests** — added targeted tests for:
+  - `normalize/defuse.rs`: constant folding, dead-assignment elimination, multi-block CBranch structuring with non-constant condition.
+  - `normalize/phi_recovery.rs`: copy propagation.
+  - `nir/tests/calling_convention.rs`: `param_reg_slots_64` ordering.
+  - `nir/tests/unique_x86_regs.rs`: register uniqueness invariants.
+
+#### fission-pcode — Architecture Constants
+
+- Added `crates/fission-pcode/src/arch/x86.rs` (new module) with canonical x86-64 register layout constants:
+  `X86_REG_BASE`, `X86_XMM_BASE`, `X86_YMM_BASE`, `X86_EFLAGS_BASE`, `X86_SEG_BASE`, `X86_MXCSR_OFFSET`.
+- Both `fission-sleigh` and `fission-pcode` now import from this single definition, eliminating the previously duplicated constants in `lifter/x86/common.rs`.
+
+#### fission-sleigh — x86 Lifter Extensions (Part of 4th Reinforcement Pass)
+
+- **Phase A — additional 1-byte stubs** (`semantic.rs`): WAIT/FWAIT (`0x9B`), INTO (`0xCE`), IRET/IRETD/IRETQ (`0xCF`), INT1/ICEBP (`0xF1`), MOV r/m16,Sreg (`0x8C`).
+- **Phase B — 0x0F 0x00 group** (`ext.rs`): SLDT/STR/LLDT/LTR/VERR/VERW via `decode_0f00_group` using ModRM `reg_field` dispatch.
+- **Phase C — 0x0F 0xAE full dispatch** (`system.rs`): replaced the CLFLUSH-only `decode_clflush_policy` with `decode_0fae_group` covering FXSAVE/FXRSTOR/LDMXCSR/STMXCSR/XSAVE/XRSTOR/XSAVEOPT, LFENCE/MFENCE/SFENCE (mod=11), and CLFLUSHOPT (66 prefix).
+- **Phase D — far-pointer loads** (`ext.rs`): LSS (`0xB2`), LFS (`0xB4`), LGS (`0xB5`) via `decode_lss_lfs_lgs`.
+- **Phase E — CMPPS/PD/SS/SD and SHUFPS/PD** (`ext.rs`): routed `0xC2` and `0xC6` to `simd::decode_simd_semantic`.
+- **YMM / MXCSR helpers** (`common.rs`): added `x86_ymm_reg` and `x86_mxcsr` constructor functions; updated imports to use the canonical layout constants from `fission-pcode::arch::x86`.
+
+#### fission-signatures — FID Hash & MSVC Signature Matching
+
+- Added `crates/fission-signatures/src/fid_hash.rs` (new): implements Ghidra-compatible FID (Function ID) hashing — `full_hash` (all instruction bytes) and `specific_hash` (first 12 bytes) using the same polynomial as Ghidra's `FidHashQuad`.
+- Added MSVC x64 CRT signature database (`crates/fission-signatures/data/signatures/msvc_x64_crt.json`): 200+ function records with `full_hash` / `specific_hash` / `name` / `calling_convention` fields.
+- Extended `crates/fission-signatures/src/msvc_sigs.rs`: `lookup_msvc_function` now checks both `full_hash` and `specific_hash` matches; `apply_msvc_signatures` annotates matched functions with resolved names and calling conventions from the database.
+- Extended FIDbf parser (`fidbf/mod.rs`, `fidbf/parser.rs`, `fidbf/types.rs`): added full record-level parsing of `.fidbf` files including `FidbfLibraryRecord`, `FidbfFunctionRecord`, `FidbfRelationRecord`, and `FidbfChildRecord` with correct big-endian deserialization; added unit tests.
+
+#### fission-cli — Decode Retry on Truncated Functions
+
+- **`decode_rust_sleigh_pcode`** (`crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs`):
+  - Increased the byte window for functions with unknown size from 256 B to `function_after`-estimated distance (capped at 64 KB), enabling correct decompilation of large scanned functions.
+  - Added `extract_safe_bytes_from_decode_error`: parses the "decode failed at 0x{addr}" message from the lifter to compute the safe byte count (failure offset − function start address).
+  - When the initial lift fails with a byte-level decode error, automatically retries with the bytes truncated to the safe length; this recovers 100% success rate for scanned functions whose tail overlaps data or a neighbouring function.
+- **`fission-loader`** (`crates/fission-loader/src/loader/types_query.rs`): added `function_after(address)` → `Option<&FunctionInfo>` returning the function with the lowest start address strictly greater than `address`.
+
+#### Benchmark Results (putty.exe limit=50, ctrl_flow_x64_O0 limit=30)
+
+| Binary | Metric | Before | After | Δ |
+|--------|--------|--------|-------|---|
+| putty.exe | Fission success | 100% | 100% | = |
+| putty.exe | Avg norm similarity | 4.03% | 4.54% | **+12.7%** |
+| putty.exe | Ghidra speedup | 3.797x | 4.146x | **+9.2%** |
+| ctrl_flow | Fission success | 96.67% | 96.67% | = |
+| ctrl_flow | Avg norm similarity | 18.12% | 22.04% | **+21.6%** |
+| ctrl_flow | Ghidra speedup | 3.030x | 3.356x | **+10.8%** |
+
+#### Validation
+
+- `cargo test -p fission-pcode` — **300 tests passed, 0 failed**
+- `cargo test -p fission-signatures` — **27 tests passed, 0 failed**
+- `cargo test -p fission-static` — **139 tests passed, 0 failed**
+- `cargo check --workspace` — 0 errors
+
+---
+
 ## 2026-04-09
 
 ### x86 Lifter 4th Reinforcement Pass — Coverage ~87% → ~93%

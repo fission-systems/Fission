@@ -145,6 +145,8 @@ mod tests {
                 region_linearize_structuring: false,
                 force_linear_structuring: false,
                 conservative_irreducible_fallback: false,
+                global_names: Default::default(),
+                calling_convention: Default::default(),
             },
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
@@ -222,35 +224,35 @@ mod tests {
             classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported branch target in mlil-preview"
             ),
-            "preview_unsupported_cfg"
+            "nir_unsupported_cfg"
         );
         assert_eq!(
             classify_nir_failure_refined(
                 "preview_structuring_failure[unsupported_cfg_region_shape]: unsupported region shape in mlil-preview"
             ),
-            "preview_structuring_failure"
+            "nir_structuring_failure"
         );
         assert_eq!(
             classify_nir_failure_refined(
                 "mlil-preview unavailable: value lowering failed on varnode: unsupported address materialization"
             ),
-            "preview_parse_or_lowering_failure"
+            "nir_parse_or_lowering_failure"
         );
         assert_eq!(
             classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported architecture in mlil-preview"
             ),
-            "preview_architecture_unsupported"
+            "nir_architecture_unsupported"
         );
         assert_eq!(
             classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported format in mlil-preview"
             ),
-            "preview_format_unsupported"
+            "nir_format_unsupported"
         );
         assert_eq!(
             classify_nir_failure_refined("mlil-preview worker response parse failed: bad json"),
-            "preview_worker_failure"
+            "nir_worker_failure"
         );
     }
 
@@ -259,10 +261,10 @@ mod tests {
         let selection = NirRoutingResolver::nir_fallback(
             "preview_structuring_failure[unsupported_cfg_phi_join]: unsupported phi join in mlil-preview",
         );
-        assert_eq!(selection.fallback_kind, Some("preview_unsupported"));
+        assert_eq!(selection.fallback_kind, Some("nir_unsupported"));
         assert_eq!(
             selection.fallback_kind_refined,
-            Some("preview_structuring_failure")
+            Some("nir_structuring_failure")
         );
     }
 

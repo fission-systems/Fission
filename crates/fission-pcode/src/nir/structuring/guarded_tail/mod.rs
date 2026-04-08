@@ -56,6 +56,8 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
+            global_names: Default::default(),
+            calling_convention: Default::default(),
         }
     }
 

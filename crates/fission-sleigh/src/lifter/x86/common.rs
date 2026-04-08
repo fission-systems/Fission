@@ -4,10 +4,13 @@ pub(super) use super::super::backend::common::{
     const_u64, RAM_SPACE_ID, UNIQUE_SPACE_ID,
 };
 
-pub(super) const X86_REG_BASE: u64 = 0xA860_0000;
-pub(super) const X86_XMM_BASE: u64 = 0xA868_0000;
-pub(in super::super) const X86_EFLAGS_BASE: u64 = 0xA86F_0000;
-pub(super) const X86_SEG_BASE: u64 = 0xA86A_0000;
+// Canonical layout constants live in fission-pcode so both the lifter and the
+// decompiler share a single definition.
+pub(super) use fission_pcode::arch::x86::{
+    X86_MXCSR_OFFSET, X86_REG_BASE, X86_SEG_BASE, X86_XMM_BASE, X86_YMM_BASE,
+};
+// X86_EFLAGS_BASE also needs to be visible to the parent `lifter` module.
+pub(in super::super) use fission_pcode::arch::x86::X86_EFLAGS_BASE;
 
 #[derive(Debug, Clone)]
 pub(super) struct X86TempFactory {
@@ -52,6 +55,26 @@ pub(super) fn x86_xmm_reg(reg: u32, size: u32) -> Varnode {
         space_id: UNIQUE_SPACE_ID,
         offset: X86_XMM_BASE + (u64::from(reg) * 16),
         size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+pub(super) fn x86_ymm_reg(reg: u32, size: u32) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_YMM_BASE + (u64::from(reg) * 32),
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+pub(super) fn x86_mxcsr() -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_MXCSR_OFFSET,
+        size: 4,
         is_constant: false,
         constant_val: 0,
     }

@@ -23,12 +23,12 @@ pub fn parse_fidbf(path: &Path) -> Result<FidbfDatabase, FidbfParseError> {
     let functions = parse_functions(&connection)?;
     let relations = parse_relations(&connection)?;
 
-    Ok(FidbfDatabase {
-        source_path: path.to_string_lossy().into_owned(),
+    Ok(FidbfDatabase::new(
+        path.to_string_lossy().into_owned(),
         libraries,
         functions,
         relations,
-    })
+    ))
 }
 
 fn validate_schema(connection: &Connection) -> Result<(), FidbfParseError> {

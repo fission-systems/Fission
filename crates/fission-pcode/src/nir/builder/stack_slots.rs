@@ -8,7 +8,7 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit {
             return None;
         }
-        let (name, index) = register_name_with_param(vn.offset, vn.size)?;
+        let (name, index) = register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
         if let Some(index) = index {
             self.params.entry(index).or_insert_with(|| NirBinding {
                 name: name.to_string(),

@@ -110,6 +110,15 @@ impl LoadedBinary {
             .and_then(|&idx| self.functions.get(idx))
     }
 
+    /// Return the function with the lowest start address strictly greater than `address`.
+    /// Useful for estimating the byte range of a function whose size is not recorded.
+    pub fn function_after(&self, address: u64) -> Option<&FunctionInfo> {
+        self.functions
+            .iter()
+            .filter(|f| f.address > address)
+            .min_by_key(|f| f.address)
+    }
+
     /// Get summary string
     pub fn summary(&self) -> String {
         format!(

@@ -45,6 +45,23 @@ fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
     None
 }
 
+/// Extract the decode-failure offset from an error message of the form
+/// "decode failed at 0x<hex>: …" and return how many bytes from `func_addr`
+/// that corresponds to (returns `None` if no such pattern is found).
+fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
+    // Look for "decode failed at 0x<hex>" in the message.
+    let marker = "decode failed at 0x";
+    let idx = err.find(marker)?;
+    let hex_start = idx + marker.len();
+    let hex_end = err[hex_start..]
+        .find(|c: char| !c.is_ascii_hexdigit())
+        .map(|i| hex_start + i)
+        .unwrap_or(err.len());
+    let fail_addr = u64::from_str_radix(&err[hex_start..hex_end], 16).ok()?;
+    let safe = fail_addr.checked_sub(func_addr)? as usize;
+    if safe == 0 { None } else { Some(safe) }
+}
+
 fn decode_rust_sleigh_pcode(
     lifter: &fission_sleigh::lifter::SleighLifter,
     binary: &LoadedBinary,
@@ -52,11 +69,17 @@ fn decode_rust_sleigh_pcode(
 ) -> Result<PcodeFunction, FissionError> {
     let max_bytes = if func.size > 0 {
         usize::try_from(func.size)
-            .unwrap_or(0x400)
-            .min(0x1000)
+            .unwrap_or(0x4000)
+            .min(0x10000)
             .max(1)
     } else {
-        0x100
+        binary
+            .function_after(func.address)
+            .and_then(|next| {
+                let dist = next.address.saturating_sub(func.address) as usize;
+                if dist > 0 { Some(dist.min(0x10000)) } else { None }
+            })
+            .unwrap_or(0x4000)
     };
 
     let bytes = binary.view_bytes(func.address, max_bytes).ok_or_else(|| {
@@ -66,16 +89,35 @@ fn decode_rust_sleigh_pcode(
         ))
     })?;
 
-    let lifted = lifter
-        .lift_raw_pcode_function_with_contract(&bytes, func.address, 512)
-        .map_err(|err| {
-            FissionError::decompiler(format!(
-                "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
-                func.name, func.address, err
-            ))
-        })?;
+    let result = lifter
+        .lift_raw_pcode_function_with_contract(&bytes, func.address, 512);
 
-    Ok(lifted.function)
+    match result {
+        Ok(lifted) => Ok(lifted.function),
+        Err(first_err) => {
+            // If the lift failed due to a byte-level decode error at a known
+            // offset, retry with the safe byte count (bytes up to the failure
+            // point).  This gracefully handles scanned functions whose size
+            // was over-estimated and whose tail lands in data or a different
+            // function's code.
+            let err_str = format!("{first_err:#}");
+            if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, func.address) {
+                if safe > 0 && safe < bytes.len() {
+                    if let Ok(retry) = lifter
+                        .lift_raw_pcode_function_with_contract(&bytes[..safe], func.address, 512)
+                    {
+                        return Ok(retry.function);
+                    }
+                }
+            }
+            // Propagate the original error if the retry path is unavailable
+            // or also failed.
+            Err(FissionError::decompiler(format!(
+                "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
+                func.name, func.address, first_err
+            )))
+        }
+    }
 }
 
 fn format_varnode_for_pcode(vn: &Varnode) -> String {

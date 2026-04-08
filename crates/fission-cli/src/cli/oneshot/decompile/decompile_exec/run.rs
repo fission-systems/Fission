@@ -42,11 +42,19 @@ fn decode_rust_sleigh_pcode(
 ) -> Result<fission_pcode::PcodeFunction, FissionError> {
     let max_bytes = if func.size > 0 {
         usize::try_from(func.size)
-            .unwrap_or(0x400)
-            .min(0x1000)
+            .unwrap_or(0x4000)
+            .min(0x10000)
             .max(1)
     } else {
-        0x100
+        // No size recorded (scanner-discovered function): estimate from next function.
+        // The lifter stops at the first terminal instruction, so a generous window is safe.
+        binary
+            .function_after(func.address)
+            .and_then(|next| {
+                let dist = next.address.saturating_sub(func.address) as usize;
+                if dist > 0 { Some(dist.min(0x10000)) } else { None }
+            })
+            .unwrap_or(0x4000)
     };
 
     let bytes = binary.view_bytes(func.address, max_bytes).ok_or_else(|| {

@@ -42,6 +42,38 @@ pub(super) fn decode_simd_semantic(
     seq: &mut u32,
     ext: u8,
 ) -> Vec<PcodeOp> {
+    decode_simd_semantic_vex(insn, op_idx, prefix, size, address, temp, seq, ext, false)
+}
+
+pub(super) fn decode_simd_semantic_avx(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext: u8,
+) -> Vec<PcodeOp> {
+    decode_simd_semantic_vex(insn, op_idx, prefix, size, address, temp, seq, ext, true)
+}
+
+fn decode_simd_semantic_vex(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext: u8,
+    vex_l: bool,
+) -> Vec<PcodeOp> {
+    // AVX 256-bit path (VEX.L=1)
+    if vex_l {
+        return decode_avx_256_semantic(insn, op_idx, prefix, size, address, temp, seq, ext);
+    }
+
     let mandatory = classify_simd_prefix(prefix);
 
     match (mandatory, ext) {
@@ -389,6 +421,71 @@ pub(super) fn decode_simd_semantic(
         (SimdMandatoryPrefix::P66, 0x50) => {
             decode_two_byte_xmm_movmsk(insn, op_idx, prefix, size, address, temp, seq, "MOVMSKPD")
         }
+
+        // Phase C: RSQRT/RCP packed (distinct named intrinsics)
+        (SimdMandatoryPrefix::None, 0x52) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "RSQRTPS")
+        }
+        (SimdMandatoryPrefix::F3, 0x52) => {
+            decode_two_byte_scalar_binop(insn, op_idx, prefix, address, temp, seq, 4, "RSQRTSS")
+        }
+        (SimdMandatoryPrefix::None, 0x53) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "RCPPS")
+        }
+        (SimdMandatoryPrefix::F3, 0x53) => {
+            decode_two_byte_scalar_binop(insn, op_idx, prefix, address, temp, seq, 4, "RCPSS")
+        }
+
+        // Phase C: CMP variants with imm8 predicate
+        (SimdMandatoryPrefix::None, 0xC2) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "CMPPS")
+        }
+        (SimdMandatoryPrefix::P66, 0xC2) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "CMPPD")
+        }
+        (SimdMandatoryPrefix::F2, 0xC2) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "CMPSD")
+        }
+        (SimdMandatoryPrefix::F3, 0xC2) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "CMPSS")
+        }
+
+        // Phase C: SHUF variants with imm8 control
+        (SimdMandatoryPrefix::None, 0xC6) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "SHUFPS")
+        }
+        (SimdMandatoryPrefix::P66, 0xC6) => {
+            decode_two_byte_xmm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "SHUFPD")
+        }
+
+        // Phase C: missing CVT pairs
+        (SimdMandatoryPrefix::None, 0x5A) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTPS2PD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5A) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTPD2PS")
+        }
+        (SimdMandatoryPrefix::None, 0x5B) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTDQ2PS")
+        }
+        (SimdMandatoryPrefix::P66, 0x5B) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTPS2DQ")
+        }
+        (SimdMandatoryPrefix::F3, 0x5B) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTTPS2DQ")
+        }
+
+        // Phase C: CVTDQ2PD, CVTPD2DQ, CVTTPD2DQ
+        (SimdMandatoryPrefix::F3, 0xE6) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTDQ2PD")
+        }
+        (SimdMandatoryPrefix::P66, 0xE6) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTTPD2DQ")
+        }
+        (SimdMandatoryPrefix::F2, 0xE6) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "CVTPD2DQ")
+        }
+
         _ => decode_simd_policy(address, seq, ext),
     }
 }
@@ -1001,6 +1098,472 @@ fn decode_two_byte_xmm_movmsk(
     };
     let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
     let src = x86_xmm_reg(rm_index, 16);
+    let dst = x86_reg(decoded.reg_index, gpr_size);
+    let out = temp.alloc(gpr_size);
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(policy_id, 8), src],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
+    });
+    ops
+}
+
+// ── AVX 256-bit (VEX.L=1) dispatcher ─────────────────────────────────────────
+
+/// Route AVX 256-bit instructions (VEX.L=1 path).
+fn decode_avx_256_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext: u8,
+) -> Vec<PcodeOp> {
+    let mandatory = classify_simd_prefix(prefix);
+
+    match (mandatory, ext) {
+        // ── Move (256-bit) ───────────────────────────────────────────────────
+        (SimdMandatoryPrefix::None, 0x10) => {
+            decode_ymm_mov_load(insn, op_idx, prefix, address, temp, seq, "VMOVUPS")
+        }
+        (SimdMandatoryPrefix::None, 0x11) => {
+            decode_ymm_mov_store(insn, op_idx, prefix, address, temp, seq, "VMOVUPS")
+        }
+        (SimdMandatoryPrefix::None, 0x28) => {
+            decode_ymm_mov_load(insn, op_idx, prefix, address, temp, seq, "VMOVAPS")
+        }
+        (SimdMandatoryPrefix::None, 0x29) => {
+            decode_ymm_mov_store(insn, op_idx, prefix, address, temp, seq, "VMOVAPS")
+        }
+        (SimdMandatoryPrefix::P66, 0x10) => {
+            decode_ymm_mov_load(insn, op_idx, prefix, address, temp, seq, "VMOVUPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x11) => {
+            decode_ymm_mov_store(insn, op_idx, prefix, address, temp, seq, "VMOVUPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x28) => {
+            decode_ymm_mov_load(insn, op_idx, prefix, address, temp, seq, "VMOVAPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x29) => {
+            decode_ymm_mov_store(insn, op_idx, prefix, address, temp, seq, "VMOVAPD")
+        }
+        // ── Arithmetic packed (256-bit) ───────────────────────────────────────
+        (SimdMandatoryPrefix::None, 0x51) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VSQRTPS")
+        }
+        (SimdMandatoryPrefix::None, 0x52) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VRSQRTPS")
+        }
+        (SimdMandatoryPrefix::None, 0x53) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VRCPPS")
+        }
+        (SimdMandatoryPrefix::None, 0x54) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VANDPS")
+        }
+        (SimdMandatoryPrefix::None, 0x55) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VANDNPS")
+        }
+        (SimdMandatoryPrefix::None, 0x56) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VORPS")
+        }
+        (SimdMandatoryPrefix::None, 0x57) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VXORPS")
+        }
+        (SimdMandatoryPrefix::None, 0x58) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VADDPS")
+        }
+        (SimdMandatoryPrefix::None, 0x59) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMULPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5C) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VSUBPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5D) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMINPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5E) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VDIVPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5F) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMAXPS")
+        }
+        (SimdMandatoryPrefix::P66, 0x51) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VSQRTPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x54) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VANDPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x55) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VANDNPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x56) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VORPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x57) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VXORPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x58) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VADDPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x59) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMULPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5C) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VSUBPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5D) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMINPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5E) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VDIVPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5F) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VMAXPD")
+        }
+        // ── Compare / Shuffle (256-bit with imm8) ────────────────────────────
+        (SimdMandatoryPrefix::None, 0xC2) => {
+            decode_ymm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "VCMPPS")
+        }
+        (SimdMandatoryPrefix::P66, 0xC2) => {
+            decode_ymm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "VCMPPD")
+        }
+        (SimdMandatoryPrefix::None, 0xC6) => {
+            decode_ymm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "VSHUFPS")
+        }
+        (SimdMandatoryPrefix::P66, 0xC6) => {
+            decode_ymm_binop_imm8(insn, op_idx, prefix, address, temp, seq, "VSHUFPD")
+        }
+        // ── Packed integer / misc (256-bit) ──────────────────────────────────
+        (SimdMandatoryPrefix::P66, 0x60) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPUNPCKLBW")
+        }
+        (SimdMandatoryPrefix::P66, 0x61) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPUNPCKLWD")
+        }
+        (SimdMandatoryPrefix::P66, 0x62) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPUNPCKLDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0x6C) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPUNPCKLQDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0x6D) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPUNPCKHQDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0x74) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPCMPEQB")
+        }
+        (SimdMandatoryPrefix::P66, 0x75) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPCMPEQW")
+        }
+        (SimdMandatoryPrefix::P66, 0x76) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPCMPEQD")
+        }
+        (SimdMandatoryPrefix::P66, 0xD4) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPADDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0xD5) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPMULLW")
+        }
+        (SimdMandatoryPrefix::P66, 0xDB) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPAND")
+        }
+        (SimdMandatoryPrefix::P66, 0xDF) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPANDN")
+        }
+        (SimdMandatoryPrefix::P66, 0xEB) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPOR")
+        }
+        (SimdMandatoryPrefix::P66, 0xEF) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPXOR")
+        }
+        (SimdMandatoryPrefix::P66, 0xF8) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPSUBB")
+        }
+        (SimdMandatoryPrefix::P66, 0xF9) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPSUBW")
+        }
+        (SimdMandatoryPrefix::P66, 0xFA) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPSUBD")
+        }
+        (SimdMandatoryPrefix::P66, 0xFB) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPSUBQ")
+        }
+        (SimdMandatoryPrefix::P66, 0xFC) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPADDB")
+        }
+        (SimdMandatoryPrefix::P66, 0xFD) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPADDW")
+        }
+        (SimdMandatoryPrefix::P66, 0xFE) => {
+            decode_ymm_binop(insn, op_idx, prefix, address, temp, seq, "VPADDD")
+        }
+        // ── MOVMSKPS/PD (256-bit) → GPR ─────────────────────────────────────
+        (SimdMandatoryPrefix::None, 0x50) => {
+            decode_ymm_movmsk(insn, op_idx, prefix, size, address, temp, seq, "VMOVMSKPS")
+        }
+        (SimdMandatoryPrefix::P66, 0x50) => {
+            decode_ymm_movmsk(insn, op_idx, prefix, size, address, temp, seq, "VMOVMSKPD")
+        }
+        _ => decode_simd_policy(address, seq, ext),
+    }
+}
+
+// ── YMM helper functions ──────────────────────────────────────────────────────
+
+/// YMM load: src(r/m256 or ymm) → dst_ymm, via intrinsic CallOther.
+fn decode_ymm_mov_load(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let src = if mode == 0x3 {
+        x86_ymm_reg(rm_index, 32)
+    } else {
+        materialize_rm_value(&decoded.rm, 32, address, &mut ops, temp, seq)
+    };
+    let dst = x86_ymm_reg(decoded.reg_index, 32);
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+    let out = temp.alloc(32);
+
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(policy_id, 8), src],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
+    });
+    ops
+}
+
+/// YMM store: src_ymm → dst(r/m256 or ymm).
+fn decode_ymm_mov_store(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let src = x86_ymm_reg(decoded.reg_index, 32);
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+
+    if mode == 0x3 {
+        let out = temp.alloc(32);
+        let dst = x86_ymm_reg(rm_index, 32);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![const_u64(policy_id, 8), src],
+            asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+        });
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::Copy,
+            address,
+            output: Some(dst),
+            inputs: vec![out],
+            asm_mnemonic: Some(format!("{tag}_WRITE")),
+        });
+        ops
+    } else {
+        let out = temp.alloc(32);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![const_u64(policy_id, 8), src],
+            asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+        });
+        write_rm_value(&decoded.rm, out, address, &mut ops, seq, tag)
+    }
+}
+
+/// YMM binary op: dst_ymm = op(dst_ymm, src_ymm/m256).
+fn decode_ymm_binop(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let dst = x86_ymm_reg(decoded.reg_index, 32);
+    let rhs = if mode == 0x3 {
+        x86_ymm_reg(rm_index, 32)
+    } else {
+        materialize_rm_value(&decoded.rm, 32, address, &mut ops, temp, seq)
+    };
+
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+    let out = temp.alloc(32);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(policy_id, 8), dst.clone(), rhs],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
+    });
+    ops
+}
+
+/// YMM binary op with imm8 (VCMPPS/PD, VSHUFPS/PD).
+fn decode_ymm_binop_imm8(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let dst = x86_ymm_reg(decoded.reg_index, 32);
+    let rhs = if mode == 0x3 {
+        x86_ymm_reg(rm_index, 32)
+    } else {
+        materialize_rm_value(&decoded.rm, 32, address, &mut ops, temp, seq)
+    };
+
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+    let out = temp.alloc(32);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(policy_id, 8), dst.clone(), rhs, imm8],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
+    });
+    ops
+}
+
+/// VMOVMSKPS/VMOVMSKPD 256-bit: extract sign-mask bits from YMM → GPR.
+fn decode_ymm_movmsk(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    gpr_size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, gpr_size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+    let src = x86_ymm_reg(rm_index, 32);
     let dst = x86_reg(decoded.reg_index, gpr_size);
     let out = temp.alloc(gpr_size);
     let ext = insn[op_idx + 1];

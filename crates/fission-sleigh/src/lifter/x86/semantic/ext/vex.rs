@@ -4,9 +4,11 @@
 //!   - 2-byte VEX (0xC5): `C5 {R̄|vvvv̄|L|pp} opcode [ModRM…]`
 //!   - 3-byte VEX (0xC4): `C4 {R̄|X̄|B̄|map} {W|vvvv̄|L|pp} opcode [ModRM…]`
 //!
-//! After extracting pp, map_select, REX bits, and the opcode byte the
+//! After extracting pp, map_select, REX bits, L bit and the opcode byte the
 //! instruction is re-routed to the existing SSE/3-byte escape decoders using
 //! an adjusted `op_idx` that keeps all downstream ModRM offsets correct.
+//!
+//! L bit: 0 = 128-bit XMM, 1 = 256-bit YMM
 //!
 //! Offset algebra (decode_modrm_operand reads insn[op_idx+1+1]):
 //!   2-byte VEX:  new_op_idx = vex_start + 1  →  opcode at +2, ModRM at +3 ✓
@@ -64,12 +66,18 @@ pub(in super::super) fn decode_vex_semantic(
         // REX.R is active-low in the VEX byte; convert to REX-style active-high.
         let rex_r_bit: u8 = if (vex_b2 & 0x80) == 0 { 0x04 } else { 0 };
         let rex = 0x40 | rex_r_bit;
+        // L bit: 0=128-bit XMM, 1=256-bit YMM
+        let vex_l = (vex_b2 & 0x04) != 0;
 
         let synth = vex_prefix_state(pp, rex);
         // Adjusted op_idx so that decode_modrm_operand(insn, new+1, …) reads
         // insn[op_idx+3] as ModRM.
         let new_op_idx = op_idx + 1;
-        simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+        if vex_l {
+            simd::decode_simd_semantic_avx(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+        } else {
+            simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+        }
     } else {
         // ── 3-byte VEX ──────────────────────────────────────────────────────
         // Byte layout: C4 | vex_b2 | vex_b3 | opcode | [ModRM …]
@@ -95,6 +103,10 @@ pub(in super::super) fn decode_vex_semantic(
         let rex_b_bit: u8 = if (vex_b2 & 0x20) == 0 { 0x01 } else { 0 };
         let rex_w_bit: u8 = if (vex_b3 & 0x80) != 0 { 0x08 } else { 0 };
         let rex = 0x40 | rex_w_bit | rex_r_bit | rex_x_bit | rex_b_bit;
+        // VVVV is bits [6:3] of vex_b3, stored inverted (active-low)
+        let vvvv_reg = u32::from((!vex_b3 >> 3) & 0xF);
+        // L bit: 0=128-bit XMM, 1=256-bit YMM
+        let vex_l = (vex_b3 & 0x04) != 0;
 
         let synth = vex_prefix_state(pp, rex);
 
@@ -103,22 +115,26 @@ pub(in super::super) fn decode_vex_semantic(
                 // Map 0x0F: route to SSE/SIMD decoder.
                 // new_op_idx+2 = (op_idx+2)+2 = op_idx+4 = ModRM ✓
                 let new_op_idx = op_idx + 2;
-                simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+                if vex_l {
+                    simd::decode_simd_semantic_avx(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+                } else {
+                    simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+                }
             }
             2 => {
-                // Map 0x0F38: 3-byte escape decoder.
+                // Map 0x0F38: 3-byte escape decoder with VVVV.
                 // ext3 = insn[new_op_idx+2] = insn[(op_idx+1)+2] = insn[op_idx+3] = opcode ✓
                 // ModRM = insn[op_idx+4] ✓
                 let new_op_idx = op_idx + 1;
                 escape3byte::decode_three_byte_escape_semantic(
-                    insn, new_op_idx, &synth, size, address, temp, seq, false,
+                    insn, new_op_idx, &synth, size, address, temp, seq, false, vvvv_reg,
                 )
             }
             3 => {
-                // Map 0x0F3A: 3-byte escape decoder (imm8 variant).
+                // Map 0x0F3A: 3-byte escape decoder (imm8 variant) with VVVV.
                 let new_op_idx = op_idx + 1;
                 escape3byte::decode_three_byte_escape_semantic(
-                    insn, new_op_idx, &synth, size, address, temp, seq, true,
+                    insn, new_op_idx, &synth, size, address, temp, seq, true, vvvv_reg,
                 )
             }
             _ => Vec::new(), // Reserved/unknown VEX map

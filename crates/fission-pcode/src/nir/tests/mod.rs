@@ -2,8 +2,11 @@ use super::*;
 use crate::pcode::{PcodeBasicBlock, PcodeOp};
 
 mod bootstrap_x86;
+mod calling_convention;
+mod unique_x86_regs;
 mod normalize_arith;
 mod normalize_bitstream;
+mod normalize_defuse;
 mod normalize_slots;
 mod relative_branch_targets;
 mod structuring_conditionals;
@@ -53,6 +56,8 @@ fn preview_options() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        global_names: Default::default(),
+        calling_convention: Default::default(),
     }
 }
 
@@ -67,5 +72,7 @@ fn preview_options_x86() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        global_names: Default::default(),
+        calling_convention: Default::default(),
     }
 }

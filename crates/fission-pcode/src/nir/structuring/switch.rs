@@ -64,7 +64,7 @@ impl<'a> PreviewBuilder<'a> {
         )))
     }
 
-    fn parse_switch_chain(
+    pub(super) fn parse_switch_chain(
         &mut self,
         start_idx: usize,
     ) -> Result<Option<ParsedSwitch>, MlilPreviewError> {
@@ -170,9 +170,9 @@ impl<'a> PreviewBuilder<'a> {
 
 #[derive(Debug, Clone)]
 pub(super) struct ParsedSwitch {
-    selector: HirExpr,
-    cases: Vec<(i64, usize)>,
-    default_idx: usize,
+    pub(super) selector: HirExpr,
+    pub(super) cases: Vec<(i64, usize)>,
+    pub(super) default_idx: usize,
 }
 
 fn extract_eq_const_for_case(expr: &HirExpr, case_on_true: bool) -> Option<(HirExpr, i64)> {

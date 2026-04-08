@@ -16,6 +16,7 @@ pub(super) use self::vex::decode_vex_semantic;
 
 const X86_RDTSC_POLICY_ID: u64 = 0x0F31;
 const X86_CLFLUSH_POLICY_ID: u64 = 0x0FAE07;
+const X86_CLFLUSHOPT_POLICY_ID: u64 = 0x660FAE07;
 const X86_SYSCALL_POLICY_ID: u64 = 0x0F05;
 const X86_SYSRET_POLICY_ID: u64 = 0x0F07;
 const X86_CLTS_POLICY_ID: u64 = 0x0F06;
@@ -48,6 +49,17 @@ const X86_INVD_POLICY_ID2: u64 = 0x0F01_05;
 const X86_MOV_CR_POLICY_ID: u64 = 0x0F20_00;
 const X86_MOV_DR_POLICY_ID: u64 = 0x0F21_00;
 const X86_RDPMC_POLICY_ID: u64 = 0x0F33;
+// 0F 00 group: segment descriptor table instructions
+const X86_SLDT_POLICY_ID: u64 = 0x0F00_00;
+const X86_STR_POLICY_ID: u64 = 0x0F00_01;
+const X86_LLDT_POLICY_ID: u64 = 0x0F00_02;
+const X86_LTR_POLICY_ID: u64 = 0x0F00_03;
+const X86_VERR_POLICY_ID: u64 = 0x0F00_04;
+const X86_VERW_POLICY_ID: u64 = 0x0F00_05;
+// Far load: LSS/LFS/LGS
+const X86_LSS_POLICY_ID: u64 = 0x0FB2_00;
+const X86_LFS_POLICY_ID: u64 = 0x0FB4_00;
+const X86_LGS_POLICY_ID: u64 = 0x0FB5_00;
 
 pub(super) fn decode_extended_semantic(
     insn: &[u8],
@@ -64,6 +76,7 @@ pub(super) fn decode_extended_semantic(
     };
 
     match ext {
+        0x00 => decode_0f00_group(insn, op_idx, prefix, address, temp, seq),
         0x01 => decode_0f01_group(insn, op_idx, prefix, address, temp, seq),
         0x05 => system::decode_system_policy(address, seq, X86_SYSCALL_POLICY_ID, "SYSCALL_POLICY"),
         0x06 => system::decode_system_policy(address, seq, X86_CLTS_POLICY_ID, "CLTS_POLICY"),
@@ -117,8 +130,8 @@ pub(super) fn decode_extended_semantic(
         0x32 => system::decode_system_policy(address, seq, X86_RDMSR_POLICY_ID, "RDMSR_POLICY"),
         0x34 => system::decode_system_policy(address, seq, X86_SYSENTER_POLICY_ID, "SYSENTER_POLICY"),
         0x35 => system::decode_system_policy(address, seq, X86_SYSEXIT_POLICY_ID, "SYSEXIT_POLICY"),
-        0x38 => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, false),
-        0x3A => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, true),
+        0x38 => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, false, 0),
+        0x3A => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, true, 0),
         0x77 => system::decode_system_policy(address, seq, X86_EMMS_POLICY_ID, "EMMS_POLICY"),
         0xA2 => system::decode_system_policy(address, seq, X86_CPUID_POLICY_ID, "CPUID_POLICY"),
         0xA0 => system::decode_system_policy(address, seq, X86_PUSH_FS_POLICY_ID, "PUSH_FS_POLICY"),
@@ -128,7 +141,11 @@ pub(super) fn decode_extended_semantic(
         0xA4 | 0xA5 | 0xAC | 0xAD => {
             bitshift::decode_shld_shrd(insn, op_idx, prefix, size, address, temp, seq, ext)
         }
-        0xAE => system::decode_clflush_policy(insn, op_idx, prefix, address, temp, seq),
+        0xAE => system::decode_0fae_group(insn, op_idx, prefix, address, temp, seq),
+        // LSS/LFS/LGS: load far pointer (offset → reg, segment → seg register) → CallOther
+        0xB2 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LSS_POLICY_ID, "LSS_POLICY"),
+        0xB4 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LFS_POLICY_ID, "LFS_POLICY"),
+        0xB5 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LGS_POLICY_ID, "LGS_POLICY"),
         0xA3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bt),
         0xAB => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bts),
         0xB3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Btr),
@@ -139,6 +156,10 @@ pub(super) fn decode_extended_semantic(
         0xB0 | 0xB1 => decode_cmpxchg(insn, op_idx, prefix, size, address, temp, seq, ext),
         // CMPXCHG8B/16B: 64/128-bit compare-and-swap → CallOther policy
         0xC7 => decode_cmpxchg8b(insn, op_idx, prefix, address, temp, seq),
+        // CMPPS/PD/SS/SD: comparison with imm8 predicate
+        0xC2 => simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext),
+        // SHUFPS/PD: shuffle with imm8 control
+        0xC6 => simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext),
         0xC8..=0xCF => bitshift::decode_bswap(prefix, size, ext, address, temp, seq),
         0xB6 | 0xB7 | 0xBE | 0xBF => {
             let src_size = if matches!(ext, 0xB6 | 0xBE) { 1 } else { 2 };
@@ -152,8 +173,8 @@ pub(super) fn decode_extended_semantic(
         0xBC => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, false),
         0xBD => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, true),
         0x40..=0x4F => decode_cmovcc(insn, op_idx, prefix, size, address, temp, seq, ext - 0x40),
-        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F | 0xD4 | 0xD5 | 0xEB | 0xEF
-        | 0xF8..=0xFE => {
+        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F | 0xD4 | 0xD5
+        | 0xE0..=0xEF | 0xF8..=0xFE => {
             simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext)
         }
         0x90..=0x9F => decode_setcc(insn, op_idx, prefix, address, temp, seq, ext - 0x90),
@@ -195,6 +216,69 @@ fn decode_0f01_group(
         opcode: PcodeOpcode::CallOther,
         address,
         output: None,
+        inputs: vec![const_u64(policy_id, 8)],
+        asm_mnemonic: Some(mnem.to_string()),
+    });
+    ops
+}
+
+/// 0F 00 group: SLDT/STR/LLDT/LTR/VERR/VERW — all → CallOther.
+fn decode_0f00_group(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 2, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let (policy_id, mnem) = match decoded.reg_field {
+        0 => (X86_SLDT_POLICY_ID, "SLDT_POLICY"),
+        1 => (X86_STR_POLICY_ID, "STR_POLICY"),
+        2 => (X86_LLDT_POLICY_ID, "LLDT_POLICY"),
+        3 => (X86_LTR_POLICY_ID, "LTR_POLICY"),
+        4 => (X86_VERR_POLICY_ID, "VERR_POLICY"),
+        5 => (X86_VERW_POLICY_ID, "VERW_POLICY"),
+        _ => return Vec::new(),
+    };
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(policy_id, 8)],
+        asm_mnemonic: Some(mnem.to_string()),
+    });
+    ops
+}
+
+/// LSS/LFS/LGS: far pointer load → CallOther with dst reg hint.
+fn decode_lss_lfs_lgs(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    policy_id: u64,
+    mnem: &'static str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let dst = x86_reg(decoded.reg_index, size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(dst),
         inputs: vec![const_u64(policy_id, 8)],
         asm_mnemonic: Some(mnem.to_string()),
     });
