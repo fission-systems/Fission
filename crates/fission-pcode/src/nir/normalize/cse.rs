@@ -35,98 +35,19 @@
 /// - Ghidra `ActionMultiCse` (coreaction.cc): local CSE concept
 /// - LLVM `GVN.cpp`: global value numbering (superset of this)
 /// - Cooper & Torczon "Engineering a Compiler" §8.4
+use super::expr_key::{invalidate_pure_map, pure_expr_key, PureExprMap};
 use super::*;
 use std::collections::HashMap;
 
 /// Apply CSE to the function body.  Returns `true` if any substitution was made.
 pub(super) fn apply_cse_pass(func: &mut HirFunction) -> bool {
-    let mut map: ExprMap = HashMap::new();
+    let mut map: PureExprMap = HashMap::new();
     cse_stmts(&mut func.body, &mut map)
-}
-
-/// Map from canonical expression key → the variable name that first computed it.
-type ExprMap = HashMap<ExprKey, String>;
-
-/// A canonical, hashable representation of a pure HIR expression.
-///
-/// We represent it as a `String` key built from the expression tree.  This is
-/// simple, allocation-heavy but correct.  A typed arena would be more efficient
-/// but adds complexity not warranted here.
-type ExprKey = String;
-
-/// Compute the canonical key for an expression, or `None` if not eligible
-/// (contains Load, Call, AggregateCopy).
-fn expr_key(expr: &HirExpr) -> Option<ExprKey> {
-    match expr {
-        HirExpr::Const(v, ty) => {
-            Some(format!("K({},{})", v, type_key(ty)))
-        }
-        HirExpr::Var(name) => Some(format!("V({})", name)),
-        HirExpr::Cast { ty, expr: inner } => {
-            let ik = expr_key(inner)?;
-            Some(format!("C({},{})", type_key(ty), ik))
-        }
-        HirExpr::Unary { op, expr: inner, ty } => {
-            let ik = expr_key(inner)?;
-            Some(format!("U({:?},{},{})", op, type_key(ty), ik))
-        }
-        HirExpr::Binary { op, lhs, rhs, ty } => {
-            let lk = expr_key(lhs)?;
-            let rk = expr_key(rhs)?;
-            // For commutative ops, canonicalise order to eliminate duplicates.
-            let (lk, rk) = if is_commutative(*op) && lk > rk {
-                (rk, lk)
-            } else {
-                (lk, rk)
-            };
-            Some(format!("B({:?},{},{},{})", op, type_key(ty), lk, rk))
-        }
-        HirExpr::PtrOffset { base, offset } => {
-            let bk = expr_key(base)?;
-            Some(format!("P({},{})", offset, bk))
-        }
-        // Impure / complex — not eligible.
-        HirExpr::Load { .. } | HirExpr::Call { .. } | HirExpr::AggregateCopy { .. }
-        | HirExpr::Index { .. } => None,
-    }
-}
-
-fn type_key(ty: &NirType) -> String {
-    match ty {
-        NirType::Unknown => "?".to_string(),
-        NirType::Bool => "b".to_string(),
-        NirType::Int { bits, signed } => format!("i{}s{}", bits, if *signed { 1 } else { 0 }),
-        NirType::Ptr(_) => "p".to_string(),
-        NirType::Aggregate { size, .. } => format!("a{}", size),
-        NirType::Float { bits } => format!("f{}", bits),
-    }
-}
-
-fn is_commutative(op: HirBinaryOp) -> bool {
-    matches!(
-        op,
-        HirBinaryOp::Add
-            | HirBinaryOp::Mul
-            | HirBinaryOp::And
-            | HirBinaryOp::Or
-            | HirBinaryOp::Xor
-            | HirBinaryOp::Eq
-            | HirBinaryOp::Ne
-            | HirBinaryOp::LogicalAnd
-            | HirBinaryOp::LogicalOr
-    )
-}
-
-/// Invalidate map entries that depend on `defined_var`.
-fn invalidate(map: &mut ExprMap, defined_var: &str) {
-    // Remove entries where the key string contains V(defined_var) as a component.
-    let marker = format!("V({})", defined_var);
-    map.retain(|k, _| !k.contains(&marker));
 }
 
 /// Process a statement list with CSE.  `map` accumulates known expressions.
 /// Returns `true` if any substitution was made.
-fn cse_stmts(stmts: &mut Vec<HirStmt>, map: &mut ExprMap) -> bool {
+fn cse_stmts(stmts: &mut Vec<HirStmt>, map: &mut PureExprMap) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         if cse_stmt(stmt, map) {
@@ -136,13 +57,13 @@ fn cse_stmts(stmts: &mut Vec<HirStmt>, map: &mut ExprMap) -> bool {
     changed
 }
 
-fn cse_stmt(stmt: &mut HirStmt, map: &mut ExprMap) -> bool {
+fn cse_stmt(stmt: &mut HirStmt, map: &mut PureExprMap) -> bool {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
             // Try to substitute rhs with a known equivalent variable.
             let mut changed = false;
             if let HirLValue::Var(target) = lhs {
-                if let Some(key) = expr_key(rhs) {
+                if let Some(key) = pure_expr_key(rhs) {
                     if let Some(existing) = map.get(&key) {
                         // Replace rhs with Var(existing).
                         let existing_name = existing.clone();
@@ -156,7 +77,7 @@ fn cse_stmt(stmt: &mut HirStmt, map: &mut ExprMap) -> bool {
                     }
                 }
                 // Invalidate any cached expression that uses this variable.
-                invalidate(map, target.as_str());
+                invalidate_pure_map(map, target.as_str());
             } else {
                 // Memory write — invalidate everything conservatively
                 // (we can't know what a store through a pointer might alias).

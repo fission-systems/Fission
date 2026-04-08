@@ -9,6 +9,46 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-08 (latest)
 
+### HIR Quality Phase 8 — Redundant Load Elimination, Branch PRE-lite, Affine IV, ExprKey sharing
+
+This update implements the "HIR 품질 강화 8단계" plan: algorithmic passes that do
+not duplicate Phase 7 local CSE (scalar pure expressions), LICM (loops), or
+Memory SSA dead-store removal (unobserved writes).
+
+#### Shared pure expression keys (`expr_key.rs`)
+
+- **`pure_expr_key`**, **`type_key`**, **`is_commutative`**, **`invalidate_pure_map`**
+  are shared by local CSE and branch-prefix hoisting so commutative normalisation
+  and invalidation rules stay in one place ([`cse.rs`](crates/fission-pcode/src/nir/normalize/cse.rs) now imports them).
+
+#### fission-pcode — Redundant load elimination (RLE)
+
+- **`apply_redundant_load_elimination`** ([`redundant_load.rs`](crates/fission-pcode/src/nir/normalize/redundant_load.rs), new)
+  - Caches the result of `Load` from [`AliasKey::Stack`](crates/fission-pcode/src/nir/normalize/mem_ssa.rs) locations only; unknown/heap pointers are never cached.
+  - Invalidates on `Deref`/`Index` stores to the same stack key; clears the cache at `if`/`while`/`switch` joins (conservative).
+  - Pipeline: immediately after [`apply_dead_store_elimination`](crates/fission-pcode/src/nir/normalize/dead_store.rs).
+
+- **`alias_key_for_pointer_expr`**, **`nir_byte_size`** are now `pub(crate)` on
+  [`mem_ssa.rs`](crates/fission-pcode/src/nir/normalize/mem_ssa.rs) for reuse by RLE and MemSSA builder.
+
+#### fission-pcode — If/else common pure-prefix hoisting
+
+- **`apply_branch_prefix_hoist_pass`** ([`branch_hoist.rs`](crates/fission-pcode/src/nir/normalize/branch_hoist.rs), new)
+  - Hoists up to 32 leading statements from both arms when they are
+    `Assign { lhs: Var(x), rhs }` with the same `x` and identical `pure_expr_key(rhs)`, and no RHS side effects (`expr_has_side_effects`).
+  - Pipeline: after [`join_coalescing_pass`](crates/fission-pcode/src/nir/normalize/phi_recovery.rs), followed by cleanup + copy propagation + def-use cleanup.
+
+#### fission-pcode — SCEV-lite affine induction (`v = v * C + k`)
+
+- [`iv_recovery.rs`](crates/fission-pcode/src/nir/normalize/iv_recovery.rs): **`is_iv_update`** extends linear `v ± k` updates with **`v * C + k`** (and commutative mul order), with `C` and `k` loop-invariant, so more `While` loops upgrade to `For`.
+
+#### Benchmark (representative)
+
+- `test_control_flow_x64_O0.exe`, `--limit 50`, 2-way vs Ghidra: shared=42,
+  `avg_normalized_similarity=18.94%`, `both_success=100%` (matches Phase 7 baseline).
+
+---
+
 ### HIR Quality Phase 7 — LICM, Local CSE, Arithmetic Right-Shift Sign Propagation
 
 This update implements the "HIR 품질 강화 7단계" plan.  All three modules are

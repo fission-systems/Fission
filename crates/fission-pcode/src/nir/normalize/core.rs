@@ -13,9 +13,11 @@ use super::cleanup::{
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_fallthrough_edges,
 };
+use super::branch_hoist::apply_branch_prefix_hoist_pass;
 use super::cse::apply_cse_pass;
 use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
 use super::licm::apply_licm_pass;
+use super::redundant_load::apply_redundant_load_elimination;
 use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
 use super::flag_recovery::apply_flag_recovery_pass;
 use super::prologue::remove_callee_save_prologue_epilogue;
@@ -111,6 +113,17 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // Join-variable coalescing: unify parallel temporaries assigned in both
     // branches of an if-else (SSA out-of-SSA for 2-way joins).
     join_coalescing_pass(func);
+    // If-else common pure-prefix hoisting: move identical leading assignments
+    // out of both branches (partial redundancy elimination for branches).
+    if apply_branch_prefix_hoist_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        if copy_propagation_pass(func) {
+            defuse_dead_assignment_pass(func);
+        }
+        defuse_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
     // Type inference: propagate types from typed sub-expressions (Const, Cast,
     // Binary, …) to NirBinding.ty for locals/params that are still Unknown,
     // and re-derive the function return type for `return <var>` patterns.
@@ -199,6 +212,14 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     if apply_dead_store_elimination(func) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         defuse_dead_assignment_pass(func);
+    }
+    // Redundant load elimination: reuse the result of an earlier stack-slot load
+    // when no intervening store (complements dead-store removal and local CSE).
+    if apply_redundant_load_elimination(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
     }
     // Aggregate field layout recovery: collect PtrOffset access offsets on
     // Ptr(Aggregate) variables and annotate the aggregate type with named

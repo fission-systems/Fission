@@ -285,8 +285,8 @@ fn find_iv_update(
     for (i, stmt) in body.iter().enumerate() {
         if let HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } = stmt {
             if lhs_name != var { continue; }
-            // Expect rhs = Var(v) ± k (linear recurrence).
-            if is_linear_update_of(rhs, var, loop_variant) {
+            // Expect rhs = Var(v) ± k (linear) or affine v*k'+k'' (see below).
+            if is_iv_update(rhs, var, loop_variant) {
                 if found.is_some() {
                     return None; // multiple updates → bail
                 }
@@ -296,6 +296,13 @@ fn find_iv_update(
     }
     let idx = found?;
     Some((idx, idx == body.len() - 1))
+}
+
+/// Linear or affine induction update: `v = v±k`, or `v = v*C+k` with `C`,`k`
+/// loop-invariant (integer affine recurrence on a single variable).
+fn is_iv_update(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>) -> bool {
+    is_linear_update_of(expr, var, loop_variant)
+        || is_affine_mul_add_update(expr, var, loop_variant)
 }
 
 /// Return true if `expr` is of the form `Var(v) op k` or `k op Var(v)` where
@@ -314,6 +321,57 @@ fn is_linear_update_of(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>
         // Allow a Cast wrapping a linear update (sign extension on IV).
         HirExpr::Cast { expr: inner, .. } => is_linear_update_of(inner, var, loop_variant),
         _ => false,
+    }
+}
+
+/// `v = v * C + k` or `v = k + v * C` (and commutative mul operand order), with
+/// `C` and `k` loop-invariant scalars.
+fn is_affine_mul_add_update(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>) -> bool {
+    match expr {
+        HirExpr::Cast { expr: inner, .. } => is_affine_mul_add_update(inner, var, loop_variant),
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let mul_on_v = |m: &HirExpr| mul_var_times_invariant(m, var, loop_variant);
+            let inv = |e: &HirExpr| is_loop_invariant_scalar(e, loop_variant);
+            (mul_on_v(lhs) && inv(rhs)) || (mul_on_v(rhs) && inv(lhs))
+        }
+        _ => false,
+    }
+}
+
+/// `v * e` or `e * v` where `e` has no loop-variant variables.
+fn mul_var_times_invariant(
+    expr: &HirExpr,
+    var: &str,
+    loop_variant: &HashSet<String>,
+) -> bool {
+    match expr {
+        HirExpr::Cast { expr: inner, .. } => mul_var_times_invariant(inner, var, loop_variant),
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lv = matches!(lhs.as_ref(), HirExpr::Var(n) if n == var);
+            let rv = matches!(rhs.as_ref(), HirExpr::Var(n) if n == var);
+            (lv && is_loop_invariant(rhs, loop_variant))
+                || (rv && is_loop_invariant(lhs, loop_variant))
+        }
+        _ => false,
+    }
+}
+
+/// Constants or expressions with no loop-variant variables (same as loop-invariant).
+fn is_loop_invariant_scalar(expr: &HirExpr, loop_variant: &HashSet<String>) -> bool {
+    match expr {
+        HirExpr::Const(_, _) => true,
+        HirExpr::Cast { expr: inner, .. } => is_loop_invariant_scalar(inner, loop_variant),
+        _ => is_loop_invariant(expr, loop_variant),
     }
 }
 

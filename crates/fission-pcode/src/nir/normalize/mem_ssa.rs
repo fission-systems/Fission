@@ -275,31 +275,7 @@ impl Builder {
 
     /// Compute an alias key for a pointer expression.
     fn alias_key_for_ptr(&self, ptr: &HirExpr, size: u32) -> AliasKey {
-        match ptr {
-            HirExpr::Var(name) => {
-                // Check if this variable has a stack-slot origin.
-                // We can't directly access the function's locals here, so we
-                // look for naming patterns from slot surfacing ("stack_...").
-                // This is conservative: only exact stack-named vars get Stack keys.
-                if let Some(offset) = extract_stack_offset(name) {
-                    AliasKey::Stack { offset, size }
-                } else {
-                    AliasKey::Unknown
-                }
-            }
-            HirExpr::PtrOffset { base, offset } => {
-                if let HirExpr::Var(name) = base.as_ref() {
-                    if let Some(base_offset) = extract_stack_offset(name) {
-                        return AliasKey::Stack {
-                            offset: base_offset + *offset,
-                            size,
-                        };
-                    }
-                }
-                AliasKey::Unknown
-            }
-            _ => AliasKey::Unknown,
-        }
+        alias_key_for_pointer_expr(ptr, size)
     }
 
     fn merge_reaching(&mut self, a: HashMap<AliasKey, usize>, b: HashMap<AliasKey, usize>) {
@@ -345,7 +321,7 @@ impl Builder {
 }
 
 /// Return the byte size of a `NirType`.
-fn nir_byte_size(ty: &NirType) -> u32 {
+pub(crate) fn nir_byte_size(ty: &NirType) -> u32 {
     match ty {
         NirType::Bool => 1,
         NirType::Int { bits, .. } => bits.div_ceil(8),
@@ -353,6 +329,35 @@ fn nir_byte_size(ty: &NirType) -> u32 {
         NirType::Aggregate { size, .. } => *size,
         NirType::Float { bits } => bits.div_ceil(8),
         NirType::Unknown => 8,
+    }
+}
+
+/// Compute an [`AliasKey`] for a pointer expression and access size (bytes).
+///
+/// Used by MemSSA construction and by redundant-load elimination.  Only
+/// `stack_*` / `PtrOffset(stack_*, k)` patterns yield [`AliasKey::Stack`];
+/// everything else is [`AliasKey::Unknown`].
+pub(crate) fn alias_key_for_pointer_expr(ptr: &HirExpr, size: u32) -> AliasKey {
+    match ptr {
+        HirExpr::Var(name) => {
+            if let Some(offset) = extract_stack_offset(name) {
+                AliasKey::Stack { offset, size }
+            } else {
+                AliasKey::Unknown
+            }
+        }
+        HirExpr::PtrOffset { base, offset } => {
+            if let HirExpr::Var(name) = base.as_ref() {
+                if let Some(base_offset) = extract_stack_offset(name) {
+                    return AliasKey::Stack {
+                        offset: base_offset + *offset,
+                        size,
+                    };
+                }
+            }
+            AliasKey::Unknown
+        }
+        _ => AliasKey::Unknown,
     }
 }
 
