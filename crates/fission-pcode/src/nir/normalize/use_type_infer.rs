@@ -221,6 +221,16 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Unsigned { bits });
                     }
                 }
+                // Arithmetic right-shift: the left operand must be a signed integer.
+                // `x >> k` where `>>` is Sar (arithmetic) means x is signed.
+                HirBinaryOp::Sar => {
+                    let bits = nir_type_bits(ty).unwrap_or(32);
+                    if let HirExpr::Var(name) = lhs.as_ref() {
+                        out.entry(name.clone())
+                            .or_default()
+                            .push(UseConstraint::Signed { bits });
+                    }
+                }
                 _ => {}
             }
             collect_constraints_expr(lhs, return_type, out);

@@ -13,7 +13,9 @@ use super::cleanup::{
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_fallthrough_edges,
 };
+use super::cse::apply_cse_pass;
 use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
+use super::licm::apply_licm_pass;
 use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
 use super::flag_recovery::apply_flag_recovery_pass;
 use super::prologue::remove_callee_save_prologue_epilogue;
@@ -83,6 +85,17 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     if constant_folding_pass(&mut func.body) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         eliminate_dead_local_clobber_assigns(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Local CSE: within each linear block, replace identical pure sub-expressions
+    // with the variable that first computed them.  Runs right after constant
+    // folding so that folded constants are included in the expression map.
+    if apply_cse_pass(func) {
+        if copy_propagation_pass(func) {
+            defuse_dead_assignment_pass(func);
+        }
+        defuse_dead_assignment_pass(func);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
@@ -212,6 +225,15 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // patterns inside loops with explicit break/continue statements.
     if apply_break_continue_pass(func) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Loop Invariant Code Motion: hoist pure loop-invariant assignments out of
+    // loop bodies (innermost-first).  Runs after break/continue recovery so the
+    // loop structure is finalised.
+    if apply_licm_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }

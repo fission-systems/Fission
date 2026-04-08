@@ -1220,6 +1220,29 @@ pub(super) fn cleanup_arithmetic_wrappers(expr: &HirExpr) -> Option<HirExpr> {
             rhs,
             ..
         } if is_full_mask_const(lhs.as_ref(), &expr_type(rhs)) => Some((**rhs).clone()),
+        // Sar(Cast(signed_T, x), k) → the cast already makes the value signed;
+        // if the output type of the Sar equals the cast type, the cast is
+        // redundant — drop it.  This prevents the printer from emitting a
+        // double-signed-cast.
+        HirExpr::Binary {
+            op: HirBinaryOp::Sar,
+            lhs,
+            rhs,
+            ty,
+        } => match lhs.as_ref() {
+            HirExpr::Cast {
+                ty: cast_ty,
+                expr: inner,
+            } if matches!(cast_ty, NirType::Int { signed: true, .. }) && cast_ty == ty => {
+                Some(HirExpr::Binary {
+                    op: HirBinaryOp::Sar,
+                    lhs: inner.clone(),
+                    rhs: rhs.clone(),
+                    ty: ty.clone(),
+                })
+            }
+            _ => None,
+        },
         HirExpr::Binary {
             op: HirBinaryOp::Ne,
             lhs,

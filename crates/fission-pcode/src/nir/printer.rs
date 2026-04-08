@@ -309,11 +309,31 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             let inner = print_expr_prec(expr, 85, depth + 1);
             (format!("{symbol}{inner}"), 85)
         }
-        HirExpr::Binary { op, lhs, rhs, .. } => {
+        HirExpr::Binary { op, lhs, rhs, ty } => {
             let prec = binary_precedence(*op);
-            let lhs = print_expr_prec(lhs, prec, depth + 1);
-            let rhs = print_expr_prec(rhs, prec + 1, depth + 1);
-            (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
+            // Arithmetic right shift (Sar) requires the left operand to be
+            // a signed integer.  If the expression type is unsigned (or unknown)
+            // we emit an explicit signed cast on the lhs so the semantics are
+            // preserved in the C output.
+            if *op == HirBinaryOp::Sar {
+                let bits = match ty {
+                    NirType::Int { bits, .. } => *bits,
+                    _ => 32,
+                };
+                let lhs_is_signed = matches!(ty, NirType::Int { signed: true, .. });
+                let lhs_str = print_expr_prec(lhs, prec, depth + 1);
+                let rhs_str = print_expr_prec(rhs, prec + 1, depth + 1);
+                let lhs_out = if lhs_is_signed {
+                    lhs_str
+                } else {
+                    format!("(int{bits}_t){lhs_str}")
+                };
+                (format!("{lhs_out} >> {rhs_str}"), prec)
+            } else {
+                let lhs_str = print_expr_prec(lhs, prec, depth + 1);
+                let rhs_str = print_expr_prec(rhs, prec + 1, depth + 1);
+                (format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)), prec)
+            }
         }
         HirExpr::Call { target, args, .. } => {
             let args = args
@@ -413,7 +433,8 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
         HirBinaryOp::Or => "|",
         HirBinaryOp::Xor => "^",
         HirBinaryOp::Shl => "<<",
-        HirBinaryOp::Shr | HirBinaryOp::Sar => ">>",
+        HirBinaryOp::Shr => ">>",
+        HirBinaryOp::Sar => ">>", // Handled specially in print_expr_prec with signed cast.
         HirBinaryOp::Eq => "==",
         HirBinaryOp::Ne => "!=",
         HirBinaryOp::Lt | HirBinaryOp::SLt => "<",

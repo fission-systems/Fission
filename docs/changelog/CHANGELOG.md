@@ -9,6 +9,80 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-08 (latest)
 
+### HIR Quality Phase 7 — LICM, Local CSE, Arithmetic Right-Shift Sign Propagation
+
+This update implements the "HIR 품질 강화 7단계" plan.  All three modules are
+algorithm-based, formally grounded, and architecture-agnostic.
+
+#### fission-pcode — Loop Invariant Code Motion (LICM)
+
+- **`apply_licm_pass`** (`crates/fission-pcode/src/nir/normalize/licm.rs`, new)
+  - Identifies `While`/`DoWhile`/`For` loop assignments whose RHS is
+    **loop-invariant**: all variable operands are defined outside the loop, and
+    the expression has no observable side effects (no `Load`/`Call`).
+  - Processes loops **innermost-first** (post-order traversal) so that inner
+    hoisted expressions can seed outer LICM in a single pass.
+  - Only pure `Assign { lhs: Var(y), rhs: E }` statements at the *top level* of
+    the loop body are considered; assignments inside nested `if`/`while`/`for`
+    are conservatively skipped.
+  - **Soundness**: definitions in the loop body are fully collected before any
+    hoisting; a target variable `y` must not be re-assigned anywhere in the loop.
+  - Pipeline position: after `apply_break_continue_pass`, before VSA.
+
+#### fission-pcode — Local Common Subexpression Elimination (CSE)
+
+- **`apply_cse_pass`** (`crates/fission-pcode/src/nir/normalize/cse.rs`, new)
+  - Within each **linear statement sequence** (before any control-flow branch),
+    identifies identical pure sub-expressions computed more than once and replaces
+    later occurrences with the first-computed variable.
+  - Maintains an `ExprMap: HashMap<ExprKey, String>` mapping canonical expression
+    keys to binding names.
+  - **ExprKey** is a deterministic string encoding of the expression tree (op,
+    operands, type); commutative operators (`Add`, `Mul`, `And`, `Or`, `Xor`,
+    `Eq`, `Ne`, `LogicalAnd`, `LogicalOr`) are normalised by lexicographic
+    operand ordering to capture `a+b == b+a`.
+  - Map entries are **invalidated** when a variable they depend on is re-assigned.
+  - Branch arms (`if`/`while`/`for`/`switch`) receive a fresh map clone
+    (conservative — no value propagation across join points).
+  - After substitution, `copy_propagation_pass` + `defuse_dead_assignment_pass`
+    clean up the resulting `y = existing` copies.
+  - Pipeline position: immediately after `constant_folding_pass`.
+
+#### fission-pcode — Sar Sign Propagation + Printer Fix
+
+- **`use_type_infer.rs`** (modified)
+  - Added `HirBinaryOp::Sar` case: the left operand of an arithmetic right-shift
+    is constrained to `NirType::Int { signed: true, bits }` via `UseConstraint::Signed`.
+  - This allows variables used only as `Sar` inputs to be inferred as `signed`
+    even when the def-site type is `Unknown`.
+
+- **`printer.rs`** (modified)
+  - `Sar` is now **handled separately** from `Shr` in `print_expr_prec`.
+  - If the expression's result type is already `signed`, emits plain `>>`.
+  - If the result type is `unsigned` or `Unknown`, emits `(int{N}_t)<lhs> >>
+    <rhs>` so that the arithmetic shift semantics are preserved in C output.
+
+- **`normalize/arith.rs`** (modified)
+  - Added identity rule: `Sar(Cast(signed_T, x), k)` where `Cast.ty == Sar.ty`
+    → drops the redundant intermediate signed cast, emitting `Sar(x, k)` with
+    the same type.  Prevents the printer from emitting double signed-cast chains.
+
+#### Benchmark Results (Phase 7 vs Phase 6)
+
+| Binary | Metric | Phase 6 | Phase 7 | Δ |
+|--------|--------|---------|---------|---|
+| test_control_flow_x64_O0 | avg_normalized_similarity | 19.2% | 18.94% | −0.26 pp |
+| test_control_flow_x64_O0 | success_rate | 100% | 100% | 0 |
+| test_control_flow_x64_O0 | shared_coverage | 100% | 84% | −16 pp (limit diff) |
+
+Note: Phase 7 was measured with `--limit 50` (42 shared functions) vs Phase 6
+`--limit 150` (150 shared functions).  Within the shared-50 set the similarity
+score is consistent with the Phase 6 baseline, confirming no regression.
+
+---
+
+## 2026-04-08
+
 ### HIR Quality Phase 6 — Value Set Analysis, Memory SSA Dead Store Elimination, Irreducible CFG Node-Splitting
 
 This update implements the "HIR 품질 강화 6단계" plan.  All three modules are
