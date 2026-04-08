@@ -18,6 +18,9 @@ use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
 use super::flag_recovery::apply_flag_recovery_pass;
 use super::prologue::remove_callee_save_prologue_epilogue;
 use super::type_infer::apply_type_inference_pass;
+use super::use_type_infer::apply_use_driven_type_infer_pass;
+use super::ptr_arith::apply_ptr_arith_recovery_pass;
+use super::cleanup::single_pred_label_inline;
 use super::slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
 };
@@ -94,6 +97,13 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // Binary, …) to NirBinding.ty for locals/params that are still Unknown,
     // and re-derive the function return type for `return <var>` patterns.
     apply_type_inference_pass(func);
+    // Use-driven backward type propagation: infer pointer/sign types from
+    // use-sites (Load/Store/signed comparisons/Return context).  Runs after
+    // def-driven inference so its results can seed additional constraints.
+    if apply_use_driven_type_infer_pass(func) {
+        // A second def-driven pass to pick up any newly-typed variables.
+        apply_type_inference_pass(func);
+    }
     // Cast elision: remove outer casts that are redundant given the binding's
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
@@ -149,6 +159,23 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(func);
             prune_unused_dead_local_bindings(func);
         }
+    }
+    // Pointer arithmetic recovery: convert IntAdd(ptr, k) → PtrOffset and
+    // IntAdd(ptr, idx*stride) → Index after pointer types are established AND
+    // after the slot-surfacing pass so the Add(ptr, Mul) pattern remains intact
+    // for slot detection.
+    if apply_ptr_arith_recovery_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
+    }
+    // Single-predecessor label inlining: reduce goto/label pairs by inlining
+    // blocks that are targeted by exactly one forward unconditional goto.
+    // Runs last so all other structural passes have already had their say.
+    if single_pred_label_inline(&mut func.body) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        super::for_loops::apply_for_loop_folding(&mut func.body);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
     }
     if diag {
         eprintln!(

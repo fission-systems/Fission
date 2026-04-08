@@ -1354,3 +1354,159 @@ fn rhs_contains_popcount(expr: &HirExpr) -> bool {
         _ => false,
     }
 }
+
+// ── Single-predecessor label inlining (goto reduction) ───────────────────────
+
+/// Inline labels that are targeted by exactly one unconditional forward `goto`.
+///
+/// ## What this eliminates
+///
+/// After CFG structuring many residual goto+label pairs remain in the flat HIR
+/// for edges the structurer could not fold into `if`/`while`/`for` constructs.
+/// A common pattern is:
+///
+/// ```text
+/// goto block_X;        ← unconditional forward jump
+/// <unreachable stmts>  ← dead code between goto and label
+/// block_X:             ← single-reference label
+/// <body stmts>         ← the actual continuation
+/// ```
+///
+/// Because `Goto` is unconditional, everything between the goto and the
+/// single-reference label is *unreachable* — provided no other `goto` or
+/// fall-through path into that dead segment exists.
+///
+/// This transformation removes the `Goto`, the unreachable segment, and the
+/// `Label`, leaving the body stmts in-place as natural fall-through.
+///
+/// ## Safety invariants
+///
+/// 1. The label must have **exactly one** incoming `Goto` reference in the
+///    entire function body (single-predecessor constraint).
+/// 2. The `Label` must appear **after** the `Goto` in the linear order
+///    (forward edge only — back-edges are loop headers and must not be removed).
+/// 3. The unreachable segment between goto and label must contain **no labels**
+///    that are referenced from outside that segment (to avoid removing code
+///    that is otherwise reachable).
+///
+/// The pass operates on the *top-level* statement list.  Recursion into nested
+/// `if`/`while`/`for` bodies is performed after the top-level pass.
+pub(super) fn single_pred_label_inline(stmts: &mut Vec<HirStmt>) -> bool {
+    // First recurse into nested scopes so their gotos are cleaned up before
+    // we look at the flat list.
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= single_pred_label_inline_in_stmt(stmt);
+    }
+
+    // Now process the top-level flat sequence.
+    changed |= single_pred_label_inline_flat(stmts);
+    changed
+}
+
+fn single_pred_label_inline_in_stmt(stmt: &mut HirStmt) -> bool {
+    match stmt {
+        HirStmt::Block(body) => single_pred_label_inline(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let a = single_pred_label_inline(then_body);
+            let b = single_pred_label_inline(else_body);
+            a || b
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            single_pred_label_inline(body)
+        }
+        HirStmt::For { body, .. } => single_pred_label_inline(body),
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases.iter_mut() {
+                changed |= single_pred_label_inline(&mut case.body);
+            }
+            changed |= single_pred_label_inline(default);
+            changed
+        }
+        _ => false,
+    }
+}
+
+/// Core flat-list transformation: inline single-predecessor forward labels.
+fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    // Repeat until stable — each inlining may expose new opportunities.
+    loop {
+        // Build the global reference count for all labels.
+        let ref_counts = collect_referenced_label_counts(stmts);
+
+        let mut did_inline = false;
+        let mut i = 0;
+        while i < stmts.len() {
+            // We need a top-level unconditional Goto.
+            let goto_label = match &stmts[i] {
+                HirStmt::Goto(label) => label.clone(),
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            };
+
+            // Only process single-reference labels.
+            if ref_counts.get(&goto_label).copied().unwrap_or(0) != 1 {
+                i += 1;
+                continue;
+            }
+
+            // Find Label("goto_label") somewhere AFTER position i (forward edge).
+            let label_pos = stmts[i + 1..]
+                .iter()
+                .position(|s| matches!(s, HirStmt::Label(l) if l == &goto_label))
+                .map(|offset| offset + i + 1);
+
+            let Some(j) = label_pos else {
+                // Label is before goto (back-edge) or not found — leave.
+                i += 1;
+                continue;
+            };
+
+            // Verify the segment [i+1..j) contains no labels that are
+            // referenced from OUTSIDE that segment (otherwise those paths
+            // remain reachable and removing the segment would be wrong).
+            let segment = &stmts[i + 1..j];
+            let segment_label_refs = collect_referenced_label_counts(segment);
+            let external_ref_found = segment.iter().any(|s| {
+                if let HirStmt::Label(l) = s {
+                    let total_refs = ref_counts.get(l).copied().unwrap_or(0);
+                    let internal_refs = segment_label_refs.get(l).copied().unwrap_or(0);
+                    total_refs > internal_refs
+                } else {
+                    false
+                }
+            });
+
+            if external_ref_found {
+                i += 1;
+                continue;
+            }
+
+            // Perform the inlining:
+            // 1. Remove Label at position j.
+            stmts.remove(j);
+            // 2. Remove unreachable segment [i+1..j).
+            if j > i + 1 {
+                stmts.drain(i + 1..j);
+            }
+            // 3. Remove Goto at position i.
+            stmts.remove(i);
+            // Positions shifted — restart from i (don't increment).
+            did_inline = true;
+            changed = true;
+        }
+
+        if !did_inline {
+            break;
+        }
+    }
+    changed
+}

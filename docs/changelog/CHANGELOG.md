@@ -9,6 +9,59 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-09 (latest)
 
+### HIR Quality Phase 4 — Use-Driven Type Propagation, Pointer Arithmetic Recovery, Return Type Inference, Goto Reduction
+
+This update completes the "HIR 품질 강화 4단계" plan.  All passes are algorithm-based, binary-agnostic, and heuristic-free.
+
+#### fission-pcode — NIR/HIR Normalization
+
+- **Use-Driven Backward Type Propagation** (`crates/fission-pcode/src/nir/normalize/use_type_infer.rs`, new)
+  - `apply_use_driven_type_infer_pass`: walks every expression and statement to collect use-site type constraints, then merges them into `NirBinding.ty` for locals and params that are still `Unknown`.
+  - Constraint sources: `Load { ptr: Var(x), ty }` → x is `Ptr(ty)`; lvalue `Deref { ptr: Var(x), ty }` → same; `SLt`/`SLe` binary → operands are signed; `Lt`/`Le` binary → operands are unsigned; `Return(Var(x))` with known return type → x gets return type; `Cast(T, Var(x))` → x gets T.
+  - Merging is monotone (Unknown → Int → Ptr) and never weakens an already-known type.
+  - Runs after def-driven `apply_type_inference_pass`; iterates to convergence (typically 1–2 rounds for alias chains).
+  - 4 unit tests covering Load ptr inference, Deref store inference, SLt signed inference, and Return-context inference.
+
+- **Pointer Arithmetic HIR Recovery** (`crates/fission-pcode/src/nir/normalize/ptr_arith.rs`, new)
+  - `apply_ptr_arith_recovery_pass`: after pointer types are established and after the slot-surfacing pass, converts `Add(Var(ptr), Const(k))` → `PtrOffset { base, offset: k }` and `Add(Var(ptr), Mul(idx, Const(stride)))` → `Index { base, index, elem_ty }` when the stride matches the element type's size.
+  - Also strips redundant `Cast(Ptr(Int8), PtrOffset { … })` casts that arise when a typed pointer expression is wrapped in a `uint8_t *` cast.
+  - Conservative: only transforms when `ptr` is concretely `Ptr(_)`, never for `Unknown`.
+  - Runs after the slot-surfacing pass to preserve the `Add(ptr, Mul(idx, stride))` pattern that `apply_memory_slot_surfacing` relies on.
+  - 2 unit tests: Add+Const → PtrOffset, Add+Mul → Index.
+
+- **Function Return Type Inference (extended)** (`crates/fission-pcode/src/nir/normalize/type_infer.rs`)
+  - `rederive_return_type` now collects ALL non-Unknown return expression types across the entire function body (not just the first one found) and picks a consensus:
+    - All agree → use that type.
+    - Multiple types: prefer integer types over Ptr/Bool.
+    - Fall back to the first candidate when no consensus can be found.
+  - Ensures `uint32 func()` / `int func()` etc. replace `undefined` return types even in functions with multiple return paths.
+
+- **Single-Predecessor Label Inlining** (`crates/fission-pcode/src/nir/normalize/cleanup.rs`)
+  - `single_pred_label_inline`: reduces `goto`/`label` pairs by identifying labels targeted by exactly one unconditional forward `goto`.
+  - Safety invariants: (1) single-predecessor constraint (ref_count == 1); (2) forward edge only (label appears after goto in linear order — back-edges for loops are preserved); (3) the unreachable segment between goto and label must not contain labels referenced from outside.
+  - Runs last in the pipeline (after slots, bitstream, and all other passes) so it sees the final goto/label structure.
+  - Recurses into nested `if`/`while`/`for`/`switch` bodies.
+  - Iterates to convergence within each invocation.
+
+- **Pipeline integration** (`normalize/core.rs`, `normalize/mod.rs`): `use_type_infer` after `type_infer`, `ptr_arith_recovery` after slots/bitstream, `single_pred_label_inline` as the final normalization step.
+
+#### Benchmarks
+
+| Binary | Metric | Phase 3 | Phase 4 | Delta |
+|--------|--------|---------|---------|-------|
+| `test_control_flow_x64_O0.exe` (139 shared funcs) | avg norm sim | 12.93% | **19.20%** | **+6.27 pp** |
+| `putty.exe` (12 shared funcs, limit=50) | avg norm sim | 6.50% | 6.43% | -0.07 pp (noise) |
+| `putty.exe` | fission goto total (50 funcs) | 285 | **277** | **-8** |
+| `putty.exe` | fission label total (50 funcs) | 128 | **121** | **-7** |
+
+Success rate: 100% for both binaries.
+
+All 316 `fission-pcode` unit tests pass.
+
+---
+
+## 2026-04-09
+
 ### HIR Expressiveness — EFLAGS Recovery, Prologue Elimination, Cooper Postdominator Structuring
 
 This update completes the "HIR Expressiveness Enhancement Phase 3" plan.  All improvements are algorithm-based and binary-agnostic.

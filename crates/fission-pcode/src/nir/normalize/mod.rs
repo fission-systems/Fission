@@ -9,8 +9,10 @@ mod flag_recovery;
 mod for_loops;
 mod phi_recovery;
 mod prologue;
+mod ptr_arith;
 mod slots;
 mod type_infer;
+mod use_type_infer;
 
 #[allow(dead_code)]
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {

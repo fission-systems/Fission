@@ -120,9 +120,16 @@ fn infer_type_for_binding(
 /// Re-derive the function's return type from its `return` statements.
 ///
 /// The builder sets `return_type` to `expr_type(return_expr)`, but
-/// `expr_type(Var(_)) = Unknown`.  This pass re-runs the same scan after type
-/// inference so that `return x;` where `x` has a resolved type propagates
-/// correctly.
+/// `expr_type(Var(_)) = Unknown`.  This pass collects ALL non-Unknown return
+/// expression types from the full body tree, then picks the consensus:
+///
+/// - If all non-Unknown candidates agree → use that type.
+/// - If there are multiple distinct types, prefer the one that is NOT a Ptr
+///   and not Bool (since integer return types are more common in practice).
+/// - Fall back to the first candidate when no consensus can be found.
+///
+/// The function's declared return type is NEVER overwritten when it is already
+/// known (non-Unknown) or when `surface_return_type_name` is set.
 fn rederive_return_type(
     return_type: &mut NirType,
     surface_return_type_name: &Option<String>,
@@ -132,28 +139,50 @@ fn rederive_return_type(
     if *return_type != NirType::Unknown || surface_return_type_name.is_some() {
         return;
     }
-    let inferred = infer_return_type_from_body(body, defs);
-    if inferred != NirType::Unknown {
-        *return_type = inferred;
+    // Collect ALL non-Unknown return candidates across the whole body.
+    let mut candidates: Vec<NirType> = Vec::new();
+    collect_return_types(body, defs, &mut candidates);
+
+    if candidates.is_empty() {
+        return;
     }
+
+    // Consensus: if all agree, use that type.
+    if candidates.iter().all(|t| t == &candidates[0]) {
+        *return_type = candidates[0].clone();
+        return;
+    }
+
+    // Prefer integer types over Ptr/Bool for disagreement resolution.
+    let int_candidates: Vec<_> = candidates
+        .iter()
+        .filter(|t| matches!(t, NirType::Int { .. }))
+        .collect();
+    if !int_candidates.is_empty() && int_candidates.iter().all(|t| *t == int_candidates[0]) {
+        *return_type = int_candidates[0].clone();
+        return;
+    }
+
+    // Fall back: use the first non-Unknown candidate.
+    *return_type = candidates[0].clone();
 }
 
-fn infer_return_type_from_body(
+/// Collect all non-Unknown return expression types from a statement list.
+fn collect_return_types(
     stmts: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
-) -> NirType {
+    out: &mut Vec<NirType>,
+) {
     for stmt in stmts {
-        if let Some(ty) = infer_return_type_stmt(stmt, defs) {
-            return ty;
-        }
+        collect_return_types_stmt(stmt, defs, out);
     }
-    NirType::Unknown
 }
 
-fn infer_return_type_stmt(
+fn collect_return_types_stmt(
     stmt: &HirStmt,
     defs: &HashMap<String, DefEntry>,
-) -> Option<NirType> {
+    out: &mut Vec<NirType>,
+) {
     match stmt {
         HirStmt::Return(Some(expr)) => {
             let ty = match expr {
@@ -163,29 +192,49 @@ fn infer_return_type_stmt(
                 }
                 other => expr_type(other),
             };
-            if ty != NirType::Unknown { Some(ty) } else { None }
+            if ty != NirType::Unknown {
+                out.push(ty);
+            }
         }
-        HirStmt::Block(stmts) => infer_return_type_stmts(stmts, defs),
+        HirStmt::Block(stmts) => collect_return_types(stmts, defs, out),
         HirStmt::If {
             then_body,
             else_body,
             ..
-        } => infer_return_type_stmts(then_body, defs)
-            .or_else(|| infer_return_type_stmts(else_body, defs)),
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            infer_return_type_stmts(body, defs)
+        } => {
+            collect_return_types(then_body, defs, out);
+            collect_return_types(else_body, defs, out);
         }
-        HirStmt::For { body, .. } => infer_return_type_stmts(body, defs),
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_return_types(body, defs, out);
+        }
+        HirStmt::For { body, .. } => collect_return_types(body, defs, out),
         HirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                if let Some(ty) = infer_return_type_stmts(&case.body, defs) {
-                    return Some(ty);
-                }
+                collect_return_types(&case.body, defs, out);
             }
-            infer_return_type_stmts(default, defs)
+            collect_return_types(default, defs, out);
         }
-        _ => None,
+        _ => {}
     }
+}
+
+fn infer_return_type_from_body(
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+) -> NirType {
+    let mut candidates = Vec::new();
+    collect_return_types(stmts, defs, &mut candidates);
+    candidates.into_iter().find(|t| *t != NirType::Unknown).unwrap_or(NirType::Unknown)
+}
+
+fn infer_return_type_stmt(
+    stmt: &HirStmt,
+    defs: &HashMap<String, DefEntry>,
+) -> Option<NirType> {
+    let mut out = Vec::new();
+    collect_return_types_stmt(stmt, defs, &mut out);
+    out.into_iter().find(|t| *t != NirType::Unknown)
 }
 
 fn infer_return_type_stmts(

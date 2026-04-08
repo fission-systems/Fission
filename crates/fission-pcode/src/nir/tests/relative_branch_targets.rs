@@ -100,7 +100,10 @@ fn preview_supports_instruction_local_unconditional_branch_targets() {
 
     let code = render_mlil_preview(&func, "rel_branch", 0x6000, &preview_options())
         .expect("preview render");
-    assert!(code.contains("goto block_6000_dup2;"), "{code}");
+    // The single-predecessor label inlining pass eliminates the goto+label pair
+    // since block_6000_dup2 has exactly one incoming reference (the unconditional
+    // forward branch).  The unreachable `return 0;` is also removed, leaving only
+    // `return 1;` as the sole surviving statement.
     assert!(code.contains("return 1;"), "{code}");
 }
 
