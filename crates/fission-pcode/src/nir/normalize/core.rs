@@ -7,14 +7,16 @@ use super::arith::{
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
     cast_elision_pass, cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
-    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
-    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
+    eliminate_dead_temp_assigns, fuse_single_predecessor_boundaries, inline_single_use_temps,
+    promote_guarded_jump_target_tail, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_fallthrough_edges,
 };
 use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
 use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
+use super::flag_recovery::apply_flag_recovery_pass;
+use super::prologue::remove_callee_save_prologue_epilogue;
 use super::type_infer::apply_type_inference_pass;
 use super::slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
@@ -43,6 +45,31 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
+    // Flag recovery: substitute raw x86 EFLAGS variable references in branch
+    // conditions with high-level comparison expressions (sf!=of → a<b signed,
+    // !zf → a!=b, etc.).  Runs early so that subsequent dead-assignment passes
+    // can eliminate now-dead flag-variable assignments.
+    if apply_flag_recovery_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Parity / popcount dead elimination: remove __popcount-based assignments
+    // whose result is not consumed anywhere (e.g., dead parity flag variables
+    // remaining after flag recovery or simple unused parity computations).
+    if elide_unused_popcount_assigns(func) {
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Prologue/epilogue elimination: remove callee-saved register save/restore
+    // pairs (`*spill = r15` / `r15 = *spill`) from the function body.
+    if remove_callee_save_prologue_epilogue(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
     // Run constant folding after the initial cleanup so that folded constants
     // unlock further simplifications in subsequent passes.
     if constant_folding_pass(&mut func.body) {

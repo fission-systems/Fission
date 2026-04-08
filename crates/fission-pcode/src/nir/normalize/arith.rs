@@ -420,6 +420,59 @@ pub(super) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
                 rhs: Box::new(negate_expr((**rhs).clone())),
                 ty: NirType::Bool,
             }),
+            // Negate comparison operators: !(a == b) → a != b, !(a < b) → b <= a, etc.
+            HirExpr::Binary { op, lhs, rhs, ty } => {
+                let negated_op = match op {
+                    HirBinaryOp::Eq => Some(HirBinaryOp::Ne),
+                    HirBinaryOp::Ne => Some(HirBinaryOp::Eq),
+                    // !(a < b)  →  b <= a
+                    HirBinaryOp::Lt => None, // handled below with swapped operands
+                    HirBinaryOp::Le => None,
+                    HirBinaryOp::SLt => None,
+                    HirBinaryOp::SLe => None,
+                    _ => None,
+                };
+                if let Some(op2) = negated_op {
+                    return Some(HirExpr::Binary {
+                        op: op2,
+                        lhs: lhs.clone(),
+                        rhs: rhs.clone(),
+                        ty: ty.clone(),
+                    });
+                }
+                // For ordered comparisons: swap operands to canonicalize.
+                // !(a < b)  →  b <= a
+                // !(a <= b) →  b < a
+                // !(a <s b) →  b <=s a
+                // !(a <=s b) → b <s a
+                match op {
+                    HirBinaryOp::Lt => Some(HirExpr::Binary {
+                        op: HirBinaryOp::Le,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::Le => Some(HirExpr::Binary {
+                        op: HirBinaryOp::Lt,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::SLt => Some(HirExpr::Binary {
+                        op: HirBinaryOp::SLe,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::SLe => Some(HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    _ => None,
+                }
+            }
             _ => None,
         },
         HirExpr::Binary {

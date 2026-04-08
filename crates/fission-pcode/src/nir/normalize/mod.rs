@@ -5,8 +5,10 @@ mod bitstream;
 mod cleanup;
 mod core;
 pub(super) mod defuse;
+mod flag_recovery;
 mod for_loops;
 mod phi_recovery;
+mod prologue;
 mod slots;
 mod type_infer;
 

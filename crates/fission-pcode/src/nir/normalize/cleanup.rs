@@ -919,7 +919,7 @@ pub(super) fn expr_has_side_effects(expr: &HirExpr) -> bool {
 }
 
 fn is_pure_intrinsic_call(target: &str) -> bool {
-    matches!(target, "__carry" | "__scarry" | "__sborrow")
+    matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
 }
 
 fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
@@ -1183,5 +1183,174 @@ fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr>
         Some((**inner).clone())
     } else {
         None
+    }
+}
+
+// ── Parity / popcount dead elimination ───────────────────────────────────────
+
+/// Eliminate assignments whose RHS (transitively) only involves `__popcount`
+/// intrinsic calls and whose assigned variable has zero rvalue uses in the
+/// entire function body.
+///
+/// This is a fast-path complement to `defuse_dead_assignment_pass`: the regular
+/// defuse pass only removes Temp-origin bindings, whereas this pass also removes
+/// named-register bindings (like the `pf` parity flag variable and any
+/// intermediate variables derived from it) when the RHS is provably pure and the
+/// result is unused.
+///
+/// Returns `true` if any statement was removed.
+pub(super) fn elide_unused_popcount_assigns(func: &mut HirFunction) -> bool {
+    use super::defuse::DefUseMap;
+
+    // Build a whole-body use count map.
+    let use_map = DefUseMap::build(&func.body);
+
+    // Collect the names of all variables with a popcount-based RHS so we
+    // can cascade: if `b = __popcount(x)` is dead, then `a = f(b)` may
+    // also become dead in a subsequent iteration.
+    let mut changed = false;
+    // Iterate to convergence (at most a small number of rounds for cascades).
+    for _ in 0..8 {
+        let round_changed = elide_popcount_round(func, &use_map);
+        if !round_changed {
+            break;
+        }
+        changed = true;
+    }
+    changed
+}
+
+fn elide_popcount_round(func: &mut HirFunction, use_map: &super::defuse::DefUseMap) -> bool {
+    let mut changed = false;
+    elide_popcount_in_stmts(&mut func.body, use_map, &mut changed);
+    if changed {
+        // Remove bindings for eliminated variables.
+        let remaining_names: HashSet<String> = func
+            .body
+            .iter()
+            .flat_map(|s| collect_assigned_names(s))
+            .collect();
+        func.locals.retain(|b| {
+            // Keep bindings that still have assignments OR are used elsewhere.
+            remaining_names.contains(&b.name)
+                || use_map
+                    .use_count
+                    .get(&b.name)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0
+        });
+    }
+    changed
+}
+
+fn collect_assigned_names(stmt: &HirStmt) -> Vec<String> {
+    let mut names = Vec::new();
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } => {
+            names.push(name.clone());
+        }
+        HirStmt::Block(body) => {
+            for s in body {
+                names.extend(collect_assigned_names(s));
+            }
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for s in then_body.iter().chain(else_body.iter()) {
+                names.extend(collect_assigned_names(s));
+            }
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            for s in body {
+                names.extend(collect_assigned_names(s));
+            }
+        }
+        HirStmt::For { body, .. } => {
+            for s in body {
+                names.extend(collect_assigned_names(s));
+            }
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                for s in &case.body {
+                    names.extend(collect_assigned_names(s));
+                }
+            }
+            for s in default {
+                names.extend(collect_assigned_names(s));
+            }
+        }
+        _ => {}
+    }
+    names
+}
+
+fn elide_popcount_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    use_map: &super::defuse::DefUseMap,
+    changed: &mut bool,
+) {
+    // Recurse first.
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) => elide_popcount_in_stmts(body, use_map, changed),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                elide_popcount_in_stmts(then_body, use_map, changed);
+                elide_popcount_in_stmts(else_body, use_map, changed);
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                elide_popcount_in_stmts(body, use_map, changed);
+            }
+            HirStmt::For { body, .. } => {
+                elide_popcount_in_stmts(body, use_map, changed);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    elide_popcount_in_stmts(&mut case.body, use_map, changed);
+                }
+                elide_popcount_in_stmts(default, use_map, changed);
+            }
+            _ => {}
+        }
+    }
+    // Remove flat-level dead popcount assignments.
+    stmts.retain(|stmt| {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } = stmt
+        {
+            let uses = use_map.use_count.get(name.as_str()).copied().unwrap_or(0);
+            if uses == 0 && rhs_contains_popcount(rhs) && !expr_has_side_effects(rhs) {
+                *changed = true;
+                return false;
+            }
+        }
+        true
+    });
+}
+
+/// Returns `true` if `expr` contains a `__popcount` call anywhere.
+fn rhs_contains_popcount(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Call { target, .. } if target == "__popcount" => true,
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. } => rhs_contains_popcount(inner),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rhs_contains_popcount(lhs) || rhs_contains_popcount(rhs)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(rhs_contains_popcount),
+        _ => false,
     }
 }

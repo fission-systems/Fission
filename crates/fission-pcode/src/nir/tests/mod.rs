@@ -7,6 +7,7 @@ mod unique_x86_regs;
 mod normalize_arith;
 mod normalize_bitstream;
 mod normalize_defuse;
+mod normalize_flag_recovery;
 mod normalize_slots;
 mod relative_branch_targets;
 mod structuring_conditionals;

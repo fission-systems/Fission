@@ -58,21 +58,29 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
 
-        // Pre-compute nearest common postdominator for each block: used to determine the
-        // natural "follow" target for structured regions.  Blocks with no successors have no
-        // postdominator candidate, so `follow_block` will be `None` for them.
+        // Pre-compute the immediate-postdominator tree using Cooper's algorithm (O(n log n)).
+        // This is more efficient than the set-based PostDomTree for large functions and gives
+        // O(depth) LCA queries.
+        let imm_postdom = self.analyze_cfg_imm_postdominators();
+
+        // Pre-compute nearest common postdominator ("follow block") for each block.
+        // For 2-way conditional branches this is the join point of the two arms.
+        // Blocks with < 2 successors have no follow candidate, so `None` is stored.
         let follow_blocks: Vec<Option<usize>> = (0..self.pcode.blocks.len())
             .map(|i| {
                 let succs = &self.successors[i];
                 if succs.len() < 2 {
                     return None;
                 }
-                postdom.nearest_common_postdominator(succs)
+                // Use efficient LCA on the idom tree instead of set intersection.
+                let follow = imm_postdom.nearest_common_postdominator(succs)?;
+                // Only use as follow if it's strictly after the branch block (forward edge).
+                if follow > i { Some(follow) } else { None }
             })
             .collect();
         // Suppress unused warning on `dom` until more reducers consume it.
         let _ = &dom;
-        let _ = &follow_blocks;
+        let _ = &postdom;
 
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
@@ -216,6 +224,24 @@ impl<'a> PreviewBuilder<'a> {
             }
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_short_circuit_if(idx),
+                &mut last_structuring_failure,
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
+            {
+                body.push(stmt);
+                idx = skip_to;
+                continue;
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=if_else_follow elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
+            // Postdominance-guided if-then-else: try before the heuristic variant.
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_reduce_if_else_with_follow(idx, follow_blocks[idx]),
                 &mut last_structuring_failure,
             )? && self.accept_structured_region(idx, skip_to, &targeted)
             {

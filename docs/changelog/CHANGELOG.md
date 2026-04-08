@@ -7,6 +7,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-09 (latest)
+
+### HIR Expressiveness — EFLAGS Recovery, Prologue Elimination, Cooper Postdominator Structuring
+
+This update completes the "HIR Expressiveness Enhancement Phase 3" plan.  All improvements are algorithm-based and binary-agnostic.
+
+#### fission-pcode — NIR/HIR Normalization
+
+- **x86 EFLAGS Condition Code Recovery** (`crates/fission-pcode/src/nir/normalize/flag_recovery.rs`, new)
+  - `apply_flag_recovery_pass`: identifies x86 flag variables (`cf`, `zf`, `sf`, `of`, `pf`, `af`) with single-definition assignments, pattern-matches all 16 Jcc semantics (e.g. `sf != of` → `a < b` signed, `!zf && sf == of` → `a > b` signed, `cf` → `a < b` unsigned) by inspecting `__sborrow`/`__scarry`/`__carry` intrinsic shapes, and replaces raw flag conditions in `if`/`while`/`for` tests with high-level `HirBinaryOp` comparisons (`SLt`, `SLe`, `Lt`, `Le`, `Eq`, `Ne`, …).
+  - `remove_dead_flag_assigns`: after flag recovery, removes all remaining assignments to x86 flag variables that have zero rvalue uses (regardless of `NirBindingOrigin`), and prunes their bindings from `func.locals`.
+  - Enhanced `normalize_boolean_logic` in `arith.rs` to simplify negated comparisons: `!(a == b)` → `a != b`, `!(a < b)` → `b <= a`, etc.
+  - 6 unit tests covering `!zf`, `zf`, `sf != of`, `sf == of`, `!zf && sf == of`, and `cf` patterns.
+
+- **Prologue/Parity Noise Elimination** (`crates/fission-pcode/src/nir/normalize/prologue.rs`, new; `cleanup.rs`)
+  - `remove_callee_save_prologue_epilogue`: scans the first 16 statements for callee-saved register spills (`*ptr = rbx/rbp/r12–r15`), collects epilogue restores (`rbx = *ptr`), validates matching pairs by checking the spill-slot pointer has no aliasing uses, then removes confirmed save/restore statements and prunes the spill-slot binding from `func.locals`.
+  - `elide_unused_popcount_assigns` in `cleanup.rs`: removes assignments whose RHS transitively contains `__popcount` and whose LHS variable (including non-Temp bindings like `pf`) has zero rvalue uses in the function body; iterates to handle cascading elimination.
+
+- **Integrated into pipeline** (`normalize/core.rs`, `normalize/mod.rs`): flag recovery → dead-flag-assign removal → popcount elision → prologue elimination; each phase followed by appropriate cleanup.
+
+#### fission-pcode — CFG Structuring
+
+- **Cooper Algorithm Immediate-Postdominator Tree** (`crates/fission-pcode/src/nir/structuring/cfg_analysis.rs`)
+  - New `ImmPostDomTree` type: computes the immediate-postdominator (idom) tree via Cooper et al.'s "Simple, Fast Dominance Algorithm" (2001) applied to the reverse CFG.
+  - Replaces the O(n³) set-intersection approach with an O(n log n) RPO-order fixed-point iteration.
+  - `ImmPostDomTree::nearest_common_postdominator`: LCA on the idom tree in O(depth) per query, used to pre-compute per-block "follow" targets.
+  - 4 unit tests: diamond, linear chain, nested diamond, single-node edge cases.
+
+- **Postdominance-Guided if-then-else Structuring** (`structuring/conditionals/if_else.rs`, `structuring/driver.rs`)
+  - `try_reduce_if_else_with_follow`: new reducer that uses the precomputed `follow_blocks[idx]` (nearest common postdominator of the branch successors) as the authoritative join point, bypassing the heuristic `shared_forward_linear_exit` probe.
+  - Wired into `build_multiblock_body` as a higher-priority attempt before the existing `try_lower_if_else`, converting previously unstructured if-else regions into clean `HirStmt::If { then_body, else_body }`.
+  - `follow_blocks` now uses `ImmPostDomTree::nearest_common_postdominator` (Cooper) instead of `PostDomTree::nearest_common_postdominator` (set intersection).
+
+#### Benchmark Results (2-Way vs Ghidra, balanced profile)
+
+| Binary | Before | After | Δ |
+|--------|--------|-------|---|
+| `putty.exe` (50 funcs) | 4.54% avg norm sim | **6.50%** | **+1.96 pp** |
+| `test_control_flow_x64_O0.exe` (30 funcs) | 18.12% avg norm sim | **27.33%** | **+9.21 pp** |
+
+All 310 `fission-pcode` unit tests pass.
+
+---
+
 ## 2026-04-09 (this session)
 
 ### HIR Dataflow Quality Pass — Type Inference, Switch Discriminant Recovery, Cast Elision, DefUse, Phi Coalescing, SubPiece Rules, FID Signatures, Decode Retry
