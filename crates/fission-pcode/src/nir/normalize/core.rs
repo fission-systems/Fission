@@ -37,6 +37,10 @@ use super::cleanup::single_pred_label_inline;
 use super::slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
 };
+use super::entry_param_promotion::apply_entry_param_promotion_pass;
+use super::interproc_sig_prop::apply_interproc_callsite_arity_pass;
+use super::variadic_stack_region::apply_variadic_stack_region_pass;
+use super::wave_stats;
 use super::*;
 use std::time::Instant;
 
@@ -45,6 +49,7 @@ pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
 }
 
 pub(super) fn normalize_hir_function(func: &mut HirFunction) {
+    wave_stats::reset_normalize_wave_stats();
     let diag = normalize_diag_enabled();
     let total_start = Instant::now();
     if diag {
@@ -91,6 +96,13 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     if constant_folding_pass(&mut func.body) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         eliminate_dead_local_clobber_assigns(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // ABI-aware entry spill → param_k promotion (HIR, after early cleanup).
+    if apply_entry_param_promotion_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
@@ -249,6 +261,8 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
+    // Windows x64 stack-tail / variadic region lattice hook (stats; optional future folds).
+    let _ = apply_variadic_stack_region_pass(func);
     // Aggregate field layout recovery: collect PtrOffset access offsets on
     // Ptr(Aggregate) variables and annotate the aggregate type with named
     // StructFields.  Must run after ptr_arith_recovery so PtrOffset nodes exist.
@@ -286,6 +300,8 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
+    // Call-site arity lower bounds per callee symbol (intra-proc merge on `HirFunction`).
+    let _ = apply_interproc_callsite_arity_pass(func);
     // Value Set Analysis: use range information to eliminate dead switch
     // cases and constant-condition branches.  Runs last so all structural
     // passes have already simplified the body.

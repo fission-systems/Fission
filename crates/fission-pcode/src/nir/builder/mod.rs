@@ -1,5 +1,6 @@
 pub(super) use super::support::*;
 use super::*;
+use std::collections::HashMap;
 mod state;
 pub(super) use state::PreviewBuilder;
 
@@ -186,6 +187,9 @@ impl<'a> PreviewBuilder<'a> {
             return_type,
             surface_return_type_name: None,
             body,
+            calling_convention: self.options.calling_convention,
+            is_64bit: self.options.is_64bit,
+            callee_observed_max_arity: HashMap::new(),
         })
     }
 

@@ -3,6 +3,7 @@ use crate::pcode::{PcodeBasicBlock, PcodeOp};
 
 mod bootstrap_x86;
 mod calling_convention;
+mod entry_param_promotion;
 mod unique_x86_regs;
 mod normalize_arith;
 mod normalize_bitstream;

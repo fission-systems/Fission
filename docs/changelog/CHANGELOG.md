@@ -51,6 +51,25 @@ SCEV-lite scope.
 - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py): `samples/windows/x64/test_control_flow_x64_O0.exe`, `--limit 50`, release `fission_cli`, Ghidra `11.4.2` (see [`test_control_flow_x64_O0-phase9-20260409`](artifacts/batch_benchmark/test_control_flow_x64_O0-phase9-20260409)).
 - 2-way vs pyghidra: shared=42, coverage=84%, `avg_normalized_similarity=24.78%`, `both_success=100%`, fission wall ~1.02s vs pyghidra ~1.89s (2026-04-09).
 
+### Decompile quality wave — ABI entry params, variadic stack region, call-site arity
+
+Canonical HIR normalize additions (see [`entry_param_promotion.rs`](crates/fission-pcode/src/nir/normalize/entry_param_promotion.rs), [`variadic_stack_region.rs`](crates/fission-pcode/src/nir/normalize/variadic_stack_region.rs), [`interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/interproc_sig_prop.rs)); telemetry merges via [`wave_stats.rs`](crates/fission-pcode/src/nir/normalize/wave_stats.rs) into [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs).
+
+#### Overlap / non-duplication (vs existing passes)
+
+| New module | Does **not** replace | Notes |
+|------------|----------------------|--------|
+| [`apply_entry_param_promotion_pass`](crates/fission-pcode/src/nir/normalize/entry_param_promotion.rs) | [`constant_folding_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs) / [`apply_sccp_pass`](crates/fission-pcode/src/nir/normalize/sccp.rs) | Renames **first** entry-prefix spills from ABI param **hardware** names to `param_k`; folding/SCCP propagate **constants**, not register→param naming. |
+| Entry promotion | [`collect_entry_register_param_aliases`](crates/fission-pcode/src/nir/builder/entry_analysis.rs) | Builder pass maps **P-code** register copies in the entry block; normalize pass maps **HIR** `Var("rsi")` spills using the same [`CallingConvention::param_offsets`](crates/fission-pcode/src/nir/support.rs) table. |
+| [`apply_variadic_stack_region_pass`](crates/fission-pcode/src/nir/normalize/variadic_stack_region.rs) | [`apply_callsite_type_prop_pass`](crates/fission-pcode/src/nir/normalize/callsite_type_prop.rs) | Counts **stack-tail** call patterns from **surfaced stack names / loads** (ABI region hook); Win API DB still seeds **named** callee types only. |
+| Variadic region | [`apply_memory_slot_surfacing`](crates/fission-pcode/src/nir/normalize/slots.rs) / MemSSA | Surfacing/MemSSA model **slot defs/uses**; this pass only **tags** plausible variadic tail sites for metrics (future folds stay gated). |
+| [`apply_interproc_callsite_arity_pass`](crates/fission-pcode/src/nir/normalize/interproc_sig_prop.rs) | [`apply_callsite_type_prop_pass`](crates/fission-pcode/src/nir/normalize/callsite_type_prop.rs) | Records **max observed arity per callee symbol** from HIR calls (DB-independent lower bound); DB pass still supplies **Win types**. |
+| Interproc arity | SCCP / constant folding | Arity bounds are **symbol→count** facts, not def-use constant lattice. |
+
+#### Benchmark (same harness as Phase 9)
+
+- [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py): same sample binary and `--limit 50` as Phase 9 when the corpus binary is available; 2-way Fission vs pyghidra for `avg_normalized_similarity` and cross KPIs.
+
 ---
 
 ## 2026-04-08

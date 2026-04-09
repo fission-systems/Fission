@@ -120,6 +120,9 @@ impl<'a> PreviewBuilder<'a> {
             condition_fold_and_count: 0,
             condition_fold_or_count: 0,
             condition_fold_rejected_side_effect: 0,
+            entry_param_promotion_spill_rename_count: 0,
+            variadic_stack_region_fold_count: 0,
+            interproc_signature_constraint_rounds: 0,
         }
     }
 }

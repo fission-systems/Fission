@@ -61,6 +61,7 @@ fn make_func(name: &str, locals: Vec<NirBinding>, body: Vec<HirStmt>) -> HirFunc
         return_type: int(32),
         surface_return_type_name: None,
         body,
+        ..Default::default()
     }
 }
 

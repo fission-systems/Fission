@@ -113,6 +113,7 @@ fn make_flag_func(
         },
         surface_return_type_name: None,
         body,
+        ..Default::default()
     }
 }
 

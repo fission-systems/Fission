@@ -31,6 +31,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Return(Some(HirExpr::Var("param_2".to_string())))],
+        ..Default::default()
     };
 
     let context = PreviewTypeContext {
@@ -82,6 +83,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
             },
             HirStmt::Return(Some(HirExpr::Var("local_20".to_string()))),
         ],
+        ..Default::default()
     };
 
     let context = PreviewTypeContext {
@@ -131,6 +133,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Return(None)],
+        ..Default::default()
     };
 
     let context = PreviewTypeContext {
@@ -172,6 +175,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Return(None)],
+        ..Default::default()
     };
 
     let context = PreviewTypeContext {
@@ -203,6 +207,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![HirStmt::Return(None)],
+        ..Default::default()
     };
 
     let context = PreviewTypeContext {
@@ -265,6 +270,7 @@ fn preview_type_hints_explicit_function_types_override_heuristic_aliases() {
                 signed: true,
             },
         })],
+        ..Default::default()
     };
 
     let mut context = PreviewTypeContext::default();
@@ -344,6 +350,7 @@ fn preview_type_hints_collect_hint_stats() {
                 signed: true,
             },
         })],
+        ..Default::default()
     };
 
     let mut context = PreviewTypeContext::default();

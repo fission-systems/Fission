@@ -527,6 +527,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             "condition_fold_rejected_side_effect",
             stats.condition_fold_rejected_side_effect,
         ),
+        (
+            "entry_param_promotion_spill_rename_count",
+            stats.entry_param_promotion_spill_rename_count,
+        ),
+        (
+            "variadic_stack_region_fold_count",
+            stats.variadic_stack_region_fold_count,
+        ),
+        (
+            "interproc_signature_constraint_rounds",
+            stats.interproc_signature_constraint_rounds,
+        ),
     ]
 }
 

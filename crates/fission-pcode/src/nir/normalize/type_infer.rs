@@ -328,6 +328,7 @@ mod tests {
             return_type,
             surface_return_type_name: None,
             body,
+            ..Default::default()
         }
     }
 

@@ -51,6 +51,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
                 rhs: HirExpr::Var("local_3c".to_string()),
             },
         ],
+        ..Default::default()
     };
 
     let mut context = PreviewTypeContext::default();
@@ -136,6 +137,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
                 size: 16,
             },
         }],
+        ..Default::default()
     };
 
     let mut hints = std::collections::HashMap::new();
@@ -195,6 +197,7 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
             ],
             else_body: vec![],
         }],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);

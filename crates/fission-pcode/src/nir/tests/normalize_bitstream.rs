@@ -113,6 +113,7 @@ fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
             ],
             else_body: Vec::new(),
         }],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -199,6 +200,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
                 },
             },
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -318,6 +320,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
                 },
             },
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);

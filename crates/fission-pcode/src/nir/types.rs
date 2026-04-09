@@ -95,6 +95,29 @@ pub struct HirFunction {
     pub return_type: NirType,
     pub surface_return_type_name: Option<String>,
     pub body: Vec<HirStmt>,
+    /// ABI used for `param_k` register ordering and entry promotion (mirrors preview options).
+    pub calling_convention: CallingConvention,
+    /// When false, x64-only normalize passes (entry param promotion, etc.) are skipped.
+    pub is_64bit: bool,
+    /// Per-callee symbol: maximum argument count observed at direct call sites in this function.
+    /// Downstream pipelines may merge this across functions for interprocedural arity bounds.
+    pub callee_observed_max_arity: HashMap<String, usize>,
+}
+
+impl Default for HirFunction {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: Vec::new(),
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -255,6 +278,15 @@ pub struct NirBuildStats {
     pub condition_fold_or_count: usize,
     #[serde(default)]
     pub condition_fold_rejected_side_effect: usize,
+    /// Spill temps renamed to `param_k` in the entry linear prefix (HIR normalize).
+    #[serde(default)]
+    pub entry_param_promotion_spill_rename_count: usize,
+    /// Conservative folds / annotations for variadic tail stack-arg regions (ABI lattice).
+    #[serde(default)]
+    pub variadic_stack_region_fold_count: usize,
+    /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
+    #[serde(default)]
+    pub interproc_signature_constraint_rounds: usize,
 }
 
 impl NirBuildStats {
@@ -379,6 +411,10 @@ impl NirBuildStats {
         self.condition_fold_and_count += other.condition_fold_and_count;
         self.condition_fold_or_count += other.condition_fold_or_count;
         self.condition_fold_rejected_side_effect += other.condition_fold_rejected_side_effect;
+        self.entry_param_promotion_spill_rename_count +=
+            other.entry_param_promotion_spill_rename_count;
+        self.variadic_stack_region_fold_count += other.variadic_stack_region_fold_count;
+        self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
     }
 }
 

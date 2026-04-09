@@ -36,6 +36,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
                 signed: true,
             },
         })],
+        ..Default::default()
     };
 
     let mut context = PreviewTypeContext::default();
@@ -97,6 +98,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
                 signed: true,
             },
         })],
+        ..Default::default()
     };
 
     let mut context = PreviewTypeContext::default();

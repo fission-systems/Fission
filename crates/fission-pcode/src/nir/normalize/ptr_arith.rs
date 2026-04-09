@@ -338,6 +338,7 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body,
+            ..Default::default()
         }
     }
 

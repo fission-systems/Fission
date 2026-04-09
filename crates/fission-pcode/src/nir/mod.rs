@@ -10,6 +10,7 @@ mod printer;
 mod structuring;
 mod support;
 mod telemetry;
+mod var_rename;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -115,6 +116,7 @@ pub fn render_mlil_preview_with_context(
     debug_log("normalize_start");
     let normalize_start = Instant::now();
     normalize_hir_function(&mut hir);
+    build_stats.merge_assign(&normalize::take_normalize_wave_stats());
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
     build_stats.promotion_candidate_count += normalized_discovery_stats.promotion_candidate_count;
     build_stats.promoted_region_count += normalized_discovery_stats.promoted_region_count;

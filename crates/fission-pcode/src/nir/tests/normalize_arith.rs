@@ -854,6 +854,7 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
             },
             HirStmt::Return(None),
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -1019,6 +1020,7 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
                 else_body: vec![],
             },
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);

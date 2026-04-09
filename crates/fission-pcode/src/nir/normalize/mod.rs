@@ -10,8 +10,10 @@ mod cse;
 mod expr_key;
 pub(super) mod defuse;
 mod dead_store;
+mod entry_param_promotion;
 mod flag_recovery;
 mod for_loops;
+mod interproc_sig_prop;
 mod iv_recovery;
 mod licm;
 mod mem_ssa;
@@ -25,6 +27,8 @@ mod callsite_type_prop;
 mod slots;
 mod type_infer;
 mod use_type_infer;
+mod variadic_stack_region;
+mod wave_stats;
 
 #[allow(dead_code)]
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
@@ -33,6 +37,10 @@ pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
 
 pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     core::normalize_hir_function(func);
+}
+
+pub(super) fn take_normalize_wave_stats() -> crate::nir::types::NirBuildStats {
+    wave_stats::take_normalize_wave_stats()
 }
 
 #[allow(dead_code)]

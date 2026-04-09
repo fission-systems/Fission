@@ -196,6 +196,7 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
             }),
             ty: uint_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -263,6 +264,7 @@ fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
             }),
             ty: uint_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -329,6 +331,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
             }),
             ty: uint_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -424,6 +427,7 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
                 ty: uint_ty.clone(),
             })),
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -486,6 +490,7 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
             }),
             ty: byte_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -557,6 +562,7 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
             }),
             ty: uint_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -633,6 +639,7 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
             }),
             ty: uint_ty.clone(),
         }))],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -699,6 +706,7 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
         return_type: uint_ty,
         surface_return_type_name: None,
         body,
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -770,6 +778,7 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
             },
             HirStmt::Return(Some(HirExpr::Var("param_1".to_string()))),
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
@@ -837,6 +846,7 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
             },
             HirStmt::Return(Some(HirExpr::Var("local_10".to_string()))),
         ],
+        ..Default::default()
     };
 
     normalize_hir_function(&mut func);
