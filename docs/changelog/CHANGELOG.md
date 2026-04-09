@@ -68,7 +68,8 @@ Canonical HIR normalize additions (see [`entry_param_promotion.rs`](crates/fissi
 
 #### Benchmark (same harness as Phase 9)
 
-- [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py): same sample binary and `--limit 50` as Phase 9 when the corpus binary is available; 2-way Fission vs pyghidra for `avg_normalized_similarity` and cross KPIs.
+- [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py): [`samples/windows/x64/putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, **`target/release/fission_cli`** (use `fission_cli`, not `fission-cli`, or the script falls back to debug), Ghidra `11.4.2` — artifact dir `putty-20260409-174151` under local `artifacts/batch_benchmark/` (not committed; `.gitignore`).
+- 2-way vs pyghidra: shared=12, coverage=24%, `avg_normalized_similarity≈6.43%`, `both_success=100%`, fission wall ~1.01s vs pyghidra ~4.21s (2026-04-09).
 
 ---
 
