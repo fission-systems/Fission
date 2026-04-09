@@ -61,9 +61,15 @@ pub struct NirFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NirPhiNode {
+    pub dest_id: u32, // Maps to SsaVarId
+    pub operands: Vec<(u32, u32)>, // Pairs of (pred_block_id, src_var_id)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirBlock {
     pub id: u32,
-    pub phis: Vec<String>,
+    pub phis: Vec<NirPhiNode>,
     pub stmts: Vec<HirStmt>,
     pub terminator: NirTerminator,
 }
