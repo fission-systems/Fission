@@ -46,9 +46,10 @@ SCEV-lite scope.
 
 - [`normalize_slots::stack_slot_recovery_names_locals`](crates/fission-pcode/src/nir/tests/normalize_slots.rs) now allows `return 7;` when SCCP folds the return after `local_10` is known constant.
 
-#### Benchmark
+#### Benchmark (representative)
 
-- Full-binary `full_decomp_benchmark.py` was not re-run in CI here (no checked-in PE corpus); use the same binary and `--limit` as Phase 8 when validating KPIs locally.
+- [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py): `samples/windows/x64/test_control_flow_x64_O0.exe`, `--limit 50`, release `fission_cli`, Ghidra `11.4.2` (see [`test_control_flow_x64_O0-phase9-20260409`](artifacts/batch_benchmark/test_control_flow_x64_O0-phase9-20260409)).
+- 2-way vs pyghidra: shared=42, coverage=84%, `avg_normalized_similarity=24.78%`, `both_success=100%`, fission wall ~1.02s vs pyghidra ~1.89s (2026-04-09).
 
 ---
 
