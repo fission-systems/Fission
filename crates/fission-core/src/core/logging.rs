@@ -25,39 +25,93 @@
 //! calling into tracing, even when the log level is disabled — prefer the
 //! macro style for hot paths.
 
+use std::sync::Once;
+
 use crate::config::LogConfig;
+use crate::config::LogLevel as ConfigLogLevel;
 
 pub use tracing::Level as LogLevel;
 
+static TRACING_INIT: Once = Once::new();
+
+fn tracing_level_to_directive(level: tracing::Level) -> &'static str {
+    match level {
+        tracing::Level::TRACE => "trace",
+        tracing::Level::DEBUG => "debug",
+        tracing::Level::INFO => "info",
+        tracing::Level::WARN => "warn",
+        tracing::Level::ERROR => "error",
+    }
+}
+
+fn config_log_level_to_directive(level: ConfigLogLevel) -> &'static str {
+    match level {
+        ConfigLogLevel::Trace => "trace",
+        ConfigLogLevel::Debug => "debug",
+        ConfigLogLevel::Info => "info",
+        ConfigLogLevel::Warn => "warn",
+        ConfigLogLevel::Error => "error",
+    }
+}
+
+/// Build an [`EnvFilter`] from `RUST_LOG` when set and parseable; otherwise `default_filter`
+/// (e.g. `"warn"`, `"info"`).
+pub fn env_filter_from_rust_log_or_default(default_filter: &str) -> tracing_subscriber::EnvFilter {
+    match std::env::var("RUST_LOG") {
+        Ok(s) if !s.is_empty() => tracing_subscriber::EnvFilter::try_new(&s).unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(default_filter)
+        }),
+        _ => tracing_subscriber::EnvFilter::new(default_filter),
+    }
+}
+
+/// Idempotent `tracing` subscriber setup (first successful init wins).
+///
+/// Honors `RUST_LOG` when set and valid. Uses a compact console format without target paths.
+pub fn try_init_tracing(default_filter: &str) {
+    TRACING_INIT.call_once(|| {
+        let env_filter = env_filter_from_rust_log_or_default(default_filter);
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .try_init();
+    });
+}
+
 /// Initialize the logger with a minimum log level
 pub fn init(level: LogLevel) {
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_target(false) // Don't print module path by default for cleaner output
-        .finish();
-
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    try_init_tracing(tracing_level_to_directive(level));
 }
 
 /// Initialize logger from LogConfig
 pub fn init_from_config(config: &LogConfig) {
-    let level = config.level.to_tracing_level();
-
-    // Build subscriber based on config
-    // Note: Conditional time format requires different approach due to type differences
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_target(config.include_target)
-        .finish();
-
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
-    // Set environment variable for C++ logger if file logging is enabled
+    // Always apply C++ logger env hint even if the tracing subscriber was already initialized
+    // elsewhere (e.g. CLI `try_init_tracing` in the same process).
     if let Some((key, value)) = config.get_cpp_log_file_env() {
         // SAFETY: We're setting an environment variable in a single-threaded init context.
         // The C++ logger will read this value once during its initialization.
         unsafe { std::env::set_var(key, value) };
     }
+
+    let include_target = config.include_target;
+    let include_timestamp = config.include_timestamp;
+    let default_directive = config_log_level_to_directive(config.level);
+
+    TRACING_INIT.call_once(move || {
+        let env_filter = env_filter_from_rust_log_or_default(default_directive);
+        let _ = if include_timestamp {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_target(include_target)
+                .try_init()
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_target(include_target)
+                .without_time()
+                .try_init()
+        };
+    });
 }
 
 /// Initialize logger using global CONFIG

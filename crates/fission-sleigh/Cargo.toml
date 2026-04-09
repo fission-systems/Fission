@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.102"
 fission-pcode = { path = "../fission-pcode" }
+tracing = "0.1"

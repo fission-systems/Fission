@@ -476,6 +476,18 @@ cargo run --bin fission_cli -- test.exe
 RUST_LOG=debug cargo run --bin fission_cli -- test.exe
 ```
 
+### Tracing and preview diagnostics
+
+The CLI installs a `tracing` subscriber at startup (via `fission_core::logging::try_init_tracing`). Default filter is `warn`; `-v` / `--verbose` raises the default to `info`. If `RUST_LOG` is set and non-empty, it defines the filter and overrides the CLI default.
+
+| Variable | Role |
+|----------|------|
+| `RUST_LOG` | `tracing-subscriber` `EnvFilter` (for example `fission_pcode::nir::normalize=debug`, `fission_static::analysis::decomp::nir=trace`). |
+| `FISSION_PREVIEW_DIAG` | Extra stderr diagnostics from NIR normalize and preview paths (presence enables). |
+| `FISSION_PREVIEW_PERF` | Per-pass timing lines during NIR normalize (presence enables). |
+
+Snapshot-based tests use [insta](https://github.com/mitsuhiko/insta): after intentional output changes, run `cargo insta test --accept` (or `INSTA_UPDATE=1 cargo test …`) and review with `cargo insta review`.
+
 ### Watch Mode (Auto-Rebuild)
 
 ```bash

@@ -1,5 +1,6 @@
 pub(super) use super::support::*;
 use super::*;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 mod state;
 pub(super) use state::PreviewBuilder;
@@ -18,6 +19,7 @@ mod terminator;
 mod type_hints;
 
 use self::debug::preview_builder_diag_enabled;
+use tracing::trace_span;
 
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
@@ -57,6 +59,13 @@ impl<'a> PreviewBuilder<'a> {
         name: &str,
         _address: u64,
     ) -> Result<HirFunction, MlilPreviewError> {
+        let _build = trace_span!(
+            "preview_build_hir",
+            fn_name = name,
+            address = _address,
+            blocks = self.pcode.blocks.len()
+        )
+        .entered();
         if self.pcode.blocks.is_empty() {
             return Err(MlilPreviewError::UnsupportedPattern("empty pcode"));
         }
@@ -189,7 +198,7 @@ impl<'a> PreviewBuilder<'a> {
             body,
             calling_convention: self.options.calling_convention,
             is_64bit: self.options.is_64bit,
-            callee_observed_max_arity: HashMap::new(),
+            callee_observed_max_arity: IndexMap::new(),
         })
     }
 

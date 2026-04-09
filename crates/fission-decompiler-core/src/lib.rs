@@ -19,6 +19,10 @@ pub struct RustSleighDecompileConfig {
 }
 
 impl RustSleighDecompileConfig {
+    /// Default Rust-Sleigh + NIR pipeline configuration.
+    ///
+    /// Used by both [`crate::decompile_with_rust_sleigh`] call sites (CLI and desktop) so lift/decode
+    /// limits match for the same binary and address.
     pub fn cli_defaults() -> Self {
         Self {
             decode_max_bytes_cap: 0x10000,
@@ -27,21 +31,6 @@ impl RustSleighDecompileConfig {
             instruction_budget_default: 512,
             retry_on_decode_error: true,
             use_next_function_distance_if_unknown: true,
-            nir_mode: NirEngineMode::Nir,
-            nir_timeout_ms: None,
-            pe_x64_only: false,
-            conservative_irreducible_fallback: true,
-        }
-    }
-
-    pub fn tauri_defaults() -> Self {
-        Self {
-            decode_max_bytes_cap: 0x2000,
-            default_decode_bytes: 0x1000,
-            instruction_budget_cap: 4096,
-            instruction_budget_default: 512,
-            retry_on_decode_error: true,
-            use_next_function_distance_if_unknown: false,
             nir_mode: NirEngineMode::Nir,
             nir_timeout_ms: None,
             pe_x64_only: false,

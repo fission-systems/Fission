@@ -244,7 +244,9 @@ export interface DisplayOptions {
 /** Performance/limits options for the decompiler engine. */
 export interface PerformanceOptions {
     timeout_ms: number;
+    /** Saved for compatibility; Rust-Sleigh uses core `RustSleighDecompileConfig` (same as CLI). */
     max_function_size: number;
+    /** Saved for compatibility; Rust-Sleigh instruction budget follows CLI defaults. */
     max_instructions: number;
     cache_size: number;
 }

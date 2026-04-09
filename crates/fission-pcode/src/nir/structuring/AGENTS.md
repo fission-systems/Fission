@@ -16,7 +16,7 @@ structuring/
 ├── linear.rs        # Linear body lowering
 ├── loops.rs         # While / do-while / loop control rewrites
 ├── switch.rs        # Switch recovery
-├── cfg_analysis.rs  # Dom/postdom/SCC facts
+├── cfg_analysis/    # Dom/postdom/SCC/edge facts (mod, dom, postdom, scc, edge, util)
 ├── cleanup.rs       # Label/layout cleanup
 └── conditionals/    # Plain if / if-else / short-circuit lowering
 ```
@@ -26,7 +26,7 @@ structuring/
 | Task | Location | Notes |
 |---|---|---|
 | Guarded-tail discovery / promotion | `guards.rs`, `driver.rs` | Biggest rejection buckets live here |
-| Shape facts | `cfg_analysis.rs` | Prefer these over lexical heuristics |
+| Shape facts | `cfg_analysis/` | Prefer these over lexical heuristics |
 | Conditional lowering | `conditionals/` | Shared follow / plain-if / short-circuit |
 | Loop normalization | `loops.rs` | Break/continue rewriting and reducers |
 | Layout cleanup | `cleanup.rs` | Canonical labels before discovery |

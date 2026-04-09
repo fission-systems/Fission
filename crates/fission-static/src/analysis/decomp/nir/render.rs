@@ -9,6 +9,7 @@ use fission_pcode::{
 };
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
+use tracing::trace_span;
 
 pub(crate) fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
@@ -309,6 +310,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
+    let _render = trace_span!("nir_render_json", address = address, fn_name = name).entered();
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;

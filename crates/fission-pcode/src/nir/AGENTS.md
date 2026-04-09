@@ -12,7 +12,7 @@ This tree owns Rust-side decompiler semantics after p-code lifting: builder stat
 ```text
 nir/
 ├── builder/        # Preview/NIR lowering from p-code
-├── normalize/      # Arithmetic, slots, bitstream cleanup
+├── normalize/      # HIR normalization passes (see normalize/AGENTS.md)
 ├── structuring/    # CFG-driven reconstruction to higher-level HIR
 ├── tests/          # Synthetic NIR/structuring integration tests
 ├── mod.rs          # PreviewBuilder state + top-level pipeline
@@ -29,6 +29,7 @@ nir/
 | Structuring rules | `structuring/` | Read child AGENT there first |
 | Output formatting | `printer.rs` | Printer is downstream of semantics |
 | Synthetic regression tests | `tests/` | Prefer adding targeted NIR tests here |
+| Normalize pass layout | `normalize/AGENTS.md` | Directory map for `arith/`, `pipeline/`, etc. |
 
 ## Conventions
 

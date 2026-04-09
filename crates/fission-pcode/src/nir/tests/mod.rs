@@ -22,6 +22,7 @@ mod type_hints_aliases;
 mod type_hints_function_hints;
 mod type_hints_imports;
 mod type_hints_stack_slots;
+mod snapshot_printer;
 
 fn reg(offset: u64, size: u32) -> Varnode {
     Varnode {

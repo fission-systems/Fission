@@ -24,9 +24,11 @@ fn decompile_rust_only(
     binary: &LoadedBinary,
     address: u64,
     name: &str,
-    decompiler_options: crate::dto::DecompilerOptions,
+    _decompiler_options: crate::dto::DecompilerOptions,
 ) -> Result<DecompileOutcome, CmdError> {
-    let mut config = RustSleighDecompileConfig::tauri_defaults();
+    // Match [`fission_cli::decompile_rust_sleigh`]: same `RustSleighDecompileConfig` and `None`/`None`
+    // decode/instruction overrides so lift + NIR output matches CLI for the same function.
+    let mut config = RustSleighDecompileConfig::cli_defaults();
     config.nir_mode = fission_decompiler_core::NirEngineMode::Nir;
 
     let result = decompile_with_rust_sleigh(
@@ -34,8 +36,8 @@ fn decompile_rust_only(
         address,
         name,
         &config,
-        Some(decompiler_options.performance.max_function_size),
-        Some(decompiler_options.performance.max_instructions),
+        None,
+        None,
     )
     .map_err(CmdError::other)?;
 

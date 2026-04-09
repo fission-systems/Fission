@@ -1,4 +1,5 @@
 use fission_loader::loader::LoadedBinary;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -101,7 +102,8 @@ pub struct HirFunction {
     pub is_64bit: bool,
     /// Per-callee symbol: maximum argument count observed at direct call sites in this function.
     /// Downstream pipelines may merge this across functions for interprocedural arity bounds.
-    pub callee_observed_max_arity: HashMap<String, usize>,
+    /// [`IndexMap`] preserves insertion order for deterministic iteration / dumps.
+    pub callee_observed_max_arity: IndexMap<String, usize>,
 }
 
 impl Default for HirFunction {
@@ -115,7 +117,7 @@ impl Default for HirFunction {
             body: Vec::new(),
             calling_convention: CallingConvention::default(),
             is_64bit: true,
-            callee_observed_max_arity: HashMap::new(),
+            callee_observed_max_arity: IndexMap::new(),
         }
     }
 }

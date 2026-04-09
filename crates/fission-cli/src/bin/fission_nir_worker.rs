@@ -13,6 +13,8 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 fn main() -> io::Result<()> {
+    fission_core::logging::try_init_tracing("warn");
+
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 

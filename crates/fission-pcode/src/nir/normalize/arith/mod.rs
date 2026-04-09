@@ -1,0 +1,19 @@
+//! Integer arithmetic normalization: casts, flags, div/mod patterns, cleanup.
+
+mod cast_wide;
+mod cleanup_shifts;
+mod div_mod;
+mod flags_cond;
+mod util;
+
+pub(crate) use cast_wide::{
+    canonicalize_integer_expr, recognize_hi_lo_extract, recognize_wide_integer_recombine,
+};
+pub(crate) use cleanup_shifts::{
+    cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
+    simplify_subpiece_chain,
+};
+pub(crate) use div_mod::{recognize_magic_number_division, recognize_mod_div_power_of_two};
+pub(crate) use flags_cond::{
+    canonicalize_condition_expr, canonicalize_flag_intrinsics, normalize_boolean_logic,
+};

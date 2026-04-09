@@ -55,6 +55,9 @@ pub fn main() -> io::Result<()> {
 fn run() -> io::Result<()> {
     let cli = OneShotArgs::parse();
 
+    let default_filter = if cli.verbose { "info" } else { "warn" };
+    fission_core::logging::try_init_tracing(default_filter);
+
     // Capture BrokenPipe errors gracefully
     if let Err(e) = execute_command(&cli)
         && e.kind() != io::ErrorKind::BrokenPipe

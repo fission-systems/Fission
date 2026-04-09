@@ -9,6 +9,36 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-09 (latest)
 
+### NIR layout — `normalize/` tree, `cfg_analysis/` split, automation report, sleigh semantic
+
+Refactor-only work: **module paths and file placement**, not decompiler semantics. Normalize **pass order and behavior** are unchanged; public `nir::normalize` entry points (`normalize_hir_function`, `take_normalize_wave_stats`) stay the same.
+
+#### fission-pcode — [`normalize/`](crates/fission-pcode/src/nir/normalize/)
+
+- Passes grouped by role: [`types/`](crates/fission-pcode/src/nir/normalize/types/) (type inference & signature propagation), [`global_opt/`](crates/fission-pcode/src/nir/normalize/global_opt/) (SCCP, LICM, CSE, GVN join, memory SSA helpers, redundant load, dead store), [`recovery/`](crates/fission-pcode/src/nir/normalize/recovery/) (PHI, flags, IV, for-loops), [`memory/`](crates/fission-pcode/src/nir/normalize/memory/) (slots, aggregates, pointer arith), [`idioms/`](crates/fission-pcode/src/nir/normalize/idioms/) (bitstream, branch hoist, prologue), [`analysis/`](crates/fission-pcode/src/nir/normalize/analysis/) (`defuse`, `expr_key`); [`arith/`](crates/fission-pcode/src/nir/normalize/arith/) split from a single `arith.rs` into focused modules; [`cleanup/`](crates/fission-pcode/src/nir/normalize/cleanup/) uses `passes.rs` under `mod.rs`.
+- Orchestration: [`pipeline/run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) (formerly `core.rs`), re-exported from [`pipeline/mod.rs`](crates/fission-pcode/src/nir/normalize/pipeline/mod.rs).
+- Map for contributors: [`normalize/AGENTS.md`](crates/fission-pcode/src/nir/normalize/AGENTS.md); [`nir/AGENTS.md`](crates/fission-pcode/src/nir/AGENTS.md) updated with a pointer.
+
+#### fission-pcode — structuring [`cfg_analysis/`](crates/fission-pcode/src/nir/structuring/cfg_analysis/)
+
+- Former monolith [`cfg_analysis.rs`](crates/fission-pcode/src/nir/structuring/cfg_analysis.rs) split into `cfg_analysis/` (`dom`, `postdom`, `edge`, `scc`, helpers, `tests`).
+
+#### fission-automation — [`report/`](crates/fission-automation/src/report/)
+
+- Large [`report.rs`](crates/fission-automation/src/report.rs) replaced by [`report/mod.rs`](crates/fission-automation/src/report/mod.rs) + [`report/pipeline.rs`](crates/fission-automation/src/report/pipeline.rs) (same outward API via `pub use`).
+
+#### fission-sleigh — x86 semantic
+
+- [`semantic.rs`](crates/fission-sleigh/src/lifter/x86/semantic.rs) reorganized as [`semantic/mod.rs`](crates/fission-sleigh/src/lifter/x86/semantic/mod.rs) with tests under [`semantic/tests/`](crates/fission-sleigh/src/lifter/x86/semantic/tests/).
+
+#### Tests / snapshots (fission-pcode)
+
+- [`structuring_conditionals`](crates/fission-pcode/src/nir/tests/structuring_conditionals/) split from a single file; snapshot-driven checks via [`snapshot_printer.rs`](crates/fission-pcode/src/nir/tests/snapshot_printer.rs) and [`snapshots/`](crates/fission-pcode/src/nir/tests/snapshots/).
+
+#### Misc
+
+- Workspace / crate manifest tweaks (`Cargo.lock`, `fission-pcode` / `fission-sleigh` `Cargo.toml`), logging and CLI worker hooks, Tauri decompiler options, [`docs/build/BUILD.md`](docs/build/BUILD.md) notes.
+
 ### HIR Quality Phase 9 — SCCP, join GVN-lite, wide def-use DCE sweep
 
 This update implements the Phase 9 plan: **structured sparse conditional constant

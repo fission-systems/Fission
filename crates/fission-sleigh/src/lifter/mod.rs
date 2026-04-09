@@ -309,6 +309,12 @@ impl SleighLifter {
         entry_address: u64,
         instruction_limit: usize,
     ) -> Result<LiftedPcodeFunction> {
+        let _lift = tracing::trace_span!(
+            "sleigh_lift_raw",
+            entry_address = entry_address,
+            instruction_limit = instruction_limit
+        )
+        .entered();
         let lifted = self
             .backend
             .lift_ops_with_contract(bytes, entry_address, instruction_limit, Self::emit_trace_copy)?;

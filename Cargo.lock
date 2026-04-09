@@ -1478,9 +1478,12 @@ dependencies = [
  "fission-loader",
  "fission-signatures",
  "iced-x86",
+ "indexmap 2.12.1",
+ "insta",
  "log",
  "lru",
  "once_cell",
+ "petgraph",
  "rkyv",
  "rustc-hash",
  "serde",
@@ -1512,6 +1515,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "fission-pcode",
+ "tracing",
 ]
 
 [[package]]
@@ -1576,6 +1580,12 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flate2"
@@ -3237,6 +3247,16 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "petgraph"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+dependencies = [
+ "fixedbitset",
+ "indexmap 2.12.1",
+]
 
 [[package]]
 name = "phf"

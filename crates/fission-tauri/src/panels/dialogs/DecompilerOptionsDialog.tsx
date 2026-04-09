@@ -371,14 +371,14 @@ export default function DecompilerOptionsDialog({
                             />
                             <NumberRow
                                 label="Max Function Size (bytes)"
-                                description="Skip functions larger than this"
+                                description="Reserved for future engines. Rust-Sleigh uses the same decode limits as fission_cli (settings value is saved but not applied)."
                                 value={options.performance.max_function_size}
                                 min={1024} max={1048576} step={1024}
                                 onChange={(v) => update("performance", "max_function_size", v)}
                             />
                             <NumberRow
                                 label="Max Instructions"
-                                description="Abort decompilation above this count"
+                                description="Reserved for future engines. Rust-Sleigh matches CLI defaults (saved for compatibility; not applied to lift budget)."
                                 value={options.performance.max_instructions}
                                 min={1000} max={10000000} step={1000}
                                 onChange={(v) => update("performance", "max_instructions", v)}
