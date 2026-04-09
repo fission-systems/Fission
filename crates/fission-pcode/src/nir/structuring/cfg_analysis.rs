@@ -711,12 +711,16 @@ fn dfs_postorder(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    pub(super) fn refresh_cfg_fact_cache(&mut self) {
+        self.dom_tree = DomTree::analyze(&self.successors, &self.predecessors);
+    }
+
     pub(super) fn analyze_cfg_edges(&self) -> CfgAnalysis {
         CfgAnalysis::analyze(&self.successors, &self.predecessors)
     }
 
     pub(super) fn analyze_cfg_dominators(&self) -> DomTree {
-        DomTree::analyze(&self.successors, &self.predecessors)
+        self.dom_tree.clone()
     }
 
     pub(super) fn analyze_cfg_postdominators(&self) -> PostDomTree {

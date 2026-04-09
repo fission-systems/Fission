@@ -7,6 +7,13 @@
 
 ### Changed
 - Replaced `NirBlock`'s basic lexical `phis: Vec<String>` handling with explicitly modeled O(N+E) SSA `NirPhiNode` structures carrying strict source var (`SsaVarId`) mapping.
+- Synchronized structuring dominator facts with CFG mutations by refreshing the cached dominator tree after irreducible-edge pruning and node-splitting, and switched `analyze_cfg_dominators()` to consume the cached fact source instead of recomputing on every call.
+
+### Validation
+- `cargo check -p fission-pcode`
+- `cargo test -p fission-pcode structuring_ -- --nocapture`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/test_control_flow_x64_O0.exe --limit 10 --baseline-dir artifacts/batch_benchmark/test_control_flow_x64_O0-20260409-154945`
+- 2-way regression check passed (`avg_norm` 34.69%, no degradation detected).
 
 ## 2026-04-08
 

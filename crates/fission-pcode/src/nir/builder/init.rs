@@ -40,7 +40,7 @@ impl<'a> PreviewBuilder<'a> {
             build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
         let mut predecessors = build_predecessor_index_map(&successors);
 
-        let dom_tree = crate::nir::structuring::DomTree::analyze(&successors, &predecessors);
+        let mut dom_tree = crate::nir::structuring::DomTree::analyze(&successors, &predecessors);
         let cfg_analysis =
             crate::nir::structuring::CfgAnalysis::analyze(&successors, &predecessors);
         let irreducible_edges = cfg_analysis.irreducible_edges(&dom_tree);
@@ -61,6 +61,9 @@ impl<'a> PreviewBuilder<'a> {
                 preds.retain(|&p| p != src);
             }
         }
+        // Downstream structuring uses the pruned CFG. Keep the dominator cache
+        // aligned with this final successor/predecessor topology.
+        dom_tree = crate::nir::structuring::DomTree::analyze(&successors, &predecessors);
 
         let register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, options.calling_convention);

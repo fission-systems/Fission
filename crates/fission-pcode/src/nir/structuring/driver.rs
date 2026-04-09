@@ -39,6 +39,7 @@ impl<'a> PreviewBuilder<'a> {
                 self.successors = split.new_successors;
                 self.predecessors = split.new_predecessors;
                 self.virtual_block_map = split.virtual_to_original;
+                self.refresh_cfg_fact_cache();
             }
         }
         if diag {
