@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-04-09
+
+### Added
+- Introduced initial Global Type Inference module (`crates/fission-pcode/src/nir/types/inference.rs`) featuring a Hindley-Milner inspired Union-Find Disjoint-Set structure (`TypeEquivalenceClass`) tailored for O(N) SSA variable type constraints.
+
+### Changed
+- Replaced `NirBlock`'s basic lexical `phis: Vec<String>` handling with explicitly modeled O(N+E) SSA `NirPhiNode` structures carrying strict source var (`SsaVarId`) mapping.
+
 ## 2026-04-08
 
 ### Changed
