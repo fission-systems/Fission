@@ -104,12 +104,6 @@ pub(crate) enum LinearExit {
     End,
 }
 
-impl LinearExit {
-    pub(crate) fn is_terminal(&self) -> bool {
-        matches!(self, Self::Return | Self::End)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct LinearBodyCacheKey {
     pub(crate) start_idx: usize,

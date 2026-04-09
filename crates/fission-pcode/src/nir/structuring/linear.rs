@@ -497,6 +497,17 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn merge_terminal_exits(&mut self, lhs: LinearExit, rhs: LinearExit) -> Option<LinearExit> {
+        match (lhs, rhs) {
+            (LinearExit::Return, LinearExit::Return) | (LinearExit::End, LinearExit::End) => {
+                self.rule_block_if_no_exit_count += 1;
+                self.rule_block_if_no_exit_accepted_count += 1;
+                Some(lhs)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn shared_linear_exit(
         &mut self,
         lhs_idx: usize,
@@ -508,13 +519,7 @@ impl<'a> PreviewBuilder<'a> {
         if lhs.is_some() && lhs == rhs {
             Ok(lhs)
         } else if let (Some(l_exit), Some(r_exit)) = (lhs, rhs) {
-            if l_exit.is_terminal() && r_exit.is_terminal() {
-                self.rule_block_if_no_exit_count += 1;
-                self.rule_block_if_no_exit_accepted_count += 1;
-                Ok(Some(l_exit))
-            } else {
-                Ok(None)
-            }
+            Ok(self.merge_terminal_exits(l_exit, r_exit))
         } else {
             Ok(None)
         }
@@ -534,12 +539,10 @@ impl<'a> PreviewBuilder<'a> {
             if shared.is_some() && shared == exit {
                 continue;
             }
-            if let (Some(s_exit), Some(c_exit)) = (shared, exit) {
-                if s_exit.is_terminal() && c_exit.is_terminal() {
-                    self.rule_block_if_no_exit_count += 1;
-                    self.rule_block_if_no_exit_accepted_count += 1;
-                    continue;
-                }
+            if let (Some(s_exit), Some(c_exit)) = (shared, exit)
+                && self.merge_terminal_exits(s_exit, c_exit).is_some()
+            {
+                continue;
             }
             return Ok(None);
         }
@@ -637,13 +640,7 @@ impl<'a> PreviewBuilder<'a> {
                 if true_exit.is_some() && true_exit == false_exit {
                     Ok(true_exit)
                 } else if let (Some(t_exit), Some(f_exit)) = (true_exit, false_exit) {
-                    if t_exit.is_terminal() && f_exit.is_terminal() {
-                        self.rule_block_if_no_exit_count += 1;
-                        self.rule_block_if_no_exit_accepted_count += 1;
-                        Ok(Some(t_exit))
-                    } else {
-                        Ok(None)
-                    }
+                    Ok(self.merge_terminal_exits(t_exit, f_exit))
                 } else {
                     Ok(None)
                 }
