@@ -15,7 +15,11 @@ use super::cleanup::{
 };
 use super::branch_hoist::apply_branch_prefix_hoist_pass;
 use super::cse::apply_cse_pass;
-use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
+use super::defuse::{
+    apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
+};
+use super::gvn_join::apply_gvn_join_hoist_pass;
+use super::sccp::apply_sccp_pass;
 use super::licm::apply_licm_pass;
 use super::redundant_load::apply_redundant_load_elimination;
 use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
@@ -90,6 +94,20 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
+    // SCCP: global sparse constant propagation on structured HIR (lattice merge
+    // at joins).  Runs after local constant folding so folded seeds propagate.
+    if apply_sccp_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        if constant_folding_pass(&mut func.body) {
+            cleanup_stmt_list(&mut func.body, &func.name, 0);
+            eliminate_dead_local_clobber_assigns(func);
+            prune_unused_temp_bindings(func);
+            prune_unused_dead_local_bindings(func);
+        }
+        apply_wide_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
     // Local CSE: within each linear block, replace identical pure sub-expressions
     // with the variable that first computed them.  Runs right after constant
     // folding so that folded constants are included in the expression map.
@@ -116,6 +134,16 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // If-else common pure-prefix hoisting: move identical leading assignments
     // out of both branches (partial redundancy elimination for branches).
     if apply_branch_prefix_hoist_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        if copy_propagation_pass(func) {
+            defuse_dead_assignment_pass(func);
+        }
+        defuse_dead_assignment_pass(func);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
+    if apply_gvn_join_hoist_pass(func) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         if copy_propagation_pass(func) {
             defuse_dead_assignment_pass(func);
@@ -274,7 +302,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     }
 }
 
-fn is_large_hir_function(func: &HirFunction) -> bool {
+pub(super) fn is_large_hir_function(func: &HirFunction) -> bool {
     count_hir_stmts(&func.body) > 220 || func.locals.len() > 160
 }
 

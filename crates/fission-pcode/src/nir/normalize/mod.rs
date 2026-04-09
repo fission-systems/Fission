@@ -16,6 +16,8 @@ mod iv_recovery;
 mod licm;
 mod mem_ssa;
 mod redundant_load;
+mod sccp;
+mod gvn_join;
 mod phi_recovery;
 mod prologue;
 mod ptr_arith;

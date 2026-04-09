@@ -288,6 +288,45 @@ fn fold_expr(expr: &mut HirExpr) -> bool {
     changed
 }
 
+/// Expose bottom-up constant folding for passes that rewrite expressions in place
+/// (e.g. SCCP after substituting known variables).
+pub(super) fn fold_expr_hir(expr: &mut HirExpr) -> bool {
+    fold_expr(expr)
+}
+
+/// Evaluate `expr` to a compile-time integer/bool constant using `env` for
+/// `Var` bindings.  Returns `None` for `Load`/`Call`/non-constant leaves.
+pub(super) fn eval_hir_expr_with_const_env(
+    expr: &HirExpr,
+    env: &HashMap<String, (i64, NirType)>,
+) -> Option<(i64, NirType)> {
+    match expr {
+        HirExpr::Const(v, ty) => Some((*v, ty.clone())),
+        HirExpr::Var(name) => env.get(name).map(|(v, t)| (*v, t.clone())),
+        HirExpr::Unary { op, expr: inner, ty } => {
+            let (a, _) = eval_hir_expr_with_const_env(inner, env)?;
+            let result = eval_unary(*op, a, ty)?;
+            Some((result, ty.clone()))
+        }
+        HirExpr::Binary { op, lhs, rhs, ty } => {
+            let (a, _) = eval_hir_expr_with_const_env(lhs, env)?;
+            let (b, _) = eval_hir_expr_with_const_env(rhs, env)?;
+            let result = eval_binary(*op, a, b, ty)?;
+            Some((result, ty.clone()))
+        }
+        HirExpr::Cast { ty, expr: inner } => {
+            let (a, _) = eval_hir_expr_with_const_env(inner, env)?;
+            let result = truncate_const(a, ty)?;
+            Some((result, ty.clone()))
+        }
+        HirExpr::Load { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::Index { .. }
+        | HirExpr::AggregateCopy { .. } => None,
+    }
+}
+
 fn try_fold(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary { op, lhs, rhs, ty } => {
@@ -438,6 +477,20 @@ pub(super) fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
         prune_unused_temp_bindings(func);
     }
     changed
+}
+
+/// Fixed-point dead temp removal: run [`defuse_dead_assignment_pass`] until it
+/// quiesces or the iteration budget is hit.  Intended after SCCP exposes temps
+/// whose only uses were folded away across the function.
+pub(super) fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
+    let mut any = false;
+    for _ in 0..6 {
+        if !defuse_dead_assignment_pass(func) {
+            break;
+        }
+        any = true;
+    }
+    any
 }
 
 fn remove_dead_in_stmts(

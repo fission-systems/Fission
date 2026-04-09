@@ -7,7 +7,52 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-08 (latest)
+## 2026-04-09 (latest)
+
+### HIR Quality Phase 9 — SCCP, join GVN-lite, wide def-use DCE sweep
+
+This update implements the Phase 9 plan: **structured sparse conditional constant
+propagation (SCCP)**, **GVN-lite at 2-way joins** (duplicate pure RHS, different
+LHS), and a **fixed-point dead temp sweep** after SCCP.  Coupled IV (SCEV) was
+**not** expanded in this cycle; existing affine IV in [`iv_recovery.rs`](crates/fission-pcode/src/nir/normalize/iv_recovery.rs) remains the
+SCEV-lite scope.
+
+#### Overlap / non-duplication (vs existing passes)
+
+| Phase 9 | Does **not** replace | Notes |
+|--------|----------------------|--------|
+| [`apply_sccp_pass`](crates/fission-pcode/src/nir/normalize/sccp.rs) | [`constant_folding_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs) | Folding is local/single-pass on syntax; SCCP merges constants at **if/switch** joins and rewrites guarded branches when the condition is constant. |
+| SCCP | [`apply_jump_resolver_pass`](crates/fission-pcode/src/nir/vsa/jump_resolver.rs) | VSA uses **intervals** on defs; SCCP uses a **constant lattice** on vars. Complementary. |
+| [`apply_gvn_join_hoist_pass`](crates/fission-pcode/src/nir/normalize/gvn_join.rs) | [`apply_branch_prefix_hoist_pass`](crates/fission-pcode/src/nir/normalize/branch_hoist.rs) | Branch hoist requires **the same LHS** on both arms; GVN join hoists when LHS **differs** but `pure_expr_key(rhs)` matches. |
+| [`apply_gvn_join_hoist_pass`](crates/fission-pcode/src/nir/normalize/gvn_join.rs) | [`apply_cse_pass`](crates/fission-pcode/src/nir/normalize/cse.rs) | CSE is **per linear block** (map reset at branches); join GVN addresses **first stmt** on each arm after a fork. |
+| [`apply_wide_dead_assignment_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs) | [`defuse_dead_assignment_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs) | Same predicate (temp-only, `DefUseMap`); wide pass repeats up to 6 rounds so SCCP-folded unused temps are removed once use counts drop. |
+
+#### fission-pcode — SCCP ([`sccp.rs`](crates/fission-pcode/src/nir/normalize/sccp.rs))
+
+- Lattice map `Var → (i64, NirType)` with **merge** at `if`/`switch` exits; loops **conservatively** drop bindings for variables assigned in the body from the post-loop environment.
+- Uses shared evaluator [`eval_hir_expr_with_const_env`](crates/fission-pcode/src/nir/normalize/defuse.rs) (no `Load`/`Call` constant evaluation).
+- Pipeline: immediately after the first [`constant_folding_pass`](crates/fission-pcode/src/nir/normalize/core.rs) block; large functions use fewer rounds via [`is_large_hir_function`](crates/fission-pcode/src/nir/normalize/core.rs).
+
+#### fission-pcode — Join GVN-lite ([`gvn_join.rs`](crates/fission-pcode/src/nir/normalize/gvn_join.rs))
+
+- If both arms begin with `Assign(Var)` and `pure_expr_key` matches, inserts `__gvn_join_* = rhs` and rewrites the first statement of each arm to copy from the temp (then copy propagation can clean up).
+- Pipeline: after [`apply_branch_prefix_hoist_pass`](crates/fission-pcode/src/nir/normalize/branch_hoist.rs).
+
+#### fission-pcode — Wide dead assignment ([`defuse.rs`](crates/fission-pcode/src/nir/normalize/defuse.rs))
+
+- [`apply_wide_dead_assignment_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs): bounded fixpoint of [`defuse_dead_assignment_pass`](crates/fission-pcode/src/nir/normalize/defuse.rs) after SCCP.
+
+#### Tests
+
+- [`normalize_slots::stack_slot_recovery_names_locals`](crates/fission-pcode/src/nir/tests/normalize_slots.rs) now allows `return 7;` when SCCP folds the return after `local_10` is known constant.
+
+#### Benchmark
+
+- Full-binary `full_decomp_benchmark.py` was not re-run in CI here (no checked-in PE corpus); use the same binary and `--limit` as Phase 8 when validating KPIs locally.
+
+---
+
+## 2026-04-08
 
 ### HIR Quality Phase 8 — Redundant Load Elimination, Branch PRE-lite, Affine IV, ExprKey sharing
 
