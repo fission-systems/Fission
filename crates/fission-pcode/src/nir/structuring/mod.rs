@@ -14,7 +14,7 @@ mod surfacing;
 mod switch;
 
 pub(crate) use cfg_analysis::{
-    CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree,
+    CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
 pub(crate) use cleanup::cleanup_redundant_labels;
 pub(crate) use driver::discover_guarded_tail_candidates_for_stats;

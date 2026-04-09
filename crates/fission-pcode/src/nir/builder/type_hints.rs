@@ -1,17 +1,19 @@
 use super::*;
+use crate::nir::abstract_location::AbstractStackSlot;
 use crate::nir::var_rename::rename_vars_in_stmts;
+use tracing::trace_span;
 
 pub(super) struct StackAliasCollector {
-    alias_boundaries: Vec<(i64, i64)>,
+    alias_boundaries: Vec<(AbstractStackSlot, u64)>,
 }
 
 impl StackAliasCollector {
     pub(super) fn new(func: &HirFunction) -> Self {
         let mut boundaries = Vec::new();
         for local in &func.locals {
-            if let Some((offset, _)) = stack_origin_offset(local.origin) {
+            if let Some(slot) = AbstractStackSlot::from_binding_origin(local.origin) {
                 if let Some(size) = binding_byte_size(&local.ty) {
-                    boundaries.push((offset, offset + size as i64));
+                    boundaries.push((slot, size as u64));
                 }
             }
         }
@@ -19,10 +21,11 @@ impl StackAliasCollector {
     }
 
     fn might_alias(&self, offset: i64, size: u32) -> bool {
-        let end_offset = offset + size as i64;
-        self.alias_boundaries.iter().any(|&(start, end)| {
-            offset < end && end_offset > start
-        })
+        let probe = AbstractStackSlot(offset);
+        let sz = size as u64;
+        self.alias_boundaries
+            .iter()
+            .any(|&(slot, slot_sz)| probe.intervals_overlap(sz, slot, slot_sz))
     }
 }
 
@@ -30,6 +33,7 @@ pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
 ) -> PreviewHintStats {
+    let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats = apply_function_name_hints(func, context);
     let alias_collector = StackAliasCollector::new(func);
 

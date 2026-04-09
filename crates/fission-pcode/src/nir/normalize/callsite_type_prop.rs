@@ -109,6 +109,8 @@ pub(super) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
         }
         // NTSTATUS / HRESULT: signed 32-bit.
         "NTSTATUS" | "HRESULT" => NirType::Int { bits: 32, signed: true },
+        // MSVC va_list (opaque; model as generic pointer).
+        "va_list" => NirType::Ptr(Box::new(NirType::Unknown)),
         // Unknown / not yet mapped → no constraint.
         _ => return None,
     };

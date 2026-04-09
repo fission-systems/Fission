@@ -57,7 +57,7 @@ impl WinApiDatabase {
     pub fn new() -> Self {
         let mut db = Self {
             // Pre-allocate for ~130 known APIs to minimize HashMap rehashing
-            signatures: HashMap::with_capacity(140),
+            signatures: HashMap::with_capacity(150),
         };
         db.load_kernel32();
         db.load_user32();
@@ -68,7 +68,15 @@ impl WinApiDatabase {
         db.load_wininet();
         db.load_shell32();
         db.load_bcrypt();
+        db.load_ucrt();
         db
+    }
+
+    fn load_ucrt(&mut self) {
+        self.load_from_json_str(
+            include_str!("../data/win_api/ucrt.json"),
+            "data/win_api/ucrt.json",
+        );
     }
 
     fn add(&mut self, sig: ApiSignature) {

@@ -3,17 +3,24 @@
 ## 2026-04-10
 
 ### Added
-- Added `rustc-hash` integration across NIR builder/cache hot paths and static analysis cache maps (`callgraph`, `xrefs`, CFG traversal/build helper maps) with boundary-safe usage.
-- Added `allocator-mimalloc` and `allocator-jemallocator` feature flags to CLI, automation, and tauri crates, plus opt-in global allocator wiring in executable entrypoints.
-- Added canonical NIR pass-level telemetry aggregation (`pass_metrics`) to `NirBuildStats` and merge propagation support for downstream reporting.
+- Added `AbstractStackSlot` / `ParamSlotIndex` in [`crates/fission-pcode/src/nir/abstract_location.rs`](crates/fission-pcode/src/nir/abstract_location.rs) as architecture-neutral keys for stack overlap and ABI slot identity; preview type hints now use interval overlap on these slots.
+- Added UCRT signatures (`_stdio_common_vsprintf`, `_stdio_common_vswprintf`) to [`crates/fission-signatures/data/win_api/ucrt.json`](crates/fission-signatures/data/win_api/ucrt.json) and `va_list` mapping in call-site type propagation so symbolic CRT callees get monotone type constraints when names resolve.
+- Exported [`SccAnalysis`](crates/fission-pcode/src/nir/structuring/mod.rs) for fresh Tarjan analysis on the current CFG; documented interprocedural arity pass as the lower-bound hook for future call-graph lattice work.
+- Added `ImmPostDomTree::merge_point_for_two_arms` and a diamond CFG unit test tying it to the join block.
 
 ### Changed
+- Guarded-tail promotion: when the legacy single-pred/succ fast path applies, run fresh `SccAnalysis` on `successors`/`predecessors` (tests and some paths mutate the graph without refreshing `cfg_facts`); `ensure_graph_invariant_promotion_region` now uses the same fresh SCC so multi-header irreducible regions reject correctly.
+- `rustc-hash` integration across NIR builder/cache hot paths and static analysis cache maps (`callgraph`, `xrefs`, CFG traversal/build helper maps) with boundary-safe usage.
+- Added `allocator-mimalloc` and `allocator-jemallocator` feature flags to CLI, automation, and tauri crates, plus opt-in global allocator wiring in executable entrypoints.
+- Added canonical NIR pass-level telemetry aggregation (`pass_metrics`) to `NirBuildStats` and merge propagation support for downstream reporting.
 - Refactored NIR normalize pass execution to a pass-logged flow that records per-pass timings/reductions and emits structured tracing fields.
 - Updated automation summary output to show slowest and most impactful NIR passes using aggregated pass metrics.
 - Added automation regression-gate checks for pass-level timing deltas against baseline summaries.
 - Expanded pcode builder internal cache maps/sets (`materialized_vns`, alias/terminator/linear caches) to fast hash aliases while preserving external type boundaries.
 
 ### Validation
+- `cargo test -p fission-pcode --lib`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --fission-bin target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC --limit 40 --output-dir artifacts/batch_benchmark/putty-plan-verify`
 - `cargo check -p fission-pcode`
 - `cargo check -p fission-static`
 - `cargo check -p fission-cli`

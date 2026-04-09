@@ -3,19 +3,23 @@
 //! Walks all `Call` expressions and records `max(args.len())` per callee name string.
 //! Downstream pipelines can merge [`HirFunction::callee_observed_max_arity`] across functions
 //! for interprocedural lower bounds (sound: never under-estimate arity).
+//!
+//! Broader **call-graph SCC + lattice fixpoint** propagation of pointer/integer types belongs
+//! in a session-scoped pass with a fact store / provenance layer; keep arity here as a cheap
+//! monotone lower bound per function.
 
 use crate::nir::types::{HirExpr, HirFunction, HirStmt};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use super::wave_stats::add_interproc_constraint_rounds;
 
-fn merge_arity(map: &mut HashMap<String, usize>, callee: &str, arity: usize) {
+fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
         .and_modify(|v| *v = (*v).max(arity))
         .or_insert(arity);
 }
 
-fn scan_expr(expr: &HirExpr, map: &mut HashMap<String, usize>) {
+fn scan_expr(expr: &HirExpr, map: &mut IndexMap<String, usize>) {
     match expr {
         HirExpr::Call { target, args, .. } => {
             merge_arity(map, target, args.len());
@@ -40,7 +44,7 @@ fn scan_expr(expr: &HirExpr, map: &mut HashMap<String, usize>) {
     }
 }
 
-fn scan_stmts(body: &[HirStmt], map: &mut HashMap<String, usize>) {
+fn scan_stmts(body: &[HirStmt], map: &mut IndexMap<String, usize>) {
     for stmt in body {
         match stmt {
             HirStmt::Assign { rhs, .. } => scan_expr(rhs, map),
@@ -76,7 +80,7 @@ fn scan_stmts(body: &[HirStmt], map: &mut HashMap<String, usize>) {
 }
 
 pub(super) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> bool {
-    let mut fresh = HashMap::new();
+    let mut fresh = IndexMap::new();
     scan_stmts(&func.body, &mut fresh);
     if fresh.is_empty() {
         return false;

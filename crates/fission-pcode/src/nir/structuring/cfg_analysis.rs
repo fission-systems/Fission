@@ -821,6 +821,13 @@ impl ImmPostDomTree {
         Some(result)
     }
 
+    /// Merge point for two forward CFG arms (e.g. then/else) when both paths reconverge:
+    /// nearest common postdominator in the Cooper immediate-postdominator tree.
+    #[allow(dead_code)]
+    pub(crate) fn merge_point_for_two_arms(&self, arm_a: usize, arm_b: usize) -> Option<usize> {
+        self.nearest_common_postdominator(&[arm_a, arm_b])
+    }
+
     /// LCA (= nearest common postdominator) of two nodes using Cooper's intersect.
     fn lca(&self, mut a: usize, mut b: usize) -> Option<usize> {
         if a >= self.node_count || b >= self.node_count {
@@ -1103,6 +1110,9 @@ mod tests {
         assert_eq!(analysis.class_of(1, 3), Some(EdgeClass::Tree));
         assert_eq!(analysis.class_of(2, 3), Some(EdgeClass::Cross));
         assert_eq!(analysis.count_class(EdgeClass::Back), 0);
+
+        let tree = ImmPostDomTree::compute(&successors, &predecessors);
+        assert_eq!(tree.merge_point_for_two_arms(1, 2), Some(3));
     }
 
     #[test]
@@ -1164,6 +1174,37 @@ mod tests {
         assert!(df.contains(1, 3));
         assert!(df.contains(2, 3));
         assert!(!df.contains(0, 3));
+    }
+
+    /// Cross-check immediate dominators against `petgraph` (reference implementation).
+    #[test]
+    fn imm_dom_matches_petgraph_diamond() {
+        use petgraph::algo::dominators::simple_fast;
+        use petgraph::graph::DiGraph;
+
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let imm_dom = ImmDomTree::compute(&successors, &predecessors);
+
+        let mut g = DiGraph::<(), ()>::new();
+        let nodes: Vec<_> = (0..4).map(|_| g.add_node(())).collect();
+        for (u, sucs) in successors.iter().enumerate() {
+            for &v in sucs {
+                g.add_edge(nodes[u], nodes[v], ());
+            }
+        }
+
+        let doms = simple_fast(&g, nodes[0]);
+        for i in 0..4 {
+            let pg = doms
+                .immediate_dominator(nodes[i])
+                .map(|ix| ix.index());
+            assert_eq!(
+                imm_dom.immediate_dominator(i),
+                pg,
+                "immediate dominator mismatch at node {i}"
+            );
+        }
     }
 
     #[test]

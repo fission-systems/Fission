@@ -1,4 +1,5 @@
 use super::*;
+use crate::nir::structuring::SccAnalysis;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn surviving_label_refs_after_guarded_tail_promotion(
@@ -167,7 +168,7 @@ impl<'a> PreviewBuilder<'a> {
         internal_entries: &[usize],
         region: &HashSet<usize>,
     ) -> Result<(), PromotionGateRejection> {
-        let scc = self.analyze_cfg_scc();
+        let scc = SccAnalysis::analyze(&self.successors, &self.predecessors);
         if region
             .iter()
             .copied()
@@ -238,6 +239,15 @@ impl<'a> PreviewBuilder<'a> {
                     .all(|pred| region.contains(pred) && *pred < *idx)
         });
         if legacy_single_pred_succ {
+            // Fresh SCC on current successors (tests and some passes mutate `successors` without
+            // refreshing `cfg_facts`).
+            let scc = SccAnalysis::analyze(&self.successors, &self.predecessors);
+            if region
+                .iter()
+                .any(|&idx| scc.is_irreducible_node(idx))
+            {
+                return self.ensure_graph_invariant_promotion_region(start_idx, &internal, &region);
+            }
             return Ok(());
         }
 
