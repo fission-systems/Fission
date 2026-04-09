@@ -123,6 +123,67 @@ fn constant_folding_does_not_fold_variable_expressions() {
     assert!(code.contains("1"), "1 should still appear in: {code}");
 }
 
+#[test]
+fn normalize_collapses_if_else_with_identical_returns() {
+    let mut func = make_func(
+        "test_redundant_if_else_return",
+        vec![],
+        vec![HirStmt::If {
+            cond: varexpr("cond"),
+            then_body: vec![return_expr(const_expr(7, 32))],
+            else_body: vec![return_expr(const_expr(7, 32))],
+        }],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(code.contains("return 7;"), "expected collapsed return; got: {code}");
+    assert!(!code.contains("if ("), "redundant if should be removed; got: {code}");
+}
+
+#[test]
+fn normalize_collapses_guarded_return_followed_by_same_return() {
+    let mut func = make_func(
+        "test_redundant_guarded_return",
+        vec![],
+        vec![
+            HirStmt::If {
+                cond: varexpr("cond"),
+                then_body: vec![return_expr(const_expr(5, 32))],
+                else_body: Vec::new(),
+            },
+            return_expr(const_expr(5, 32)),
+        ],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(code.contains("return 5;"), "expected return to remain; got: {code}");
+    assert!(!code.contains("if ("), "redundant guarded if should be removed; got: {code}");
+}
+
+#[test]
+fn normalize_preserves_side_effect_in_redundant_conditional_return() {
+    let mut func = make_func(
+        "test_redundant_if_side_effect",
+        vec![],
+        vec![HirStmt::If {
+            cond: HirExpr::Call {
+                target: "check".to_string(),
+                args: vec![],
+                ty: NirType::Bool,
+            },
+            then_body: vec![return_expr(const_expr(9, 32))],
+            else_body: vec![return_expr(const_expr(9, 32))],
+        }],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(code.contains("check()"), "side-effect call must be preserved; got: {code}");
+    assert!(code.contains("return 9;"), "return must be preserved; got: {code}");
+}
+
 // ── Dead assignment elimination (via normalize_hir_function) ─────────────────
 
 #[test]

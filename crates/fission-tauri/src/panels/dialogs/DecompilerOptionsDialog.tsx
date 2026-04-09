@@ -204,7 +204,6 @@ export default function DecompilerOptionsDialog({
                                 options={[
                                     { value: "auto", label: "Auto (Fission NIR when safe)" },
                                     { value: "nir", label: "Fission NIR" },
-                                    { value: "mlil_preview", label: "MLIL Preview (Deprecated)" },
                                 ]}
                                 onChange={(v) => {
                                     setOptions((prev) => ({

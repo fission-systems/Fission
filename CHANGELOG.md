@@ -9,15 +9,29 @@
 - Replaced `NirBlock`'s basic lexical `phis: Vec<String>` handling with explicitly modeled O(N+E) SSA `NirPhiNode` structures carrying strict source var (`SsaVarId`) mapping.
 - Synchronized structuring dominator facts with CFG mutations by refreshing the cached dominator tree after irreducible-edge pruning and node-splitting, and switched `analyze_cfg_dominators()` to consume the cached fact source instead of recomputing on every call.
 - Tightened terminal exit merging in linear structuring so `Return` and `End` are no longer treated as interchangeable terminal exits; merged the previous duplicated acceptance checks into a single helper to keep rule-block-if-no-exit accounting consistent.
+- Added a cache-backed CFG fact bundle in structuring (`CfgFactCache`) and wired follow/postdom/frontier lookups through a single invalidation path after graph mutation to reduce stale-fact retries.
+- Strengthened NIR type inference fixed-point propagation by feeding already-known binding types into alias resolution and returning an explicit changed-flag from the pass, then using that signal to converge quickly without over-iterating.
+- Expanded normalization/structuring regression coverage, including a fixpoint idempotence test for type inference and broader guarded-tail/conditional follow stability checks.
 
 ### Validation
 - `cargo check -p fission-pcode`
 - `cargo test -p fission-pcode structuring_ -- --nocapture`
+- `cargo test -p fission-pcode reports_change_and_reaches_fixpoint -- --nocapture`
+- `cargo test -p fission-pcode structuring_ -- --nocapture`
+- `cargo check -p fission-pcode`
+- `cargo check -p fission-automation`
 - `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/test_control_flow_x64_O0.exe --limit 10 --baseline-dir artifacts/batch_benchmark/test_control_flow_x64_O0-20260409-154945`
 - 2-way regression check passed (`avg_norm` 34.69%, no degradation detected).
 - `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --auto-limit-functions 40`
 - `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --auto-limit-functions 40 --baseline-dir artifacts/batch_benchmark/putty-20260409-180504`
 - Putty 2-way regression check passed (`avg_norm` 4.34%, no degradation detected).
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --fission-bin target/release/fission-cli --pairwise-similarity-mode auto --pairwise-auto-shared-full-max 2000 --aggregate-similarity-mode weighted`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/test_control_flow_x64_O2.exe --fission-bin target/release/fission-cli --pairwise-similarity-mode auto --pairwise-auto-shared-full-max 2000 --aggregate-similarity-mode weighted`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/test_real_world_algorithms_x64_O2.exe --fission-bin target/release/fission-cli --pairwise-similarity-mode auto --pairwise-auto-shared-full-max 2000 --aggregate-similarity-mode weighted`
+- 3-gate KPI snapshot:
+	- putty: `avg_norm=34.03`, `both_success=99.889%`, `high_div=97.081%`, `wall_speedup=1.51x`, `throughput_speedup=3.233x`, delta overall=`degraded` (0 improved / 3 degraded / 9 unchanged).
+	- test_control_flow_x64_O2: `avg_norm=35.25`, `both_success=100.0%`, `high_div=92.143%`, `wall_speedup=1.268x`, `throughput_speedup=2.074x`, delta overall=`improved` (2 improved / 1 degraded / 9 unchanged).
+	- test_real_world_algorithms_x64_O2: `avg_norm=34.62`, `both_success=100.0%`, `high_div=94.964%`, `wall_speedup=1.257x`, `throughput_speedup=2.045x`, delta overall=`degraded` (1 improved / 3 degraded / 8 unchanged).
 
 ## 2026-04-08
 

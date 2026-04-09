@@ -102,19 +102,42 @@ fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
 fn infer_type_for_binding(
     name: &str,
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
     visited: &mut HashSet<String>,
 ) -> NirType {
     if !visited.insert(name.to_owned()) {
         return NirType::Unknown;
     }
     match defs.get(name) {
-        None => NirType::Unknown,
-        Some(DefEntry::Known(ty)) => ty.clone(),
+        None => known_binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or(NirType::Unknown),
+        Some(DefEntry::Known(ty)) if *ty != NirType::Unknown => ty.clone(),
+        Some(DefEntry::Known(_)) => known_binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or(NirType::Unknown),
         Some(DefEntry::Alias(src)) => {
             let src = src.clone();
-            infer_type_for_binding(&src, defs, visited)
+            infer_type_for_binding(&src, defs, known_binding_types, visited)
         }
     }
+}
+
+fn collect_known_binding_types(func: &HirFunction) -> HashMap<String, NirType> {
+    let mut known = HashMap::new();
+    for b in &func.params {
+        if b.ty != NirType::Unknown {
+            known.insert(b.name.clone(), b.ty.clone());
+        }
+    }
+    for b in &func.locals {
+        if b.ty != NirType::Unknown {
+            known.insert(b.name.clone(), b.ty.clone());
+        }
+    }
+    known
 }
 
 /// Re-derive the function's return type from its `return` statements.
@@ -135,13 +158,14 @@ fn rederive_return_type(
     surface_return_type_name: &Option<String>,
     body: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
 ) {
     if *return_type != NirType::Unknown || surface_return_type_name.is_some() {
         return;
     }
     // Collect ALL non-Unknown return candidates across the whole body.
     let mut candidates: Vec<NirType> = Vec::new();
-    collect_return_types(body, defs, &mut candidates);
+    collect_return_types(body, defs, known_binding_types, &mut candidates);
 
     if candidates.is_empty() {
         return;
@@ -171,16 +195,18 @@ fn rederive_return_type(
 fn collect_return_types(
     stmts: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) {
     for stmt in stmts {
-        collect_return_types_stmt(stmt, defs, out);
+        collect_return_types_stmt(stmt, defs, known_binding_types, out);
     }
 }
 
 fn collect_return_types_stmt(
     stmt: &HirStmt,
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) {
     match stmt {
@@ -188,7 +214,7 @@ fn collect_return_types_stmt(
             let ty = match expr {
                 HirExpr::Var(name) => {
                     let mut visited = HashSet::new();
-                    infer_type_for_binding(name, defs, &mut visited)
+                    infer_type_for_binding(name, defs, known_binding_types, &mut visited)
                 }
                 other => expr_type(other),
             };
@@ -196,24 +222,24 @@ fn collect_return_types_stmt(
                 out.push(ty);
             }
         }
-        HirStmt::Block(stmts) => collect_return_types(stmts, defs, out),
+        HirStmt::Block(stmts) => collect_return_types(stmts, defs, known_binding_types, out),
         HirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            collect_return_types(then_body, defs, out);
-            collect_return_types(else_body, defs, out);
+            collect_return_types(then_body, defs, known_binding_types, out);
+            collect_return_types(else_body, defs, known_binding_types, out);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            collect_return_types(body, defs, out);
+            collect_return_types(body, defs, known_binding_types, out);
         }
-        HirStmt::For { body, .. } => collect_return_types(body, defs, out),
+        HirStmt::For { body, .. } => collect_return_types(body, defs, known_binding_types, out),
         HirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                collect_return_types(&case.body, defs, out);
+                collect_return_types(&case.body, defs, known_binding_types, out);
             }
-            collect_return_types(default, defs, out);
+            collect_return_types(default, defs, known_binding_types, out);
         }
         _ => {}
     }
@@ -222,27 +248,30 @@ fn collect_return_types_stmt(
 fn infer_return_type_from_body(
     stmts: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
 ) -> NirType {
     let mut candidates = Vec::new();
-    collect_return_types(stmts, defs, &mut candidates);
+    collect_return_types(stmts, defs, known_binding_types, &mut candidates);
     candidates.into_iter().find(|t| *t != NirType::Unknown).unwrap_or(NirType::Unknown)
 }
 
 fn infer_return_type_stmt(
     stmt: &HirStmt,
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
 ) -> Option<NirType> {
     let mut out = Vec::new();
-    collect_return_types_stmt(stmt, defs, &mut out);
+    collect_return_types_stmt(stmt, defs, known_binding_types, &mut out);
     out.into_iter().find(|t| *t != NirType::Unknown)
 }
 
 fn infer_return_type_stmts(
     stmts: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
 ) -> Option<NirType> {
     for stmt in stmts.iter().rev() {
-        if let Some(ty) = infer_return_type_stmt(stmt, defs) {
+        if let Some(ty) = infer_return_type_stmt(stmt, defs, known_binding_types) {
             return Some(ty);
         }
     }
@@ -255,11 +284,13 @@ fn infer_return_type_stmts(
 ///   `ty == Unknown` and no `surface_type_name` override.
 /// - Re-derives `HirFunction.return_type` when it is `Unknown`.
 ///
-/// This is idempotent — running it twice produces the same result.
-pub(super) fn apply_type_inference_pass(func: &mut HirFunction) {
+/// Returns `true` when at least one binding/return type was strengthened.
+pub(super) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     // Build the owned def map (no lifetime ties to func).
     let mut defs: HashMap<String, DefEntry> = HashMap::new();
     scan_def_types(&func.body, &mut defs);
+    let mut known_binding_types = collect_known_binding_types(func);
+    let mut changed = false;
 
     // Infer types for locals whose ty is Unknown.
     for binding in func.locals.iter_mut() {
@@ -267,9 +298,11 @@ pub(super) fn apply_type_inference_pass(func: &mut HirFunction) {
             continue;
         }
         let mut visited = HashSet::new();
-        let inferred = infer_type_for_binding(&binding.name, &defs, &mut visited);
-        if inferred != NirType::Unknown {
+        let inferred = infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
+        if inferred != NirType::Unknown && binding.ty != inferred {
             binding.ty = inferred;
+            known_binding_types.insert(binding.name.clone(), binding.ty.clone());
+            changed = true;
         }
     }
 
@@ -280,19 +313,26 @@ pub(super) fn apply_type_inference_pass(func: &mut HirFunction) {
             continue;
         }
         let mut visited = HashSet::new();
-        let inferred = infer_type_for_binding(&binding.name, &defs, &mut visited);
-        if inferred != NirType::Unknown {
+        let inferred = infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
+        if inferred != NirType::Unknown && binding.ty != inferred {
             binding.ty = inferred;
+            known_binding_types.insert(binding.name.clone(), binding.ty.clone());
+            changed = true;
         }
     }
 
     // Re-derive the return type (no lifetime conflict — defs owns its data).
+    let prev_return_type = func.return_type.clone();
     rederive_return_type(
         &mut func.return_type,
         &func.surface_return_type_name,
         &func.body,
         &defs,
+        &known_binding_types,
     );
+    changed |= func.return_type != prev_return_type;
+
+    changed
 }
 
 #[cfg(test)]
@@ -345,6 +385,17 @@ mod tests {
             func.locals[0].ty,
             NirType::Int { bits: 32, signed: false }
         );
+    }
+
+    #[test]
+    fn reports_change_and_reaches_fixpoint() {
+        let body = vec![make_assign(
+            "x",
+            HirExpr::Const(42, NirType::Int { bits: 32, signed: false }),
+        )];
+        let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
+        assert!(apply_type_inference_pass(&mut func));
+        assert!(!apply_type_inference_pass(&mut func));
     }
 
     /// Chain: `y = x`, `x = Const(1, bool)` → y.ty inferred as `bool`

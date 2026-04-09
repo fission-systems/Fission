@@ -61,9 +61,10 @@ impl<'a> PreviewBuilder<'a> {
                 preds.retain(|&p| p != src);
             }
         }
-        // Downstream structuring uses the pruned CFG. Keep the dominator cache
+        // Downstream structuring uses the pruned CFG. Keep cached CFG facts
         // aligned with this final successor/predecessor topology.
-        dom_tree = crate::nir::structuring::DomTree::analyze(&successors, &predecessors);
+        let cfg_facts = crate::nir::structuring::CfgFactCache::analyze(&successors, &predecessors);
+        dom_tree = cfg_facts.dominators().clone();
 
         let register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, options.calling_convention);
@@ -94,6 +95,7 @@ impl<'a> PreviewBuilder<'a> {
             layout_fallthrough,
             successors,
             predecessors,
+            cfg_facts,
             dom_tree,
             irreducible_edges,
             virtual_block_map: Vec::new(),

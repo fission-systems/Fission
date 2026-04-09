@@ -41,6 +41,211 @@ pub(crate) struct IrreducibleComponent {
     pub(crate) headers: Vec<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CfgFactCache {
+    edge_analysis: CfgAnalysis,
+    dom_tree: DomTree,
+    imm_dom_tree: ImmDomTree,
+    dom_frontier: DominanceFrontier,
+    postdom_tree: PostDomTree,
+    imm_postdom_tree: ImmPostDomTree,
+    scc_analysis: SccAnalysis,
+}
+
+impl CfgFactCache {
+    pub(crate) fn analyze(successors: &[Vec<usize>], predecessors: &[Vec<usize>]) -> Self {
+        let imm_dom_tree = ImmDomTree::compute(successors, predecessors);
+        Self {
+            edge_analysis: CfgAnalysis::analyze(successors, predecessors),
+            dom_tree: DomTree::analyze(successors, predecessors),
+            dom_frontier: DominanceFrontier::compute(predecessors, &imm_dom_tree),
+            imm_dom_tree,
+            postdom_tree: PostDomTree::analyze(successors, predecessors),
+            imm_postdom_tree: ImmPostDomTree::compute(successors, predecessors),
+            scc_analysis: SccAnalysis::analyze(successors, predecessors),
+        }
+    }
+
+    pub(crate) fn edges(&self) -> &CfgAnalysis {
+        &self.edge_analysis
+    }
+
+    pub(crate) fn dominators(&self) -> &DomTree {
+        &self.dom_tree
+    }
+
+    pub(crate) fn dominance_frontier(&self) -> &DominanceFrontier {
+        &self.dom_frontier
+    }
+
+    pub(crate) fn postdominators(&self) -> &PostDomTree {
+        &self.postdom_tree
+    }
+
+    pub(crate) fn immediate_postdominators(&self) -> &ImmPostDomTree {
+        &self.imm_postdom_tree
+    }
+
+    pub(crate) fn scc(&self) -> &SccAnalysis {
+        &self.scc_analysis
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImmDomTree {
+    idom: Vec<usize>,
+}
+
+impl ImmDomTree {
+    pub(crate) fn compute(successors: &[Vec<usize>], predecessors: &[Vec<usize>]) -> Self {
+        let node_count = successors.len();
+        if node_count == 0 {
+            return Self {
+                idom: Vec::new(),
+            };
+        }
+
+        let mut roots: Vec<usize> = predecessors
+            .iter()
+            .enumerate()
+            .filter_map(|(i, preds)| preds.is_empty().then_some(i))
+            .collect();
+        if roots.is_empty() {
+            roots.push(0);
+        }
+
+        let total_nodes = node_count + if roots.len() > 1 { 1 } else { 0 };
+        let super_root = if roots.len() > 1 { Some(node_count) } else { None };
+
+        let mut fwd_succs: Vec<Vec<usize>> = successors.to_vec();
+        fwd_succs.resize(total_nodes, Vec::new());
+        let mut fwd_preds: Vec<Vec<usize>> = predecessors.to_vec();
+        fwd_preds.resize(total_nodes, Vec::new());
+        if let Some(sr) = super_root {
+            for &root in &roots {
+                fwd_succs[sr].push(root);
+                fwd_preds[root].push(sr);
+            }
+        }
+
+        let start = super_root.unwrap_or(roots[0]);
+        let rpo_order = compute_rpo(start, &fwd_succs, total_nodes);
+        let mut rpo_number = vec![usize::MAX; total_nodes];
+        for (pos, &n) in rpo_order.iter().enumerate() {
+            rpo_number[n] = pos;
+        }
+
+        const UNDEF: usize = usize::MAX;
+        let mut idom = vec![UNDEF; total_nodes];
+        idom[start] = start;
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &n in &rpo_order {
+                if n == start {
+                    continue;
+                }
+                let mut new_idom = UNDEF;
+                for &p in &fwd_preds[n] {
+                    if idom[p] == UNDEF {
+                        continue;
+                    }
+                    if new_idom == UNDEF {
+                        new_idom = p;
+                    } else {
+                        new_idom = cooper_intersect(new_idom, p, &idom, &rpo_number);
+                    }
+                }
+                if new_idom == UNDEF {
+                    new_idom = n;
+                }
+                if idom[n] != new_idom {
+                    idom[n] = new_idom;
+                    changed = true;
+                }
+            }
+        }
+
+        for i in 0..total_nodes {
+            if idom[i] == UNDEF {
+                idom[i] = i;
+            }
+        }
+
+        idom.truncate(node_count);
+        rpo_number.truncate(node_count);
+        for i in 0..node_count {
+            if idom[i] >= node_count {
+                idom[i] = i;
+            }
+        }
+
+        Self { idom }
+    }
+
+    pub(crate) fn immediate_dominator(&self, n: usize) -> Option<usize> {
+        let idom = self.idom.get(n).copied()?;
+        if idom == n {
+            None
+        } else {
+            Some(idom)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DominanceFrontier {
+    frontiers: Vec<HashSet<usize>>,
+}
+
+impl DominanceFrontier {
+    pub(crate) fn compute(predecessors: &[Vec<usize>], imm_dom: &ImmDomTree) -> Self {
+        let node_count = predecessors.len();
+        let mut frontiers = vec![HashSet::new(); node_count];
+        for block in 0..node_count {
+            if predecessors[block].len() < 2 {
+                continue;
+            }
+            let Some(idom_block) = imm_dom.immediate_dominator(block) else {
+                continue;
+            };
+            for mut runner in predecessors[block].iter().copied() {
+                if runner >= node_count {
+                    continue;
+                }
+                let mut hops = 0usize;
+                while runner != idom_block {
+                    frontiers[runner].insert(block);
+                    let Some(parent) = imm_dom.immediate_dominator(runner) else {
+                        break;
+                    };
+                    if parent == runner {
+                        break;
+                    }
+                    runner = parent;
+                    hops += 1;
+                    if hops > node_count + 1 {
+                        break;
+                    }
+                }
+            }
+        }
+        Self { frontiers }
+    }
+
+    pub(crate) fn contains(&self, from: usize, to: usize) -> bool {
+        self.frontiers
+            .get(from)
+            .is_some_and(|nodes| nodes.contains(&to))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn of(&self, node: usize) -> Option<&HashSet<usize>> {
+        self.frontiers.get(node)
+    }
+}
+
 impl CfgAnalysis {
     pub(crate) fn analyze(successors: &[Vec<usize>], predecessors: &[Vec<usize>]) -> Self {
         let node_count = successors.len();
@@ -711,28 +916,21 @@ fn dfs_postorder(
 }
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn refresh_cfg_fact_cache(&mut self) {
-        self.dom_tree = DomTree::analyze(&self.successors, &self.predecessors);
+    pub(super) fn cfg_fact_cache(&self) -> &CfgFactCache {
+        &self.cfg_facts
     }
 
-    pub(super) fn analyze_cfg_edges(&self) -> CfgAnalysis {
-        CfgAnalysis::analyze(&self.successors, &self.predecessors)
+    pub(super) fn refresh_cfg_fact_cache(&mut self) {
+        self.cfg_facts = CfgFactCache::analyze(&self.successors, &self.predecessors);
+        self.dom_tree = self.cfg_facts.dominators().clone();
     }
 
     pub(super) fn analyze_cfg_dominators(&self) -> DomTree {
-        self.dom_tree.clone()
-    }
-
-    pub(super) fn analyze_cfg_postdominators(&self) -> PostDomTree {
-        PostDomTree::analyze(&self.successors, &self.predecessors)
-    }
-
-    pub(super) fn analyze_cfg_imm_postdominators(&self) -> ImmPostDomTree {
-        ImmPostDomTree::compute(&self.successors, &self.predecessors)
+        self.cfg_facts.dominators().clone()
     }
 
     pub(super) fn analyze_cfg_scc(&self) -> SccAnalysis {
-        SccAnalysis::analyze(&self.successors, &self.predecessors)
+        self.cfg_facts.scc().clone()
     }
 }
 
@@ -948,6 +1146,36 @@ mod tests {
 
         assert_eq!(postdom.nearest_common_postdominator(&[1, 2]), Some(3));
         assert_eq!(postdom.nearest_common_postdominator(&[0, 1]), Some(3));
+    }
+
+    #[test]
+    fn imm_dom_tree_and_dominance_frontier_match_diamond_shape() {
+        // 0 -> {1,2}; 1 -> 3; 2 -> 3; 3 -> []
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let imm_dom = ImmDomTree::compute(&successors, &predecessors);
+        let df = DominanceFrontier::compute(&predecessors, &imm_dom);
+
+        assert_eq!(imm_dom.immediate_dominator(1), Some(0));
+        assert_eq!(imm_dom.immediate_dominator(2), Some(0));
+        assert_eq!(imm_dom.immediate_dominator(3), Some(0));
+        assert!(df.contains(1, 3));
+        assert!(df.contains(2, 3));
+        assert!(!df.contains(0, 3));
+    }
+
+    #[test]
+    fn dominance_frontier_empty_for_linear_chain() {
+        // 0 -> 1 -> 2 -> 3 -> []
+        let successors = vec![vec![1], vec![2], vec![3], vec![]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let imm_dom = ImmDomTree::compute(&successors, &predecessors);
+        let df = DominanceFrontier::compute(&predecessors, &imm_dom);
+
+        for idx in 0..successors.len() {
+            let frontier = df.of(idx).expect("frontier entry must exist");
+            assert!(frontier.is_empty());
+        }
     }
 
     #[test]

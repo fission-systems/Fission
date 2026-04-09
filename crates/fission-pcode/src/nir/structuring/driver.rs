@@ -7,17 +7,24 @@ impl<'a> PreviewBuilder<'a> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
         let force_linear = self.should_force_linear_structuring();
-        let scc = self.analyze_cfg_scc();
-        self.structuring_scc_component_count += scc.component_count();
-        self.structuring_irreducible_scc_count += scc.irreducible_count();
-        self.structuring_irreducible_header_count += scc.irreducible_header_total_count();
+        let (scc_component_count, scc_irreducible_count, scc_irreducible_header_count) = {
+            let scc = self.cfg_fact_cache().scc();
+            (
+                scc.component_count(),
+                scc.irreducible_count(),
+                scc.irreducible_header_total_count(),
+            )
+        };
+        self.structuring_scc_component_count += scc_component_count;
+        self.structuring_irreducible_scc_count += scc_irreducible_count;
+        self.structuring_irreducible_header_count += scc_irreducible_header_count;
 
         // Node-splitting for irreducible CFGs: when the SCC analysis shows
         // irreducible SCCs, attempt to make the CFG reducible by splitting
         // the extra header nodes into virtual clones.  This allows the
         // structured-code reducer to succeed where it would otherwise fall
         // back to goto-based linearisation.
-        if scc.irreducible_count() > 0 && !force_linear {
+        if scc_irreducible_count > 0 && !force_linear {
             let block_stmt_counts: Vec<usize> = self
                 .pcode
                 .blocks
@@ -66,11 +73,13 @@ impl<'a> PreviewBuilder<'a> {
         // Dom and postdom are computed unconditionally and used by the primary reducer to
         // determine follow blocks.  The diag path additionally logs edge-class statistics.
         // NOTE: These are computed AFTER node-splitting so they reflect the augmented CFG.
-        let dom = self.analyze_cfg_dominators();
-        let postdom = self.analyze_cfg_postdominators();
+        let cfg_facts = self.cfg_fact_cache();
+        let dom = cfg_facts.dominators();
+        let postdom = cfg_facts.postdominators();
+        let dom_frontier = cfg_facts.dominance_frontier();
 
         if diag {
-            let cfg = self.analyze_cfg_edges();
+            let cfg = cfg_facts.edges();
             let total_b = self.pcode.blocks.len() + self.virtual_block_map.len();
             let sample_ncd = if total_b >= 2 {
                 dom.nearest_common_dominator(&[0, total_b - 1])
@@ -86,8 +95,8 @@ impl<'a> PreviewBuilder<'a> {
                 cfg.count_class(EdgeClass::Cross),
                 dom.roots().len(),
                 postdom.exits().len(),
-                scc.component_count(),
-                scc.irreducible_count(),
+                scc_component_count,
+                scc_irreducible_count,
                 sample_ncd,
             );
         }
@@ -95,7 +104,7 @@ impl<'a> PreviewBuilder<'a> {
         // Pre-compute the immediate-postdominator tree using Cooper's algorithm (O(n log n)).
         // This is more efficient than the set-based PostDomTree for large functions and gives
         // O(depth) LCA queries.
-        let imm_postdom = self.analyze_cfg_imm_postdominators();
+        let imm_postdom = cfg_facts.immediate_postdominators();
 
         // Pre-compute nearest common postdominator ("follow block") for each block,
         // including any virtual blocks created by node-splitting.
@@ -109,12 +118,19 @@ impl<'a> PreviewBuilder<'a> {
                 // Use efficient LCA on the idom tree instead of set intersection.
                 let follow = imm_postdom.nearest_common_postdominator(succs)?;
                 // Only use as follow if it's strictly after the branch block (forward edge).
-                if follow > i { Some(follow) } else { None }
+                if follow <= i {
+                    return None;
+                }
+                // Guard postdom-based follow discovery with a dominance-frontier witness
+                // from at least one outgoing arm. This avoids selecting distant common
+                // postdominators that are not a real local join for this branch.
+                let has_frontier_witness = succs
+                    .iter()
+                    .copied()
+                    .any(|succ| succ == follow || dom_frontier.contains(succ, follow));
+                has_frontier_witness.then_some(follow)
             })
             .collect();
-        // Suppress unused warning on `dom` until more reducers consume it.
-        let _ = &dom;
-        let _ = &postdom;
 
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;

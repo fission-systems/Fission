@@ -181,7 +181,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                     code: `// Error decompiling ${functionName}: ${err}`,
                     function_name: functionName,
                     address: addressText,
-                    engine_used: "legacy",
+                    engine_used: "nir",
                     fell_back: true,
                     fallback_reason: `native_pcode_failure: ${String(err)}`,
                 };

@@ -6,6 +6,7 @@ use super::arith::{
 };
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
+    collapse_redundant_conditional_returns,
     cast_elision_pass, cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
     elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, fuse_single_predecessor_boundaries, inline_single_use_temps,
@@ -43,6 +44,41 @@ use super::variadic_stack_region::apply_variadic_stack_region_pass;
 use super::wave_stats;
 use super::*;
 use std::time::Instant;
+
+const TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS: usize = 6;
+
+fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool) {
+    let mut interproc_signature_rounds = 0usize;
+    for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
+        let def_changed = apply_type_inference_pass(func);
+        let callsite_changed = apply_callsite_type_prop_pass(func);
+        let use_changed = apply_use_driven_type_infer_pass(func);
+        let round_changed = def_changed || callsite_changed || use_changed;
+
+        if callsite_changed {
+            interproc_signature_rounds += 1;
+        }
+
+        if diag {
+            eprintln!(
+                "[DIAG] normalize type-fp: {} round={} def_changed={} callsite_changed={} use_changed={}",
+                func.name,
+                round + 1,
+                def_changed,
+                callsite_changed,
+                use_changed,
+            );
+        }
+
+        if !round_changed {
+            break;
+        }
+    }
+
+    if interproc_signature_rounds > 0 {
+        wave_stats::add_interproc_constraint_rounds(interproc_signature_rounds);
+    }
+}
 
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
     cleanup_stmt_list(body, "<body>", 0);
@@ -164,24 +200,9 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
-    // Type inference: propagate types from typed sub-expressions (Const, Cast,
-    // Binary, …) to NirBinding.ty for locals/params that are still Unknown,
-    // and re-derive the function return type for `return <var>` patterns.
-    apply_type_inference_pass(func);
-    // Call-site inter-procedural type propagation: look up callee signatures
-    // in the Windows API database and constrain argument / return-value bindings.
-    // Runs right after def-driven inference so that the API-derived types
-    // become seeds for the subsequent use-driven backward pass.
-    if apply_callsite_type_prop_pass(func) {
-        apply_type_inference_pass(func);
-    }
-    // Use-driven backward type propagation: infer pointer/sign types from
-    // use-sites (Load/Store/signed comparisons/Return context).  Runs after
-    // def-driven inference so its results can seed additional constraints.
-    if apply_use_driven_type_infer_pass(func) {
-        // A second def-driven pass to pick up any newly-typed variables.
-        apply_type_inference_pass(func);
-    }
+    // Module B: run def-driven, callsite-signature, and use-driven inference
+    // to convergence (bounded). This avoids one-shot ordering sensitivity.
+    apply_type_signature_fixed_point(func, diag);
     // Cast elision: remove outer casts that are redundant given the binding's
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
@@ -505,6 +526,10 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
         if simplify_empty_and_constant_ifs(stmts) {
             changed = true;
             last_changed_pass = Some("simplify_empty_and_constant_ifs");
+        }
+        if collapse_redundant_conditional_returns(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_redundant_conditional_returns");
         }
         if simplify_fallthrough_edges(stmts) {
             changed = true;

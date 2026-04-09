@@ -35,18 +35,18 @@ function decompileStatusLabel(result: DecompileResult): string {
         return "Fission NIR -> Unsupported";
     }
     if (reason.startsWith("legacy_fallback:")) {
-        return "Fission NIR -> Native fallback";
+        return "Fission NIR -> Fallback";
     }
     if (reason.startsWith("native_pcode_failure:")) {
-        return "Fission NIR -> Native p-code failure";
+        return "Fission NIR -> p-code failure";
     }
-    if (result.engine_used === "nir" || result.engine_used === "mlil_preview") {
+    if (result.engine_used === "nir") {
         if (!result.fell_back && isUnstructuredPreviewCode(result.code)) {
             return "Fission NIR (unstructured)";
         }
         return result.fell_back ? "Fission NIR rescue" : "Fission NIR";
     }
-    return "Native decompiler";
+    return "Fission NIR";
 }
 
 const KEYWORDS = new Set([

@@ -146,6 +146,66 @@ pub(super) fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool 
     changed
 }
 
+pub(super) fn collapse_redundant_conditional_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut rewritten = Vec::with_capacity(stmts.len());
+    let mut idx = 0usize;
+
+    while idx < stmts.len() {
+        let Some(HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        }) = stmts.get(idx)
+        else {
+            rewritten.push(stmts[idx].clone());
+            idx += 1;
+            continue;
+        };
+
+        let then_ret = single_return_stmt(then_body);
+        let else_ret = single_return_stmt(else_body);
+
+        // if (cond) return X; else return X;  ==>  [cond side effects]; return X;
+        if let (Some(then_ret), Some(else_ret)) = (then_ret.clone(), else_ret.clone())
+            && then_ret == else_ret
+        {
+            changed = true;
+            if expr_has_side_effects(cond) {
+                rewritten.push(HirStmt::Expr(cond.clone()));
+            }
+            rewritten.push(then_ret);
+            idx += 1;
+            continue;
+        }
+
+        // if (cond) return X; return X;  ==>  [cond side effects]; return X;
+        // if (cond) {} else return X; return X;  ==>  [cond side effects]; return X;
+        if let Some(next_ret) = stmts.get(idx + 1).and_then(as_return_stmt) {
+            let then_matches_next = then_ret.as_ref().is_some_and(|ret| ret == next_ret)
+                && else_body.is_empty();
+            let else_matches_next = else_ret.as_ref().is_some_and(|ret| ret == next_ret)
+                && then_body.is_empty();
+            if then_matches_next || else_matches_next {
+                changed = true;
+                if expr_has_side_effects(cond) {
+                    rewritten.push(HirStmt::Expr(cond.clone()));
+                }
+                idx += 1;
+                continue;
+            }
+        }
+
+        rewritten.push(stmts[idx].clone());
+        idx += 1;
+    }
+
+    if changed {
+        *stmts = rewritten;
+    }
+    changed
+}
+
 pub(super) fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
@@ -422,6 +482,17 @@ fn next_label_index_and_name(stmts: &[HirStmt], start_idx: usize) -> Option<(usi
 
 fn matches_single_goto(body: &[HirStmt], label: &str) -> bool {
     matches!(body, [HirStmt::Goto(target)] if target == label)
+}
+
+fn as_return_stmt(stmt: &HirStmt) -> Option<&HirStmt> {
+    matches!(stmt, HirStmt::Return(_)).then_some(stmt)
+}
+
+fn single_return_stmt(body: &[HirStmt]) -> Option<HirStmt> {
+    match body {
+        [HirStmt::Return(expr)] => Some(HirStmt::Return(expr.clone())),
+        _ => None,
+    }
 }
 
 fn single_goto_target(body: &[HirStmt]) -> Option<&str> {

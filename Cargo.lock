@@ -1381,6 +1381,7 @@ version = "0.1.0"
 dependencies = [
  "fission-loader",
  "fission-pcode",
+ "fission-sleigh",
  "fission-static",
 ]
 
@@ -1550,6 +1551,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "fission-core",
+ "fission-decompiler-core",
  "fission-dynamic",
  "fission-loader",
  "fission-pcode",

@@ -2,7 +2,6 @@ use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use fission_core::FissionError;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{NirRenderOptions, PcodeFunction, Varnode};
 use std::cmp::min;
 use std::fs;
 use std::io::{self, Write};
@@ -24,137 +23,6 @@ struct FunctionRenderResult {
     postprocess_sec: f64,
     plain_output: String,
     json_entry: serde_json::Value,
-}
-
-fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
-    if arch_spec.starts_with("AARCH64:LE:64") && arch_spec.contains("AppleSilicon") {
-        return Some("AARCH64_AppleSilicon");
-    }
-    if arch_spec.starts_with("AARCH64:LE:64") {
-        return Some("AARCH64");
-    }
-    if arch_spec.starts_with("AARCH64:BE:64") {
-        return Some("AARCH64BE");
-    }
-    if arch_spec.starts_with("x86:LE:64") {
-        return Some("x86-64");
-    }
-    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
-        return Some("x86");
-    }
-    None
-}
-
-/// Extract the decode-failure offset from an error message of the form
-/// "decode failed at 0x<hex>: …" and return how many bytes from `func_addr`
-/// that corresponds to (returns `None` if no such pattern is found).
-fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
-    // Look for "decode failed at 0x<hex>" in the message.
-    let marker = "decode failed at 0x";
-    let idx = err.find(marker)?;
-    let hex_start = idx + marker.len();
-    let hex_end = err[hex_start..]
-        .find(|c: char| !c.is_ascii_hexdigit())
-        .map(|i| hex_start + i)
-        .unwrap_or(err.len());
-    let fail_addr = u64::from_str_radix(&err[hex_start..hex_end], 16).ok()?;
-    let safe = fail_addr.checked_sub(func_addr)? as usize;
-    if safe == 0 { None } else { Some(safe) }
-}
-
-fn decode_rust_sleigh_pcode(
-    lifter: &fission_sleigh::lifter::SleighLifter,
-    binary: &LoadedBinary,
-    func: &FunctionInfo,
-) -> Result<PcodeFunction, FissionError> {
-    let max_bytes = if func.size > 0 {
-        usize::try_from(func.size)
-            .unwrap_or(0x4000)
-            .min(0x10000)
-            .max(1)
-    } else {
-        binary
-            .function_after(func.address)
-            .and_then(|next| {
-                let dist = next.address.saturating_sub(func.address) as usize;
-                if dist > 0 { Some(dist.min(0x10000)) } else { None }
-            })
-            .unwrap_or(0x4000)
-    };
-
-    let bytes = binary.view_bytes(func.address, max_bytes).ok_or_else(|| {
-        FissionError::decompiler(format!(
-            "rust_sleigh: unable to read bytes at 0x{:x}",
-            func.address
-        ))
-    })?;
-
-    let result = lifter
-        .lift_raw_pcode_function_with_contract(&bytes, func.address, 512);
-
-    match result {
-        Ok(lifted) => Ok(lifted.function),
-        Err(first_err) => {
-            // If the lift failed due to a byte-level decode error at a known
-            // offset, retry with the safe byte count (bytes up to the failure
-            // point).  This gracefully handles scanned functions whose size
-            // was over-estimated and whose tail lands in data or a different
-            // function's code.
-            let err_str = format!("{first_err:#}");
-            if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, func.address) {
-                if safe > 0 && safe < bytes.len() {
-                    if let Ok(retry) = lifter
-                        .lift_raw_pcode_function_with_contract(&bytes[..safe], func.address, 512)
-                    {
-                        return Ok(retry.function);
-                    }
-                }
-            }
-            // Propagate the original error if the retry path is unavailable
-            // or also failed.
-            Err(FissionError::decompiler(format!(
-                "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
-                func.name, func.address, first_err
-            )))
-        }
-    }
-}
-
-fn format_varnode_for_pcode(vn: &Varnode) -> String {
-    if vn.is_constant {
-        format!("const(0x{:x}:{})", vn.constant_val as u64, vn.size)
-    } else {
-        format!("v(space={},off=0x{:x},size={})", vn.space_id, vn.offset, vn.size)
-    }
-}
-
-fn render_pcode_text(func: &FunctionInfo, pcode: &PcodeFunction) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// rust_sleigh direct pcode output: {}\n",
-        func.name
-    ));
-    for block in &pcode.blocks {
-        out.push_str(&format!("block_{} @ 0x{:x}\n", block.index, block.start_address));
-        for op in &block.ops {
-            let out_vn = op
-                .output
-                .as_ref()
-                .map(format_varnode_for_pcode)
-                .unwrap_or_else(|| "-".to_string());
-            let in_vn = op
-                .inputs
-                .iter()
-                .map(format_varnode_for_pcode)
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push_str(&format!(
-                "  [{:04}] 0x{:x} {:?}  {} <- {}\n",
-                op.seq_num, op.address, op.opcode, out_vn, in_vn
-            ));
-        }
-    }
-    out
 }
 
 fn should_use_assembly_fallback(error: &str) -> bool {
@@ -220,63 +88,24 @@ fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
 ) -> Result<(String, bool, Option<String>, Option<fission_pcode::NirBuildStats>, Option<fission_pcode::NirHintStats>), FissionError> {
-    let language = sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
-        FissionError::decompiler(format!(
-            "rust_sleigh: unsupported arch_spec '{}'",
-            binary.arch_spec
-        ))
-    })?;
-
-    let lifter = fission_sleigh::lifter::SleighLifter::new_for_language(language)
-        .map_err(|e| FissionError::decompiler(format!("rust_sleigh: {e:#}")))?;
-
-    let pcode = decode_rust_sleigh_pcode(&lifter, binary, func)?;
-
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
-    options.pe_x64_only = false;
-    options.conservative_irreducible_fallback = true;
-
-    let selection = fission_decompiler_core::select_nir_output_from_prebuilt_pcode(
-        &pcode,
+    let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();
+    let result = fission_decompiler_core::decompile_with_rust_sleigh(
         binary,
         func.address,
         &func.name,
-        fission_decompiler_core::NirEngineMode::Nir,
+        &config,
         None,
-        options,
+        None,
     )
-    .map_err(|e| FissionError::decompiler(format!("rust_sleigh routing failed: {e}")))?;
+    .map_err(FissionError::decompiler)?;
 
-    if let Some(code) = selection.nir_code {
-        return Ok((
-            code,
-            selection.fell_back,
-            selection.fallback_reason,
-            selection.build_stats,
-            selection.hint_stats,
-        ));
-    }
-
-    let fallback_reason = selection
-        .fallback_reason
-        .unwrap_or_else(|| "nir skipped: function not supported by Fission NIR builder".to_string());
-    let lower = fallback_reason.to_ascii_lowercase();
-    let is_unsupported_arch = lower.contains("unsupported architecture in mlil-preview")
-        || matches!(selection.fallback_kind_refined, Some("preview_architecture_unsupported"));
-    if is_unsupported_arch {
-        return Ok((
-            render_pcode_text(func, &pcode),
-            true,
-            Some("nir_unsupported_arch:pcode_dump".to_string()),
-            None,
-            None,
-        ));
-    }
-
-    Err(FissionError::decompiler(format!(
-        "rust_sleigh render failed: {}",
-        fallback_reason
-    )))
+    Ok((
+        result.code,
+        result.fell_back,
+        result.fallback_reason,
+        result.build_stats,
+        result.hint_stats,
+    ))
 }
 
 fn collect_target_functions(cli: &OneShotArgs, binary: &LoadedBinary) -> Vec<FunctionInfo> {

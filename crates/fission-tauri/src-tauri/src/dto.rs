@@ -208,9 +208,9 @@ pub struct DecompilerOptions {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DecompilerEngineMode {
-    Legacy,
     #[serde(alias = "mlil_preview")]
     Nir,
+    #[serde(alias = "legacy")]
     #[default]
     Auto,
 }

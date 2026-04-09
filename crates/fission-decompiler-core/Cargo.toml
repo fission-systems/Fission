@@ -17,6 +17,7 @@ default = []
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
 fission-static = { path = "../fission-static" }
+fission-sleigh = { path = "../fission-sleigh" }
 
 [dev-dependencies]
 fission-loader = { path = "../fission-loader" }

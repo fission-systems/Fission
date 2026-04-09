@@ -11,13 +11,8 @@ use tracing::warn;
 // Private helpers
 // ============================================================================
 
-fn normalize_decompiler_options(mut options: DecompilerOptions) -> DecompilerOptions {
-    if matches!(
-        options.engine_mode,
-        crate::dto::DecompilerEngineMode::Legacy
-    ) {
-        options.engine_mode = crate::dto::DecompilerEngineMode::Auto;
-    }
+fn normalize_decompiler_options(options: DecompilerOptions) -> DecompilerOptions {
+    // Legacy engine values from older settings are deserialized into Auto via aliasing.
     options
 }
 
