@@ -1264,7 +1264,11 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-        Ok(postdom_tree.postdominators().clone())
+        Ok(postdom_tree
+            .postdominators()
+            .iter()
+            .map(|(node, set)| (*node, set.clone()))
+            .collect())
     }
 
     fn shared_follow_candidate_has_side_edge(

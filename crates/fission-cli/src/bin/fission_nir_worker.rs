@@ -1,6 +1,17 @@
 use fission_static::analysis::decomp::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
 use std::io::{self, Read, Write};
 
+#[cfg(feature = "allocator-mimalloc")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(all(
+    feature = "allocator-jemallocator",
+    not(feature = "allocator-mimalloc")
+))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 fn main() -> io::Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;

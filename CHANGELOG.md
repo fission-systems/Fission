@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-04-10
+
+### Added
+- Added `rustc-hash` integration across NIR builder/cache hot paths and static analysis cache maps (`callgraph`, `xrefs`, CFG traversal/build helper maps) with boundary-safe usage.
+- Added `allocator-mimalloc` and `allocator-jemallocator` feature flags to CLI, automation, and tauri crates, plus opt-in global allocator wiring in executable entrypoints.
+- Added canonical NIR pass-level telemetry aggregation (`pass_metrics`) to `NirBuildStats` and merge propagation support for downstream reporting.
+
+### Changed
+- Refactored NIR normalize pass execution to a pass-logged flow that records per-pass timings/reductions and emits structured tracing fields.
+- Updated automation summary output to show slowest and most impactful NIR passes using aggregated pass metrics.
+- Added automation regression-gate checks for pass-level timing deltas against baseline summaries.
+- Expanded pcode builder internal cache maps/sets (`materialized_vns`, alias/terminator/linear caches) to fast hash aliases while preserving external type boundaries.
+
+### Validation
+- `cargo check -p fission-pcode`
+- `cargo check -p fission-static`
+- `cargo check -p fission-cli`
+- `cargo run -p fission-cli -- samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --engine nir --profile speed --decomp-all --decomp-limit 10 --benchmark --json --timeout-ms 1200`
+- `cargo run -p fission-cli -- samples/windows/x64/putty.exe --engine nir --profile speed --decomp-all --decomp-limit 10 --benchmark --json --timeout-ms 1200`
+- `artifacts/compare_hash_phase2_cli_nir_diff.json` aggregate comparison: wall-clock `-2.39%` (`0.248193s -> 0.242255s`), total decomp time `+0.14%` (`0.441573s -> 0.442209s`).
+
 ## 2026-04-09
 
 ### Added

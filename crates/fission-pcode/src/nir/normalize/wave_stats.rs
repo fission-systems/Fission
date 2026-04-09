@@ -36,3 +36,25 @@ pub(super) fn add_interproc_constraint_rounds(n: usize) {
     }
     WAVE.with(|w| w.borrow_mut().interproc_signature_constraint_rounds += n);
 }
+
+pub(super) fn add_pass_metric(
+    name: &str,
+    elapsed_ms: f64,
+    changed: bool,
+    before_stmts: usize,
+    after_stmts: usize,
+    before_locals: usize,
+    after_locals: usize,
+) {
+    WAVE.with(|w| {
+        let mut stats = w.borrow_mut();
+        let agg = stats.pass_metrics.entry(name.to_string()).or_default();
+        agg.total_time_ms += elapsed_ms;
+        agg.total_invocations += 1;
+        if changed {
+            agg.changed_count += 1;
+        }
+        agg.stmts_reduced += (before_stmts as isize) - (after_stmts as isize);
+        agg.locals_reduced += (before_locals as isize) - (after_locals as isize);
+    });
+}

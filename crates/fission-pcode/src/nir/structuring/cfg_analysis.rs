@@ -1,4 +1,6 @@
 use super::*;
+use crate::fast_hash::FastMap as HashMap;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EdgeClass {
@@ -254,7 +256,7 @@ impl CfgAnalysis {
                 roots: Vec::new(),
                 preorder: Vec::new(),
                 preorder_index: Vec::new(),
-                edge_classes: HashMap::new(),
+                edge_classes: HashMap::default(),
             };
         }
 
@@ -270,7 +272,7 @@ impl CfgAnalysis {
         let mut color = vec![0u8; node_count];
         let mut preorder_index = vec![0usize; node_count];
         let mut preorder = Vec::with_capacity(node_count);
-        let mut edge_classes = HashMap::new();
+        let mut edge_classes = HashMap::default();
 
         for root in roots.iter().copied() {
             if color[root] != 0 {
@@ -355,7 +357,7 @@ impl DomTree {
         if node_count == 0 {
             return Self {
                 roots: Vec::new(),
-                dominators: HashMap::new(),
+                dominators: HashMap::default(),
             };
         }
 
@@ -368,7 +370,7 @@ impl DomTree {
             roots.push(0);
         }
 
-        let mut dominators = HashMap::new();
+        let mut dominators = HashMap::default();
         for root in roots.iter().copied() {
             let component = reachable_from(root, successors);
             if component.is_empty() {
@@ -416,7 +418,7 @@ impl PostDomTree {
         if node_count == 0 {
             return Self {
                 exits: Vec::new(),
-                postdominators: HashMap::new(),
+                postdominators: HashMap::default(),
             };
         }
 
@@ -429,7 +431,7 @@ impl PostDomTree {
             exits.push(node_count - 1);
         }
 
-        let mut postdominators = HashMap::new();
+        let mut postdominators = HashMap::default();
         for exit in exits.iter().copied() {
             let component = reverse_reachable_from(exit, predecessors);
             if component.is_empty() {
@@ -986,7 +988,7 @@ fn compute_dominator_sets(
     predecessors: &[Vec<usize>],
     root: usize,
 ) -> HashMap<usize, HashSet<usize>> {
-    let mut dom = HashMap::new();
+    let mut dom = HashMap::default();
     for node in nodes.iter().copied() {
         if node == root {
             dom.insert(node, HashSet::from([root]));
@@ -1038,7 +1040,7 @@ fn compute_postdominator_sets_for_exit(
     successors: &[Vec<usize>],
     exit: usize,
 ) -> HashMap<usize, HashSet<usize>> {
-    let mut postdom = HashMap::new();
+    let mut postdom = HashMap::default();
     for node in nodes.iter().copied() {
         if node == exit {
             postdom.insert(node, HashSet::from([exit]));

@@ -1,6 +1,6 @@
 //! Call graph analysis built from cross-references.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use fission_loader::loader::FunctionInfo;
 
@@ -14,8 +14,8 @@ pub struct CallEdge {
 
 #[derive(Debug, Clone, Default)]
 pub struct CallGraph {
-    callers: HashMap<u64, Vec<CallEdge>>,
-    callees: HashMap<u64, Vec<CallEdge>>,
+    callers: FxHashMap<u64, Vec<CallEdge>>,
+    callees: FxHashMap<u64, Vec<CallEdge>>,
     total_call_sites: usize,
 }
 
@@ -45,8 +45,8 @@ impl CallGraph {
         functions.sort_by_key(|func| func.address);
 
         let fallback_range = fallback_range.max(1);
-        let mut callers_map: HashMap<u64, HashMap<u64, usize>> = HashMap::new();
-        let mut callees_map: HashMap<u64, HashMap<u64, usize>> = HashMap::new();
+        let mut callers_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
+        let mut callees_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
         let mut total_call_sites = 0usize;
 
         for xref in xref_db.iter() {
@@ -90,8 +90,8 @@ impl CallGraph {
     }
 }
 
-fn finalize_edges(map: HashMap<u64, HashMap<u64, usize>>) -> HashMap<u64, Vec<CallEdge>> {
-    let mut out = HashMap::new();
+fn finalize_edges(map: FxHashMap<u64, FxHashMap<u64, usize>>) -> FxHashMap<u64, Vec<CallEdge>> {
+    let mut out = FxHashMap::default();
     for (addr, edges) in map {
         let mut list: Vec<CallEdge> = edges
             .into_iter()

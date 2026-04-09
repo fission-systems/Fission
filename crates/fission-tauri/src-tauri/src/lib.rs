@@ -7,6 +7,17 @@ pub(crate) mod menu;
 mod services;
 mod state;
 
+#[cfg(feature = "allocator-mimalloc")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(all(
+    feature = "allocator-jemallocator",
+    not(feature = "allocator-mimalloc")
+))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 use menu::ids;
 use state::AppState;
 use tauri::{Emitter, Manager};

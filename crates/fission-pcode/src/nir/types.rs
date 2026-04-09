@@ -120,7 +120,16 @@ impl Default for HirFunction {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PassAggregate {
+    pub total_time_ms: f64,
+    pub total_invocations: usize,
+    pub changed_count: usize,
+    pub stmts_reduced: isize,
+    pub locals_reduced: isize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NirBuildStats {
     #[serde(default)]
     pub build_duration_ms: usize,
@@ -287,6 +296,8 @@ pub struct NirBuildStats {
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
+    #[serde(default)]
+    pub pass_metrics: std::collections::BTreeMap<String, PassAggregate>,
 }
 
 impl NirBuildStats {
@@ -415,6 +426,15 @@ impl NirBuildStats {
             other.entry_param_promotion_spill_rename_count;
         self.variadic_stack_region_fold_count += other.variadic_stack_region_fold_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
+
+        for (name, agg) in &other.pass_metrics {
+            let current = self.pass_metrics.entry(name.clone()).or_default();
+            current.total_time_ms += agg.total_time_ms;
+            current.total_invocations += agg.total_invocations;
+            current.changed_count += agg.changed_count;
+            current.stmts_reduced += agg.stmts_reduced;
+            current.locals_reduced += agg.locals_reduced;
+        }
     }
 }
 

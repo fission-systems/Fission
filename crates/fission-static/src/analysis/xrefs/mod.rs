@@ -2,7 +2,7 @@
 //!
 //! Analyzes binary code to find call/jump/data references between addresses.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Type of cross-reference
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,9 +32,9 @@ pub struct Xref {
 #[derive(Debug, Clone, Default)]
 pub struct XrefDatabase {
     /// References TO an address (key = target address)
-    refs_to: HashMap<u64, Vec<Xref>>,
+    refs_to: FxHashMap<u64, Vec<Xref>>,
     /// References FROM an address (key = source address)
-    refs_from: HashMap<u64, Vec<Xref>>,
+    refs_from: FxHashMap<u64, Vec<Xref>>,
     /// Cached total reference count for O(1) lookup
     /// Updated incrementally on each add_xref call
     total_count: usize,

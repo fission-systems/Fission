@@ -1334,6 +1334,8 @@ dependencies = [
  "anyhow",
  "clap",
  "fission-pcode",
+ "jemallocator",
+ "mimalloc",
  "serde",
  "serde_json",
  "toml 0.8.2",
@@ -1351,7 +1353,9 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "iced-x86",
+ "jemallocator",
  "libc",
+ "mimalloc",
  "rayon",
  "serde",
  "serde_json",
@@ -1478,6 +1482,7 @@ dependencies = [
  "lru",
  "once_cell",
  "rkyv",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1537,6 +1542,7 @@ dependencies = [
  "proptest",
  "regex",
  "rkyv",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1559,6 +1565,8 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "iced-x86",
+ "jemallocator",
+ "mimalloc",
  "serde",
  "serde_json",
  "tauri",
@@ -2493,6 +2501,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "jemalloc-sys"
+version = "0.5.4+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac6c1946e1cea1788cbfde01c993b52a10e2da07f4bac608228d1bed20bfebf2"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "jemallocator"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0de374a9f8e63150e6f5e8a60cc14c668226d7a347d8aee1a45766e3c4dd3bc"
+dependencies = [
+ "jemalloc-sys",
+ "libc",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2626,6 +2654,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libmimalloc-sys"
+version = "0.1.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "667f4fec20f29dfc6bc7357c582d91796c169ad7e2fce709468aefeb2c099870"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2750,6 +2788,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mimalloc"
+version = "0.1.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1ee66a4b64c74f4ef288bcbb9192ad9c3feaad75193129ac8509af543894fd8"
+dependencies = [
+ "libmimalloc-sys",
 ]
 
 [[package]]
@@ -3935,6 +3982,12 @@ name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
 
 [[package]]
 name = "rustc_version"

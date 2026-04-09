@@ -5,7 +5,8 @@
 
 use super::{BasicBlock, BlockEdge, CfgError, CfgResult, EdgeKind};
 use fission_pcode::{PcodeFunction, PcodeOp, PcodeOpcode};
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{HashSet, VecDeque};
 
 /// Control Flow Graph representation
 #[derive(Debug, Clone)]
@@ -92,7 +93,7 @@ impl ControlFlowGraph {
 
     /// Perform depth-first traversal
     pub fn dfs_preorder(&self) -> Vec<usize> {
-        let mut visited = HashSet::new();
+        let mut visited = FxHashSet::default();
         let mut order = Vec::new();
         let mut stack = vec![self.entry_block];
 
@@ -118,7 +119,7 @@ impl ControlFlowGraph {
 
     /// Perform breadth-first traversal
     pub fn bfs(&self) -> Vec<usize> {
-        let mut visited = HashSet::new();
+        let mut visited = FxHashSet::default();
         let mut order = Vec::new();
         let mut queue = VecDeque::new();
         queue.push_back(self.entry_block);
@@ -144,13 +145,13 @@ impl ControlFlowGraph {
 
     /// Compute reverse post-order (topological order for acyclic parts)
     pub fn reverse_postorder(&self) -> Vec<usize> {
-        let mut visited = HashSet::new();
+        let mut visited = FxHashSet::default();
         let mut postorder = Vec::new();
 
         fn dfs_postorder(
             cfg: &ControlFlowGraph,
             block_idx: usize,
-            visited: &mut HashSet<usize>,
+            visited: &mut FxHashSet<usize>,
             postorder: &mut Vec<usize>,
         ) {
             if visited.contains(&block_idx) {
@@ -204,7 +205,7 @@ impl CfgBuilder {
         let mut cfg = ControlFlowGraph::new();
 
         // Build address to block index mapping
-        let mut addr_to_block: HashMap<u64, usize> = HashMap::new();
+        let mut addr_to_block: FxHashMap<u64, usize> = FxHashMap::default();
 
         // Create basic blocks
         for (idx, pcode_block) in func.blocks.iter().enumerate() {
@@ -254,7 +255,7 @@ impl CfgBuilder {
     /// Build edges between blocks
     fn build_edges(
         cfg: &mut ControlFlowGraph,
-        addr_to_block: &HashMap<u64, usize>,
+        addr_to_block: &FxHashMap<u64, usize>,
     ) -> CfgResult<()> {
         let block_count = cfg.blocks.len();
 

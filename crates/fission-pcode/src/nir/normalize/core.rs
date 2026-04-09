@@ -44,15 +44,30 @@ use super::variadic_stack_region::apply_variadic_stack_region_pass;
 use super::wave_stats;
 use super::*;
 use std::time::Instant;
+use tracing::{debug, debug_span};
 
 const TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS: usize = 6;
 
-fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool) {
+fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bool) {
     let mut interproc_signature_rounds = 0usize;
     for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
-        let def_changed = apply_type_inference_pass(func);
-        let callsite_changed = apply_callsite_type_prop_pass(func);
-        let use_changed = apply_use_driven_type_infer_pass(func);
+        let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
+        let round_start = if perf { Some(Instant::now()) } else { None };
+
+        let def_changed =
+            run_pass_logged(func, "type_inference", perf, apply_type_inference_pass);
+        let callsite_changed = run_pass_logged(
+            func,
+            "callsite_type_prop",
+            perf,
+            apply_callsite_type_prop_pass,
+        );
+        let use_changed = run_pass_logged(
+            func,
+            "use_driven_type_infer",
+            perf,
+            apply_use_driven_type_infer_pass,
+        );
         let round_changed = def_changed || callsite_changed || use_changed;
 
         if callsite_changed {
@@ -67,6 +82,21 @@ fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool) {
                 def_changed,
                 callsite_changed,
                 use_changed,
+            );
+        }
+
+        if let Some(start) = round_start {
+            let (after_stmts, after_locals) = hir_shape(func);
+            eprintln!(
+                "[PERF] normalize type-fp-round: fn={} round={} changed={} elapsed_ms={:.3} stmts={}=>{} locals={}=>{}",
+                func.name,
+                round + 1,
+                round_changed,
+                start.elapsed().as_secs_f64() * 1000.0,
+                before_stmts,
+                after_stmts,
+                before_locals,
+                after_locals,
             );
         }
 
@@ -87,6 +117,7 @@ pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
 pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     wave_stats::reset_normalize_wave_stats();
     let diag = normalize_diag_enabled();
+    let perf = normalize_perf_enabled();
     let total_start = Instant::now();
     if diag {
         eprintln!(
@@ -96,134 +127,254 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
             func.locals.len()
         );
     }
-    normalize_binding_initializers(&mut func.locals);
-    cleanup_stmt_list(&mut func.body, &func.name, 0);
-    super::for_loops::apply_for_loop_folding(&mut func.body);
-    eliminate_dead_local_clobber_assigns(func);
-    prune_unused_temp_bindings(func);
-    prune_unused_dead_local_bindings(func);
+    run_cleanup_block(func, "cleanup_init_1", perf, |f| {
+
+        normalize_binding_initializers(&mut f.locals);
+
+        cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+        super::for_loops::apply_for_loop_folding(&mut f.body);
+
+        eliminate_dead_local_clobber_assigns(f);
+
+        prune_unused_temp_bindings(f);
+
+        prune_unused_dead_local_bindings(f);
+
+    });
     // Flag recovery: substitute raw x86 EFLAGS variable references in branch
     // conditions with high-level comparison expressions (sf!=of → a<b signed,
     // !zf → a!=b, etc.).  Runs early so that subsequent dead-assignment passes
     // can eliminate now-dead flag-variable assignments.
-    if apply_flag_recovery_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(func, "flag_recovery", perf, apply_flag_recovery_pass) {
+        run_cleanup_block(func, "cleanup_defuse_4", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            defuse_dead_assignment_pass(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // Parity / popcount dead elimination: remove __popcount-based assignments
     // whose result is not consumed anywhere (e.g., dead parity flag variables
     // remaining after flag recovery or simple unused parity computations).
-    if elide_unused_popcount_assigns(func) {
+    if run_pass_logged(func, "elide_unused_popcount", perf, elide_unused_popcount_assigns) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Prologue/epilogue elimination: remove callee-saved register save/restore
     // pairs (`*spill = r15` / `r15 = *spill`) from the function body.
-    if remove_callee_save_prologue_epilogue(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(
+        func,
+        "remove_callee_save_prologue_epilogue",
+        perf,
+        remove_callee_save_prologue_epilogue,
+    ) {
+        run_cleanup_block(func, "cleanup_defuse_5", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            defuse_dead_assignment_pass(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // Run constant folding after the initial cleanup so that folded constants
     // unlock further simplifications in subsequent passes.
-    if constant_folding_pass(&mut func.body) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        eliminate_dead_local_clobber_assigns(func);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(func, "constant_folding", perf, |f| constant_folding_pass(&mut f.body)) {
+        run_cleanup_block(func, "cleanup_elim_7", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            eliminate_dead_local_clobber_assigns(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // ABI-aware entry spill → param_k promotion (HIR, after early cleanup).
-    if apply_entry_param_promotion_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(
+        func,
+        "entry_param_promotion",
+        perf,
+        apply_entry_param_promotion_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_defuse_6", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            defuse_dead_assignment_pass(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // SCCP: global sparse constant propagation on structured HIR (lattice merge
     // at joins).  Runs after local constant folding so folded seeds propagate.
-    if apply_sccp_pass(func) {
+    if run_pass_logged(func, "sccp", perf, apply_sccp_pass) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-        if constant_folding_pass(&mut func.body) {
-            cleanup_stmt_list(&mut func.body, &func.name, 0);
-            eliminate_dead_local_clobber_assigns(func);
-            prune_unused_temp_bindings(func);
-            prune_unused_dead_local_bindings(func);
+        if run_pass_logged(func, "constant_folding_after_sccp", perf, |f| {
+            constant_folding_pass(&mut f.body)
+        }) {
+            run_cleanup_block(func, "cleanup_elim_8", perf, |f| {
+
+                cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+                eliminate_dead_local_clobber_assigns(f);
+
+                prune_unused_temp_bindings(f);
+
+                prune_unused_dead_local_bindings(f);
+
+            });
         }
-        apply_wide_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "wide_dead_assignment",
+            perf,
+            apply_wide_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Local CSE: within each linear block, replace identical pure sub-expressions
     // with the variable that first computed them.  Runs right after constant
     // folding so that folded constants are included in the expression map.
-    if apply_cse_pass(func) {
-        if copy_propagation_pass(func) {
-            defuse_dead_assignment_pass(func);
+    if run_pass_logged(func, "cse", perf, apply_cse_pass) {
+        if run_pass_logged(func, "copy_propagation_after_cse", perf, copy_propagation_pass) {
+            run_pass_logged(
+                func,
+                "defuse_dead_assignment_after_cse_copy",
+                perf,
+                defuse_dead_assignment_pass,
+            );
         }
-        defuse_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_cse",
+            perf,
+            defuse_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Function-level def-use dead assignment: removes dead writes to ANY
     // variable (not just trivially-named temps) across the whole body tree.
-    defuse_dead_assignment_pass(func);
+    run_pass_logged(
+        func,
+        "defuse_dead_assignment",
+        perf,
+        defuse_dead_assignment_pass,
+    );
     // Copy propagation: forward-substitute `x = y` (single-definition copy)
     // to eliminate unnecessary temporaries.
-    if copy_propagation_pass(func) {
+    if run_pass_logged(func, "copy_propagation", perf, copy_propagation_pass) {
         // A second cleanup pass to catch newly-exposed dead code.
-        defuse_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_copy",
+            perf,
+            defuse_dead_assignment_pass,
+        );
     }
     // Join-variable coalescing: unify parallel temporaries assigned in both
     // branches of an if-else (SSA out-of-SSA for 2-way joins).
-    join_coalescing_pass(func);
+    run_pass_logged(func, "join_coalescing", perf, join_coalescing_pass);
     // If-else common pure-prefix hoisting: move identical leading assignments
     // out of both branches (partial redundancy elimination for branches).
-    if apply_branch_prefix_hoist_pass(func) {
+    if run_pass_logged(
+        func,
+        "branch_prefix_hoist",
+        perf,
+        apply_branch_prefix_hoist_pass,
+    ) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-        if copy_propagation_pass(func) {
-            defuse_dead_assignment_pass(func);
+        if run_pass_logged(func, "copy_propagation_after_branch_hoist", perf, copy_propagation_pass)
+        {
+            run_pass_logged(
+                func,
+                "defuse_dead_assignment_after_branch_hoist_copy",
+                perf,
+                defuse_dead_assignment_pass,
+            );
         }
-        defuse_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_branch_hoist",
+            perf,
+            defuse_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
-    if apply_gvn_join_hoist_pass(func) {
+    if run_pass_logged(func, "gvn_join_hoist", perf, apply_gvn_join_hoist_pass) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-        if copy_propagation_pass(func) {
-            defuse_dead_assignment_pass(func);
+        if run_pass_logged(func, "copy_propagation_after_gvn", perf, copy_propagation_pass) {
+            run_pass_logged(
+                func,
+                "defuse_dead_assignment_after_gvn_copy",
+                perf,
+                defuse_dead_assignment_pass,
+            );
         }
-        defuse_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_gvn",
+            perf,
+            defuse_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Module B: run def-driven, callsite-signature, and use-driven inference
     // to convergence (bounded). This avoids one-shot ordering sensitivity.
-    apply_type_signature_fixed_point(func, diag);
+    apply_type_signature_fixed_point(func, diag, perf);
     // Cast elision: remove outer casts that are redundant given the binding's
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
-    if cast_elision_pass(func) {
+    if run_pass_logged(func, "cast_elision", perf, cast_elision_pass) {
         // A light cleanup pass to simplify any newly-exposed dead code.
-        defuse_dead_assignment_pass(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_cast_elision",
+            perf,
+            defuse_dead_assignment_pass,
+        );
     }
     let allow_expensive_passes = !is_large_hir_function(func);
     let mut changed = false;
-    let pass_start = Instant::now();
     changed |= if allow_expensive_passes {
-        apply_memory_slot_surfacing(func)
+        run_pass_logged(
+            func,
+            "memory_slot_surfacing_full",
+            perf,
+            apply_memory_slot_surfacing,
+        )
     } else {
-        apply_memory_slot_surfacing_cheap(func)
+        run_pass_logged(
+            func,
+            "memory_slot_surfacing_cheap",
+            perf,
+            apply_memory_slot_surfacing_cheap,
+        )
     };
     if diag {
         eprintln!(
-            "[DIAG] normalize slots: {} changed={} elapsed={:.3}s mode={}",
+            "[DIAG] normalize slots: {} changed={} mode={}",
             func.name,
             changed,
-            pass_start.elapsed().as_secs_f64(),
             if allow_expensive_passes {
                 "full"
             } else {
@@ -232,66 +383,126 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         );
     }
     if changed {
-        normalize_binding_initializers(&mut func.locals);
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        super::for_loops::apply_for_loop_folding(&mut func.body);
-        eliminate_dead_local_clobber_assigns(func);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+        run_cleanup_block(func, "cleanup_init_2", perf, |f| {
+
+            normalize_binding_initializers(&mut f.locals);
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            super::for_loops::apply_for_loop_folding(&mut f.body);
+
+            eliminate_dead_local_clobber_assigns(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     if allow_expensive_passes {
-        let bitstream_start = Instant::now();
-        changed |= apply_bitstream_idioms(func);
+        changed |= run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms);
         if diag {
             eprintln!(
-                "[DIAG] normalize bitstream: {} changed={} elapsed={:.3}s",
+                "[DIAG] normalize bitstream: {} changed={}",
                 func.name,
                 changed,
-                bitstream_start.elapsed().as_secs_f64()
             );
         }
         if changed {
-            normalize_binding_initializers(&mut func.locals);
-            cleanup_stmt_list(&mut func.body, &func.name, 0);
-            super::for_loops::apply_for_loop_folding(&mut func.body);
-            eliminate_dead_local_clobber_assigns(func);
-            prune_unused_temp_bindings(func);
-            prune_unused_dead_local_bindings(func);
+            run_cleanup_block(func, "cleanup_init_3", perf, |f| {
+
+                normalize_binding_initializers(&mut f.locals);
+
+                cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+                super::for_loops::apply_for_loop_folding(&mut f.body);
+
+                eliminate_dead_local_clobber_assigns(f);
+
+                prune_unused_temp_bindings(f);
+
+                prune_unused_dead_local_bindings(f);
+
+            });
         }
     }
     // Pointer arithmetic recovery: convert IntAdd(ptr, k) → PtrOffset and
     // IntAdd(ptr, idx*stride) → Index after pointer types are established AND
     // after the slot-surfacing pass so the Add(ptr, Mul) pattern remains intact
     // for slot detection.
-    if apply_ptr_arith_recovery_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
+    if run_pass_logged(
+        func,
+        "ptr_arith_recovery",
+        perf,
+        apply_ptr_arith_recovery_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_standalone_12", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+        });
+run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_ptr_arith",
+            perf,
+            defuse_dead_assignment_pass,
+        );
     }
     // Memory SSA dead store elimination: remove stack-slot stores that are
     // never observed by any subsequent load.  Must run after ptr_arith_recovery
     // so Deref/PtrOffset patterns are normalised, and before aggregate_fields.
-    if apply_dead_store_elimination(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
+    if run_pass_logged(func, "dead_store_elimination", perf, apply_dead_store_elimination) {
+        run_cleanup_block(func, "cleanup_standalone_13", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+        });
+run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_dead_store",
+            perf,
+            defuse_dead_assignment_pass,
+        );
     }
     // Redundant load elimination: reuse the result of an earlier stack-slot load
     // when no intervening store (complements dead-store removal and local CSE).
-    if apply_redundant_load_elimination(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
+    if run_pass_logged(
+        func,
+        "redundant_load_elimination",
+        perf,
+        apply_redundant_load_elimination,
+    ) {
+        run_cleanup_block(func, "cleanup_standalone_14", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+        });
+run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_redundant_load",
+            perf,
+            defuse_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Windows x64 stack-tail / variadic region lattice hook (stats; optional future folds).
-    let _ = apply_variadic_stack_region_pass(func);
+    let _ = run_pass_logged(
+        func,
+        "variadic_stack_region",
+        perf,
+        apply_variadic_stack_region_pass,
+    );
     // Aggregate field layout recovery: collect PtrOffset access offsets on
     // Ptr(Aggregate) variables and annotate the aggregate type with named
     // StructFields.  Must run after ptr_arith_recovery so PtrOffset nodes exist.
-    apply_aggregate_fields_pass(func);
+    run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass);
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.
-    if single_pred_label_inline(&mut func.body) {
+    if run_pass_logged(func, "single_pred_label_inline", perf, |f| {
+        single_pred_label_inline(&mut f.body)
+    }) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         super::for_loops::apply_for_loop_folding(&mut func.body);
         prune_unused_temp_bindings(func);
@@ -300,35 +511,76 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // Loop IV recovery (SCEV-lite): upgrade While → For for linear induction
     // variables.  Runs after label inlining so the loop body is maximally
     // simplified first.
-    if apply_iv_recovery_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(func, "iv_recovery", perf, apply_iv_recovery_pass) {
+        run_cleanup_block(func, "cleanup_prune_9", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // Break/Continue recovery: replace single-predecessor Goto-to-exit-label
     // patterns inside loops with explicit break/continue statements.
-    if apply_break_continue_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    if run_pass_logged(func, "break_continue_recovery", perf, apply_break_continue_pass) {
+        run_cleanup_block(func, "cleanup_prune_10", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+
+        });
     }
     // Loop Invariant Code Motion: hoist pure loop-invariant assignments out of
     // loop bodies (innermost-first).  Runs after break/continue recovery so the
     // loop structure is finalised.
-    if apply_licm_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        defuse_dead_assignment_pass(func);
+    if run_pass_logged(func, "licm", perf, apply_licm_pass) {
+        run_cleanup_block(func, "cleanup_standalone_15", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+        });
+run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_licm",
+            perf,
+            defuse_dead_assignment_pass,
+        );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
     // Call-site arity lower bounds per callee symbol (intra-proc merge on `HirFunction`).
-    let _ = apply_interproc_callsite_arity_pass(func);
+    let _ = run_pass_logged(
+        func,
+        "interproc_callsite_arity",
+        perf,
+        apply_interproc_callsite_arity_pass,
+    );
     // Value Set Analysis: use range information to eliminate dead switch
     // cases and constant-condition branches.  Runs last so all structural
     // passes have already simplified the body.
-    if apply_jump_resolver_pass(func) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
-        prune_unused_temp_bindings(func);
+    if run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass) {
+        run_cleanup_block(func, "cleanup_prune1_11", perf, |f| {
+
+            cleanup_stmt_list(&mut f.body, &f.name, 0);
+
+            prune_unused_temp_bindings(f);
+
+        });
+    }
+    if perf {
+        let (final_stmts, final_locals) = hir_shape(func);
+        eprintln!(
+            "[PERF] normalize total: fn={} elapsed_ms={:.3} final_stmts={} final_locals={}",
+            func.name,
+            total_start.elapsed().as_secs_f64() * 1000.0,
+            final_stmts,
+            final_locals,
+        );
     }
     if diag {
         eprintln!(
@@ -366,6 +618,68 @@ fn count_hir_stmts(stmts: &[HirStmt]) -> usize {
     }
 
     stmts.iter().map(count_stmt).sum()
+}
+
+fn hir_shape(func: &HirFunction) -> (usize, usize) {
+    (count_hir_stmts(&func.body), func.locals.len())
+}
+
+fn run_cleanup_block<F>(func: &mut HirFunction, pass_name: &str, perf: bool, mut block: F) -> bool
+where
+    F: FnMut(&mut HirFunction),
+{
+    run_pass_logged(func, pass_name, perf, |f| {
+        let (before_stmts, before_locals) = hir_shape(f);
+        block(f);
+        let (after_stmts, after_locals) = hir_shape(f);
+        before_stmts != after_stmts || before_locals != after_locals
+    })
+}
+
+fn run_pass_logged<F>(func: &mut HirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
+where
+    F: FnOnce(&mut HirFunction) -> bool,
+{
+    let _span = debug_span!("normalize_pass", fn_name = %func.name, pass = pass_name).entered();
+
+    let (before_stmts, before_locals) = hir_shape(func);
+    let start = Instant::now();
+    let changed = pass_fn(func);
+    let (after_stmts, after_locals) = hir_shape(func);
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    super::wave_stats::add_pass_metric(
+        pass_name,
+        elapsed_ms,
+        changed,
+        before_stmts,
+        after_stmts,
+        before_locals,
+        after_locals,
+    );
+
+    debug!(
+        changed,
+        elapsed_ms,
+        stmts_reduced = (before_stmts as isize - after_stmts as isize),
+        locals_reduced = (before_locals as isize - after_locals as isize),
+        "pass completed"
+    );
+
+    if perf {
+        eprintln!(
+            "[PERF] normalize pass: fn={} pass={} changed={} elapsed_ms={:.3} stmts={}=>{} locals={}=>{}",
+            func.name,
+            pass_name,
+            changed,
+            elapsed_ms,
+            before_stmts,
+            after_stmts,
+            before_locals,
+            after_locals,
+        );
+    }
+    changed
 }
 
 pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
@@ -630,4 +944,8 @@ pub(super) fn normalize_expr(expr: &mut HirExpr) {
 
 fn normalize_diag_enabled() -> bool {
     std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
+}
+
+fn normalize_perf_enabled() -> bool {
+    std::env::var_os("FISSION_PREVIEW_PERF").is_some()
 }

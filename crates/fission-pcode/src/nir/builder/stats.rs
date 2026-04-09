@@ -123,6 +123,7 @@ impl<'a> PreviewBuilder<'a> {
             entry_param_promotion_spill_rename_count: 0,
             variadic_stack_region_fold_count: 0,
             interproc_signature_constraint_rounds: 0,
+            pass_metrics: std::collections::BTreeMap::new(),
         }
     }
 }

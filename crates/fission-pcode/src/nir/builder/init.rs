@@ -1,4 +1,5 @@
 use super::*;
+use super::state::{BuilderCacheMap, BuilderCacheSet};
 
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn new(
@@ -85,9 +86,9 @@ impl<'a> PreviewBuilder<'a> {
             type_context,
             defs,
             block_defs,
-            lookup_site_cache: std::cell::RefCell::new(HashMap::new()),
-            peel_cache: std::cell::RefCell::new(HashMap::new()),
-            terminator_cache: HashMap::new(),
+            lookup_site_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
+            peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
+            terminator_cache: BuilderCacheMap::default(),
             x86_branch_recovery_attempts: 0,
             address_to_index,
             block_target_keys,
@@ -109,10 +110,10 @@ impl<'a> PreviewBuilder<'a> {
             current_lowering_site: None,
             register_param_aliases,
             stack_frame_size,
-            linear_exit_cache: HashMap::new(),
-            linear_body_cache: HashMap::new(),
-            active_linear_body_keys: HashSet::new(),
-            active_conditional_tail_keys: HashSet::new(),
+            linear_exit_cache: BuilderCacheMap::default(),
+            linear_body_cache: BuilderCacheMap::default(),
+            active_linear_body_keys: BuilderCacheSet::default(),
+            active_conditional_tail_keys: BuilderCacheSet::default(),
             jump_targets_cache: None,
             active_trace_id: None,
             last_trace_id: None,

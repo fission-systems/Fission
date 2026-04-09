@@ -1,6 +1,9 @@
 use super::*;
 use std::cell::RefCell;
 
+pub(super) type BuilderCacheMap<K, V> = rustc_hash::FxHashMap<K, V>;
+pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
+
 #[derive(Debug)]
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
@@ -9,9 +12,9 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     pub(crate) lookup_site_cache:
-        RefCell<HashMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
-    pub(crate) peel_cache: RefCell<HashMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
-    pub(crate) terminator_cache: HashMap<usize, LoweredTerminator>,
+        RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
+    pub(crate) peel_cache: RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
+    pub(crate) terminator_cache: BuilderCacheMap<usize, LoweredTerminator>,
     pub(crate) x86_branch_recovery_attempts: usize,
     pub(crate) address_to_index: HashMap<u64, usize>,
     pub(crate) block_target_keys: Vec<u64>,
@@ -35,10 +38,10 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) stack_frame_size: i64,
-    pub(crate) linear_exit_cache: HashMap<usize, Option<LinearExit>>,
-    pub(crate) linear_body_cache: HashMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
-    pub(crate) active_linear_body_keys: HashSet<LinearBodyCacheKey>,
-    pub(crate) active_conditional_tail_keys: HashSet<ConditionalTailKey>,
+    pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,
+    pub(crate) linear_body_cache: BuilderCacheMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
+    pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,
+    pub(crate) active_conditional_tail_keys: BuilderCacheSet<ConditionalTailKey>,
     pub(crate) jump_targets_cache: Option<HashSet<u64>>,
     pub(crate) active_trace_id: Option<u64>,
     pub(crate) last_trace_id: Option<u64>,

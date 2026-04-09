@@ -225,7 +225,7 @@ pub fn build_summary(
             recovery_quality_flag_counts: summary.recovery_quality_flag_counts.clone(),
             recovery_structuring_mode_counts: summary.recovery_structuring_mode_counts.clone(),
             nir_output_class_counts: summary.nir_output_class_counts.clone(),
-            nir_build_stats_totals: summary.nir_build_stats_totals,
+            nir_build_stats_totals: summary.nir_build_stats_totals.clone(),
         });
     }
     AutomationSummary {
@@ -1263,6 +1263,18 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
     );
     println!("  top_build_stats={:?}", quality.top_build_stats);
     println!("  structuring_fallbacks={:?}", quality.structuring_fallback_reasons);
+
+    let mut pass_metrics: Vec<_> = summary.aggregate.nir_build_stats_totals.pass_metrics.iter().collect();
+    pass_metrics.sort_by(|a, b| b.1.total_time_ms.partial_cmp(&a.1.total_time_ms).unwrap_or(std::cmp::Ordering::Equal));
+    let slowest_passes: Vec<_> = pass_metrics.iter().take(5).map(|(n, a)| format!("{} ({:.1}ms)", n, a.total_time_ms)).collect();
+    
+    pass_metrics.sort_by_key(|a| std::cmp::Reverse(a.1.stmts_reduced));
+    let impactful_passes: Vec<_> = pass_metrics.iter().take(5).map(|(n, a)| format!("{} ({} stmts)", n, a.stmts_reduced)).collect();
+
+    if !slowest_passes.is_empty() {
+        println!("  slowest_passes={:?}", slowest_passes);
+        println!("  impactful_passes={:?}", impactful_passes);
+    }
 }
 
 pub fn update_latest(run_dir: &Path, latest_dir: &Path) -> Result<()> {

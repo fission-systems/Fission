@@ -4,6 +4,7 @@
 //! A block B dominates block A if every path from the entry to A goes through B.
 
 use super::{CfgError, CfgResult, ControlFlowGraph};
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 
 /// Dominator Tree structure
@@ -33,7 +34,7 @@ impl DominatorTree {
         let rpo = cfg.reverse_postorder();
 
         // Map block index to RPO position for quick lookup
-        let rpo_num: HashMap<usize, usize> = rpo
+        let rpo_num: FxHashMap<usize, usize> = rpo
             .iter()
             .enumerate()
             .map(|(pos, &block_idx)| (block_idx, pos))
@@ -112,7 +113,7 @@ impl DominatorTree {
     #[allow(clippy::while_immutable_condition)]
     fn intersect(
         idom: &HashMap<usize, usize>,
-        rpo_num: &HashMap<usize, usize>,
+        rpo_num: &FxHashMap<usize, usize>,
         mut b1: usize,
         mut b2: usize,
     ) -> usize {

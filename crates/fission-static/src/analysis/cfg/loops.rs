@@ -6,7 +6,8 @@
 #[cfg(test)]
 use super::EdgeKind;
 use super::{ControlFlowGraph, DominatorTree};
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{HashSet, VecDeque};
 
 /// Kind of detected loop
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +96,7 @@ impl LoopAnalyzer {
         let back_edges = Self::find_back_edges(cfg, dom_tree);
 
         // Group back edges by header
-        let mut header_to_back_edges: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
+        let mut header_to_back_edges: FxHashMap<usize, Vec<(usize, usize)>> = FxHashMap::default();
         for (from, to) in back_edges {
             header_to_back_edges.entry(to).or_default().push((from, to));
         }
@@ -174,7 +175,7 @@ impl LoopAnalyzer {
 
     /// Find exit edges and exit blocks for a loop
     fn find_exits(cfg: &ControlFlowGraph, body: &HashSet<usize>, loop_info: &mut Loop) {
-        let mut exit_blocks = HashSet::new();
+        let mut exit_blocks = FxHashSet::default();
 
         for &block_idx in body {
             if let Some(block) = cfg.blocks.get(block_idx) {

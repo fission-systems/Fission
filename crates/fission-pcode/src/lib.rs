@@ -16,6 +16,7 @@
 // Re-export fission-disasm directly (no wrapper needed)
 pub use fission_disasm as disasm;
 pub mod arch;
+pub(crate) mod fast_hash;
 pub mod nir;
 mod pcode;
 pub mod prelude;

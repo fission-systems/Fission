@@ -5,6 +5,17 @@ mod lanes;
 mod model;
 mod report;
 
+#[cfg(feature = "allocator-mimalloc")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(all(
+    feature = "allocator-jemallocator",
+    not(feature = "allocator-mimalloc")
+))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use corpus::build_corpus_artifacts;
@@ -348,6 +359,28 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         "[fission-automation] wrote outputs to {}",
         base_output_dir.display()
     );
+
+    // Performance regression gate
+    if let Some(baseline) = baseline.as_ref() {
+        for (pass_name, current_agg) in &automation_summary.aggregate.nir_build_stats_totals.pass_metrics {
+            if let Some(base_agg) = baseline.aggregate.nir_build_stats_totals.pass_metrics.get(pass_name) {
+                // Ignore passes that take negligible time to avoid noise (e.g., < 10ms)
+                if base_agg.total_time_ms > 10.0 {
+                    let ratio = current_agg.total_time_ms / base_agg.total_time_ms;
+                    if ratio > 1.25 {
+                        anyhow::bail!(
+                            "performance regression detected in pass '{}': {:.1}ms -> {:.1}ms ({:.1}x increase)",
+                            pass_name,
+                            base_agg.total_time_ms,
+                            current_agg.total_time_ms,
+                            ratio
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

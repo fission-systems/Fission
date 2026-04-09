@@ -21,7 +21,7 @@ impl NirEngineMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NirSelection {
     pub nir_code: Option<String>,
     pub build_stats: Option<NirBuildStats>,
