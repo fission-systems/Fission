@@ -115,7 +115,12 @@ fn apply_function_name_hints(
     }
 
     for binding in &mut func.locals {
-        let Some(NirBindingOrigin::StackOffset(offset)) = binding.origin else {
+        let Some(
+            NirBindingOrigin::StackOffset(offset)
+            | NirBindingOrigin::HomeSlot(offset)
+            | NirBindingOrigin::OutgoingArgSlot(offset),
+        ) = binding.origin
+        else {
             continue;
         };
         let Some(new_name) = hints.stack_local_names.get(&offset) else {
@@ -186,6 +191,8 @@ fn apply_function_name_hints(
 fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<(i64, bool)> {
     match origin {
         Some(NirBindingOrigin::StackOffset(offset)) => Some((offset, false)),
+        Some(NirBindingOrigin::HomeSlot(offset))
+        | Some(NirBindingOrigin::OutgoingArgSlot(offset)) => Some((offset, false)),
         Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => Some((offset, true)),
         _ => None,
     }
@@ -200,6 +207,9 @@ fn collect_call_type_hints(
         match stmt {
             HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) => {
                 collect_call_hints_from_expr(rhs, context, pointer_hints);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                collect_call_hints_from_expr(va_list, context, pointer_hints);
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
@@ -338,6 +348,7 @@ pub(super) fn collect_local_surface_hints(
                 collect_local_surface_hints(else_body, pointer_hints, func, alias_collector, local_hints);
             }
             HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
             | HirStmt::Label(_)
             | HirStmt::Goto(_)
             | HirStmt::Return(_)

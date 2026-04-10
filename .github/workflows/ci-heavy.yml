@@ -114,6 +114,17 @@ jobs:
       - name: Run automation crate tests
         run: cargo test -p fission-automation --verbose
 
+      # Smoke the real nir-check lane (no committed baseline in CI → perf gate skipped; --no-update-latest avoids touching latest/).
+      - name: Run fission-automation nir-check (fast profile)
+        run: |
+          cargo run -p fission-automation --release -- nir-check \
+            --lane nir \
+            --no-build \
+            --no-update-latest \
+            --fission-bin target/release/fission_cli \
+            --run-profile fast \
+            --functions-limit 10
+
       - name: Upload automation artifacts
         uses: actions/upload-artifact@v4
         with:

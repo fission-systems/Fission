@@ -1,6 +1,133 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
+        let Some(asm) = op.asm_mnemonic.as_deref() else {
+            return false;
+        };
+        let asm = asm.trim().to_ascii_uppercase();
+        asm.starts_with("PUSH RSI")
+            || asm.starts_with("PUSH RDI")
+            || asm.starts_with("PUSH RBX")
+            || asm.starts_with("PUSH RBP")
+            || asm.starts_with("PUSH R12")
+            || asm.starts_with("PUSH R13")
+            || asm.starts_with("PUSH R14")
+            || asm.starts_with("PUSH R15")
+    }
+
+    fn is_call_return_scaffold_store(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+    ) -> bool {
+        if op.inputs.len() < 3 || !op.inputs[2].is_constant {
+            return false;
+        }
+        let Some((next_idx, next_call)) = block
+            .ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .find(|(_, candidate)| {
+                matches!(
+                    candidate.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+            })
+        else {
+            return false;
+        };
+        if next_idx != op_idx + 1 {
+            return false;
+        }
+        let ret_addr = op.inputs[2].constant_val as u64;
+        ret_addr > next_call.address && ret_addr.saturating_sub(next_call.address) <= 0x10
+    }
+
+    fn call_result_registers(&self) -> Vec<Varnode> {
+        if !self.options.is_64bit {
+            return Vec::new();
+        }
+        vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x00,
+                size: self.options.pointer_size,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: UNIQUE_SPACE_ID,
+                offset: crate::arch::x86::X86_REG_BASE,
+                size: self.options.pointer_size,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ]
+    }
+
+    fn call_result_is_observed(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let ret_regs = self.call_result_registers();
+        if ret_regs.is_empty() {
+            return false;
+        }
+        let keys = ret_regs.iter().map(VarnodeKey::from).collect::<Vec<_>>();
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if candidate
+                .inputs
+                .iter()
+                .any(|input| keys.iter().any(|key| VarnodeKey::from(input) == *key))
+            {
+                return true;
+            }
+            if let Some(output) = candidate.output.as_ref()
+                && keys.iter().any(|key| VarnodeKey::from(output) == *key)
+            {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn ensure_call_result_binding(&mut self, site: LoweringSite, op: &PcodeOp) -> String {
+        if let Some(name) = self.call_result_bindings.get(&site) {
+            return name.clone();
+        }
+        let ret_regs = self.call_result_registers();
+        let Some(ret_reg) = ret_regs.first() else {
+            return self.ensure_temp_binding_for_output(
+                op,
+                &Varnode {
+                    space_id: UNIQUE_SPACE_ID,
+                    offset: u64::from(op.seq_num),
+                    size: self.options.pointer_size,
+                    is_constant: false,
+                    constant_val: 0,
+                },
+            )
+            .name;
+        };
+        let name = next_temp_name(&type_from_size(ret_reg.size, false), &mut self.temp_next_id);
+        self.temps.insert(
+            name.clone(),
+            NirBinding {
+                name: name.clone(),
+                ty: type_from_size(ret_reg.size, false),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            },
+        );
+        self.call_result_bindings.insert(site, name.clone());
+        name
+    }
+
     pub(in crate::nir) fn lower_block_stmts(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -30,6 +157,11 @@ impl<'a> PreviewBuilder<'a> {
                                     op.opcode,
                                     &MlilPreviewError::UnsupportedExprMemoryBackedVarnode,
                                 );
+                                return Ok(None);
+                            }
+                            if this.is_callee_saved_push_store(op)
+                                || this.is_call_return_scaffold_store(block, op_idx, op)
+                            {
                                 return Ok(None);
                             }
                             let lhs = if let Some((slot_name, _slot_ty)) = this
@@ -98,7 +230,12 @@ impl<'a> PreviewBuilder<'a> {
                                         );
                                         err
                                     })?;
-                                Ok(Some(HirStmt::Expr(expr)))
+                                if this.call_result_is_observed(block, op_idx) {
+                                    let lhs = HirLValue::Var(this.ensure_call_result_binding(site, op));
+                                    Ok(Some(HirStmt::Assign { lhs, rhs: expr }))
+                                } else {
+                                    Ok(Some(HirStmt::Expr(expr)))
+                                }
                             } else {
                                 this.maybe_materialize_output_stmt(
                                     block.start_address,

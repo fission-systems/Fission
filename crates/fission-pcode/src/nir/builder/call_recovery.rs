@@ -1,16 +1,62 @@
 use super::*;
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PopOutcome {
-    Success(HirExpr),
-    Solid,
-    FailedDef,
-}
-
 impl<'a> PreviewBuilder<'a> {
+    fn surface_call_carrier_name(&mut self, vn: &Varnode) -> Option<String> {
+        if let Some(param) = self.register_param(vn) {
+            return Some(param);
+        }
+        if vn.space_id == UNIQUE_SPACE_ID {
+            return crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                .map(str::to_string);
+        }
+        if vn.space_id == REGISTER_SPACE_ID {
+            return Some(register_name(vn.offset, vn.size).to_string());
+        }
+        None
+    }
+
+    fn param_index_for_varnode(&self, vn: &Varnode) -> Option<usize> {
+        if vn.space_id == REGISTER_SPACE_ID {
+            return register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
+                .and_then(|(_, index)| index);
+        }
+        if vn.space_id == UNIQUE_SPACE_ID
+            && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+        {
+            return self
+                .options
+                .calling_convention
+                .param_offsets()
+                .iter()
+                .position(|&off| x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name)));
+        }
+        None
+    }
+
+    fn debug_call_recovery(&self, message: &str) {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            eprintln!("[mlil-preview] stage=call_arg_recovery {message}");
+        }
+    }
+
+    fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
+        let reg_name = if vn.space_id == REGISTER_SPACE_ID {
+            register_name(vn.offset, vn.size)
+        } else if vn.space_id == UNIQUE_SPACE_ID {
+            crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).unwrap_or("")
+        } else {
+            ""
+        };
+        matches!(
+            reg_name,
+            "rbx" | "rbp" | "rsi" | "rdi" | "r12" | "r13" | "r14" | "r15"
+        )
+    }
+
     fn check_ancestor_realistic(
         &self,
+        vn: &Varnode,
         def_site: &crate::nir::builder::DefSite,
         call_block_idx: usize,
         call_op_idx: usize,
@@ -36,13 +82,61 @@ impl<'a> PreviewBuilder<'a> {
             }
             let inter_block = &self.pcode.blocks[intermediate_idx];
             for op in &inter_block.ops {
-                if op.opcode.is_call() {
+                if op.opcode.is_call() && !self.is_callee_saved_register_varnode(vn) {
                     return false;
                 }
             }
         }
 
         true
+    }
+
+    fn recover_call_stack_args_from_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+        if !self.options.is_64bit
+            || self.options.calling_convention != CallingConvention::WindowsX64
+        {
+            return Ok(Vec::new());
+        }
+
+        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+        for prev_idx in (0..call_idx).rev() {
+            let prev = &block.ops[prev_idx];
+            if prev.opcode.is_control_flow() {
+                break;
+            }
+            if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
+                continue;
+            }
+            let Some((StackBase::Rsp, offset)) = self
+                .resolve_stack_address_from_memory_op(prev)
+                .or_else(|| self.resolve_stack_address(&prev.inputs[1]))
+            else {
+                continue;
+            };
+            if offset < 0x20 || (offset - 0x20) % i64::from(self.options.pointer_size) != 0 {
+                continue;
+            }
+            let stack_index = ((offset - 0x20) / i64::from(self.options.pointer_size)) as usize;
+            if recovered.contains_key(&stack_index) {
+                continue;
+            }
+            let value = self.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())?;
+            recovered.insert(stack_index, value);
+        }
+
+        let mut out = Vec::new();
+        for idx in 0.. {
+            let Some(expr) = recovered.remove(&idx) else {
+                break;
+            };
+            out.push(expr);
+        }
+        self.debug_call_recovery(&format!("stack_args={}", out.len()));
+        Ok(out)
     }
 
     pub(in crate::nir::builder) fn recover_call_args_from_block(
@@ -56,7 +150,6 @@ impl<'a> PreviewBuilder<'a> {
 
         let param_regs = self.options.calling_convention.param_reg_slots_64();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_regs.len()];
-        let mut outcomes: Vec<PopOutcome> = vec![PopOutcome::FailedDef; param_regs.len()];
 
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
@@ -66,13 +159,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(output) = &prev.output else {
                 continue;
             };
-            if output.space_id != REGISTER_SPACE_ID {
-                continue;
-            }
-
-            let Some((_, Some(param_index))) =
-                register_name_with_param(output.offset, output.size, self.options.calling_convention)
-            else {
+            let Some(param_index) = self.param_index_for_varnode(output) else {
                 continue;
             };
             if param_index >= recovered.len() || recovered[param_index].is_some() {
@@ -81,6 +168,14 @@ impl<'a> PreviewBuilder<'a> {
 
             let expr = match self.lower_varnode(output, &mut HashSet::new()) {
                 Ok(expr) => expr,
+                Err(MlilPreviewError::UnsupportedPattern("opcode"))
+                    if self.surface_call_carrier_name(output).is_some() =>
+                {
+                    HirExpr::Var(
+                        self.surface_call_carrier_name(output)
+                            .expect("surface carrier exists after guard"),
+                    )
+                }
                 Err(err) => {
                     self.debug_lowering_error(
                         "call_arg_recovery",
@@ -105,15 +200,10 @@ impl<'a> PreviewBuilder<'a> {
                 }
             };
             recovered[param_index] = Some(expr.clone());
-            outcomes[param_index] = PopOutcome::Success(expr);
         }
 
-        let Some(highest_recovered) = recovered.iter().rposition(Option::is_some) else {
-            return Ok(None);
-        };
-
         for (param_index, (offset, size)) in param_regs.iter().enumerate() {
-            if param_index > highest_recovered || recovered[param_index].is_some() {
+            if recovered[param_index].is_some() {
                 continue;
             }
 
@@ -127,22 +217,27 @@ impl<'a> PreviewBuilder<'a> {
 
             let key = VarnodeKey::from(&vn);
             if let Some(def_site) = self.defs.get(&key) {
-                if self.check_ancestor_realistic(def_site, block.index as usize, call_idx) {
+                if self.check_ancestor_realistic(&vn, def_site, block.index as usize, call_idx) {
                     recovered[param_index] = Some(self.lower_varnode(&vn, &mut HashSet::new())?);
-                    outcomes[param_index] = PopOutcome::Solid;
                     continue;
                 }
             }
+        }
 
+        let contiguous_reg_count = recovered.iter().take_while(|expr| expr.is_some()).count();
+        if contiguous_reg_count == 0 {
+            self.debug_call_recovery("no_contiguous_reg_args");
             return Ok(None);
         }
 
-        Ok(Some(
-            recovered
-                .into_iter()
-                .take(highest_recovered + 1)
-                .map(|expr| expr.unwrap())
-                .collect(),
-        ))
+        let mut args = recovered
+            .into_iter()
+            .take(contiguous_reg_count)
+            .map(|expr| expr.expect("contiguous recovered reg arg"))
+            .collect::<Vec<_>>();
+        let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
+        args.extend(stack_args);
+        self.debug_call_recovery(&format!("reg_args={} total_args={}", contiguous_reg_count, args.len()));
+        Ok(Some(args))
     }
 }

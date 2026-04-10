@@ -61,6 +61,9 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
                 }
             }
         }
+        HirStmt::VaStart { va_list, .. } => {
+            rewrite_loads_in_expr(va_list, cache, &mut changed);
+        }
         HirStmt::Expr(e) | HirStmt::Return(Some(e)) => {
             rewrite_loads_in_expr(e, cache, &mut changed);
         }

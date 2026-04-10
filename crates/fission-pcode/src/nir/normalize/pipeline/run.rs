@@ -5,7 +5,8 @@ use super::super::arith::{
     recognize_magic_number_division, recognize_wide_integer_recombine, simplify_subpiece_chain,
 };
 use super::super::idioms::{
-    apply_bitstream_idioms, apply_branch_prefix_hoist_pass, remove_callee_save_prologue_epilogue,
+    apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
+    apply_security_cookie_pass, remove_callee_save_prologue_epilogue,
 };
 use super::super::cleanup::{
     collapse_redundant_conditional_returns,
@@ -184,6 +185,8 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
 
         });
     }
+    let _ = run_pass_logged(func, "call_artifact_cleanup", perf, apply_call_artifact_cleanup_pass);
+    let _ = run_pass_logged(func, "security_cookie", perf, apply_security_cookie_pass);
     // Run constant folding after the initial cleanup so that folded constants
     // unlock further simplifications in subsequent passes.
     if run_pass_logged(func, "constant_folding", perf, |f| constant_folding_pass(&mut f.body)) {
@@ -683,6 +686,7 @@ where
 pub(crate) fn normalize_stmt(stmt: &mut HirStmt) {
     match stmt {
         HirStmt::Assign { rhs, .. } => normalize_expr(rhs),
+        HirStmt::VaStart { va_list, .. } => normalize_expr(va_list),
         HirStmt::Expr(expr) => normalize_expr(expr),
         HirStmt::Block(stmts) => {
             for stmt in stmts {
@@ -807,6 +811,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
                 cleanup_stmt_list(default, func_name, depth + 1);
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Goto(_)

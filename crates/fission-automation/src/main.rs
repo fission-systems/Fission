@@ -19,18 +19,19 @@ static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use corpus::build_corpus_artifacts;
-use diagnosis::{aggregate_diagnosis, diagnosis_entry, DiagnosisReport};
+use diagnosis::{DiagnosisReport, aggregate_diagnosis, diagnosis_entry};
 use inventory::{ensure_fission_cli, run_inventory_emit};
 use lanes::{
     default_manifest_path, default_source_inventory_path, load_source_inventory,
-    normalize_lane_name, resolve_lane_targets, resolve_source_meta,
+    normalize_lane_name, resolve_lane_targets, resolve_source_meta, validate_lane_target_paths,
 };
-use model::{InventoryRow, InventorySummary, SourceMeta};
+use model::{InventoryRow, InventorySummary, LaneTarget, SourceMeta};
+use rayon::prelude::*;
 use report::{
-    build_decision_insights, build_quality_measurement, build_summary, compute_delta,
-    enrich_summary_with_provenance, load_baseline, load_baseline_candidates,
-    print_terminal_summary, render_markdown, update_latest, AutomationDecisionInsights,
-    AutomationSummary,
+    AutomationDecisionInsights, AutomationSummary, build_decision_insights,
+    build_quality_measurement, build_summary, compute_delta, enrich_summary_with_provenance,
+    load_baseline, load_baseline_candidates, print_terminal_summary, render_markdown,
+    update_latest,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -70,6 +71,16 @@ struct NirCheckArgs {
     baseline: Option<PathBuf>,
     #[arg(long, default_value_t = true)]
     update_latest: bool,
+    /// Skip copying this run into `artifacts/fission-automation/latest/<lane>/` (CI-friendly).
+    #[arg(long = "no-update-latest")]
+    no_update_latest: bool,
+    #[arg(long)]
+    dry_run: bool,
+    /// Exit with non-zero status unless `go_stop_gate.decision` starts with `go_`.
+    #[arg(long)]
+    fail_on_stop: bool,
+    #[arg(long, default_value_t = 1)]
+    jobs: usize,
     #[arg(long)]
     timeout_ms: Option<u64>,
     #[arg(long)]
@@ -181,13 +192,8 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     if targets.is_empty() {
         anyhow::bail!("lane `{}` resolved no targets", args.lane);
     }
+    validate_lane_target_paths(&targets)?;
 
-    let fission_bin = ensure_fission_cli(
-        &root,
-        args.release,
-        args.no_build,
-        args.fission_bin.as_deref(),
-    )?;
     let run_id = unix_run_id();
     let base_output_dir = args.output_dir.unwrap_or_else(|| {
         root.join("artifacts")
@@ -195,6 +201,39 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
             .join(&run_id)
     });
     let per_binary_dir = base_output_dir.join("per_binary");
+
+    if args.dry_run {
+        let fission_display = match args.fission_bin.as_deref() {
+            Some(p) => p.display().to_string(),
+            None => root
+                .join("target")
+                .join(if args.release { "release" } else { "debug" })
+                .join("fission_cli")
+                .display()
+                .to_string(),
+        };
+        println!("[fission-automation] dry-run");
+        println!("  lane: {} (canonical: {canonical_lane})", args.lane);
+        println!("  manifest: {}", manifest_path.display());
+        println!("  fission_cli (expected): {fission_display}");
+        println!("  output_dir: {}", base_output_dir.display());
+        println!("  targets ({}):", targets.len());
+        for t in &targets {
+            println!("    - {} ({})", t.binary, t.path.display());
+        }
+        println!(
+            "  per_binary_dir (would create): {}",
+            per_binary_dir.display()
+        );
+        return Ok(());
+    }
+
+    let fission_bin = ensure_fission_cli(
+        &root,
+        args.release,
+        args.no_build,
+        args.fission_bin.as_deref(),
+    )?;
     fs::create_dir_all(&per_binary_dir)
         .with_context(|| format!("create {}", per_binary_dir.display()))?;
 
@@ -214,7 +253,8 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     {
         let focus_binaries = pick_focus_binaries_from_baseline(candidates, top_n);
         if !focus_binaries.is_empty() {
-            targets.retain(|target| focus_binaries.contains(&normalize_binary_label(&target.binary)));
+            targets
+                .retain(|target| focus_binaries.contains(&normalize_binary_label(&target.binary)));
         }
     }
     if targets.is_empty() {
@@ -222,22 +262,30 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     }
 
     let inventory_started = Instant::now();
-    let mut datasets: Vec<(InventorySummary, Vec<InventoryRow>, Option<SourceMeta>)> = Vec::new();
+    type DatasetEntry = (
+        LaneTarget,
+        InventorySummary,
+        Vec<InventoryRow>,
+        Option<SourceMeta>,
+    );
+    let mut datasets: Vec<DatasetEntry> = Vec::new();
     let mut inventory_summaries = Vec::new();
     let mut failed_targets = Vec::new();
 
-    for target in &targets {
+    let run_target = |target: &LaneTarget| -> Result<DatasetEntry> {
         let file_slug = sanitize_file_stem(&target.binary);
         let rows_path = per_binary_dir.join(format!("{file_slug}.inventory.rows.jsonl"));
         let summary_path = per_binary_dir.join(format!("{file_slug}.inventory.summary.json"));
         let base_functions_limit = args.functions_limit.or(target.default_functions_limit);
-        let functions_limit = args.run_profile.adjust_functions_limit(base_functions_limit);
+        let functions_limit = args
+            .run_profile
+            .adjust_functions_limit(base_functions_limit);
         let timeout_ms = args
             .timeout_ms
             .or(target.default_timeout_ms)
             .unwrap_or(10_000);
         let timeout_ms = args.run_profile.adjust_timeout_ms(timeout_ms);
-        let inventory_result = run_inventory_emit(
+        let (rows, summary) = run_inventory_emit(
             &root,
             &fission_bin,
             &target.path,
@@ -245,21 +293,56 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
             &summary_path,
             functions_limit,
             timeout_ms,
-        );
-        let (rows, summary) = match inventory_result {
-            Ok(result) => result,
-            Err(error) => {
-                eprintln!(
-                    "[fission-automation] inventory failed for {}: {error:#}",
-                    target.path.display()
-                );
-                failed_targets.push(target.binary.clone());
-                continue;
-            }
-        };
+        )?;
         let source_meta = resolve_source_meta(&source_inventory, &target.path).cloned();
-        inventory_summaries.push(summary.clone());
-        datasets.push((summary, rows, source_meta));
+        Ok((target.clone(), summary, rows, source_meta))
+    };
+
+    let jobs = args.jobs.max(1);
+    if jobs == 1 {
+        for target in &targets {
+            match run_target(target) {
+                Ok(entry) => {
+                    let (_, ref summary, _, _) = entry;
+                    inventory_summaries.push(summary.clone());
+                    datasets.push(entry);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[fission-automation] inventory failed for {}: {error:#}",
+                        target.path.display()
+                    );
+                    failed_targets.push(target.binary.clone());
+                }
+            }
+        }
+    } else {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .context("build inventory thread pool")?;
+        let results: Vec<Result<DatasetEntry, anyhow::Error>> = pool.install(|| {
+            targets
+                .par_iter()
+                .map(|target| run_target(target))
+                .collect()
+        });
+        for (target, result) in targets.iter().zip(results) {
+            match result {
+                Ok(entry) => {
+                    let (_, ref summary, _, _) = entry;
+                    inventory_summaries.push(summary.clone());
+                    datasets.push(entry);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[fission-automation] inventory failed for {}: {error:#}",
+                        target.path.display()
+                    );
+                    failed_targets.push(target.binary.clone());
+                }
+            }
+        }
     }
     if datasets.is_empty() {
         anyhow::bail!(
@@ -274,8 +357,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let diagnosis_started = Instant::now();
     let diagnosis_entries = datasets
         .iter()
-        .zip(targets.iter())
-        .map(|((summary, rows, source_meta), target)| {
+        .map(|(target, summary, rows, source_meta)| {
             diagnosis_entry(&target.path, rows, summary, source_meta.as_ref())
         })
         .collect::<Vec<_>>();
@@ -331,7 +413,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     );
     fs::write(base_output_dir.join("summary.md"), markdown)
         .with_context(|| format!("write {}", base_output_dir.join("summary.md").display()))?;
-    if args.update_latest {
+    if args.update_latest && !args.no_update_latest {
         update_latest(&base_output_dir, &latest_dir)?;
     }
     print_terminal_summary(&automation_summary, &diagnosis_report);
@@ -360,10 +442,27 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         base_output_dir.display()
     );
 
-    // Performance regression gate
+    if args.fail_on_stop && !decision_insights.go_stop_gate.decision.starts_with("go_") {
+        anyhow::bail!(
+            "go/stop gate is `{}` (rationale: {}); --fail-on-stop requested",
+            decision_insights.go_stop_gate.decision,
+            decision_insights.go_stop_gate.rationale
+        );
+    }
+
+    // Performance regression gate (only when a baseline summary exists; CI without baseline skips this)
     if let Some(baseline) = baseline.as_ref() {
-        for (pass_name, current_agg) in &automation_summary.aggregate.nir_build_stats_totals.pass_metrics {
-            if let Some(base_agg) = baseline.aggregate.nir_build_stats_totals.pass_metrics.get(pass_name) {
+        for (pass_name, current_agg) in &automation_summary
+            .aggregate
+            .nir_build_stats_totals
+            .pass_metrics
+        {
+            if let Some(base_agg) = baseline
+                .aggregate
+                .nir_build_stats_totals
+                .pass_metrics
+                .get(pass_name)
+            {
                 // Ignore passes that take negligible time to avoid noise (e.g., < 10ms)
                 if base_agg.total_time_ms > 10.0 {
                     let ratio = current_agg.total_time_ms / base_agg.total_time_ms;
@@ -534,4 +633,15 @@ fn sanitize_file_stem(value: &str) -> String {
             _ => '_',
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_file_stem;
+
+    #[test]
+    fn sanitize_file_stem_replaces_unsafe_chars() {
+        assert_eq!(sanitize_file_stem("a b"), "a_b");
+        assert_eq!(sanitize_file_stem("foo.exe"), "foo.exe");
+    }
 }

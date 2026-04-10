@@ -263,6 +263,7 @@ impl<'a> PreviewBuilder<'a> {
                     self.discover_guarded_tail_candidates_in_body(default);
                 }
                 HirStmt::Assign { .. }
+                | HirStmt::VaStart { .. }
                 | HirStmt::Expr(_)
                 | HirStmt::Label(_)
                 | HirStmt::Goto(_)

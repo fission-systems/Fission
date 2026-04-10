@@ -97,6 +97,61 @@ fn unique_rax_is_named_rax_in_output() {
     assert!(!code.contains("tmp_a860"), "should not see tmp_a860xxxx; got:\n{code}");
 }
 
+#[test]
+fn unique_rsp_based_store_surfaces_stack_slot() {
+    let rsp = arch_reg(gpr_offset(4), 8);
+    let ptr = uniq(0x120, 8);
+    let val = uniq(0x128, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140002100,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140002100,
+                    output: Some(ptr.clone()),
+                    inputs: vec![rsp, cst(0x70, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140002101,
+                    output: None,
+                    inputs: vec![cst(0, 8), ptr.clone(), cst(7, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140002102,
+                    output: Some(val.clone()),
+                    inputs: vec![cst(0, 8), ptr],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140002103,
+                    output: None,
+                    inputs: vec![cst(0, 8), val],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "test_stack_slot", 0x140002100, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("stack_70"),
+        "expected unique-rsp stack slot surfacing, got:\n{code}"
+    );
+}
+
 // ── cross-block test ──────────────────────────────────────────────────────────
 
 /// Block 0 writes rsp; block 1 reads rsp — the cross-block read must not appear as tmp_a8600020.

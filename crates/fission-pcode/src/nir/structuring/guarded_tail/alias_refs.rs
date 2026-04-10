@@ -120,6 +120,7 @@ impl<'a> PreviewBuilder<'a> {
                         .sum::<usize>()
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)
@@ -378,6 +379,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)
@@ -432,6 +434,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)

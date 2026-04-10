@@ -299,6 +299,9 @@ fn substitute_copies_in_stmt(
             substitute_copies_lvalue(lhs, copy_map, changed);
             substitute_copies_expr(rhs, copy_map, changed);
         }
+        HirStmt::VaStart { va_list, .. } => {
+            substitute_copies_expr(va_list, copy_map, changed);
+        }
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
             substitute_copies_expr(expr, copy_map, changed);
         }
@@ -671,6 +674,9 @@ fn apply_join_renames_stmt(
             apply_join_renames_expr(rhs, rename_map, changed);
             // Also rename inside index/deref lvalues.
             apply_join_renames_lvalue(lhs, rename_map, changed);
+        }
+        HirStmt::VaStart { va_list, .. } => {
+            apply_join_renames_expr(va_list, rename_map, changed);
         }
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
             apply_join_renames_expr(expr, rename_map, changed);

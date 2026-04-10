@@ -93,6 +93,14 @@ pub(super) fn print_stmt(stmt: &HirStmt) -> String {
                 print_expr(expr_fallback(rhs, 0))
             )
         }
+        HirStmt::VaStart {
+            va_list,
+            last_named_param,
+        } => format!(
+            "va_start({}, {});",
+            print_expr(expr_fallback(va_list, 0)),
+            last_named_param
+        ),
         HirStmt::Expr(expr) => format!("{};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Label(label) => format!("{}:", label),
         HirStmt::Goto(label) => format!("goto {};", label),
@@ -118,6 +126,7 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, depth: usize, out: &mut
     }
     match stmt {
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Return(_)
         | HirStmt::Break
@@ -608,6 +617,14 @@ fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
                 print_expr_with_ctx(rhs, ctx)
             )
         }
+        HirStmt::VaStart {
+            va_list,
+            last_named_param,
+        } => format!(
+            "va_start({}, {});",
+            print_expr_with_ctx(va_list, ctx),
+            last_named_param
+        ),
         HirStmt::Expr(expr) => format!("{};", print_expr_with_ctx(expr, ctx)),
         HirStmt::Return(Some(expr)) => format!("return {};", print_expr_with_ctx(expr, ctx)),
         HirStmt::Return(None) => "return;".to_string(),
@@ -634,6 +651,7 @@ fn print_stmt_with_indent_ctx(
     }
     match stmt {
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Return(_)
         | HirStmt::Break

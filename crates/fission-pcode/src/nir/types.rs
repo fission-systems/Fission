@@ -47,6 +47,10 @@ pub struct NirBinding {
 pub enum NirBindingOrigin {
     ParamIndex(usize),
     StackOffset(i64),
+    HomeSlot(i64),
+    OutgoingArgSlot(i64),
+    VaRegion,
+    ReturnScaffold,
     DerivedFromStackOffset(i64),
     Temp,
 }
@@ -295,6 +299,24 @@ pub struct NirBuildStats {
     /// Conservative folds / annotations for variadic tail stack-arg regions (ABI lattice).
     #[serde(default)]
     pub variadic_stack_region_fold_count: usize,
+    /// ABI-classified stack / carrier slots recovered from entry/call usage.
+    #[serde(default)]
+    pub abi_slot_recovered_count: usize,
+    /// Home / shadow slots promoted out of generic `local_*` naming.
+    #[serde(default)]
+    pub home_slot_promoted_count: usize,
+    /// Semantic `va_start` statements recovered from ABI carrier setup.
+    #[serde(default)]
+    pub va_start_recovered_count: usize,
+    /// Call targets/signatures tightened beyond anonymous `sub_/FUN_` defaults.
+    #[serde(default)]
+    pub call_signature_refined_count: usize,
+    /// Security-cookie setup/check pairs folded into semantic form.
+    #[serde(default)]
+    pub security_cookie_fold_count: usize,
+    /// Non-semantic call/return scaffolding stores removed after proof.
+    #[serde(default)]
+    pub call_artifact_removed_count: usize,
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
@@ -427,6 +449,12 @@ impl NirBuildStats {
         self.entry_param_promotion_spill_rename_count +=
             other.entry_param_promotion_spill_rename_count;
         self.variadic_stack_region_fold_count += other.variadic_stack_region_fold_count;
+        self.abi_slot_recovered_count += other.abi_slot_recovered_count;
+        self.home_slot_promoted_count += other.home_slot_promoted_count;
+        self.va_start_recovered_count += other.va_start_recovered_count;
+        self.call_signature_refined_count += other.call_signature_refined_count;
+        self.security_cookie_fold_count += other.security_cookie_fold_count;
+        self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
 
         for (name, agg) in &other.pass_metrics {
@@ -447,6 +475,10 @@ pub enum HirStmt {
         rhs: HirExpr,
     },
     Expr(HirExpr),
+    VaStart {
+        va_list: HirExpr,
+        last_named_param: String,
+    },
     Block(Vec<HirStmt>),
     Switch {
         expr: HirExpr,

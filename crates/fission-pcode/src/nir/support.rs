@@ -22,6 +22,7 @@ pub(crate) struct StackSlot {
     pub(crate) id: StackSlotId,
     pub(crate) name: String,
     pub(crate) ty: NirType,
+    pub(crate) origin: NirBindingOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -19,6 +19,8 @@ impl AbstractStackSlot {
     pub fn from_binding_origin(origin: Option<NirBindingOrigin>) -> Option<Self> {
         match origin {
             Some(NirBindingOrigin::StackOffset(o))
+            | Some(NirBindingOrigin::HomeSlot(o))
+            | Some(NirBindingOrigin::OutgoingArgSlot(o))
             | Some(NirBindingOrigin::DerivedFromStackOffset(o)) => Some(AbstractStackSlot(o)),
             _ => None,
         }

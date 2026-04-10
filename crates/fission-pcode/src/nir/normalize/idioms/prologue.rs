@@ -138,6 +138,7 @@ fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             lhs_uses + count_ptr_in_expr(rhs, name)
         }
         HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_ptr_in_expr(e, name),
+        HirStmt::VaStart { va_list, .. } => count_ptr_in_expr(va_list, name),
         HirStmt::If {
             cond,
             then_body,

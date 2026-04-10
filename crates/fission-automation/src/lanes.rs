@@ -190,3 +190,52 @@ pub fn resolve_lane_targets(
 
     Ok(targets)
 }
+
+/// Fail fast if any lane manifest binary path is missing (before long inventory runs).
+pub fn validate_lane_target_paths(targets: &[LaneTarget]) -> Result<()> {
+    for target in targets {
+        if !target.path.exists() {
+            anyhow::bail!(
+                "lane manifest path does not exist: {} (binary `{}`)",
+                target.path.display(),
+                target.binary
+            );
+        }
+        if !target.path.is_file() {
+            anyhow::bail!(
+                "lane manifest path is not a file: {} (binary `{}`)",
+                target.path.display(),
+                target.binary
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::LaneTarget;
+
+    #[test]
+    fn normalize_lane_name_maps_preview_alias() {
+        let (n, dep) = normalize_lane_name("preview");
+        assert_eq!(n, "nir");
+        assert!(dep);
+        let (n2, dep2) = normalize_lane_name("nir");
+        assert_eq!(n2, "nir");
+        assert!(!dep2);
+    }
+
+    #[test]
+    fn validate_lane_target_paths_rejects_missing_file() {
+        let t = LaneTarget {
+            binary: "b".into(),
+            path: PathBuf::from("/nonexistent/path/that/does/not/exist.bin"),
+            role: "r".into(),
+            default_functions_limit: None,
+            default_timeout_ms: None,
+        };
+        assert!(validate_lane_target_paths(&[t]).is_err());
+    }
+}

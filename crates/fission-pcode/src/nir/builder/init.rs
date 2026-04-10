@@ -107,6 +107,7 @@ impl<'a> PreviewBuilder<'a> {
             temps: BTreeMap::new(),
             temp_next_id: 0,
             materialized_vns: HashMap::new(),
+            call_result_bindings: HashMap::new(),
             current_lowering_site: None,
             register_param_aliases,
             stack_frame_size,

@@ -30,6 +30,48 @@ pub(super) fn add_variadic_stack_region_folds(n: usize) {
     WAVE.with(|w| w.borrow_mut().variadic_stack_region_fold_count += n);
 }
 
+pub(super) fn add_abi_slot_recoveries(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().abi_slot_recovered_count += n);
+}
+
+pub(super) fn add_home_slot_promotions(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().home_slot_promoted_count += n);
+}
+
+pub(super) fn add_va_start_recoveries(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().va_start_recovered_count += n);
+}
+
+pub(super) fn add_call_signature_refinements(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_signature_refined_count += n);
+}
+
+pub(super) fn add_security_cookie_folds(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().security_cookie_fold_count += n);
+}
+
+pub(super) fn add_call_artifact_removals(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_artifact_removed_count += n);
+}
+
 pub(super) fn add_interproc_constraint_rounds(n: usize) {
     if n == 0 {
         return;

@@ -155,6 +155,11 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 }
                 break;
             }
+            HirStmt::VaStart { va_list, .. } => {
+                sccp_subst_expr(va_list, env);
+                changed |= fold_expr_hir(va_list);
+                break;
+            }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 sccp_subst_expr(expr, env);
                 changed |= fold_expr_hir(expr);

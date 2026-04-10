@@ -28,7 +28,7 @@ Fission/
 
 - `crates/fission-pcode/src/nir/AGENTS.md`
 - `crates/fission-pcode/src/nir/structuring/AGENTS.md`
-- `crates/fission-automation/src/AGENTS.md`
+- `crates/fission-automation/AGENTS.md`
 - `crates/fission-static/src/analysis/decomp/postprocess/AGENTS.md`
 
 Read the nearest child file before editing those areas.
@@ -39,7 +39,8 @@ Read the nearest child file before editing those areas.
 |---|---|---|
 | NIR structuring / canonicalization | `crates/fission-pcode/src/nir/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
-| Automation summaries / deltas | `crates/fission-automation/src/report.rs` | Must stay aligned with `NirBuildStats` |
+| Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
+| Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |
 | Static orchestration / postprocess | `crates/fission-static/src/analysis/` | Routing and downstream passes |
 | Legacy compatibility boundary | `crates/fission-static/src/analysis/decomp/` | Keep compatibility-only logic separate from canonical Rust structuring |
 | Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |

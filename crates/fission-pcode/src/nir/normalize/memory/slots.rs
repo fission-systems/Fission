@@ -196,6 +196,9 @@ fn collect_memory_slot_candidates_from_stmts(
                 }
                 collect_memory_slot_candidates_from_expr(rhs, candidates);
             }
+            HirStmt::VaStart { va_list, .. } => {
+                collect_memory_slot_candidates_from_expr(va_list, candidates);
+            }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 collect_memory_slot_candidates_from_expr(expr, candidates);
             }
@@ -298,6 +301,9 @@ fn rewrite_memory_slot_stmts(
             HirStmt::Assign { lhs, rhs } => {
                 changed |= rewrite_memory_slot_lvalue(lhs, aliases);
                 changed |= rewrite_memory_slot_expr(rhs, aliases);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                changed |= rewrite_memory_slot_expr(va_list, aliases);
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 changed |= rewrite_memory_slot_expr(expr, aliases);

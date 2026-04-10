@@ -41,6 +41,7 @@
 /// Constraints are injected using the same `merge_constraint` / fixed-point
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
+use super::super::wave_stats::add_call_signature_refinements;
 use fission_signatures::win_api::WIN_API_DB;
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -154,6 +155,7 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
 
     for (receiver, callee, arg_vars) in &callsites {
         let Some(sig) = WIN_API_DB.get(callee) else { continue; };
+        let mut refined_here = false;
 
         // Resolve return type and update receiver binding.
         if let Some(ret_ty) = resolve_return_ty(&sig.return_type) {
@@ -161,7 +163,9 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
                 if let Some(b) = binding_by_name_mut(&mut func.locals, recv_name)
                     .or_else(|| binding_by_name_mut(&mut func.params, recv_name))
                 {
-                    changed |= tighten_binding_ty(b, &ret_ty);
+                    let tightened = tighten_binding_ty(b, &ret_ty);
+                    changed |= tightened;
+                    refined_here |= tightened;
                 }
             }
         }
@@ -174,8 +178,13 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                changed |= tighten_binding_ty(b, &param_ty);
+                let tightened = tighten_binding_ty(b, &param_ty);
+                changed |= tightened;
+                refined_here |= tightened;
             }
+        }
+        if refined_here {
+            add_call_signature_refinements(1);
         }
     }
 

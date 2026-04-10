@@ -90,6 +90,7 @@ fn rewrite_bitstream_stmt_list(
                 changed |= rewrite_bitstream_stmt_list(else_body, state_roots, default_state);
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Goto(_)
@@ -290,7 +291,8 @@ fn infer_state_from_stmt(
         | HirStmt::Goto(_)
         | HirStmt::Return(None)
         | HirStmt::Break
-        | HirStmt::Continue => None,
+        | HirStmt::Continue
+        | HirStmt::VaStart { .. } => None,
     }
 }
 

@@ -7,7 +7,67 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-09 (latest)
+## 2026-04-10 (latest)
+
+### Decompile quality wave — ABI carrier recovery, variadic surfacing, security/call cleanup
+
+This update pushes wrapper-quality recovery further in the canonical Rust decompiler pipeline. The focus is **ABI meaning recovery**, not CFG reshaping: Win64 home/shadow slots are separated from ordinary locals, recovered call carriers survive UNIQUE-space lowering, variadic stack regions can surface as `va_start`, and low-signal call/security scaffolding is cleaned from canonical HIR before printing.
+
+#### fission-pcode — ABI carrier / stack-slot recovery
+
+- [`NirBindingOrigin`](crates/fission-pcode/src/nir/types.rs) now distinguishes [`HomeSlot`](crates/fission-pcode/src/nir/types.rs), [`OutgoingArgSlot`](crates/fission-pcode/src/nir/types.rs), [`VaRegion`](crates/fission-pcode/src/nir/types.rs), and [`ReturnScaffold`](crates/fission-pcode/src/nir/types.rs), so ABI stack roles stop collapsing into plain locals.
+- [`StackSlot`](crates/fission-pcode/src/nir/support.rs) carries binding origin; [`stack_slots.rs`](crates/fission-pcode/src/nir/builder/stack_slots.rs) classifies Win64 positive `rsp` offsets into home-space slots and preserves canonical `stack_*` naming expected by normalize/MemSSA consumers.
+- [`lower_expr.rs`](crates/fission-pcode/src/nir/builder/lower_expr.rs) now rejects non-dominating or later-in-block def-sites during lowering, fixing temporal unsoundness where earlier uses could see later defs.
+- [`call_recovery.rs`](crates/fission-pcode/src/nir/builder/call_recovery.rs) recognizes UNIQUE-space x86 register carriers, recovers Win64 stack-tail arguments, and falls back to surfaced carrier names when a recovered carrier cannot be lowered through a p-code opcode chain.
+
+#### fission-pcode — Variadic / call-signature refinement
+
+- [`HirStmt::VaStart`](crates/fission-pcode/src/nir/types.rs) was added and threaded through printer, rename, cleanup, analysis, and structuring visitors so variadic recovery becomes a real IR feature instead of a metric-only placeholder.
+- [`variadic_stack_region.rs`](crates/fission-pcode/src/nir/normalize/types/variadic_stack_region.rs) now performs real rewrites: it maps home slots, recovers ABI-backed variadic regions, inserts `VaStart`, and updates new ABI/variadic telemetry in [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs).
+- [`entry_param_promotion.rs`](crates/fission-pcode/src/nir/normalize/types/entry_param_promotion.rs) now promotes direct register reads and trims unused Win64 variadic tail parameters, so wrapper-shaped functions keep the fixed parameter prefix instead of surfacing dead `r8`/`r9` artifacts.
+- [`callsite_type_prop.rs`](crates/fission-pcode/src/nir/normalize/types/callsite_type_prop.rs) records call-site tightening in canonical telemetry.
+
+#### fission-pcode — Security / call artifact canonicalization
+
+- Added [`call_artifact.rs`](crates/fission-pcode/src/nir/normalize/idioms/call_artifact.rs) to eliminate synthetic temp-only call artifact scaffolding once dominance/def-use proof shows there is no remaining semantic user.
+- Added [`security_cookie.rs`](crates/fission-pcode/src/nir/normalize/idioms/security_cookie.rs) to recognize xor-with-stack-pointer cookie checks and rename weak single-arg guard calls as `__security_check_cookie`.
+- [`pipeline/run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now runs both passes in canonical normalize order; metrics flow through [`wave_stats.rs`](crates/fission-pcode/src/nir/normalize/wave_stats.rs) and [`stats.rs`](crates/fission-pcode/src/nir/builder/stats.rs).
+
+#### Telemetry / contracts
+
+- [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) gained:
+  - `abi_slot_recovered_count`
+  - `home_slot_promoted_count`
+  - `va_start_recovered_count`
+  - `call_signature_refined_count`
+  - `security_cookie_fold_count`
+  - `call_artifact_removed_count`
+- This work keeps telemetry canonical in `fission-pcode`; no parallel report-only metric payload was introduced in automation.
+
+#### Tests
+
+- Added [`unique_x86_regs.rs`](crates/fission-pcode/src/nir/tests/unique_x86_regs.rs) coverage for UNIQUE-space `rsp` stack-slot recovery.
+- Added Win64 variadic parameter trimming coverage in [`entry_param_promotion.rs`](crates/fission-pcode/src/nir/tests/entry_param_promotion.rs).
+- Full crate validation:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+
+#### Benchmarks
+
+- Regression guard:
+  - [`validate_limit_regression.py`](artifacts/batch_benchmark_scripts/validate_limit_regression.py) on [`test_control_flow_x64_O0.exe`](samples/windows/x64/test_control_flow_x64_O0.exe) passed against release [`fission_cli`](crates/fission-cli/) and Ghidra `11.4.2` on 2026-04-10.
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, artifact dir `artifacts/batch_benchmark/putty-abi-varargs-security/`.
+  - Result summary: `both_success_rate_pct=100.0`, `avg_normalized_similarity=35.08%`, `coverage_ratio_pct=24.0%`, Fission `wall_sec=0.124522` vs pyghidra `wall_sec=4.223712`, and the harness reported `Regression check passed — no significant degradation detected.`
+
+#### Known blocker
+
+- [`nir-check`](crates/fission-automation/) remains blocked in the current repository configuration because [`inventory.rs`](crates/fission-automation/src/inventory.rs) still invokes deprecated inventory emission flags while [`fission-cli`](crates/fission-cli/build.rs) and [`fission-static`](crates/fission-static/build.rs) intentionally block the deprecated `native_decomp` feature. This change set does **not** re-enable that legacy path.
+
+---
+
+## 2026-04-09
 
 ### NIR layout — `normalize/` tree, `cfg_analysis/` split, automation report, sleigh semantic
 

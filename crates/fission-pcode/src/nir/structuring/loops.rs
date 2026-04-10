@@ -45,6 +45,7 @@ fn rewrite_loop_control_gotos_in_stmts(
                 stats.skipped_nested_scope_count += 1;
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)
@@ -90,6 +91,7 @@ fn rewrite_loop_control_gotos_multi(
                 stats.skipped_nested_scope_count += 1;
             }
             HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)

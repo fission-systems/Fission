@@ -1,6 +1,19 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
+        match base {
+            StackBase::Rsp
+                if self.options.is_64bit
+                    && self.options.calling_convention == CallingConvention::WindowsX64
+                    && offset >= self.stack_frame_size =>
+            {
+                NirBindingOrigin::HomeSlot(offset)
+            }
+            _ => NirBindingOrigin::StackOffset(offset),
+        }
+    }
+
     pub(super) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
         if vn.space_id != REGISTER_SPACE_ID {
             return None;
@@ -74,6 +87,15 @@ impl<'a> PreviewBuilder<'a> {
                 _ => None,
             };
         }
+        if ptr.space_id == UNIQUE_SPACE_ID
+            && let Some(name) = crate::arch::x86::unique_x86_register_name(ptr.offset, ptr.size)
+        {
+            return match name {
+                "rsp" | "esp" => Some((StackBase::Rsp, 0)),
+                "rbp" | "ebp" => Some((StackBase::Rbp, 0)),
+                _ => None,
+            };
+        }
 
         let key = VarnodeKey::from(ptr);
         if !visiting.insert(key.clone()) {
@@ -136,10 +158,14 @@ impl<'a> PreviewBuilder<'a> {
         offset: i64,
         ty: NirType,
     ) -> Option<(String, NirType)> {
-        let kind_name = match base {
+        let origin = self.classify_stack_slot_origin(base, offset);
+        let kind_name = match origin {
+            NirBindingOrigin::HomeSlot(home_offset) => format!("stack_{home_offset:x}"),
+            _ => match base {
             StackBase::Rbp if offset > 0 => format!("param_{:x}", offset),
             StackBase::Rbp => format!("local_{:x}", offset.unsigned_abs()),
             StackBase::Rsp => format!("local_{:x}", self.rsp_local_display_offset(offset)),
+            },
         };
 
         let entry = self.locals.entry(offset).or_insert_with(|| {
@@ -149,10 +175,16 @@ impl<'a> PreviewBuilder<'a> {
                 id,
                 name: kind_name.clone(),
                 ty: ty.clone(),
+                origin,
             }
         });
         if entry.ty == NirType::Unknown {
             entry.ty = ty.clone();
+        }
+        if matches!(entry.origin, NirBindingOrigin::StackOffset(_))
+            && !matches!(origin, NirBindingOrigin::StackOffset(_))
+        {
+            entry.origin = origin;
         }
         Some((entry.name.clone(), entry.ty.clone()))
     }

@@ -9,6 +9,7 @@ pub(crate) fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, Str
                 rename_var_in_lvalue(lhs, renames);
                 rename_var_in_expr(rhs, renames);
             }
+            HirStmt::VaStart { va_list, .. } => rename_var_in_expr(va_list, renames),
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_var_in_expr(expr, renames),
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }

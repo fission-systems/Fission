@@ -39,6 +39,155 @@ fn collect_entry_linear_prefix<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirSt
     }
 }
 
+fn stmt_contains_rhs_var(stmt: &HirStmt, target: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+            expr_contains_var(rhs, target)
+        }
+        HirStmt::VaStart { va_list, .. } => expr_contains_var(va_list, target),
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => stmts.iter().any(|stmt| stmt_contains_rhs_var(stmt, target)),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_contains_var(cond, target)
+                || then_body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+                || else_body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_contains_var(expr, target)
+                || cases
+                    .iter()
+                    .any(|case| case.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target)))
+                || default.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn expr_contains_var(expr: &HirExpr, target: &str) -> bool {
+    match expr {
+        HirExpr::Var(name) => name == target,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, target),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_var(lhs, target) || expr_contains_var(rhs, target)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, target)),
+        HirExpr::PtrOffset { base, .. } => expr_contains_var(base, target),
+        HirExpr::Index { base, index, .. } => {
+            expr_contains_var(base, target) || expr_contains_var(index, target)
+        }
+        HirExpr::Const(_, _) => false,
+    }
+}
+
+fn stmt_assigns_var(stmt: &HirStmt, target: &str) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } => name == target,
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => stmts.iter().any(|stmt| stmt_assigns_var(stmt, target)),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(|stmt| stmt_assigns_var(stmt, target))
+                || else_body.iter().any(|stmt| stmt_assigns_var(stmt, target))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| case.body.iter().any(|stmt| stmt_assigns_var(stmt, target)))
+                || default.iter().any(|stmt| stmt_assigns_var(stmt, target))
+        }
+        _ => false,
+    }
+}
+
+fn detect_variadic_register_save(func: &HirFunction) -> bool {
+    fn stmt_has_variadic_shape(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::Assign {
+                rhs: HirExpr::Call { args, .. },
+                ..
+            }
+            | HirStmt::Expr(HirExpr::Call { args, .. }) => args.len() > 4,
+            HirStmt::VaStart { .. } => true,
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => stmts.iter().any(stmt_has_variadic_shape),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body.iter().any(stmt_has_variadic_shape) || else_body.iter().any(stmt_has_variadic_shape),
+            HirStmt::Switch { cases, default, .. } => {
+                cases.iter().any(|case| case.body.iter().any(stmt_has_variadic_shape))
+                    || default.iter().any(stmt_has_variadic_shape)
+            }
+            _ => stmt_contains_rhs_var(stmt, "r8") || stmt_contains_rhs_var(stmt, "r9"),
+        }
+    }
+
+    func.body.iter().any(stmt_has_variadic_shape)
+}
+
+fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
+    let abi = func.calling_convention;
+    let variadic_evidence =
+        abi == CallingConvention::WindowsX64 && detect_variadic_register_save(func);
+    let max_fixed_slot = if variadic_evidence { 2 } else { abi.param_offsets().len() };
+    let mut renames = Vec::new();
+    let mut promotions = 0usize;
+    for slot in 0..max_fixed_slot {
+        let Some(hw) = hw_name_for_slot(abi, slot) else {
+            continue;
+        };
+        if stmt_assigns_var(&HirStmt::Block(func.body.clone()), hw) {
+            continue;
+        }
+        if !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, hw)) {
+            continue;
+        }
+        let param_name = format!("param_{}", slot + 1);
+        ensure_param_binding(
+            func,
+            slot,
+            NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+        );
+        renames.push((hw.to_string(), param_name));
+        promotions += 1;
+    }
+    if !renames.is_empty() {
+        rename_vars_in_stmts(&mut func.body, &renames);
+    }
+    promotions
+}
+
 fn sort_params_by_index(params: &mut [crate::nir::types::NirBinding]) {
     params.sort_by_key(|b| {
         b.name
@@ -70,6 +219,26 @@ fn remove_local_binding(func: &mut HirFunction, name: &str) {
     if let Some(pos) = func.locals.iter().position(|b| b.name == name) {
         func.locals.remove(pos);
     }
+}
+
+fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
+    if func.calling_convention != CallingConvention::WindowsX64
+        || !detect_variadic_register_save(func)
+        || func.params.len() <= 2
+    {
+        return false;
+    }
+
+    let removable = func
+        .params
+        .iter()
+        .skip(2)
+        .all(|param| !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, &param.name)));
+    if !removable {
+        return false;
+    }
+    func.params.truncate(2);
+    true
 }
 
 fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str> {
@@ -187,7 +356,13 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
     });
 
     if spill_to_slot.is_empty() {
-        return false;
+        let promotions = promote_direct_param_register_reads(func);
+        if promotions == 0 {
+            return trim_unused_variadic_tail_params(func);
+        }
+        let _ = trim_unused_variadic_tail_params(func);
+        add_entry_param_promotions(promotions);
+        return true;
     }
 
     let mut renames = Vec::new();
@@ -202,6 +377,8 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
 
     rename_vars_in_stmts(&mut func.body, &renames);
     remove_redundant_param_hw_copies(&mut func.body, abi);
+    promotions += promote_direct_param_register_reads(func);
+    let _ = trim_unused_variadic_tail_params(func);
     add_entry_param_promotions(promotions);
     true
 }

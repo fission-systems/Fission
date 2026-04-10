@@ -43,6 +43,7 @@ impl DefUseMap {
                 self.count_lvalue(lhs);
                 self.count_expr(rhs);
             }
+            HirStmt::VaStart { va_list, .. } => self.count_expr(va_list),
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => self.count_expr(expr),
             HirStmt::Return(None)
             | HirStmt::Break
@@ -182,6 +183,7 @@ fn fold_stmt(stmt: &mut HirStmt) -> bool {
             fold_lvalue(lhs);
             changed |= fold_expr(rhs);
         }
+        HirStmt::VaStart { va_list, .. } => changed |= fold_expr(va_list),
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => changed |= fold_expr(expr),
         HirStmt::Return(None)
         | HirStmt::Break
@@ -578,6 +580,7 @@ fn count_any_mention_in_stmt(stmt: &HirStmt, name: &str) -> usize {
         HirStmt::Assign { lhs, rhs } => {
             count_mention_lhs(lhs, name) + count_mention_expr(rhs, name)
         }
+        HirStmt::VaStart { va_list, .. } => count_mention_expr(va_list, name),
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => count_mention_expr(expr, name),
         HirStmt::Return(None)
         | HirStmt::Break

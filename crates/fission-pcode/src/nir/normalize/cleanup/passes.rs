@@ -508,7 +508,7 @@ fn stmts_are_fuseable_linear_segment(stmts: &[HirStmt]) -> bool {
 
 fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
     match stmt {
-        HirStmt::Assign { .. } | HirStmt::Expr(_) => true,
+        HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => true,
         HirStmt::Block(body) => stmts_are_fuseable_linear_segment(body),
         HirStmt::If {
             then_body,
@@ -582,6 +582,7 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
             referenced.insert(label.clone());
         }
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Label(_)
         | HirStmt::Return(_)
@@ -626,6 +627,7 @@ fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<Str
             *counts.entry(label.clone()).or_insert(0) += 1;
         }
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Label(_)
         | HirStmt::Return(_)
@@ -923,6 +925,7 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             total
         }
         HirStmt::Return(Some(expr)) => count_var_uses(expr, name),
+        HirStmt::VaStart { va_list, .. } => count_var_uses(va_list, name),
         HirStmt::Label(_)
         | HirStmt::Goto(_)
         | HirStmt::Return(None)
@@ -999,6 +1002,7 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
             replace_var_in_lvalue(lhs, name, replacement);
             replace_var_in_expr(rhs, name, replacement);
         }
+        HirStmt::VaStart { va_list, .. } => replace_var_in_expr(va_list, name, replacement),
         HirStmt::Expr(expr) => replace_var_in_expr(expr, name, replacement),
         HirStmt::Block(stmts) => {
             for stmt in stmts {

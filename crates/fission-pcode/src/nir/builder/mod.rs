@@ -188,7 +188,14 @@ impl<'a> PreviewBuilder<'a> {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
                     surface_type_name: None,
-                    origin: Some(NirBindingOrigin::StackOffset(*offset)),
+                    origin: Some(match slot.origin {
+                        NirBindingOrigin::StackOffset(_)
+                        | NirBindingOrigin::HomeSlot(_)
+                        | NirBindingOrigin::OutgoingArgSlot(_)
+                        | NirBindingOrigin::VaRegion
+                        | NirBindingOrigin::ReturnScaffold => slot.origin,
+                        _ => NirBindingOrigin::StackOffset(*offset),
+                    }),
                     initializer: None,
                 })
                 .chain(self.temps.values().cloned())

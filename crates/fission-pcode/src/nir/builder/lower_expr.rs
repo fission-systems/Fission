@@ -49,6 +49,17 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: def.op_idx,
             });
         }
+        if let (Some(scope_site), Some(candidate_site)) = (scope, resolved_site) {
+            let candidate_is_prior = if candidate_site.block_idx == scope_site.block_idx {
+                candidate_site.op_idx < scope_site.op_idx
+            } else {
+                self.dom_tree
+                    .dominates(candidate_site.block_idx, scope_site.block_idx)
+            };
+            if !candidate_is_prior {
+                resolved_site = None;
+            }
+        }
 
         self.lookup_site_cache
             .borrow_mut()
@@ -265,22 +276,6 @@ impl<'a> PreviewBuilder<'a> {
             ));
         }
 
-        if let Some(param) = self.register_param(vn) {
-            return Ok(HirExpr::Var(param));
-        }
-
-        if vn.space_id == UNIQUE_SPACE_ID {
-            if let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size) {
-                return Ok(HirExpr::Var(name.to_string()));
-            }
-        }
-
-        if !self.options.is_64bit && vn.space_id == REGISTER_SPACE_ID {
-            if let Some(name) = x86_register_name(vn.offset, vn.size) {
-                return Ok(HirExpr::Var(name.to_string()));
-            }
-        }
-
         if vn.space_id == REGISTER_SPACE_ID
             && vn.size >= 16
             && let Some(site) = self.current_lowering_site
@@ -299,13 +294,50 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-        if vn.space_id == REGISTER_SPACE_ID {
-            return Ok(HirExpr::Var(register_name(vn.offset, vn.size).to_string()));
-        }
-
         let key = VarnodeKey::from(vn);
         let def_site = self.lookup_def_site(vn);
+        if def_site.is_none() {
+            if let Some(param) = self.register_param(vn) {
+                return Ok(HirExpr::Var(param));
+            }
+            if vn.space_id == UNIQUE_SPACE_ID
+                && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+            {
+                return Ok(HirExpr::Var(name.to_string()));
+            }
+            if !self.options.is_64bit && vn.space_id == REGISTER_SPACE_ID
+                && let Some(name) = x86_register_name(vn.offset, vn.size)
+            {
+                return Ok(HirExpr::Var(name.to_string()));
+            }
+            if vn.space_id == REGISTER_SPACE_ID {
+                return Ok(HirExpr::Var(register_name(vn.offset, vn.size).to_string()));
+            }
+        }
+        let stack_reg_name = match vn.space_id {
+            UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(vn.offset, vn.size),
+            REGISTER_SPACE_ID => Some(register_name(vn.offset, vn.size)),
+            _ => None,
+        };
+        if let Some(name) = stack_reg_name
+            && matches!(name, "rsp" | "rbp" | "esp" | "ebp")
+        {
+            return Ok(HirExpr::Var(name.to_string()));
+        }
         if let Some((_, op)) = def_site {
+            if op.output.is_none()
+                && matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+                && ((vn.space_id == REGISTER_SPACE_ID && vn.offset == 0x00)
+                    || (vn.space_id == UNIQUE_SPACE_ID
+                        && vn.offset == crate::arch::x86::X86_REG_BASE))
+                && let Some((site, _)) = def_site
+                && let Some(name) = self.call_result_bindings.get(&site)
+            {
+                return Ok(HirExpr::Var(name.clone()));
+            }
             let materialized_key = MaterializedVarnodeKey::new(vn, op);
             if let Some(name) = self.materialized_vns.get(&materialized_key) {
                 return Ok(HirExpr::Var(name.clone()));

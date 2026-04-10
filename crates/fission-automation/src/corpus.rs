@@ -250,7 +250,12 @@ pub fn load_timeout_rescue(root: &Path) -> BTreeMap<String, Vec<String>> {
 
 pub fn build_corpus_artifacts(
     root: &Path,
-    datasets: &[(InventorySummary, Vec<InventoryRow>, Option<SourceMeta>)],
+    datasets: &[(
+        crate::model::LaneTarget,
+        InventorySummary,
+        Vec<InventoryRow>,
+        Option<SourceMeta>,
+    )],
 ) -> CorpusArtifacts {
     let mut all_candidates = Vec::new();
     let mut explicit_entries = Vec::new();
@@ -259,7 +264,7 @@ pub fn build_corpus_artifacts(
     let mut aligned_entries = Vec::new();
     let mut totals = InventorySummaryTotals::default();
 
-    for (summary, rows, source_meta) in datasets {
+    for (_lane_target, summary, rows, source_meta) in datasets {
         update_totals(&mut totals, summary);
         for row in rows {
             all_candidates.push(row.clone());

@@ -35,6 +35,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) temps: BTreeMap<String, NirBinding>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,
+    pub(crate) call_result_bindings: HashMap<LoweringSite, String>,
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) stack_frame_size: i64,

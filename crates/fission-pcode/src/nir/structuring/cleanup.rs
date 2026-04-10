@@ -407,6 +407,7 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
             referenced.insert(label.clone());
         }
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Label(_)
         | HirStmt::Return(_)
@@ -451,6 +452,7 @@ fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<Str
             *counts.entry(label.clone()).or_insert(0) += 1;
         }
         HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
         | HirStmt::Expr(_)
         | HirStmt::Label(_)
         | HirStmt::Return(_)
