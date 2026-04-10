@@ -63,7 +63,11 @@ This update pushes wrapper-quality recovery further in the canonical Rust decomp
 
 #### Known blocker
 
-- [`nir-check`](crates/fission-automation/) remains blocked in the current repository configuration because [`inventory.rs`](crates/fission-automation/src/inventory.rs) still invokes deprecated inventory emission flags while [`fission-cli`](crates/fission-cli/build.rs) and [`fission-static`](crates/fission-static/build.rs) intentionally block the deprecated `native_decomp` feature. This change set does **not** re-enable that legacy path.
+- Rust-only inventory emission now replaces the removed legacy inventory path for [`nir-check`](crates/fission-automation/): [`fission-cli`](crates/fission-cli/src/cli/oneshot/inventory/emit.rs) can emit `function_facts_inventory` without `native_decomp`, and [`fission-automation`](crates/fission-automation/src/inventory.rs) builds the default Rust-only CLI again.
+- Validation after the switch:
+  - hidden CLI inventory emit succeeds on [`putty.exe`](samples/windows/x64/putty.exe)
+  - `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin target/debug/fission_cli --run-profile fast` completes successfully
+  - `cargo run -p fission-automation --release -- nir-check --lane nir --no-build --fission-bin target/release/fission_cli --run-profile mid --baseline artifacts/fission-automation/latest/nir/summary.json --fail-on-stop` now executes end-to-end and fails only on the expected quality gate (`stop_hold_p5h3f`), not on inventory contract breakage
 
 ---
 

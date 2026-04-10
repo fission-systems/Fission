@@ -11,7 +11,6 @@ mod decompile;
 mod decompile_rust_sleigh;
 mod disasm;
 mod functions;
-#[cfg(feature = "native_decomp")]
 mod inventory;
 mod strings;
 
@@ -24,7 +23,6 @@ use decompile::{
 use decompile_rust_sleigh::run_decompilation_rust_sleigh;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
-#[cfg(feature = "native_decomp")]
 use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
@@ -166,16 +164,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
     }
 
     if cli.emit_function_facts_inventory {
-        #[cfg(feature = "native_decomp")]
-        {
-            return emit_function_facts_inventory(cli, &binary, &binary_data);
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            eprintln!("Error: function facts inventory is deprecated with native_decomp removal");
-            std::process::exit(1);
-        }
+        return emit_function_facts_inventory(cli, &binary, &binary_data);
     }
 
     if let Some(min_len) = cli.strings {

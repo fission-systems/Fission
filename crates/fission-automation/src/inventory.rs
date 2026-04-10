@@ -33,9 +33,7 @@ pub fn ensure_fission_cli(
     cmd.current_dir(root)
         .arg("build")
         .arg("-p")
-        .arg("fission-cli")
-        .arg("--features")
-        .arg("native_decomp");
+        .arg("fission-cli");
     if release {
         cmd.arg("--release");
     }

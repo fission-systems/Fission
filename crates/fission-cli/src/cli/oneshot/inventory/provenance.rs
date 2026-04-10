@@ -2,12 +2,112 @@ use super::schema::{
     ExplicitFactBreakdown, FactSourcesPresent, FunctionFactsInventoryRow,
     FunctionFactsInventorySummary, ProvenanceFactBreakdown,
 };
-use crate::cli::oneshot::decompile::{
-    PreviewCandidateEntry, PreviewCandidateScanSummary, update_scan_summary,
-};
+use fission_pcode::{NirBuildStats, NirHintStats};
 use fission_static::analysis::decomp::{FactStore, FunctionFacts};
 
-pub(super) fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
+#[derive(Debug, Clone)]
+pub(super) struct InventoryCandidateEntry {
+    pub(super) binary: String,
+    pub(super) address: String,
+    pub(super) name: String,
+    pub(super) row_status: String,
+    pub(super) row_error_kind: Option<String>,
+    pub(super) row_error_message: Option<String>,
+    pub(super) has_dwarf_function: bool,
+    pub(super) dwarf_param_count: usize,
+    pub(super) dwarf_local_count: usize,
+    pub(super) has_dwarf_return_type: bool,
+    pub(super) loader_type_count: usize,
+    pub(super) fact_density_score: i32,
+    pub(super) preview_direct_success: bool,
+    pub(super) nir_direct_success: bool,
+    pub(super) nir_fallback_kind: Option<String>,
+    pub(super) nir_fallback_kind_refined: Option<String>,
+    pub(super) nir_fallback_reason: Option<String>,
+    pub(super) nir_block_signature: Option<String>,
+    pub(super) nir_block_detail: Option<String>,
+    pub(super) preview_fallback_kind: Option<String>,
+    pub(super) preview_fallback_kind_refined: Option<String>,
+    pub(super) preview_fallback_reason: Option<String>,
+    pub(super) preview_block_signature: Option<String>,
+    pub(super) preview_block_detail: Option<String>,
+    pub(super) recovery_strategy_attempted: Option<String>,
+    pub(super) recovery_strategy_applied: Option<String>,
+    pub(super) recovery_outcome: Option<String>,
+    pub(super) recovery_source_signature: Option<String>,
+    pub(super) recovery_structuring_mode: Option<String>,
+    pub(super) recovery_goto_count_before: Option<usize>,
+    pub(super) recovery_goto_count_after: Option<usize>,
+    pub(super) recovery_hint_surface_before: Option<usize>,
+    pub(super) recovery_hint_surface_after: Option<usize>,
+    pub(super) recovery_quality_flags: Vec<String>,
+    pub(super) nir_surface_kind: Option<String>,
+    pub(super) preview_surface_kind: Option<String>,
+    pub(super) pcode_block_count: usize,
+    pub(super) pcode_op_count: usize,
+    pub(super) has_indirect_control_flow: bool,
+    pub(super) auto_eligible: bool,
+    pub(super) nir_goto_count: Option<usize>,
+    pub(super) nir_output_class: Option<String>,
+    pub(super) nir_build_stats: Option<NirBuildStats>,
+    pub(super) reason_tags: Vec<String>,
+    pub(super) preview_hint_stats: Option<NirHintStats>,
+}
+
+#[cfg(feature = "native_decomp")]
+impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCandidateEntry {
+    fn from(entry: crate::cli::oneshot::decompile::PreviewCandidateEntry) -> Self {
+        Self {
+            binary: entry.binary,
+            address: entry.address,
+            name: entry.name,
+            row_status: entry.row_status,
+            row_error_kind: entry.row_error_kind,
+            row_error_message: entry.row_error_message,
+            has_dwarf_function: entry.has_dwarf_function,
+            dwarf_param_count: entry.dwarf_param_count,
+            dwarf_local_count: entry.dwarf_local_count,
+            has_dwarf_return_type: entry.has_dwarf_return_type,
+            loader_type_count: entry.loader_type_count,
+            fact_density_score: entry.fact_density_score,
+            preview_direct_success: entry.preview_direct_success,
+            nir_direct_success: entry.nir_direct_success,
+            nir_fallback_kind: entry.nir_fallback_kind,
+            nir_fallback_kind_refined: entry.nir_fallback_kind_refined,
+            nir_fallback_reason: entry.nir_fallback_reason,
+            nir_block_signature: entry.nir_block_signature,
+            nir_block_detail: entry.nir_block_detail,
+            preview_fallback_kind: entry.preview_fallback_kind,
+            preview_fallback_kind_refined: entry.preview_fallback_kind_refined,
+            preview_fallback_reason: entry.preview_fallback_reason,
+            preview_block_signature: entry.preview_block_signature,
+            preview_block_detail: entry.preview_block_detail,
+            recovery_strategy_attempted: entry.recovery_strategy_attempted,
+            recovery_strategy_applied: entry.recovery_strategy_applied,
+            recovery_outcome: entry.recovery_outcome,
+            recovery_source_signature: entry.recovery_source_signature,
+            recovery_structuring_mode: entry.recovery_structuring_mode,
+            recovery_goto_count_before: entry.recovery_goto_count_before,
+            recovery_goto_count_after: entry.recovery_goto_count_after,
+            recovery_hint_surface_before: entry.recovery_hint_surface_before,
+            recovery_hint_surface_after: entry.recovery_hint_surface_after,
+            recovery_quality_flags: entry.recovery_quality_flags,
+            nir_surface_kind: entry.nir_surface_kind,
+            preview_surface_kind: entry.preview_surface_kind,
+            pcode_block_count: entry.pcode_block_count,
+            pcode_op_count: entry.pcode_op_count,
+            has_indirect_control_flow: entry.has_indirect_control_flow,
+            auto_eligible: entry.auto_eligible,
+            nir_goto_count: entry.nir_goto_count,
+            nir_output_class: entry.nir_output_class,
+            nir_build_stats: entry.nir_build_stats,
+            reason_tags: entry.reason_tags,
+            preview_hint_stats: entry.preview_hint_stats,
+        }
+    }
+}
+
+pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
         stats.pointer_alias_hits > 0
@@ -35,7 +135,7 @@ pub(super) fn detect_pdb_source_present(binary: &fission_loader::loader::LoadedB
 
 fn fact_sources_present(
     snapshot: &FunctionFacts,
-    entry: &PreviewCandidateEntry,
+    entry: &InventoryCandidateEntry,
     pdb_source_present: bool,
 ) -> FactSourcesPresent {
     FactSourcesPresent {
@@ -47,7 +147,7 @@ fn fact_sources_present(
 }
 
 fn explicit_fact_breakdown(
-    entry: &PreviewCandidateEntry,
+    entry: &InventoryCandidateEntry,
     snapshot: &FunctionFacts,
 ) -> ExplicitFactBreakdown {
     ExplicitFactBreakdown {
@@ -81,7 +181,7 @@ fn inventory_surface_gap(sources: &FactSourcesPresent, explicit_fact_total: usiz
 }
 
 fn strict_explicit_candidate_row(
-    entry: &PreviewCandidateEntry,
+    entry: &InventoryCandidateEntry,
     explicit_fact_total: usize,
 ) -> bool {
     explicit_fact_total >= 2
@@ -90,7 +190,10 @@ fn strict_explicit_candidate_row(
         && entry.pcode_op_count <= 800
 }
 
-fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: bool) -> String {
+fn admission_block_stage(
+    entry: &InventoryCandidateEntry,
+    inventory_surface_gap: bool,
+) -> String {
     if entry.preview_direct_success {
         return "none".to_string();
     }
@@ -116,7 +219,7 @@ pub(super) fn to_inventory_row(
     binary_path: &std::path::Path,
     pdb_source_present: bool,
     fact_store: &FactStore,
-    entry: PreviewCandidateEntry,
+    entry: InventoryCandidateEntry,
 ) -> FunctionFactsInventoryRow {
     let address =
         u64::from_str_radix(entry.address.trim_start_matches("0x"), 16).unwrap_or_default();
@@ -154,11 +257,11 @@ pub(super) fn to_inventory_row(
         admission_block_stage,
         inventory_surface_gap,
         nir_direct_success: entry.nir_direct_success,
-        nir_fallback_kind: entry.nir_fallback_kind.clone(),
-        nir_fallback_kind_refined: entry.nir_fallback_kind_refined.clone(),
-        nir_fallback_reason: entry.nir_fallback_reason.clone(),
-        nir_block_signature: entry.nir_block_signature.clone(),
-        nir_block_detail: entry.nir_block_detail.clone(),
+        nir_fallback_kind: entry.nir_fallback_kind,
+        nir_fallback_kind_refined: entry.nir_fallback_kind_refined,
+        nir_fallback_reason: entry.nir_fallback_reason,
+        nir_block_signature: entry.nir_block_signature,
+        nir_block_detail: entry.nir_block_detail,
         preview_direct_success: entry.preview_direct_success,
         preview_fallback_kind: entry.preview_fallback_kind,
         preview_fallback_kind_refined: entry.preview_fallback_kind_refined,
@@ -175,14 +278,14 @@ pub(super) fn to_inventory_row(
         recovery_hint_surface_before: entry.recovery_hint_surface_before,
         recovery_hint_surface_after: entry.recovery_hint_surface_after,
         recovery_quality_flags: entry.recovery_quality_flags,
-        nir_surface_kind: entry.nir_surface_kind.clone(),
+        nir_surface_kind: entry.nir_surface_kind,
         preview_surface_kind: entry.preview_surface_kind,
         pcode_block_count: entry.pcode_block_count,
         pcode_op_count: entry.pcode_op_count,
         has_indirect_control_flow: entry.has_indirect_control_flow,
         auto_eligible: entry.auto_eligible,
         nir_goto_count: entry.nir_goto_count,
-        nir_output_class: entry.nir_output_class.clone(),
+        nir_output_class: entry.nir_output_class,
         nir_build_stats: entry.nir_build_stats,
         strict_explicit_candidate: strict_explicit,
         heuristic_surface_candidate: heuristic_surface,
@@ -195,7 +298,6 @@ pub(super) fn to_inventory_row(
 
 pub(super) fn update_inventory_summary(
     summary: &mut FunctionFactsInventorySummary,
-    candidate_summary: &mut PreviewCandidateScanSummary,
     row: &FunctionFactsInventoryRow,
 ) {
     summary.rows_emitted += 1;
@@ -234,15 +336,6 @@ pub(super) fn update_inventory_summary(
     }
     if row.provenance_fact_breakdown.loader_type_count > 0 {
         summary.provenance_surface_totals.loader_nonzero_rows += 1;
-    }
-    if let Some(output_class) = row.nir_output_class.as_ref() {
-        *summary
-            .nir_output_class_counts
-            .entry(output_class.clone())
-            .or_insert(0) += 1;
-    }
-    if let Some(build_stats) = row.nir_build_stats {
-        summary.nir_build_stats_totals.merge_assign(&build_stats);
     }
     if row.inventory_surface_gap {
         summary.inventory_surface_gap_count += 1;
@@ -288,61 +381,45 @@ pub(super) fn update_inventory_summary(
             .entry(flag.clone())
             .or_insert(0) += 1;
     }
-
-    let candidate_entry = PreviewCandidateEntry {
-        binary: row.binary.clone(),
-        address: row.address.clone(),
-        name: row.name.clone(),
-        row_status: row.row_status.clone(),
-        row_error_kind: row.row_error_kind.clone(),
-        row_error_message: row.row_error_message.clone(),
-        row_error_verbose: None,
-        has_dwarf_function: row.has_dwarf_function,
-        dwarf_param_count: row.dwarf_param_count,
-        dwarf_local_count: row.dwarf_local_count,
-        has_dwarf_return_type: row.has_dwarf_return_type,
-        loader_type_count: row.loader_type_count,
-        fact_density_score: row.fact_density_score,
-        preview_direct_success: row.preview_direct_success,
-        nir_direct_success: row.nir_direct_success,
-        nir_fallback_kind: row.nir_fallback_kind.clone(),
-        nir_fallback_kind_refined: row.nir_fallback_kind_refined.clone(),
-        nir_fallback_reason: row.nir_fallback_reason.clone(),
-        nir_block_signature: row.nir_block_signature.clone(),
-        nir_block_detail: row.nir_block_detail.clone(),
-        preview_fallback_kind: row.preview_fallback_kind.clone(),
-        preview_fallback_kind_refined: row.preview_fallback_kind_refined.clone(),
-        preview_fallback_reason: row.preview_fallback_reason.clone(),
-        preview_block_signature: row.preview_block_signature.clone(),
-        preview_block_detail: row.preview_block_detail.clone(),
-        recovery_strategy_attempted: row.recovery_strategy_attempted.clone(),
-        recovery_strategy_applied: row.recovery_strategy_applied.clone(),
-        recovery_outcome: row.recovery_outcome.clone(),
-        recovery_source_signature: row.recovery_source_signature.clone(),
-        recovery_structuring_mode: row.recovery_structuring_mode.clone(),
-        recovery_goto_count_before: row.recovery_goto_count_before,
-        recovery_goto_count_after: row.recovery_goto_count_after,
-        recovery_hint_surface_before: row.recovery_hint_surface_before,
-        recovery_hint_surface_after: row.recovery_hint_surface_after,
-        recovery_quality_flags: row.recovery_quality_flags.clone(),
-        pcode_block_count: row.pcode_block_count,
-        pcode_op_count: row.pcode_op_count,
-        has_indirect_control_flow: row.has_indirect_control_flow,
-        auto_eligible: row.auto_eligible,
-        nir_goto_count: row.nir_goto_count,
-        nir_output_class: row.nir_output_class.clone(),
-        nir_build_stats: row.nir_build_stats,
-        nir_surface_kind: row.nir_surface_kind.clone(),
-        preview_surface_kind: row.preview_surface_kind.clone(),
-        quality_potential_score: 0,
-        reason_tags: row.reason_tags.clone(),
-        preview_hint_stats: None,
-    };
-    update_scan_summary(candidate_summary, &candidate_entry);
-    summary.nir_failure_count = candidate_summary.nir_failure_count;
-    summary.preview_failure_count = candidate_summary.preview_failure_count;
-    summary.panic_recovered_count = candidate_summary.panic_recovered_count;
-    summary.internal_error_count = candidate_summary.internal_error_count;
-    summary.failure_kind_counts = candidate_summary.failure_kind_counts.clone();
-    summary.row_error_kind_counts = candidate_summary.row_error_kind_counts.clone();
+    if let Some(output_class) = row.nir_output_class.as_ref() {
+        *summary
+            .nir_output_class_counts
+            .entry(output_class.clone())
+            .or_insert(0) += 1;
+    }
+    if let Some(build_stats) = row.nir_build_stats.as_ref() {
+        summary.nir_build_stats_totals.merge_assign(build_stats);
+    }
+    match row.row_status.as_str() {
+        "preview_failure" => {
+            summary.nir_failure_count += 1;
+            summary.preview_failure_count += 1;
+        }
+        "panic_recovered" => summary.panic_recovered_count += 1,
+        "internal_error" => summary.internal_error_count += 1,
+        _ => {}
+    }
+    if row.row_status != "ok" {
+        let failure_kind = row
+            .row_error_kind
+            .as_deref()
+            .or(row.preview_fallback_kind_refined.as_deref())
+            .or(row.preview_fallback_kind.as_deref())
+            .unwrap_or("preview_non_success_unknown")
+            .to_string();
+        *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
+    }
+    if let Some(kind) = row.row_error_kind.as_ref() {
+        *summary.row_error_kind_counts.entry(kind.clone()).or_insert(0) += 1;
+    }
+    let is_timeout = row.row_error_kind.as_deref() == Some("preview_timeout")
+        || row.preview_fallback_kind_refined.as_deref() == Some("preview_timeout")
+        || row.preview_fallback_kind.as_deref() == Some("preview_timeout");
+    if is_timeout {
+        summary
+            .failure_kind_counts
+            .entry("preview_timeout".to_string())
+            .and_modify(|count| *count += 0)
+            .or_insert(0);
+    }
 }
