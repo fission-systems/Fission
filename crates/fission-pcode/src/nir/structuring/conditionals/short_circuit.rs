@@ -28,7 +28,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut first_prefix: Vec<HirStmt> = Vec::new();
 
         loop {
-            let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[current_idx])?;
+            let cond_block = self.pcode_block(current_idx).clone();
+            let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if current_idx == idx {
                 if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
                     self.condition_fold_rejected_side_effect += 1;
@@ -120,7 +121,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut first_prefix: Vec<HirStmt> = Vec::new();
 
         loop {
-            let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[current_idx])?;
+            let cond_block = self.pcode_block(current_idx).clone();
+            let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if current_idx == idx {
                 if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
                     self.condition_fold_rejected_side_effect += 1;
@@ -216,7 +218,8 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
 
-        let first_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        let first_block = self.pcode_block(idx).clone();
+        let first_prefix = self.lower_block_stmts(&first_block)?;
         if !first_prefix.iter().all(Self::is_trivial_structuring_stmt) {
             self.condition_fold_rejected_side_effect += 1;
             return Ok(None);
@@ -322,7 +325,8 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
 
-            let next_prefix = self.lower_block_stmts(&self.pcode.blocks[next_idx])?;
+            let next_block = self.pcode_block(next_idx).clone();
+            let next_prefix = self.lower_block_stmts(&next_block)?;
             if !next_prefix.is_empty() {
                 self.condition_fold_rejected_side_effect += 1;
                 return Ok(None);

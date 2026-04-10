@@ -11,6 +11,28 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
 use tracing::trace_span;
 
+fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return (*message).to_string();
+    }
+    "panic payload unavailable".to_string()
+}
+
+fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> String {
+    let detail = panic_payload_to_string(payload);
+    nir_diag_event(
+        address,
+        "render_preview_panic",
+        format!("detail={detail}"),
+    );
+    format!(
+        "nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}"
+    )
+}
+
 pub(crate) fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
 }
@@ -130,14 +152,16 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
         force_linear_structuring,
     );
     let render_start = Instant::now();
-    match render_nir_with_context(pcode, name, address, &options, Some(&type_context)) {
-        Ok(code) => {
+    match catch_unwind(AssertUnwindSafe(|| {
+        render_nir_with_context(pcode, name, address, &options, Some(&type_context))
+    })) {
+        Ok(Ok(code)) => {
             let build_stats = take_last_nir_build_stats();
             let hint_stats = take_last_nir_hint_stats();
             nir_diag_stage(address, "render_preview_done", render_start);
             Ok(Some((code, build_stats, hint_stats)))
         }
-        Err(err) => {
+        Ok(Err(err)) => {
             let surfaced_error = err
                 .structuring_failure_kind()
                 .map(|kind| {
@@ -149,6 +173,10 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
                 .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
             nir_diag_stage(address, "render_preview_error", render_start);
             Err(surfaced_error)
+        }
+        Err(payload) => {
+            nir_diag_stage(address, "render_preview_error", render_start);
+            Err(surface_render_panic(address, payload.as_ref()))
         }
     }
 }
@@ -248,14 +276,16 @@ pub(crate) fn render_nir_request(
             });
     }
     let render_start = Instant::now();
-    match render_nir_with_context(
-        &pcode,
-        &request.name,
-        request.address,
-        &request.options,
-        Some(&request.type_context),
-    ) {
-        Ok(code) => {
+    match catch_unwind(AssertUnwindSafe(|| {
+        render_nir_with_context(
+            &pcode,
+            &request.name,
+            request.address,
+            &request.options,
+            Some(&request.type_context),
+        )
+    })) {
+        Ok(Ok(code)) => {
             let build_stats = take_last_nir_build_stats();
             let hint_stats = take_last_nir_hint_stats();
             nir_diag_stage(request.address, "render_preview_done", render_start);
@@ -270,7 +300,7 @@ pub(crate) fn render_nir_request(
             }
             Ok((code, build_stats, hint_stats))
         }
-        Err(err) => {
+        Ok(Err(err)) => {
             let surfaced_error = err
                 .structuring_failure_kind()
                 .map(|kind| {
@@ -290,6 +320,24 @@ pub(crate) fn render_nir_request(
                         std::io::Write::write_all(
                             &mut f,
                             format!("[mlil-preview] stage=render_error err={surfaced_error}\n")
+                                .as_bytes(),
+                        )
+                    });
+            }
+            Err(surfaced_error)
+        }
+        Err(payload) => {
+            nir_diag_stage(request.address, "render_preview_error", render_start);
+            let surfaced_error = surface_render_panic(request.address, payload.as_ref());
+            if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("/tmp/fission_preview_{:x}.log", request.address))
+                    .and_then(|mut f| {
+                        std::io::Write::write_all(
+                            &mut f,
+                            format!("[mlil-preview] stage=render_panic err={surfaced_error}\n")
                                 .as_bytes(),
                         )
                     });

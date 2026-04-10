@@ -32,7 +32,7 @@ impl<'a> PreviewBuilder<'a> {
         targeted: &HashSet<u64>,
     ) -> Vec<LinearExit> {
         let mut candidates = Vec::new();
-        let search_limit = self.pcode.blocks.len();
+        let search_limit = self.block_count();
 
         for idx in (start_idx + 1)..search_limit {
             if self.dom_tree.dominates(start_idx, idx) {

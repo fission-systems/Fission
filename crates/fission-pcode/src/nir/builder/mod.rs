@@ -54,6 +54,21 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    #[inline]
+    pub(crate) fn pcode_block(&self, idx: usize) -> &crate::pcode::PcodeBasicBlock {
+        &self.pcode.blocks[self.pcode_block_idx(idx)]
+    }
+
+    #[inline]
+    pub(crate) fn block_start_address(&self, idx: usize) -> u64 {
+        self.pcode_block(idx).start_address
+    }
+
+    #[inline]
+    pub(crate) fn block_count(&self) -> usize {
+        self.pcode.blocks.len() + self.virtual_block_map.len()
+    }
+
     pub(super) fn build_hir(
         &mut self,
         name: &str,

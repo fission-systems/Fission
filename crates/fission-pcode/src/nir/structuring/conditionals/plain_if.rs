@@ -7,11 +7,12 @@ impl<'a> PreviewBuilder<'a> {
         budget: &mut IfLoweringBudget,
         diag: bool,
     ) -> Result<Option<PlainIfCandidate>, MlilPreviewError> {
-        let block_addr = self.pcode.blocks[idx].start_address;
+        let block_addr = self.block_start_address(idx);
         if budget.checkpoint("cond_prefix_pre") {
             return Ok(None);
         }
-        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        let cond_block = self.pcode_block(idx).clone();
+        let cond_prefix = self.lower_block_stmts(&cond_block)?;
         if budget.checkpoint("cond_prefix_post") {
             return Ok(None);
         }
@@ -104,13 +105,13 @@ impl<'a> PreviewBuilder<'a> {
         let mut budget = IfLoweringBudget::new(
             self.options,
             idx,
-            self.pcode.blocks[idx].start_address,
+            self.block_start_address(idx),
             "try_lower_if",
         );
         if diag {
             eprintln!(
                 "[DIAG] try_lower_if start: idx={} block=0x{:x} x86_guard={}",
-                idx, self.pcode.blocks[idx].start_address, budget.enabled
+                idx, self.block_start_address(idx), budget.enabled
             );
         }
 
@@ -165,7 +166,7 @@ impl<'a> PreviewBuilder<'a> {
             eprintln!(
                 "[DIAG] try_lower_if done: idx={} block=0x{:x} elapsed={:.3}s success={} budget_tripped={}",
                 idx,
-                self.pcode.blocks[idx].start_address,
+                self.block_start_address(idx),
                 budget.start.elapsed().as_secs_f64(),
                 matches!(result, Ok(Some(_))),
                 budget.tripped

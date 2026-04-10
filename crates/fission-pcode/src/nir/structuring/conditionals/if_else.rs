@@ -5,11 +5,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        let cond_block = self.pcode_block(idx).clone();
+        let cond_prefix = self.lower_block_stmts(&cond_block)?;
         if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
             return Ok(None);
         }
-        if idx + 2 >= self.pcode.blocks.len() {
+        if idx + 2 >= self.block_count() {
             return Ok(None);
         }
         let LoweredTerminator::Cond {
@@ -85,11 +86,12 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
         // follow_idx must be strictly after idx (forward edge) and reachable.
-        if follow_idx <= idx || follow_idx >= self.pcode.blocks.len() {
+        if follow_idx <= idx || follow_idx >= self.block_count() {
             return Ok(None);
         }
 
-        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        let cond_block = self.pcode_block(idx).clone();
+        let cond_prefix = self.lower_block_stmts(&cond_block)?;
         if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
             return Ok(None);
         }

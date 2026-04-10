@@ -9,6 +9,72 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Direct-success-first wave — virtual-block panic removal and canonical recovery surfacing
+
+This wave focused on the remaining seeded direct-success blocker after coverage alignment. The immediate target was the `putty.exe --limit 50` seeded set case at `0x140006ef0`, which previously fell through as a partial/error row because a deeper virtual-block structuring path in `fission-pcode` panicked. The fix was applied at the canonical owner rather than in the benchmark harness or CLI surface.
+
+#### fission-pcode — canonical block projection for structuring consumers
+
+- [`builder/mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs) now exposes canonical block access helpers for structuring:
+  - `pcode_block_idx(..)`
+  - `pcode_block(..)`
+  - `block_start_address(..)`
+  - `block_count()`
+- These helpers project synthetic or virtual split-block indices back to canonical P-code block indices before structuring code reads block metadata.
+- [`structuring/loops.rs`](crates/fission-pcode/src/nir/structuring/loops.rs), [`structuring/linear.rs`](crates/fission-pcode/src/nir/structuring/linear.rs), [`structuring/conditionals/plain_if.rs`](crates/fission-pcode/src/nir/structuring/conditionals/plain_if.rs), [`structuring/conditionals/if_else.rs`](crates/fission-pcode/src/nir/structuring/conditionals/if_else.rs), [`structuring/conditionals/short_circuit.rs`](crates/fission-pcode/src/nir/structuring/conditionals/short_circuit.rs), and [`structuring/recovery.rs`](crates/fission-pcode/src/nir/structuring/recovery.rs) now consume those canonical helpers instead of indexing `self.pcode.blocks` directly.
+- This removes the index-drift that previously produced:
+  - `index out of bounds: the len is 15 but the index is 15`
+  in the `0x140006ef0` structuring path.
+
+#### fission-static — render panic now enters the canonical recovery path
+
+- [`render.rs`](crates/fission-static/src/analysis/decomp/nir/render.rs) now catches `render_nir_with_context(..)` panics and surfaces them as deterministic structuring failures instead of letting them escape as worker-thread panics.
+- Panic payloads are converted into:
+  - `nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: ...`
+- This keeps recovery ownership in the Rust canonical path:
+  - `fission-pcode` defines the failure
+  - `fission-static` routes it
+  - CLI/batch output only surfaces the canonical outcome
+
+#### Duplicate-logic audit
+
+- Block identity owner:
+  - canonical owner is now `fission-pcode` builder/block projection, not ad hoc structuring-side index math
+- Recovery family owner:
+  - panic-to-structuring-failure translation now happens at the NIR render boundary, not inside batch-row formatting logic
+- Batch availability reporting:
+  - benchmark and CLI now consume the same “recovered vs failed” contract instead of inferring direct success from thread panics
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode --lib --quiet`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli`
+  - `cargo build -p fission-cli --release`
+- `nir-check`:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+    - lane completed successfully
+    - gate remains `stop_hold_p5h3f`
+    - dominant perf blocker remains `cleanup_init_1` (`160.8ms` in the latest fast-lane run)
+- Single-function direct-success repro:
+  - `./target/release/fission_cli samples/windows/x64/putty.exe --decomp 0x140006ef0 --engine rust-sleigh --ghidra-compat`
+  - previously panicked in [`structuring/loops.rs`](crates/fission-pcode/src/nir/structuring/loops.rs)
+  - now completes and emits pseudocode successfully
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-direct-success-wave`
+  - seeded shared coverage: `100.00%`
+  - independent top-N coverage: `96.00%`
+  - `avg_normalized_similarity=37.47%`
+  - `both_success=100.000%`
+  - Fission wall `0.505s`, pyghidra wall `3.229s`, throughput speedup `6.393x`
+
+#### Known residual risk
+
+- The seeded direct-success blocker at `0x140006ef0` is cleared for this benchmark spot check, but the quality/perf gate is still held by `cleanup_init_1`.
+- The remaining next bottleneck is no longer panic recovery; it is semantic quality and cleanup cost.
+
 ### Similarity-first recovery wave — partial output retention and object surfacing
 
 This wave focused on the next bottleneck after coverage alignment: keeping seeded functions present even when structuring still fails, while tightening a few low-signal surfaces in the Rust-owned canonical path.

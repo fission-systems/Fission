@@ -116,7 +116,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        let block = &self.pcode.blocks[idx];
+        let block = self.pcode_block(idx).clone();
         let block_addr = block.start_address;
         let LoweredTerminator::Cond {
             cond,
@@ -145,7 +145,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let mut body = self.lower_block_stmts(block)?;
+        let mut body = self.lower_block_stmts(&block)?;
         body.push(HirStmt::If {
             cond: break_cond,
             then_body: vec![HirStmt::Break],
@@ -169,7 +169,7 @@ impl<'a> PreviewBuilder<'a> {
         if self.successors[idx].len() != 1 {
             return Ok(None);
         }
-        let block = &self.pcode.blocks[idx];
+        let block = self.pcode_block(idx).clone();
         let block_addr = block.start_address;
         let terminator = self.lower_block_terminator(idx)?;
         let loops_to_self = matches!(
@@ -183,7 +183,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let body = self.lower_block_stmts(block)?;
+        let body = self.lower_block_stmts(&block)?;
         let mut body = body;
         let continue_label = block_label(block_addr);
         let mut stats = LoopControlRewriteStats::default();
@@ -223,7 +223,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
-        let block_addr = self.pcode.blocks[idx].start_address;
+        let block_addr = self.block_start_address(idx);
         let mut budget = IfLoweringBudget::new(self.options, idx, block_addr, "try_lower_while");
         if diag {
             eprintln!(
@@ -236,7 +236,7 @@ impl<'a> PreviewBuilder<'a> {
             if budget.checkpoint("terminator_pre") {
                 return Ok(None);
             }
-            let cond_block = &self.pcode.blocks[idx];
+            let cond_block = self.pcode_block(idx).clone();
             let LoweredTerminator::Cond {
                 cond,
                 true_target,
@@ -252,7 +252,7 @@ impl<'a> PreviewBuilder<'a> {
             if budget.checkpoint("cond_prefix_pre") {
                 return Ok(None);
             }
-            let cond_prefix = self.lower_block_stmts(cond_block)?;
+            let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if budget.checkpoint("cond_prefix_post") {
                 return Ok(None);
             }
@@ -267,9 +267,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
 
-            let Some(exit_addr) = self.pcode.blocks.get(exit_idx).map(|b| b.start_address) else {
-                return Ok(None);
-            };
+            let exit_addr = self.block_target_key(exit_idx);
 
             let (cond, body_addr) = if true_target == exit_addr {
                 let Some(body_addr) = false_target else { return Ok(None) };
@@ -358,9 +356,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
 
-            let Some(exit_addr) = self.pcode.blocks.get(exit_idx).map(|b| b.start_address) else {
-                return Ok(None);
-            };
+            let exit_addr = self.block_target_key(exit_idx);
 
             // Head must still have a CBranch with one arm pointing to exit.
             let LoweredTerminator::Cond { cond, true_target, false_target } =
@@ -368,7 +364,8 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 return Ok(None);
             };
-            let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx].clone())?;
+            let cond_block = self.pcode_block(idx).clone();
+            let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
                 return Ok(None);
             }
@@ -459,8 +456,8 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
 
-            let block = &self.pcode.blocks[idx];
-            body.extend(self.lower_block_stmts(block)?);
+            let block = self.pcode_block(idx).clone();
+            body.extend(self.lower_block_stmts(&block)?);
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Cond {
                     cond,
@@ -554,9 +551,7 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return Ok(None);
         };
-        let Some(exit_addr) = self.pcode.blocks.get(exit_idx).map(|b| b.start_address) else {
-            return Ok(None);
-        };
+        let exit_addr = self.block_target_key(exit_idx);
         let (while_cond, body_addr) = if true_target == exit_addr {
             let Some(body_addr) = false_target else { return Ok(None) };
             (negate_expr(cond), body_addr)
@@ -567,7 +562,8 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         // Head must have no non-trivial statements of its own (pure condition test)
-        let head_stmts = self.lower_block_stmts(&self.pcode.blocks[idx].clone())?;
+        let head_block = self.pcode_block(idx).clone();
+        let head_stmts = self.lower_block_stmts(&head_block)?;
         if !head_stmts.iter().all(Self::is_trivial_structuring_stmt) {
             return Ok(None);
         }
@@ -584,7 +580,8 @@ impl<'a> PreviewBuilder<'a> {
         let init_idx = outside_preds[0];
 
         // Init block must lower to exactly one Assign statement
-        let init_stmts = self.lower_block_stmts(&self.pcode.blocks[init_idx].clone())?;
+        let init_block = self.pcode_block(init_idx).clone();
+        let init_stmts = self.lower_block_stmts(&init_block)?;
         if init_stmts.len() != 1 {
             return Ok(None);
         }
@@ -598,7 +595,8 @@ impl<'a> PreviewBuilder<'a> {
 
         // ── Invariant 4: latch lowers to exactly one Assign (the update) ──
         // We lower latch stmts only (not the back-edge terminator).
-        let latch_stmts = self.lower_block_stmts(&self.pcode.blocks[latch_idx].clone())?;
+        let latch_block = self.pcode_block(latch_idx).clone();
+        let latch_stmts = self.lower_block_stmts(&latch_block)?;
         if latch_stmts.len() != 1 {
             return Ok(None);
         }
@@ -684,13 +682,8 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(Some(Vec::new()));
         }
 
-        let break_addr: Option<u64> = break_idx.and_then(|bi| {
-            self.pcode.blocks.get(bi).map(|b| b.start_address)
-        });
-        let head_addr: u64 = match self.pcode.blocks.get(head_idx) {
-            Some(b) => b.start_address,
-            None => return Ok(None),
-        };
+        let break_addr: Option<u64> = break_idx.map(|bi| self.block_target_key(bi));
+        let head_addr: u64 = self.block_target_key(head_idx);
 
         let targeted = self.collect_jump_targets()?;
 
@@ -751,14 +744,14 @@ impl<'a> PreviewBuilder<'a> {
             try_reducer!(self.try_lower_if(idx));
 
             // --- Fallback: emit block with loop-context-aware terminator ---
-            let block = &self.pcode.blocks[idx];
+            let block = self.pcode_block(idx).clone();
             let block_key = self.block_target_key(idx);
             if (idx == start_idx || targeted.contains(&block_key))
                 && emitted_labels.insert(block_key)
             {
                 result_stmts.push(HirStmt::Label(block_label(block_key)));
             }
-            result_stmts.extend(self.lower_block_stmts(block)?);
+            result_stmts.extend(self.lower_block_stmts(&block)?);
 
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => {

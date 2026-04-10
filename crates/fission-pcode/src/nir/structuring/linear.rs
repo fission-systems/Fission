@@ -139,12 +139,12 @@ impl<'a> PreviewBuilder<'a> {
         let targeted = self.collect_jump_targets()?;
         let mut emitted_labels = HashSet::new();
         for idx in 0..self.pcode.blocks.len() {
-            let block = &self.pcode.blocks[idx];
+            let block = self.pcode_block(idx).clone();
             let block_key = self.block_target_key(idx);
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(HirStmt::Label(block_label(block_key)));
             }
-            body.extend(self.lower_block_stmts(block)?);
+            body.extend(self.lower_block_stmts(&block)?);
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
@@ -397,8 +397,8 @@ impl<'a> PreviewBuilder<'a> {
                 ));
             }
 
-            let block = &self.pcode.blocks[idx];
-            body.extend(self.lower_block_stmts(block)?);
+            let block = self.pcode_block(idx).clone();
+            body.extend(self.lower_block_stmts(&block)?);
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => {
                     if exit != LinearExit::Return {
@@ -444,10 +444,7 @@ impl<'a> PreviewBuilder<'a> {
                             LinearBodyRejectReason::ExitMismatch,
                         ));
                     }
-                    return Ok(LinearBodyLoweringOutcome::Lowered((
-                        body,
-                        self.pcode.blocks.len(),
-                    )));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((body, self.block_count())));
                 }
                 LoweredTerminator::Cond {
                     cond,
@@ -720,7 +717,7 @@ impl<'a> PreviewBuilder<'a> {
         if idx >= next_idx {
             return false;
         }
-        let block = &self.pcode.blocks[idx];
+        let block = self.pcode_block(idx).clone();
         if block.ops.len() > 8 {
             return false;
         }
@@ -741,7 +738,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn is_trivial_linear_tail(&self, idx: usize) -> bool {
-        let block = &self.pcode.blocks[idx];
+        let block = self.pcode_block(idx).clone();
         if block.ops.len() > 24 {
             return false;
         }
