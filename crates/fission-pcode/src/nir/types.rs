@@ -19,6 +19,47 @@ pub struct StructField {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageClass {
+    Param,
+    StackLocal,
+    Aggregate,
+    GlobalLike,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapperClass {
+    None,
+    TailForwarder,
+    ImportThunk,
+    PureAdapter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectRegion {
+    pub root: i64,
+    pub storage_class: StorageClass,
+    pub escaped: bool,
+    pub interval: (i64, i64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedObjectShape {
+    pub fields: Vec<StructField>,
+    pub array_runs: Vec<(u32, u32)>,
+    pub opaque_ranges: Vec<(u32, u32)>,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceBinding {
+    pub object_id: i64,
+    pub role: StorageClass,
+    pub preferred_name: String,
+    pub preferred_type: NirType,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NirType {
     Unknown,
@@ -117,6 +158,16 @@ pub struct CallSummary {
     pub locked_exact_arity: Option<usize>,
     pub return_lattice: NirType,
     pub param_lattices: Vec<NirType>,
+    pub effect_summary: CallEffectSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallEffectSummary {
+    pub reads_memory: Option<bool>,
+    pub writes_memory: Option<bool>,
+    pub escapes_args: Option<bool>,
+    pub wrapper_class: WrapperClass,
+    pub confidence: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,6 +435,30 @@ pub struct NirBuildStats {
     /// Non-semantic call/return scaffolding stores removed after proof.
     #[serde(default)]
     pub call_artifact_removed_count: usize,
+    /// Typed object shapes recovered from partitioned memory regions.
+    #[serde(default)]
+    pub object_shape_recovered_count: usize,
+    /// New surface bindings/slot aliases promoted from raw partition evidence.
+    #[serde(default)]
+    pub surface_binding_promoted_count: usize,
+    /// Call/effect summaries refined beyond plain arity/name recovery.
+    #[serde(default)]
+    pub call_effect_summary_refined_count: usize,
+    /// Forwarding/wrapper summaries folded into canonical call-target metadata.
+    #[serde(default)]
+    pub wrapper_summary_fold_count: usize,
+    /// Cleanup families skipped due to explicit budget/readiness guards.
+    #[serde(default)]
+    pub cleanup_budget_skip_count: usize,
+    /// Binding-initializer cleanup family invocations.
+    #[serde(default)]
+    pub cleanup_family_binding_init_count: usize,
+    /// Statement canonical cleanup family invocations.
+    #[serde(default)]
+    pub cleanup_family_stmt_canonical_count: usize,
+    /// Dead-binding cleanup family invocations.
+    #[serde(default)]
+    pub cleanup_family_dead_binding_count: usize,
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
@@ -535,6 +610,14 @@ impl NirBuildStats {
         self.call_signature_refined_count += other.call_signature_refined_count;
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
+        self.object_shape_recovered_count += other.object_shape_recovered_count;
+        self.surface_binding_promoted_count += other.surface_binding_promoted_count;
+        self.call_effect_summary_refined_count += other.call_effect_summary_refined_count;
+        self.wrapper_summary_fold_count += other.wrapper_summary_fold_count;
+        self.cleanup_budget_skip_count += other.cleanup_budget_skip_count;
+        self.cleanup_family_binding_init_count += other.cleanup_family_binding_init_count;
+        self.cleanup_family_stmt_canonical_count += other.cleanup_family_stmt_canonical_count;
+        self.cleanup_family_dead_binding_count += other.cleanup_family_dead_binding_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;

@@ -29,10 +29,30 @@
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
+use crate::nir::normalize::wave_stats::{add_object_shape_recoveries, add_surface_binding_promotions};
 use std::collections::HashMap;
 
 /// Map: variable name → (offset → best NirType for that field).
 type OffsetMap = HashMap<String, HashMap<u32, NirType>>;
+
+#[derive(Debug, Clone)]
+struct AccessFacts {
+    ty: NirType,
+    loads: usize,
+    stores: usize,
+}
+
+impl Default for AccessFacts {
+    fn default() -> Self {
+        Self {
+            ty: NirType::Unknown,
+            loads: 0,
+            stores: 0,
+        }
+    }
+}
+
+type AccessFactMap = HashMap<String, HashMap<u32, AccessFacts>>;
 
 /// Return the byte width of a type (0 = unknown).
 fn type_bits_bytes(ty: &NirType) -> u32 {
@@ -63,6 +83,22 @@ fn record_access(var_name: &str, offset: u32, access_ty: NirType, out: &mut Offs
     *best = merge_field_ty(best, &access_ty);
 }
 
+fn record_access_fact(
+    var_name: &str,
+    offset: u32,
+    access_ty: NirType,
+    kind: super::partition::MemoryAccessKind,
+    out: &mut AccessFactMap,
+) {
+    let entry = out.entry(var_name.to_owned()).or_default();
+    let facts = entry.entry(offset).or_default();
+    facts.ty = merge_field_ty(&facts.ty, &access_ty);
+    match kind {
+        super::partition::MemoryAccessKind::Load => facts.loads += 1,
+        super::partition::MemoryAccessKind::Store => facts.stores += 1,
+    }
+}
+
 fn collect_offsets(func: &HirFunction, tracked_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
     for access in collect_partitioned_memory_accesses(&func.body) {
         let HirExpr::Var(name) = &access.base else {
@@ -72,6 +108,28 @@ fn collect_offsets(func: &HirFunction, tracked_vars: &HashMap<String, NirType>, 
             continue;
         }
         record_access(name, access.const_offset as u32, access.access_ty.clone(), out);
+    }
+}
+
+fn collect_access_facts(
+    func: &HirFunction,
+    tracked_vars: &HashMap<String, NirType>,
+    out: &mut AccessFactMap,
+) {
+    for access in collect_partitioned_memory_accesses(&func.body) {
+        let HirExpr::Var(name) = &access.base else {
+            continue;
+        };
+        if !tracked_vars.contains_key(name.as_str()) || access.const_offset < 0 {
+            continue;
+        }
+        record_access_fact(
+            name,
+            access.const_offset as u32,
+            access.access_ty.clone(),
+            access.kind,
+            out,
+        );
     }
 }
 
@@ -103,7 +161,43 @@ fn should_infer_aggregate(offsets: &HashMap<u32, NirType>) -> bool {
 }
 
 fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
-    matches!(&binding.ty, NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown))
+    matches!(
+        &binding.ty,
+        NirType::Ptr(inner)
+            if matches!(
+                inner.as_ref(),
+                NirType::Unknown
+                    | NirType::Aggregate { .. }
+                    | NirType::Int { bits: 8 | 16, .. }
+            )
+    )
+}
+
+fn infer_storage_class(binding: &NirBinding) -> StorageClass {
+    match binding.origin {
+        Some(NirBindingOrigin::ParamIndex(_)) => StorageClass::Param,
+        Some(
+            NirBindingOrigin::StackOffset(_)
+            | NirBindingOrigin::DerivedFromStackOffset(_)
+            | NirBindingOrigin::HomeSlot(_)
+            | NirBindingOrigin::OutgoingArgSlot(_)
+            | NirBindingOrigin::ReturnScaffold,
+        ) => StorageClass::StackLocal,
+        _ => StorageClass::Unknown,
+    }
+}
+
+fn should_emit_surface_binding(binding: &NirBinding, offsets: &HashMap<u32, AccessFacts>) -> bool {
+    if matches!(&binding.ty, NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown)) {
+        return !offsets.is_empty();
+    }
+    match infer_storage_class(binding) {
+        StorageClass::Param => !offsets.is_empty(),
+        StorageClass::StackLocal => {
+            offsets.len() >= 2 || offsets.values().any(|facts| facts.stores > 0)
+        }
+        _ => offsets.len() >= 2,
+    }
 }
 
 /// Apply aggregate field layout recovery to a function.
@@ -116,7 +210,9 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     }
 
     let mut offset_map: OffsetMap = HashMap::new();
+    let mut access_facts: AccessFactMap = HashMap::new();
     collect_offsets(func, &tracked_ptr_vars, &mut offset_map);
+    collect_access_facts(func, &tracked_ptr_vars, &mut access_facts);
 
     if offset_map.is_empty() {
         return false;
@@ -139,10 +235,18 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
             fields: Vec::new(),
         }));
         changed = true;
+        add_object_shape_recoveries(1);
     }
 
     // Update each NirBinding that is Ptr(Aggregate { .. }) with discovered fields.
     let update_binding = |binding: &mut NirBinding, offset_map: &OffsetMap| -> bool {
+        let can_surface = access_facts
+            .get(&binding.name)
+            .map(|accesses| should_emit_surface_binding(binding, accesses))
+            .unwrap_or(false);
+        if !can_surface {
+            return false;
+        }
         let NirType::Ptr(inner) = &mut binding.ty else { return false; };
         let NirType::Aggregate { fields, .. } = inner.as_mut() else { return false; };
         if !fields.is_empty() {
@@ -165,10 +269,16 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     };
 
     for binding in func.locals.iter_mut() {
-        changed |= update_binding(binding, &offset_map);
+        if update_binding(binding, &offset_map) {
+            add_surface_binding_promotions(1);
+            changed = true;
+        }
     }
     for binding in func.params.iter_mut() {
-        changed |= update_binding(binding, &offset_map);
+        if update_binding(binding, &offset_map) {
+            add_surface_binding_promotions(1);
+            changed = true;
+        }
     }
 
     changed
@@ -180,6 +290,13 @@ mod tests {
 
     fn ptr_unknown() -> NirType {
         NirType::Ptr(Box::new(NirType::Unknown))
+    }
+
+    fn ptr_u8() -> NirType {
+        NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }))
     }
 
     #[test]
@@ -222,5 +339,68 @@ mod tests {
         assert_eq!(*size, 12);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].offset, 8);
+    }
+
+    #[test]
+    fn aggregate_fields_upgrades_byte_pointer_when_shape_is_structured() {
+        let mut func = HirFunction {
+            name: "shape".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: ptr_u8(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 4,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                            offset: 8,
+                        }),
+                        ty: NirType::Int {
+                            bits: 16,
+                            signed: false,
+                        },
+                    },
+                    rhs: HirExpr::Const(
+                        0,
+                        NirType::Int {
+                            bits: 16,
+                            signed: false,
+                        },
+                    ),
+                },
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer param");
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+            panic!("expected inferred aggregate");
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].offset, 4);
+        assert_eq!(fields[1].offset, 8);
     }
 }

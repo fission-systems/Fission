@@ -1,6 +1,7 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
 use super::super::*;
+use crate::nir::normalize::wave_stats::add_surface_binding_promotions;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use std::collections::{HashMap, HashSet};
 
@@ -129,6 +130,8 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
             }),
         });
     }
+
+    add_surface_binding_promotions(aliases.len());
 
     rewrite_memory_slot_stmts(&mut func.body, &aliases)
 }

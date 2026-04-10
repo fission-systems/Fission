@@ -46,6 +46,11 @@ use tracing::{debug, debug_span};
 
 const TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS: usize = 6;
 
+#[derive(Debug, Clone, Copy)]
+struct PassBudget {
+    stmt_limit: usize,
+}
+
 fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bool) {
     let mut interproc_signature_rounds = 0usize;
     for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
@@ -126,21 +131,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             func.locals.len()
         );
     }
-    run_cleanup_block(func, "cleanup_init_1", perf, |f| {
-
-        normalize_binding_initializers(&mut f.locals);
-
-        cleanup_stmt_list(&mut f.body, &f.name, 0);
-
-        apply_for_loop_folding(&mut f.body);
-
-        eliminate_dead_local_clobber_assigns(f);
-
-        prune_unused_temp_bindings(f);
-
-        prune_unused_dead_local_bindings(f);
-
-    });
+    run_cleanup_family_passes(func, "init_1", perf, PassBudget { stmt_limit: 600 });
     // Flag recovery: substitute raw x86 EFLAGS variable references in branch
     // conditions with high-level comparison expressions (sf!=of → a<b signed,
     // !zf → a!=b, etc.).  Runs early so that subsequent dead-assignment passes
@@ -384,21 +375,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         );
     }
     if changed {
-        run_cleanup_block(func, "cleanup_init_2", perf, |f| {
-
-            normalize_binding_initializers(&mut f.locals);
-
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
-
-            apply_for_loop_folding(&mut f.body);
-
-            eliminate_dead_local_clobber_assigns(f);
-
-            prune_unused_temp_bindings(f);
-
-            prune_unused_dead_local_bindings(f);
-
-        });
+        run_cleanup_family_passes(func, "init_2", perf, PassBudget { stmt_limit: 600 });
     }
     if allow_expensive_passes {
         changed |= run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms);
@@ -410,21 +387,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             );
         }
         if changed {
-            run_cleanup_block(func, "cleanup_init_3", perf, |f| {
-
-                normalize_binding_initializers(&mut f.locals);
-
-                cleanup_stmt_list(&mut f.body, &f.name, 0);
-
-                apply_for_loop_folding(&mut f.body);
-
-                eliminate_dead_local_clobber_assigns(f);
-
-                prune_unused_temp_bindings(f);
-
-                prune_unused_dead_local_bindings(f);
-
-            });
+            run_cleanup_family_passes(func, "init_3", perf, PassBudget { stmt_limit: 600 });
         }
     }
     // Pointer arithmetic recovery: convert IntAdd(ptr, k) → PtrOffset and
@@ -637,6 +600,72 @@ where
     })
 }
 
+fn run_cleanup_family_passes(
+    func: &mut HirFunction,
+    stage: &str,
+    perf: bool,
+    budget: PassBudget,
+) -> bool {
+    let mut changed = false;
+
+    if has_binding_initializers(&func.locals) {
+        wave_stats::add_cleanup_family_binding_init(1);
+        changed |= run_pass_logged(
+            func,
+            &format!("cleanup_binding_init_{stage}"),
+            perf,
+            |f| {
+                let before = collect_initializer_fingerprints(&f.locals);
+                normalize_binding_initializers(&mut f.locals);
+                before != collect_initializer_fingerprints(&f.locals)
+            },
+        );
+    } else {
+        wave_stats::add_cleanup_budget_skips(1);
+    }
+
+    if !func.body.is_empty() {
+        wave_stats::add_cleanup_family_stmt_canonical(1);
+        changed |= run_pass_logged(
+            func,
+            &format!("cleanup_stmt_canonical_{stage}"),
+            perf,
+            |f| {
+                let before = hir_shape(f);
+                cleanup_stmt_list(&mut f.body, &f.name, 0);
+                if count_hir_stmts(&f.body) <= budget.stmt_limit && body_has_loopish_shapes(&f.body) {
+                    apply_for_loop_folding(&mut f.body);
+                } else if body_has_loopish_shapes(&f.body) {
+                    wave_stats::add_cleanup_budget_skips(1);
+                }
+                before != hir_shape(f)
+            },
+        );
+    } else {
+        wave_stats::add_cleanup_budget_skips(1);
+    }
+
+    if !func.locals.is_empty() {
+        wave_stats::add_cleanup_family_dead_binding(1);
+        changed |= run_pass_logged(
+            func,
+            &format!("cleanup_dead_binding_{stage}"),
+            perf,
+            |f| {
+                let before = hir_shape(f);
+                eliminate_dead_local_clobber_assigns(f);
+                prune_unused_temp_bindings(f);
+                prune_unused_dead_local_bindings(f);
+                before != hir_shape(f)
+            },
+        );
+    } else {
+        wave_stats::add_cleanup_budget_skips(1);
+    }
+
+    changed
+}
+
 fn run_pass_logged<F>(func: &mut HirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
 where
     F: FnOnce(&mut HirFunction) -> bool,
@@ -681,6 +710,60 @@ where
         );
     }
     changed
+}
+
+fn has_binding_initializers(bindings: &[NirBinding]) -> bool {
+    bindings.iter().any(|binding| binding.initializer.is_some())
+}
+
+fn collect_initializer_fingerprints(bindings: &[NirBinding]) -> Vec<(String, Option<String>)> {
+    bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.name.clone(),
+                binding.initializer.as_ref().map(print_expr),
+            )
+        })
+        .collect()
+}
+
+fn body_has_loopish_shapes(stmts: &[HirStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => return true,
+            HirStmt::Block(body) => {
+                if body_has_loopish_shapes(body) {
+                    return true;
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if body_has_loopish_shapes(then_body) || body_has_loopish_shapes(else_body) {
+                    return true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                if cases.iter().any(|case| body_has_loopish_shapes(&case.body))
+                    || body_has_loopish_shapes(default)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    false
 }
 
 pub(crate) fn normalize_stmt(stmt: &mut HirStmt) {

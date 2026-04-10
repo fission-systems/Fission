@@ -9,6 +9,109 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Typed-object and bounded-cleanup wave — semantic owner tightening without similarity regression
+
+This wave targeted the next bottleneck after coverage and direct-success stabilization: semantic similarity drift and the oversized `cleanup_init_1` bucket. The goal was to move more memory/object/call semantics into the Rust-owned canonical path while splitting cleanup cost attribution into deterministic pass families. The result is that seeded coverage and direct success stayed intact, `nir-check` now reports cleanup cost with family-level attribution, and the benchmark remains stable, but the spot-check similarity metric did not materially improve yet.
+
+#### fission-pcode — typed object recovery telemetry and conservative object surfacing
+
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs) now defines canonical semantic carriers for this wave:
+  - `StorageClass`
+  - `ObjectRegion`
+  - `TypedObjectShape`
+  - `SurfaceBinding`
+  - `CallEffectSummary`
+  - `WrapperClass`
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs) also extends [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) with canonical counters for:
+  - object-shape recovery
+  - surface binding promotion
+  - call/effect summary refinement
+  - wrapper summary folds
+  - cleanup budget skips
+  - split cleanup family counts
+- [`builder/stats.rs`](crates/fission-pcode/src/nir/builder/stats.rs) and [`normalize/wave_stats.rs`](crates/fission-pcode/src/nir/normalize/wave_stats.rs) now initialize and accumulate those counters in the Rust canonical path rather than introducing downstream-only telemetry.
+- [`normalize/memory/aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) now:
+  - collects structured access facts per partition
+  - upgrades `Ptr(Unknown)` and structured byte-pointer cases into aggregate pointers when interval evidence is strong enough
+  - promotes field-like surfacing for stack locals and parameters under a conservative proof policy
+  - records canonical object-shape and surface-binding telemetry
+- [`normalize/memory/slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs) now reports slot alias surfacing as canonical surface-binding promotion telemetry.
+
+#### fission-pcode — call/effect summary lattice extension
+
+- [`normalize/types/interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs) now pushes call summary ownership beyond arity lower bounds:
+  - summaries now carry `CallEffectSummary`
+  - zero-arity callees conservatively seed `escapes_args = false`
+  - simple forwarding wrappers are recognized as:
+    - `TailForwarder`
+    - `PureAdapter`
+- This summary tightening remains canonical to `fission-pcode`; `fission-static` continues to provide provenance and import facts but does not own wrapper/effect semantics.
+
+#### fission-pcode — bounded cleanup scheduler and family-level perf attribution
+
+- [`normalize/pipeline/run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) no longer treats the early cleanup wave as one opaque megablock.
+- The former `cleanup_init_*` behavior is now split into bounded family passes:
+  - `cleanup_binding_init_*`
+  - `cleanup_stmt_canonical_*`
+  - `cleanup_dead_binding_*`
+- The scheduler now:
+  - skips binding-init cleanup when no initializer evidence exists
+  - avoids loop-folding work on bodies that fail the size/budget checks
+  - records budget skips explicitly
+- This does not yet make the lane green, but it changes perf attribution from “giant cleanup bucket” into actionable canonical pass families.
+
+#### fission-automation — family attribution follows canonical counters only
+
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now reads the new canonical counters directly from [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs).
+- The quality-family map now includes:
+  - richer `memory_shape` attribution
+  - richer `call_signature` attribution
+  - a dedicated `cleanup` family
+- This keeps telemetry ownership in `fission-pcode`; automation only aggregates and reports the canonical source of truth.
+
+#### Duplicate-logic audit
+
+- Object / field / slot semantic ownership:
+  - canonical owner remains `fission-pcode`
+  - no new semantic rewrite layer was added to `fission-static`
+- Call / effect / wrapper summary ownership:
+  - canonical owner remains `fission-pcode`
+  - `fission-static` remains a provenance and fact supplier
+- Perf-family taxonomy ownership:
+  - canonical owner remains [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs)
+  - `fission-automation` only groups and reports those counters
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode --lib --quiet`
+  - `cargo check -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli`
+  - `cargo build -p fission-cli --release`
+- `nir-check`:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+  - lane completed successfully
+  - gate remains `stop_hold_p5h3f`
+  - top build stats now include `call_effect_summary_refined_count=104`
+  - the dominant cleanup cost is now reported as:
+    - `cleanup_stmt_canonical_init_1 (117.0ms)`
+    - `cleanup_dead_binding_init_1 (40.6ms)`
+  instead of one opaque `cleanup_init_1` bucket
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-object-call-cleanup-wave-rerun`
+  - seeded shared coverage: `100.00%`
+  - independent top-N coverage: `96.00%`
+  - `avg_normalized_similarity=37.45%`
+  - `both_success=100.000%`
+  - Fission wall `0.507s`, pyghidra wall `2.926s`
+
+#### Known residual risk
+
+- This wave tightened semantic ownership and improved cleanup attribution, but it did not materially raise the similarity score for the `putty.exe --limit 50` spot check.
+- The next bottleneck is no longer coverage or direct success; it is semantic surface quality and the remaining cleanup-family cost headed by `cleanup_stmt_canonical_init_1`.
+
 ### Direct-success-first wave — virtual-block panic removal and canonical recovery surfacing
 
 This wave focused on the remaining seeded direct-success blocker after coverage alignment. The immediate target was the `putty.exe --limit 50` seeded set case at `0x140006ef0`, which previously fell through as a partial/error row because a deeper virtual-block structuring path in `fission-pcode` panicked. The fix was applied at the canonical owner rather than in the benchmark harness or CLI surface.

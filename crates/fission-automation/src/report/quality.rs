@@ -297,6 +297,38 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.call_artifact_removed_count,
         ),
         (
+            "object_shape_recovered_count",
+            stats.object_shape_recovered_count,
+        ),
+        (
+            "surface_binding_promoted_count",
+            stats.surface_binding_promoted_count,
+        ),
+        (
+            "call_effect_summary_refined_count",
+            stats.call_effect_summary_refined_count,
+        ),
+        (
+            "wrapper_summary_fold_count",
+            stats.wrapper_summary_fold_count,
+        ),
+        (
+            "cleanup_budget_skip_count",
+            stats.cleanup_budget_skip_count,
+        ),
+        (
+            "cleanup_family_binding_init_count",
+            stats.cleanup_family_binding_init_count,
+        ),
+        (
+            "cleanup_family_stmt_canonical_count",
+            stats.cleanup_family_stmt_canonical_count,
+        ),
+        (
+            "cleanup_family_dead_binding_count",
+            stats.cleanup_family_dead_binding_count,
+        ),
+        (
             "interproc_signature_constraint_rounds",
             stats.interproc_signature_constraint_rounds,
         ),
@@ -337,7 +369,9 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
         ),
         (
             "memory_shape".to_string(),
-            stats.call_artifact_removed_count,
+            stats.call_artifact_removed_count
+                + stats.object_shape_recovered_count
+                + stats.surface_binding_promoted_count,
         ),
         (
             "variadic".to_string(),
@@ -345,7 +379,17 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
         ),
         (
             "call_signature".to_string(),
-            stats.call_signature_refined_count + stats.interproc_signature_constraint_rounds,
+            stats.call_signature_refined_count
+                + stats.call_effect_summary_refined_count
+                + stats.wrapper_summary_fold_count
+                + stats.interproc_signature_constraint_rounds,
+        ),
+        (
+            "cleanup".to_string(),
+            stats.cleanup_budget_skip_count
+                + stats.cleanup_family_binding_init_count
+                + stats.cleanup_family_stmt_canonical_count
+                + stats.cleanup_family_dead_binding_count,
         ),
         (
             "structuring".to_string(),
