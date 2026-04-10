@@ -40,6 +40,7 @@ fn preview_type_hints_resolve_indirect_import_call_through_entry_param_alias() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -118,6 +119,7 @@ fn preview_type_hints_recover_indirect_import_args_from_block_register_setup() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),

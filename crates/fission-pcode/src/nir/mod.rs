@@ -177,6 +177,7 @@ pub fn render_mlil_preview_with_context(
     build_stats.rejected_external_entry += normalized_discovery_stats.rejected_external_entry;
     build_stats.rejected_loop_or_switch_target +=
         normalized_discovery_stats.rejected_loop_or_switch_target;
+    build_stats.refresh_structuring_reason_families();
     build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
     build_stats.normalize_duration_ms = normalize_start.elapsed().as_millis() as usize;
     telemetry::store_preview_build_stats(build_stats);

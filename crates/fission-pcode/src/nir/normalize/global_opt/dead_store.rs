@@ -42,7 +42,7 @@ pub(crate) fn apply_dead_store_elimination(func: &mut HirFunction) -> bool {
             def.use_count == 0
                 && !def.may_escape
                 && !phi_inputs.contains(&def.id)
-                && matches!(def.key, AliasKey::Stack { .. })
+                && matches!(&def.key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
         })
         .map(|def| def.id)
         .collect();
@@ -92,8 +92,10 @@ impl<'a> DeadStoreCollector<'a> {
                 if is_mem_write {
                     // Find the matching MemDef by scanning in order.
                     while self.current_def_idx < self.dead_defs.len()
-                        && !matches!(self.dead_defs[self.current_def_idx].key, AliasKey::Stack { .. })
-                        && !matches!(self.dead_defs[self.current_def_idx].key, AliasKey::Unknown)
+                        && !matches!(
+                            &self.dead_defs[self.current_def_idx].key,
+                            AliasKey::Partition(_) | AliasKey::Unknown
+                        )
                     {
                         self.current_def_idx += 1;
                     }

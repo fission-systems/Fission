@@ -206,6 +206,7 @@ impl<'a> PreviewBuilder<'a> {
             calling_convention: self.options.calling_convention,
             is_64bit: self.options.is_64bit,
             callee_observed_max_arity: IndexMap::new(),
+            callee_summaries: IndexMap::new(),
         })
     }
 

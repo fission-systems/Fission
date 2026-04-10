@@ -104,7 +104,12 @@ impl<'a> PreviewBuilder<'a> {
             match self.lower_varnode(target, visiting) {
                 Ok(HirExpr::Const(val, _)) => self
                     .type_context
-                    .and_then(|ctx| ctx.call_targets.get(&(val as u64)).cloned())
+                    .and_then(|ctx| {
+                        ctx.call_target_refs
+                            .get(&(val as u64))
+                            .map(|target_ref| target_ref.symbol.clone())
+                            .or_else(|| ctx.call_targets.get(&(val as u64)).cloned())
+                    })
                     .unwrap_or_else(|| format!("sub_{:x}", val as u64)),
                 Ok(HirExpr::Var(name)) => name,
                 Ok(other) => print_expr(&other),
@@ -188,8 +193,12 @@ impl<'a> PreviewBuilder<'a> {
         let addr = parse_call_target_address(asm)?;
         if let Some(name) = self
             .type_context
-            .and_then(|ctx| ctx.call_targets.get(&addr))
-            .cloned()
+            .and_then(|ctx| {
+                ctx.call_target_refs
+                    .get(&addr)
+                    .map(|target_ref| target_ref.symbol.clone())
+                    .or_else(|| ctx.call_targets.get(&addr).cloned())
+            })
         {
             return Some(name);
         }

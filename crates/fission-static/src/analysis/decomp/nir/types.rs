@@ -37,6 +37,8 @@ pub struct NirSelection {
     pub recovery_outcome: Option<&'static str>,
     pub recovery_source_signature: Option<String>,
     pub recovery_structuring_mode: Option<&'static str>,
+    pub recovery_reason_family: Option<&'static str>,
+    pub recovery_retryable: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,8 @@ pub struct NirRoutingDecision {
     pub recovery_outcome: Option<&'static str>,
     pub recovery_source_signature: Option<String>,
     pub recovery_structuring_mode: Option<&'static str>,
+    pub recovery_reason_family: Option<&'static str>,
+    pub recovery_retryable: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +80,8 @@ impl NirRoutingResolver {
             recovery_outcome: selection.recovery_outcome,
             recovery_source_signature: selection.recovery_source_signature.clone(),
             recovery_structuring_mode: selection.recovery_structuring_mode,
+            recovery_reason_family: selection.recovery_reason_family,
+            recovery_retryable: selection.recovery_retryable,
         }
     }
 
@@ -95,6 +101,8 @@ impl NirRoutingResolver {
             recovery_outcome: None,
             recovery_source_signature: None,
             recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
         }
     }
 
@@ -120,6 +128,8 @@ impl NirRoutingResolver {
             recovery_outcome: None,
             recovery_source_signature: None,
             recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
         }
     }
 
@@ -132,6 +142,8 @@ impl NirRoutingResolver {
         outcome: &'static str,
         source_signature: Option<String>,
         structuring_mode: &'static str,
+        reason_family: &'static str,
+        retryable: bool,
     ) -> NirSelection {
         NirSelection {
             nir_surface: Some(classify_nir_surface(&code)),
@@ -148,6 +160,8 @@ impl NirRoutingResolver {
             recovery_outcome: Some(outcome),
             recovery_source_signature: source_signature,
             recovery_structuring_mode: Some(structuring_mode),
+            recovery_reason_family: Some(reason_family),
+            recovery_retryable: Some(retryable),
         }
     }
 
@@ -168,6 +182,8 @@ impl NirRoutingResolver {
             recovery_outcome: None,
             recovery_source_signature: None,
             recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
         }
     }
 
@@ -178,6 +194,8 @@ impl NirRoutingResolver {
         outcome: &'static str,
         source_signature: Option<String>,
         structuring_mode: Option<&'static str>,
+        reason_family: Option<&'static str>,
+        retryable: Option<bool>,
     ) -> NirSelection {
         let fallback_reason = classified_nir_error(reason.as_ref());
         NirSelection {
@@ -195,6 +213,8 @@ impl NirRoutingResolver {
             recovery_outcome: Some(outcome),
             recovery_source_signature: source_signature,
             recovery_structuring_mode: structuring_mode,
+            recovery_reason_family: reason_family,
+            recovery_retryable: retryable,
         }
     }
 
@@ -212,6 +232,8 @@ impl NirRoutingResolver {
             recovery_outcome: None,
             recovery_source_signature: None,
             recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
         }
     }
 }

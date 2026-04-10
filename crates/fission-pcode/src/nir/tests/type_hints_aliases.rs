@@ -41,6 +41,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
 
     let mut context = PreviewTypeContext::default();
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -103,6 +104,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
 
     let mut context = PreviewTypeContext::default();
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),

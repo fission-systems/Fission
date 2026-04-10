@@ -66,6 +66,59 @@ pub enum CarrierClass {
     ReturnSlot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum CallTargetProvenance {
+    Direct,
+    Import,
+    Fact,
+    Global,
+    Intrinsic,
+    Reference,
+    IndirectCandidate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum CallEdgeKind {
+    Direct,
+    Import,
+    Reference,
+    IndirectCandidate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CallTargetRef {
+    pub address: Option<u64>,
+    pub symbol: String,
+    pub provenance: CallTargetProvenance,
+    pub edge_kind: CallEdgeKind,
+    pub confidence: u8,
+}
+
+impl CallTargetRef {
+    pub fn canonical_key(&self) -> String {
+        self.address
+            .map(|address| format!("addr:0x{address:x}"))
+            .unwrap_or_else(|| format!("sym:{}", self.symbol))
+    }
+
+    pub fn is_import_locked(&self) -> bool {
+        matches!(
+            self.provenance,
+            CallTargetProvenance::Import | CallTargetProvenance::Intrinsic
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallSummary {
+    pub target: CallTargetRef,
+    pub min_arity: usize,
+    pub max_arity: usize,
+    pub locked_exact_arity: Option<usize>,
+    pub return_lattice: NirType,
+    pub param_lattices: Vec<NirType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirFunction {
     pub name: String,
@@ -119,6 +172,8 @@ pub struct HirFunction {
     /// Downstream pipelines may merge this across functions for interprocedural arity bounds.
     /// [`IndexMap`] preserves insertion order for deterministic iteration / dumps.
     pub callee_observed_max_arity: IndexMap<String, usize>,
+    /// Typed summaries derived from canonical call-target identity.
+    pub callee_summaries: IndexMap<String, CallSummary>,
 }
 
 impl Default for HirFunction {
@@ -133,6 +188,7 @@ impl Default for HirFunction {
             calling_convention: CallingConvention::default(),
             is_64bit: true,
             callee_observed_max_arity: IndexMap::new(),
+            callee_summaries: IndexMap::new(),
         }
     }
 }
@@ -331,6 +387,19 @@ pub struct NirBuildStats {
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
+    /// Canonical family totals derived from structuring failures/recovery in pcode.
+    #[serde(default)]
+    pub structuring_reason_region_legality_count: usize,
+    #[serde(default)]
+    pub structuring_reason_follow_failure_count: usize,
+    #[serde(default)]
+    pub structuring_reason_irreducible_count: usize,
+    #[serde(default)]
+    pub structuring_reason_loop_exit_count: usize,
+    #[serde(default)]
+    pub structuring_reason_switch_shape_count: usize,
+    #[serde(default)]
+    pub structuring_reason_budget_count: usize,
     #[serde(default)]
     pub pass_metrics: std::collections::BTreeMap<String, PassAggregate>,
 }
@@ -467,6 +536,16 @@ impl NirBuildStats {
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
+        self.structuring_reason_region_legality_count +=
+            other.structuring_reason_region_legality_count;
+        self.structuring_reason_follow_failure_count +=
+            other.structuring_reason_follow_failure_count;
+        self.structuring_reason_irreducible_count +=
+            other.structuring_reason_irreducible_count;
+        self.structuring_reason_loop_exit_count += other.structuring_reason_loop_exit_count;
+        self.structuring_reason_switch_shape_count +=
+            other.structuring_reason_switch_shape_count;
+        self.structuring_reason_budget_count += other.structuring_reason_budget_count;
 
         for (name, agg) in &other.pass_metrics {
             let current = self.pass_metrics.entry(name.clone()).or_default();
@@ -476,6 +555,35 @@ impl NirBuildStats {
             current.stmts_reduced += agg.stmts_reduced;
             current.locals_reduced += agg.locals_reduced;
         }
+    }
+
+    pub fn refresh_structuring_reason_families(&mut self) {
+        self.structuring_reason_region_legality_count =
+            self.region_linearize_rejected_non_structuring_failure_count
+                + self.region_linearize_rejected_no_exit_count
+                + self.region_linearize_rejected_body_lowering_unsupported_terminator_count
+                + self.rejected_external_entry
+                + self.rejected_not_single_pred_succ;
+        self.structuring_reason_follow_failure_count =
+            self.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count
+                + self.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count
+                + self.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count
+                + self.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count
+                + self.region_linearize_rejected_body_lowering_successor_inline_rejected_count;
+        self.structuring_reason_irreducible_count =
+            self.region_linearize_rejected_irreducible_cfg_count
+                + self.structuring_irreducible_scc_count
+                + self.structuring_irreducible_header_count;
+        self.structuring_reason_loop_exit_count =
+            self.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count
+                + self.loop_control_rewrite_skipped_nested_scope_count
+                + self.rejected_loop_or_switch_target;
+        self.structuring_reason_switch_shape_count =
+            self.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count;
+        self.structuring_reason_budget_count =
+            self.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count
+                + self.region_linearize_rejected_non_advancing_count
+                + self.region_linearize_rejected_body_lowering_revisit_cycle_count;
     }
 }
 
@@ -640,6 +748,7 @@ pub struct NirRenderOptions {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirTypeContext {
     pub call_targets: HashMap<u64, String>,
+    pub call_target_refs: HashMap<u64, CallTargetRef>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,
 }
@@ -658,6 +767,7 @@ pub struct NirHintStats {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirCallParamRule {
+    pub callee_address: Option<u64>,
     pub callee_name: String,
     pub arg_index: usize,
     pub pointer_alias: String,
@@ -742,6 +852,69 @@ pub enum StructuringFailureKind {
     RegionShape,
     PhiJoin,
     IndirectCallRegion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RecoveryMode {
+    Structured,
+    RegionLinearized,
+    ForcedLinear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StructuringReasonFamily {
+    RegionLegality,
+    FollowFailure,
+    Irreducible,
+    LoopExit,
+    SwitchShape,
+    Budget,
+}
+
+impl StructuringReasonFamily {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            StructuringReasonFamily::RegionLegality => "region_legality",
+            StructuringReasonFamily::FollowFailure => "follow_failure",
+            StructuringReasonFamily::Irreducible => "irreducible",
+            StructuringReasonFamily::LoopExit => "loop_exit",
+            StructuringReasonFamily::SwitchShape => "switch_shape",
+            StructuringReasonFamily::Budget => "budget",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StructuringOutcome {
+    pub mode: RecoveryMode,
+    pub reason_family: StructuringReasonFamily,
+    pub retryable: bool,
+    pub confidence: u8,
+}
+
+pub fn parse_call_target_address(target: &str) -> Option<u64> {
+    for prefix in ["sub_", "FUN_0x", "FUN_", "DAT_0x", "DAT_"] {
+        if let Some(rest) = target.strip_prefix(prefix) {
+            return u64::from_str_radix(rest.trim_start_matches("0x"), 16).ok();
+        }
+    }
+    None
+}
+
+pub fn structuring_outcome_for_signature(signature: &str) -> Option<StructuringOutcome> {
+    let family = match signature {
+        "unsupported_cfg_region_shape" | "unsupported_cfg_phi_join" => {
+            StructuringReasonFamily::RegionLegality
+        }
+        "unsupported_cfg_indirect_call_region" => StructuringReasonFamily::FollowFailure,
+        _ => return None,
+    };
+    Some(StructuringOutcome {
+        mode: RecoveryMode::RegionLinearized,
+        reason_family: family,
+        retryable: true,
+        confidence: 224,
+    })
 }
 
 impl StructuringFailureKind {

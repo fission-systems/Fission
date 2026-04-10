@@ -1,7 +1,10 @@
 use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
-use fission_pcode::{NirCallParamRule, NirFunctionHints, NirTypeContext};
+use fission_pcode::{
+    CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallParamRule, NirFunctionHints,
+    NirTypeContext,
+};
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
@@ -12,44 +15,81 @@ pub(crate) fn build_nir_type_context(
     address: u64,
 ) -> NirTypeContext {
     let mut call_targets = HashMap::new();
+    let mut call_target_refs = HashMap::new();
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
         if resolved_address == 0 || fact.name.is_empty() {
             continue;
         }
-        call_targets.insert(resolved_address, sanitize_nir_symbol_name(&fact.name));
+        let sanitized = sanitize_nir_symbol_name(&fact.name);
+        call_targets.insert(resolved_address, sanitized.clone());
+        call_target_refs.insert(
+            resolved_address,
+            CallTargetRef {
+                address: Some(resolved_address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Fact,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 255,
+            },
+        );
     }
 
     for func in &binary.functions {
         if func.address == 0 || func.name.is_empty() {
             continue;
         }
+        let sanitized = sanitize_nir_symbol_name(&func.name);
         call_targets
             .entry(func.address)
-            .or_insert_with(|| sanitize_nir_symbol_name(&func.name));
+            .or_insert_with(|| sanitized.clone());
+        call_target_refs.entry(func.address).or_insert(CallTargetRef {
+            address: Some(func.address),
+            symbol: sanitized,
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 224,
+        });
     }
 
     for (resolved_address, name) in &binary.inner().iat_symbols {
         if *resolved_address == 0 || name.is_empty() {
             continue;
         }
+        let sanitized = sanitize_nir_symbol_name(name);
         call_targets
             .entry(*resolved_address)
-            .or_insert_with(|| sanitize_nir_symbol_name(name));
+            .or_insert_with(|| sanitized.clone());
+        call_target_refs.entry(*resolved_address).or_insert(CallTargetRef {
+            address: Some(*resolved_address),
+            symbol: sanitized,
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 255,
+        });
     }
 
     for (resolved_address, name) in &binary.inner().global_symbols {
         if *resolved_address == 0 || name.is_empty() {
             continue;
         }
+        let sanitized = sanitize_nir_symbol_name(name);
         call_targets
             .entry(*resolved_address)
-            .or_insert_with(|| sanitize_nir_symbol_name(name));
+            .or_insert_with(|| sanitized.clone());
+        call_target_refs.entry(*resolved_address).or_insert(CallTargetRef {
+            address: Some(*resolved_address),
+            symbol: sanitized,
+            provenance: CallTargetProvenance::Global,
+            edge_kind: CallEdgeKind::Reference,
+            confidence: 192,
+        });
     }
 
     NirTypeContext {
         call_targets,
-        call_param_rules: build_nir_call_param_rules(),
+        call_target_refs: call_target_refs.clone(),
+        call_param_rules: build_nir_call_param_rules(&call_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
     }
 }
@@ -132,9 +172,17 @@ fn sanitize_nir_symbol_name(name: &str) -> String {
     sanitized
 }
 
-fn build_nir_call_param_rules() -> Vec<NirCallParamRule> {
+fn build_nir_call_param_rules(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> Vec<NirCallParamRule> {
     let structures = WindowsStructures::new();
     let mut call_param_rules = Vec::new();
+    let target_addresses_by_name = call_target_refs
+        .iter()
+        .fold(HashMap::<String, Vec<u64>>::new(), |mut acc, (addr, target_ref)| {
+            acc.entry(target_ref.symbol.clone()).or_default().push(*addr);
+            acc
+        });
     for sig in WIN_API_DB.iter() {
         for (arg_index, param) in sig.params.iter().enumerate() {
             let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
@@ -146,14 +194,33 @@ fn build_nir_call_param_rules() -> Vec<NirCallParamRule> {
             if struct_def.size_64 == 0 {
                 continue;
             }
-            call_param_rules.push(NirCallParamRule {
-                callee_name: sig.name.clone(),
-                arg_index,
-                pointer_alias: param.type_name.clone(),
-                pointee_alias: struct_name,
-                pointer_size: 8,
-                pointee_sizes: vec![struct_def.size_64 as u32],
-            });
+            let addresses = target_addresses_by_name
+                .get(&sig.name)
+                .cloned()
+                .unwrap_or_default();
+            if addresses.is_empty() {
+                call_param_rules.push(NirCallParamRule {
+                    callee_address: None,
+                    callee_name: sig.name.clone(),
+                    arg_index,
+                    pointer_alias: param.type_name.clone(),
+                    pointee_alias: struct_name.clone(),
+                    pointer_size: 8,
+                    pointee_sizes: vec![struct_def.size_64 as u32],
+                });
+            } else {
+                for address in addresses {
+                    call_param_rules.push(NirCallParamRule {
+                        callee_address: Some(address),
+                        callee_name: sig.name.clone(),
+                        arg_index,
+                        pointer_alias: param.type_name.clone(),
+                        pointee_alias: struct_name.clone(),
+                        pointer_size: 8,
+                        pointee_sizes: vec![struct_def.size_64 as u32],
+                    });
+                }
+            }
         }
     }
     call_param_rules

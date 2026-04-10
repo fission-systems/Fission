@@ -251,8 +251,11 @@ fn collect_call_hints_from_expr(
 ) {
     match expr {
         HirExpr::Call { target, args, .. } => {
+            let target_addr = parse_call_target_address(target);
             for rule in &context.call_param_rules {
-                if rule.callee_name != *target {
+                if rule.callee_name != *target
+                    && !matches!(rule.callee_address, Some(address) if Some(address) == target_addr)
+                {
                     continue;
                 }
                 let Some(var_name) = args

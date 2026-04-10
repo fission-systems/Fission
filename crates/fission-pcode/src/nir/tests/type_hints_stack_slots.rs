@@ -80,6 +80,7 @@ fn preview_type_hints_name_rsp_aggregate_slot_as_local() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),

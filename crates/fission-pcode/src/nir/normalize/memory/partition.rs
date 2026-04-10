@@ -7,6 +7,40 @@ pub(crate) enum MemoryAccessKind {
     Store,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum MemoryAccessClass {
+    Stack,
+    Aggregate,
+    HeapLike,
+    GlobalLike,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum MemoryEscapeClass {
+    NonEscaping,
+    AddressTaken,
+    Escaped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PartitionKey {
+    pub(crate) base_object: String,
+    pub(crate) offset_interval: (i64, i64),
+    pub(crate) stride: Option<i64>,
+    pub(crate) effect_class: MemoryAccessClass,
+    pub(crate) escape_class: MemoryEscapeClass,
+}
+
+impl PartitionKey {
+    pub(crate) fn is_promotable_stack_like(&self) -> bool {
+        matches!(
+            (self.effect_class, self.escape_class),
+            (MemoryAccessClass::Stack | MemoryAccessClass::Aggregate, MemoryEscapeClass::NonEscaping)
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PartitionedMemoryAccess {
     pub(crate) kind: MemoryAccessKind,
@@ -34,6 +68,11 @@ pub(crate) fn collect_partitioned_memory_accesses(
     accesses
 }
 
+pub(crate) fn partition_key_for_pointer_expr(ptr: &HirExpr, access_ty: &NirType) -> Option<PartitionKey> {
+    let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
+    Some(access.partition_key())
+}
+
 pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
     match ty {
         NirType::Bool => Some(1),
@@ -42,6 +81,19 @@ pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
         NirType::Aggregate { size, .. } => Some(*size),
         NirType::Float { bits } => Some(bits / 8),
         NirType::Unknown => None,
+    }
+}
+
+impl PartitionedMemoryAccess {
+    pub(crate) fn partition_key(&self) -> PartitionKey {
+        let width = i64::from(type_byte_size(&self.access_ty).unwrap_or(0));
+        PartitionKey {
+            base_object: self.base_repr.clone(),
+            offset_interval: (self.const_offset, self.const_offset + width),
+            stride: self.stride,
+            effect_class: classify_base_object(&self.base),
+            escape_class: classify_escape(&self.base),
+        }
     }
 }
 
@@ -155,6 +207,41 @@ fn parse_partitioned_access(
         index,
         access_ty: access_ty.clone(),
     })
+}
+
+fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
+    match base {
+        HirExpr::Var(name) => {
+            if name.starts_with("stack_")
+                || name.starts_with("local_")
+                || name.starts_with("home_")
+                || name.starts_with("arg_out_")
+            {
+                MemoryAccessClass::Stack
+            } else if name.starts_with("param_") {
+                MemoryAccessClass::Unknown
+            } else if name.starts_with("DAT_") {
+                MemoryAccessClass::GlobalLike
+            } else {
+                MemoryAccessClass::Unknown
+            }
+        }
+        HirExpr::PtrOffset { base, .. } | HirExpr::Cast { expr: base, .. } => classify_base_object(base),
+        _ => MemoryAccessClass::HeapLike,
+    }
+}
+
+fn classify_escape(base: &HirExpr) -> MemoryEscapeClass {
+    match classify_base_object(base) {
+        MemoryAccessClass::Stack | MemoryAccessClass::Aggregate | MemoryAccessClass::GlobalLike => {
+            if expr_has_side_effects(base) {
+                MemoryEscapeClass::AddressTaken
+            } else {
+                MemoryEscapeClass::NonEscaping
+            }
+        }
+        MemoryAccessClass::HeapLike | MemoryAccessClass::Unknown => MemoryEscapeClass::Escaped,
+    }
 }
 
 fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {

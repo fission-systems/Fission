@@ -9,6 +9,90 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Decompile quality wave — typed call semantics / partitioned MemSSA / structuring ownership
+
+This wave moves three pieces of semantic ownership back into the Rust-only canonical path: typed call identity and summary propagation, partition-backed memory SSA aliasing, and canonical structuring recovery/family attribution. The goal is not printer-only cleanup for a single sample, but a tighter `fission-pcode -> fission-static -> fission-automation` contract with less duplicated policy.
+
+#### fission-pcode — typed call semantics graph
+
+- Added typed call identity primitives to [`types.rs`](crates/fission-pcode/src/nir/types.rs):
+  - `CallTargetProvenance`
+  - `CallEdgeKind`
+  - `CallTargetRef`
+  - `CallSummary`
+- [`HirFunction`](crates/fission-pcode/src/nir/types.rs) now carries `callee_summaries`, so observed arity/type tightening has a canonical owner in `fission-pcode` instead of downstream string-only consumers.
+- [`lower_expr.rs`](crates/fission-pcode/src/nir/builder/lower_expr.rs) now resolves call targets through typed `CallTargetRef` facts first and only falls back to plain names when no stronger provenance exists.
+- [`callsite_type_prop.rs`](crates/fission-pcode/src/nir/normalize/types/callsite_type_prop.rs) and [`interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs) now work from typed callee identity plus canonical summaries before consulting import signature seeds.
+
+#### fission-static — provenance supplier only
+
+- [`nir/context.rs`](crates/fission-static/src/analysis/decomp/nir/context.rs) now supplies typed call provenance (`Fact`, `Direct`, `Import`, `Global`) and address-backed call parameter rules, but no longer owns summary tightening policy.
+- [`nir/recovery.rs`](crates/fission-static/src/analysis/decomp/nir/recovery.rs) now consumes canonical structuring outcomes from `fission-pcode` instead of maintaining a static-local retry signature table.
+
+#### fission-pcode — partitioned memory SSA alias core
+
+- [`partition.rs`](crates/fission-pcode/src/nir/normalize/memory/partition.rs) now defines canonical partition identity with:
+  - `MemoryAccessClass`
+  - `MemoryEscapeClass`
+  - `PartitionKey`
+- [`mem_ssa.rs`](crates/fission-pcode/src/nir/normalize/global_opt/mem_ssa.rs) now consumes `PartitionKey` directly rather than keeping an older `Stack | Unknown`-only alias split.
+- [`dead_store.rs`](crates/fission-pcode/src/nir/normalize/global_opt/dead_store.rs) and [`redundant_load.rs`](crates/fission-pcode/src/nir/normalize/global_opt/redundant_load.rs) now gate forwarding/elimination on partition-backed promotability.
+- Conservative fix applied during this wave:
+  - parameter-rooted memory is intentionally kept `Unknown` rather than promotable stack-like, which avoids unsound aggregate-store elimination on address-taken or externally visible pointees.
+
+#### fission-pcode / automation — canonical structuring policy ownership
+
+- Added canonical recovery-family types in [`types.rs`](crates/fission-pcode/src/nir/types.rs):
+  - `RecoveryMode`
+  - `StructuringReasonFamily`
+  - `StructuringOutcome`
+- [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs) now derives canonical family counters for:
+  - `RegionLegality`
+  - `FollowFailure`
+  - `Irreducible`
+  - `LoopExit`
+  - `SwitchShape`
+  - `Budget`
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) and [`insights.rs`](crates/fission-automation/src/report/insights.rs) now consume those family counters directly, instead of recomputing structuring policy from downstream subtype-specific heuristics.
+
+#### Duplicate-logic audit
+
+- Call semantics:
+  - canonical call summary/tightening now lives in [`fission-pcode`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs)
+  - [`fission-static`](crates/fission-static/src/analysis/decomp/nir/context.rs) only supplies provenance/facts
+- Memory aliasing:
+  - canonical partition identity now lives in [`partition.rs`](crates/fission-pcode/src/nir/normalize/memory/partition.rs)
+  - [`mem_ssa.rs`](crates/fission-pcode/src/nir/normalize/global_opt/mem_ssa.rs) no longer carries a second stack-offset alias parser
+- Structuring policy:
+  - canonical recovery family/retryability now lives in [`fission-pcode`](crates/fission-pcode/src/nir/types.rs)
+  - static and automation only orchestrate or report that canonical outcome
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli`
+  - `cargo build -p fission-cli --release`
+- `nir-check`:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+    - completed successfully
+    - gate remained `stop_hold_p5h3f`
+    - `changed_rows=0`
+  - `cargo run -p fission-automation --release -- nir-check --lane nir --no-build --fission-bin target/release/fission_cli --run-profile mid --baseline artifacts/fission-automation/latest/nir/summary.json --fail-on-stop`
+    - completed the lane
+    - exited non-zero only because `--fail-on-stop` treats `stop_hold_p5h3f` as a blocking quality gate
+    - `changed_rows=0`
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-next-wave-call-mem-struct`
+  - Result summary: shared coverage `24.00%`, `avg_normalized_similarity=35.79%`, `both_success=100.000%`, Fission wall `0.505s`, pyghidra wall `4.222s`, throughput speedup `8.367x`, Fission p99/p50 tail ratio `11.119`, pyghidra p99/p50 tail ratio `233.927`
+
+#### Known residual risk
+
+- This wave fixes semantic ownership drift, but it does not clear the current `nir-check` go/stop gate by itself. The remaining blocker is lane quality policy (`stop_hold_p5h3f`), not build breakage or inventory failure.
+
 ### Logging and diagnostics wave — canonical observability owner
 
 This wave upgrades Fission's Rust-first observability path without introducing ad-hoc subscribers in boundary crates. The canonical owner remains [`fission-core/src/core/logging.rs`](crates/fission-core/src/core/logging.rs): file logging, span-aware boundary diagnostics, and runtime metrics are now wired through that shared layer, while CLI and automation only adapt process-boundary behavior.

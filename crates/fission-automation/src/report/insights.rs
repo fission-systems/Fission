@@ -94,6 +94,29 @@ fn mismatch_subtype_counts_from_stats(stats: &NirBuildStats) -> BTreeMap<String,
     counts
 }
 
+fn structuring_family_counts_from_stats(stats: &NirBuildStats) -> BTreeMap<String, usize> {
+    BTreeMap::from([
+        (
+            "region_legality".to_string(),
+            stats.structuring_reason_region_legality_count,
+        ),
+        (
+            "follow_failure".to_string(),
+            stats.structuring_reason_follow_failure_count,
+        ),
+        (
+            "irreducible".to_string(),
+            stats.structuring_reason_irreducible_count,
+        ),
+        ("loop_exit".to_string(), stats.structuring_reason_loop_exit_count),
+        (
+            "switch_shape".to_string(),
+            stats.structuring_reason_switch_shape_count,
+        ),
+        ("budget".to_string(), stats.structuring_reason_budget_count),
+    ])
+}
+
 pub fn build_decision_insights(
     summary: &AutomationSummary,
     candidates: &[InventoryRow],
@@ -224,12 +247,17 @@ pub fn build_decision_insights(
             || variadic_delta > 0
             || call_signature_delta > 0
             || security_delta > 0;
-        let dominant_subtype = subtype_ranking.first().map(|(name, _)| name.as_str());
+        let family_ranking = structuring_family_counts_from_stats(&summary.aggregate.nir_build_stats_totals)
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .collect::<Vec<_>>();
+        let dominant_family = family_ranking
+            .iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+            .map(|(name, _)| name.as_str());
         let safe_dominant = matches!(
-            dominant_subtype,
-            Some("follow_beyond_window")
-                | Some("side_entry_or_exit")
-                | Some("no_common_follow_in_window")
+            dominant_family,
+            Some("follow_failure") | Some("loop_exit") | Some("region_legality")
         );
         let irreducible_scc_delta = summary
             .aggregate
@@ -325,6 +353,15 @@ mod tests {
     use crate::report::snapshot::{AggregateSnapshot, AutomationSummary};
 
     fn make_summary(mismatch: usize, failed: usize) -> AutomationSummary {
+        let mut stats = NirBuildStats {
+            forced_linear_structuring_count: 2,
+            region_linearize_structuring_count: 1,
+            region_linearize_rejected_body_lowering_failed_count: failed,
+            region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: mismatch,
+            region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 3,
+            ..NirBuildStats::default()
+        };
+        stats.refresh_structuring_reason_families();
         AutomationSummary {
             generated_at: "now".to_string(),
             lane: "nir".to_string(),
@@ -354,16 +391,7 @@ mod tests {
                 recovery_quality_flag_counts: BTreeMap::new(),
                 recovery_structuring_mode_counts: BTreeMap::new(),
                 nir_output_class_counts: BTreeMap::new(),
-                nir_build_stats_totals: NirBuildStats {
-                    forced_linear_structuring_count: 2,
-                    region_linearize_structuring_count: 1,
-                    region_linearize_rejected_body_lowering_failed_count: failed,
-                    region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count:
-                        mismatch,
-                    region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count:
-                        3,
-                    ..NirBuildStats::default()
-                },
+                nir_build_stats_totals: stats,
             },
         }
     }
@@ -376,12 +404,14 @@ mod tests {
         row.name = "fn".to_string();
         row.recovery_structuring_mode = Some("forced_linear".to_string());
         row.nir_output_class = Some("linear_fallback".to_string());
-        row.nir_build_stats = Some(NirBuildStats {
+        let mut row_stats = NirBuildStats {
             region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: 5,
             region_linearize_rejected_body_lowering_failed_count: 1,
             region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 2,
             ..NirBuildStats::default()
-        });
+        };
+        row_stats.refresh_structuring_reason_families();
+        row.nir_build_stats = Some(row_stats);
 
         let insights = build_decision_insights(
             &make_summary(5, 1),
@@ -401,20 +431,24 @@ mod tests {
         current_row.binary = "bin".to_string();
         current_row.address = "0x1000".to_string();
         current_row.name = "fn".to_string();
-        current_row.nir_build_stats = Some(NirBuildStats {
+        let mut current_stats = NirBuildStats {
             region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: 2,
             region_linearize_rejected_body_lowering_failed_count: 0,
             region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 2,
             ..NirBuildStats::default()
-        });
+        };
+        current_stats.refresh_structuring_reason_families();
+        current_row.nir_build_stats = Some(current_stats);
 
         let mut baseline_row = current_row.clone();
-        baseline_row.nir_build_stats = Some(NirBuildStats {
+        let mut baseline_stats = NirBuildStats {
             region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: 6,
             region_linearize_rejected_body_lowering_failed_count: 0,
             region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 1,
             ..NirBuildStats::default()
-        });
+        };
+        baseline_stats.refresh_structuring_reason_families();
+        baseline_row.nir_build_stats = Some(baseline_stats);
 
         let insights = build_decision_insights(
             &make_summary(2, 0),

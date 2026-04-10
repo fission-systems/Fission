@@ -35,14 +35,15 @@
 /// - LLVM `MemorySSA.h`: `MemoryDef`/`MemoryUse`/`MemoryPhi` design
 /// - RetDec `reaching_definitions.h`: UD/DU chains
 /// - LLVM `BasicAliasAnalysis.cpp`: stack-slot no-alias rule
+use super::super::memory::{partition_key_for_pointer_expr, PartitionKey};
 use super::super::*;
 use std::collections::HashMap;
 
 /// Identifies a memory location for alias analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum AliasKey {
-    /// A stack slot at `[offset, offset + size)` bytes from the frame pointer.
-    Stack { offset: i64, size: u32 },
+    /// A partitioned alias class rooted in canonical memory partitioning.
+    Partition(PartitionKey),
     /// Any non-stack / unknown pointer — conservative may-alias bucket.
     Unknown,
 }
@@ -51,8 +52,8 @@ impl AliasKey {
     /// Return `true` if two keys definitely refer to the same location.
     pub(crate) fn is_must_alias(&self, other: &AliasKey) -> bool {
         match (self, other) {
-            (AliasKey::Stack { offset: o1, size: s1 }, AliasKey::Stack { offset: o2, size: s2 }) => {
-                o1 == o2 && s1 == s2
+            (AliasKey::Partition(a), AliasKey::Partition(b)) => {
+                a.base_object == b.base_object && a.offset_interval == b.offset_interval
             }
             _ => false,
         }
@@ -61,13 +62,12 @@ impl AliasKey {
     /// Return `true` if two keys definitely do NOT alias.
     pub(crate) fn is_no_alias(&self, other: &AliasKey) -> bool {
         match (self, other) {
-            (AliasKey::Stack { offset: o1, size: s1 }, AliasKey::Stack { offset: o2, size: s2 }) => {
+            (AliasKey::Partition(a), AliasKey::Partition(b)) if a.base_object == b.base_object => {
                 // Non-overlapping intervals.
-                let end1 = *o1 + *s1 as i64;
-                let end2 = *o2 + *s2 as i64;
-                end1 <= *o2 || end2 <= *o1
+                a.offset_interval.1 <= b.offset_interval.0 || b.offset_interval.1 <= a.offset_interval.0
             }
             (AliasKey::Unknown, _) | (_, AliasKey::Unknown) => false,
+            _ => false,
         }
     }
 }
@@ -311,9 +311,8 @@ impl Builder {
     fn finish(mut self) -> MemSsa {
         // Mark defs whose variable escaped.
         for def in &mut self.defs {
-            if let AliasKey::Stack { .. } = &def.key {
-                // Escape is tracked separately via self.escaped — use Unknown
-                // check to gate removals (see dead_store.rs).
+            if let AliasKey::Partition(key) = &def.key {
+                def.may_escape = !key.is_promotable_stack_like();
             }
         }
         MemSsa { defs: self.defs, uses: self.uses, phis: self.phis }
@@ -334,45 +333,14 @@ pub(crate) fn nir_byte_size(ty: &NirType) -> u32 {
 
 /// Compute an [`AliasKey`] for a pointer expression and access size (bytes).
 ///
-/// Used by MemSSA construction and by redundant-load elimination.  Only
-/// `stack_*` / `PtrOffset(stack_*, k)` patterns yield [`AliasKey::Stack`];
-/// everything else is [`AliasKey::Unknown`].
+/// Used by MemSSA construction and by redundant-load elimination. Precision
+/// comes from the canonical partition collector; everything else is conservatively
+/// collapsed to [`AliasKey::Unknown`].
 pub(crate) fn alias_key_for_pointer_expr(ptr: &HirExpr, size: u32) -> AliasKey {
-    match ptr {
-        HirExpr::Var(name) => {
-            if let Some(offset) = extract_stack_offset(name) {
-                AliasKey::Stack { offset, size }
-            } else {
-                AliasKey::Unknown
-            }
-        }
-        HirExpr::PtrOffset { base, offset } => {
-            if let HirExpr::Var(name) = base.as_ref() {
-                if let Some(base_offset) = extract_stack_offset(name) {
-                    return AliasKey::Stack {
-                        offset: base_offset + *offset,
-                        size,
-                    };
-                }
-            }
-            AliasKey::Unknown
-        }
-        _ => AliasKey::Unknown,
-    }
-}
-
-/// Extract a stack offset from a variable name produced by slot surfacing.
-///
-/// Slot surfacing names stack variables as `stack_neg_<abs>` or `stack_<offset>`.
-/// This function parses those names to recover the numeric offset.
-fn extract_stack_offset(name: &str) -> Option<i64> {
-    if let Some(rest) = name.strip_prefix("stack_neg_") {
-        rest.parse::<i64>().ok().map(|v| -v)
-    } else if let Some(rest) = name.strip_prefix("stack_") {
-        rest.parse::<i64>().ok()
-    } else {
-        None
-    }
+    let access_ty = NirType::Aggregate { size, fields: vec![] };
+    partition_key_for_pointer_expr(ptr, &access_ty)
+        .map(AliasKey::Partition)
+        .unwrap_or(AliasKey::Unknown)
 }
 
 /// Build MemSSA for a HIR function.

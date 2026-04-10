@@ -36,6 +36,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
 
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
+        call_target_refs: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
@@ -88,6 +89,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
 
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
+        call_target_refs: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -138,6 +140,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
 
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
+        call_target_refs: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -180,6 +183,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
 
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
+        call_target_refs: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -212,6 +216,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
 
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
+        call_target_refs: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -275,6 +280,7 @@ fn preview_type_hints_explicit_function_types_override_heuristic_aliases() {
 
     let mut context = PreviewTypeContext::default();
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -355,6 +361,7 @@ fn preview_type_hints_collect_hint_stats() {
 
     let mut context = PreviewTypeContext::default();
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),

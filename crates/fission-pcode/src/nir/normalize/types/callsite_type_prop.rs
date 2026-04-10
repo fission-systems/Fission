@@ -139,6 +139,16 @@ fn tighten_binding_ty(binding: &mut NirBinding, candidate: &NirType) -> bool {
     }
 }
 
+fn resolve_call_target_symbol<'a>(
+    target: &'a str,
+    summaries: &'a indexmap::IndexMap<String, CallSummary>,
+) -> &'a str {
+    summaries
+        .get(target)
+        .map(|summary| summary.target.symbol.as_str())
+        .unwrap_or(target)
+}
+
 /// Apply call-site type propagation to a function.
 ///
 /// Collects all `Call` expressions, looks up each target in `WIN_API_DB`, and
@@ -154,7 +164,13 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     collect_callsites_stmts(&func.body, &mut callsites);
 
     for (receiver, callee, arg_vars) in &callsites {
-        let Some(sig) = WIN_API_DB.get(callee) else { continue; };
+        let resolved_callee = resolve_call_target_symbol(callee, &func.callee_summaries);
+        let Some(sig) = WIN_API_DB
+            .get(resolved_callee)
+            .or_else(|| WIN_API_DB.get(callee))
+        else {
+            continue;
+        };
         let mut refined_here = false;
 
         // Resolve return type and update receiver binding.

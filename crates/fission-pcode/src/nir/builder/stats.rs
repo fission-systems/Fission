@@ -129,6 +129,12 @@ impl<'a> PreviewBuilder<'a> {
             security_cookie_fold_count: 0,
             call_artifact_removed_count: 0,
             interproc_signature_constraint_rounds: 0,
+            structuring_reason_region_legality_count: 0,
+            structuring_reason_follow_failure_count: 0,
+            structuring_reason_irreducible_count: 0,
+            structuring_reason_loop_exit_count: 0,
+            structuring_reason_switch_shape_count: 0,
+            structuring_reason_budget_count: 0,
             pass_metrics: std::collections::BTreeMap::new(),
         }
     }

@@ -25,6 +25,7 @@ fn snapshot_print_hir_function_minimal() {
         calling_convention: CallingConvention::default(),
         is_64bit: true,
         callee_observed_max_arity: IndexMap::new(),
+        callee_summaries: IndexMap::new(),
     };
     assert_snapshot!(print_hir_function(&func));
 }

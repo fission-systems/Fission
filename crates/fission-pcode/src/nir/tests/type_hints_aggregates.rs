@@ -56,6 +56,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
 
     let mut context = PreviewTypeContext::default();
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -144,6 +145,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
     hints.insert(
         "param_2".to_string(),
         PreviewCallParamRule {
+            callee_address: None,
             callee_name: "GetClientRect".to_string(),
             arg_index: 1,
             pointer_alias: "LPRECT".to_string(),
@@ -345,6 +347,7 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -476,6 +479,7 @@ fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
@@ -623,6 +627,7 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
         .call_targets
         .insert(0x14012c378, "GetClientRect".to_string());
     context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: None,
         callee_name: "GetClientRect".to_string(),
         arg_index: 1,
         pointer_alias: "LPRECT".to_string(),
