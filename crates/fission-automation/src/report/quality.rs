@@ -301,8 +301,20 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.object_shape_recovered_count,
         ),
         (
+            "object_root_recovered_count",
+            stats.object_root_recovered_count,
+        ),
+        (
+            "typed_object_shape_refined_count",
+            stats.typed_object_shape_refined_count,
+        ),
+        (
             "surface_binding_promoted_count",
             stats.surface_binding_promoted_count,
+        ),
+        (
+            "prototype_summary_refined_count",
+            stats.prototype_summary_refined_count,
         ),
         (
             "call_effect_summary_refined_count",
@@ -323,6 +335,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         (
             "cleanup_family_stmt_canonical_count",
             stats.cleanup_family_stmt_canonical_count,
+        ),
+        (
+            "cleanup_stmt_fold_count",
+            stats.cleanup_stmt_fold_count,
+        ),
+        (
+            "cleanup_boundary_label_count",
+            stats.cleanup_boundary_label_count,
+        ),
+        (
+            "cleanup_loopish_rewrite_count",
+            stats.cleanup_loopish_rewrite_count,
         ),
         (
             "cleanup_family_dead_binding_count",
@@ -371,6 +395,8 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             "memory_shape".to_string(),
             stats.call_artifact_removed_count
                 + stats.object_shape_recovered_count
+                + stats.object_root_recovered_count
+                + stats.typed_object_shape_refined_count
                 + stats.surface_binding_promoted_count,
         ),
         (
@@ -380,6 +406,7 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
         (
             "call_signature".to_string(),
             stats.call_signature_refined_count
+                + stats.prototype_summary_refined_count
                 + stats.call_effect_summary_refined_count
                 + stats.wrapper_summary_fold_count
                 + stats.interproc_signature_constraint_rounds,
@@ -389,6 +416,9 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             stats.cleanup_budget_skip_count
                 + stats.cleanup_family_binding_init_count
                 + stats.cleanup_family_stmt_canonical_count
+                + stats.cleanup_stmt_fold_count
+                + stats.cleanup_boundary_label_count
+                + stats.cleanup_loopish_rewrite_count
                 + stats.cleanup_family_dead_binding_count,
         ),
         (

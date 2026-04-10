@@ -37,6 +37,12 @@ pub enum WrapperClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummarySoundness {
+    Pessimistic,
+    Optimistic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectRegion {
     pub root: i64,
     pub storage_class: StorageClass,
@@ -153,12 +159,18 @@ impl CallTargetRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallSummary {
     pub target: CallTargetRef,
+    pub prototype: PrototypeSummary,
+    pub effect_summary: CallEffectSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrototypeSummary {
     pub min_arity: usize,
     pub max_arity: usize,
     pub locked_exact_arity: Option<usize>,
     pub return_lattice: NirType,
     pub param_lattices: Vec<NirType>,
-    pub effect_summary: CallEffectSummary,
+    pub soundness: SummarySoundness,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -438,9 +450,18 @@ pub struct NirBuildStats {
     /// Typed object shapes recovered from partitioned memory regions.
     #[serde(default)]
     pub object_shape_recovered_count: usize,
+    /// Root object regions recovered before field/array surfacing.
+    #[serde(default)]
+    pub object_root_recovered_count: usize,
+    /// Existing object shapes refined with field/array/opaque range evidence.
+    #[serde(default)]
+    pub typed_object_shape_refined_count: usize,
     /// New surface bindings/slot aliases promoted from raw partition evidence.
     #[serde(default)]
     pub surface_binding_promoted_count: usize,
+    /// Call prototype summaries refined beyond raw call-site arity bounds.
+    #[serde(default)]
+    pub prototype_summary_refined_count: usize,
     /// Call/effect summaries refined beyond plain arity/name recovery.
     #[serde(default)]
     pub call_effect_summary_refined_count: usize,
@@ -456,6 +477,15 @@ pub struct NirBuildStats {
     /// Statement canonical cleanup family invocations.
     #[serde(default)]
     pub cleanup_family_stmt_canonical_count: usize,
+    /// Statement-fold canonical cleanup subfamily invocations.
+    #[serde(default)]
+    pub cleanup_stmt_fold_count: usize,
+    /// Boundary-label cleanup subfamily invocations.
+    #[serde(default)]
+    pub cleanup_boundary_label_count: usize,
+    /// Loopish rewrite cleanup subfamily invocations.
+    #[serde(default)]
+    pub cleanup_loopish_rewrite_count: usize,
     /// Dead-binding cleanup family invocations.
     #[serde(default)]
     pub cleanup_family_dead_binding_count: usize,
@@ -611,12 +641,18 @@ impl NirBuildStats {
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.object_shape_recovered_count += other.object_shape_recovered_count;
+        self.object_root_recovered_count += other.object_root_recovered_count;
+        self.typed_object_shape_refined_count += other.typed_object_shape_refined_count;
         self.surface_binding_promoted_count += other.surface_binding_promoted_count;
+        self.prototype_summary_refined_count += other.prototype_summary_refined_count;
         self.call_effect_summary_refined_count += other.call_effect_summary_refined_count;
         self.wrapper_summary_fold_count += other.wrapper_summary_fold_count;
         self.cleanup_budget_skip_count += other.cleanup_budget_skip_count;
         self.cleanup_family_binding_init_count += other.cleanup_family_binding_init_count;
         self.cleanup_family_stmt_canonical_count += other.cleanup_family_stmt_canonical_count;
+        self.cleanup_stmt_fold_count += other.cleanup_stmt_fold_count;
+        self.cleanup_boundary_label_count += other.cleanup_boundary_label_count;
+        self.cleanup_loopish_rewrite_count += other.cleanup_loopish_rewrite_count;
         self.cleanup_family_dead_binding_count += other.cleanup_family_dead_binding_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
         self.structuring_reason_region_legality_count +=

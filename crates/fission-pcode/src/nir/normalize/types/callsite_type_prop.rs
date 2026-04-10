@@ -46,7 +46,7 @@ use fission_signatures::win_api::WIN_API_DB;
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
 /// unconstrained types (void, variadic, …).
-pub(super) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
+pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
     // Strip leading/trailing whitespace and trailing `*` for pointer types.
     let name = name.trim();
 
@@ -165,10 +165,43 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
 
     for (receiver, callee, arg_vars) in &callsites {
         let resolved_callee = resolve_call_target_symbol(callee, &func.callee_summaries);
+        let summary = func
+            .callee_summaries
+            .get(callee)
+            .or_else(|| func.callee_summaries.get(resolved_callee));
         let Some(sig) = WIN_API_DB
             .get(resolved_callee)
             .or_else(|| WIN_API_DB.get(callee))
         else {
+            if let Some(summary) = summary {
+                let mut refined_here = false;
+                if let Some(recv_name) = receiver
+                    && summary.prototype.return_lattice != NirType::Unknown
+                    && let Some(b) = binding_by_name_mut(&mut func.locals, recv_name)
+                        .or_else(|| binding_by_name_mut(&mut func.params, recv_name))
+                {
+                    let tightened = tighten_binding_ty(b, &summary.prototype.return_lattice);
+                    changed |= tightened;
+                    refined_here |= tightened;
+                }
+                for (i, arg_var_opt) in arg_vars.iter().enumerate() {
+                    let Some(arg_var) = arg_var_opt else { continue; };
+                    let Some(param_ty) = summary.prototype.param_lattices.get(i) else { break; };
+                    if *param_ty == NirType::Unknown {
+                        continue;
+                    }
+                    if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
+                        .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
+                    {
+                        let tightened = tighten_binding_ty(b, param_ty);
+                        changed |= tightened;
+                        refined_here |= tightened;
+                    }
+                }
+                if refined_here {
+                    add_call_signature_refinements(1);
+                }
+            }
             continue;
         };
         let mut refined_here = false;

@@ -79,11 +79,32 @@ pub(super) fn add_object_shape_recoveries(n: usize) {
     WAVE.with(|w| w.borrow_mut().object_shape_recovered_count += n);
 }
 
+pub(super) fn add_object_root_recoveries(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().object_root_recovered_count += n);
+}
+
+pub(super) fn add_typed_object_shape_refinements(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().typed_object_shape_refined_count += n);
+}
+
 pub(super) fn add_surface_binding_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().surface_binding_promoted_count += n);
+}
+
+pub(super) fn add_prototype_summary_refinements(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().prototype_summary_refined_count += n);
 }
 
 pub(super) fn add_call_effect_summary_refinements(n: usize) {
@@ -119,6 +140,27 @@ pub(super) fn add_cleanup_family_stmt_canonical(n: usize) {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_family_stmt_canonical_count += n);
+}
+
+pub(super) fn add_cleanup_stmt_fold(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().cleanup_stmt_fold_count += n);
+}
+
+pub(super) fn add_cleanup_boundary_label(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().cleanup_boundary_label_count += n);
+}
+
+pub(super) fn add_cleanup_loopish_rewrite(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().cleanup_loopish_rewrite_count += n);
 }
 
 pub(super) fn add_cleanup_family_dead_binding(n: usize) {

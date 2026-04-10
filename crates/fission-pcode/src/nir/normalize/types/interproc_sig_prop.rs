@@ -11,13 +11,16 @@
 use crate::nir::types::{
     parse_call_target_address, CallEdgeKind, CallEffectSummary, CallSummary,
     CallTargetProvenance, CallTargetRef, HirExpr, HirFunction, HirLValue, HirStmt, NirType,
-    WrapperClass,
+    PrototypeSummary, SummarySoundness, WrapperClass,
 };
 use indexmap::IndexMap;
 
 use super::super::wave_stats::{
-    add_call_effect_summary_refinements, add_interproc_constraint_rounds, add_wrapper_summary_folds,
+    add_call_effect_summary_refinements, add_interproc_constraint_rounds,
+    add_prototype_summary_refinements, add_wrapper_summary_folds,
 };
+use super::callsite_type_prop::win_type_name_to_nir;
+use fission_signatures::win_api::WIN_API_DB;
 
 fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
@@ -47,13 +50,16 @@ fn summary_seed(target: &str) -> CallTargetRef {
 fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
         .and_modify(|summary| {
-            summary.min_arity = summary.min_arity.min(arity);
-            summary.max_arity = summary.max_arity.max(arity);
-            if let Some(locked) = summary.locked_exact_arity && locked != arity {
-                summary.locked_exact_arity = None;
+            summary.prototype.min_arity = summary.prototype.min_arity.min(arity);
+            summary.prototype.max_arity = summary.prototype.max_arity.max(arity);
+            if let Some(locked) = summary.prototype.locked_exact_arity && locked != arity {
+                summary.prototype.locked_exact_arity = None;
             }
-            if summary.param_lattices.len() < arity {
-                summary.param_lattices.resize(arity, NirType::Unknown);
+            if summary.prototype.param_lattices.len() < arity {
+                summary
+                    .prototype
+                    .param_lattices
+                    .resize(arity, NirType::Unknown);
             }
             if arity == 0 && summary.effect_summary.escapes_args != Some(false) {
                 summary.effect_summary.escapes_args = Some(false);
@@ -62,11 +68,14 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
         })
         .or_insert_with(|| CallSummary {
             target: summary_seed(callee),
-            min_arity: arity,
-            max_arity: arity,
-            locked_exact_arity: None,
-            return_lattice: NirType::Unknown,
-            param_lattices: vec![NirType::Unknown; arity],
+            prototype: PrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                locked_exact_arity: None,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![NirType::Unknown; arity],
+                soundness: SummarySoundness::Pessimistic,
+            },
             effect_summary: CallEffectSummary {
                 reads_memory: None,
                 writes_memory: None,
@@ -75,6 +84,48 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 confidence: if arity == 0 { 96 } else { 0 },
             },
         });
+}
+
+fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize {
+    let Some(sig) = WIN_API_DB.get(callee) else {
+        return 0;
+    };
+    let mut refinements = 0usize;
+    let exact_arity = sig.params.len();
+    if summary.prototype.locked_exact_arity != Some(exact_arity) {
+        summary.prototype.locked_exact_arity = Some(exact_arity);
+        refinements += 1;
+    }
+    if summary.prototype.max_arity != exact_arity || summary.prototype.min_arity > exact_arity {
+        summary.prototype.min_arity = summary.prototype.min_arity.min(exact_arity);
+        summary.prototype.max_arity = exact_arity;
+        refinements += 1;
+    }
+    if summary.prototype.param_lattices.len() < exact_arity {
+        summary
+            .prototype
+            .param_lattices
+            .resize(exact_arity, NirType::Unknown);
+    }
+    for (idx, param) in sig.params.iter().enumerate() {
+        let Some(param_ty) = win_type_name_to_nir(&param.type_name) else {
+            continue;
+        };
+        if summary.prototype.param_lattices[idx] == NirType::Unknown && param_ty != NirType::Unknown {
+            summary.prototype.param_lattices[idx] = param_ty;
+            refinements += 1;
+        }
+    }
+    if summary.prototype.return_lattice == NirType::Unknown
+        && let Some(ret_ty) = win_type_name_to_nir(&sig.return_type)
+    {
+        summary.prototype.return_lattice = ret_ty;
+        refinements += 1;
+    }
+    if refinements > 0 {
+        summary.prototype.soundness = SummarySoundness::Optimistic;
+    }
+    refinements
 }
 
 fn classify_wrapper_body(func: &HirFunction) -> Option<WrapperClass> {
@@ -169,6 +220,7 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
     }
     let mut improved = 0usize;
     let wrapper_class = classify_wrapper_body(func);
+    let mut prototype_refinements = 0usize;
     let mut effect_refinements = 0usize;
     let mut wrapper_refinements = 0usize;
     for (k, v) in fresh {
@@ -182,12 +234,21 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
         func.callee_summaries
             .entry(key)
             .and_modify(|existing| {
-                existing.min_arity = existing.min_arity.min(summary.min_arity);
-                existing.max_arity = existing.max_arity.max(summary.max_arity);
-                if existing.param_lattices.len() < summary.param_lattices.len() {
+                existing.prototype.min_arity =
+                    existing.prototype.min_arity.min(summary.prototype.min_arity);
+                existing.prototype.max_arity =
+                    existing.prototype.max_arity.max(summary.prototype.max_arity);
+                if existing.prototype.param_lattices.len() < summary.prototype.param_lattices.len() {
                     existing
+                        .prototype
                         .param_lattices
-                        .resize(summary.param_lattices.len(), NirType::Unknown);
+                        .resize(summary.prototype.param_lattices.len(), NirType::Unknown);
+                }
+                if existing.prototype.soundness == SummarySoundness::Pessimistic
+                    && summary.prototype.soundness == SummarySoundness::Optimistic
+                {
+                    existing.prototype.soundness = SummarySoundness::Optimistic;
+                    prototype_refinements += 1;
                 }
                 if existing.effect_summary.escapes_args.is_none()
                     && summary.effect_summary.escapes_args.is_some()
@@ -204,9 +265,13 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                     existing.effect_summary.confidence = existing.effect_summary.confidence.max(64);
                     wrapper_refinements += 1;
                 }
+                let target_symbol = existing.target.symbol.clone();
+                prototype_refinements += apply_import_signature_seed(existing, &target_symbol);
             })
             .or_insert_with(|| {
                 let mut summary = summary;
+                let target_symbol = summary.target.symbol.clone();
+                prototype_refinements += apply_import_signature_seed(&mut summary, &target_symbol);
                 if let Some(wrapper_class) = wrapper_class {
                     summary.effect_summary.wrapper_class = wrapper_class;
                     summary.effect_summary.confidence = summary.effect_summary.confidence.max(64);
@@ -221,6 +286,7 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
     if improved > 0 {
         add_interproc_constraint_rounds(1);
     }
+    add_prototype_summary_refinements(prototype_refinements);
     add_call_effect_summary_refinements(effect_refinements);
     add_wrapper_summary_folds(wrapper_refinements);
     true

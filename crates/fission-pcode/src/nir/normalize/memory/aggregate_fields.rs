@@ -29,7 +29,11 @@
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
-use crate::nir::normalize::wave_stats::{add_object_shape_recoveries, add_surface_binding_promotions};
+use crate::nir::normalize::wave_stats::{
+    add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
+    add_typed_object_shape_refinements,
+};
+use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
 
 /// Map: variable name → (offset → best NirType for that field).
@@ -200,6 +204,72 @@ fn should_emit_surface_binding(binding: &NirBinding, offsets: &HashMap<u32, Acce
     }
 }
 
+fn candidate_struct_name(
+    surface_type_name: Option<&str>,
+    structures: &WindowsStructures,
+) -> Option<String> {
+    let type_name = surface_type_name?.trim();
+    if structures.get(type_name).is_some() {
+        return Some(type_name.to_string());
+    }
+    for prefix in ["LP", "P"] {
+        if let Some(candidate) = type_name.strip_prefix(prefix)
+            && structures.get(candidate).is_some()
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn build_named_fields(
+    surface_type_name: Option<&str>,
+    offsets: &HashMap<u32, NirType>,
+    inferred_size: u32,
+    is_64bit: bool,
+    structures: &WindowsStructures,
+) -> (Vec<StructField>, bool) {
+    let mut named_fields = false;
+    let mut struct_fields = HashMap::new();
+    if let Some(struct_name) = candidate_struct_name(surface_type_name, structures)
+        && let Some(struct_def) = structures.get(&struct_name)
+    {
+        let struct_size = if is_64bit {
+            struct_def.size_64 as u32
+        } else {
+            struct_def.size_32 as u32
+        };
+        if struct_size == inferred_size {
+            for field in &struct_def.fields {
+                let offset = if is_64bit {
+                    field.offset_64 as u32
+                } else {
+                    field.offset_32 as u32
+                };
+                struct_fields.insert(offset, field.name.clone());
+            }
+        }
+    }
+
+    let mut new_fields: Vec<StructField> = offsets
+        .iter()
+        .map(|(&offset, ty)| {
+            let name = struct_fields
+                .get(&offset)
+                .cloned()
+                .unwrap_or_else(|| format!("field_{offset:x}"));
+            named_fields |= struct_fields.contains_key(&offset);
+            StructField {
+                offset,
+                ty: ty.clone(),
+                name,
+            }
+        })
+        .collect();
+    new_fields.sort_by_key(|f| f.offset);
+    (new_fields, named_fields)
+}
+
 /// Apply aggregate field layout recovery to a function.
 ///
 /// Returns `true` if any `NirType::Aggregate` had fields added to it.
@@ -219,6 +289,11 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     }
 
     let mut changed = false;
+    let structures = WindowsStructures::new();
+    let object_root_count = offset_map.len();
+    if object_root_count > 0 {
+        add_object_root_recoveries(object_root_count);
+    }
 
     for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
         let Some(offsets) = offset_map.get(&binding.name) else {
@@ -255,16 +330,14 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
         let Some(offsets) = offset_map.get(&binding.name) else { return false; };
         if offsets.is_empty() { return false; }
 
-        let mut new_fields: Vec<StructField> = offsets
-            .iter()
-            .map(|(&offset, ty)| StructField {
-                offset,
-                ty: ty.clone(),
-                name: format!("field_{offset:x}"),
-            })
-            .collect();
-        new_fields.sort_by_key(|f| f.offset);
+        let inferred_size = inferred_aggregate_size(offsets).unwrap_or_default();
+        let surface_type_name = binding.surface_type_name.clone();
+        let (new_fields, named_fields) =
+            build_named_fields(surface_type_name.as_deref(), offsets, inferred_size, func.is_64bit, &structures);
         *fields = new_fields;
+        if named_fields {
+            add_typed_object_shape_refinements(1);
+        }
         true
     };
 
@@ -402,5 +475,78 @@ mod tests {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].offset, 4);
         assert_eq!(fields[1].offset, 8);
+    }
+
+    #[test]
+    fn aggregate_fields_uses_windows_struct_field_names_when_surface_type_known() {
+        let mut func = HirFunction {
+            name: "rect_shape".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: ptr_unknown(),
+                surface_type_name: Some("LPRECT".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 4,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 8,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 12,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer param");
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+            panic!("expected inferred aggregate");
+        };
+        let names = fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, vec!["left", "top", "right", "bottom"]);
     }
 }

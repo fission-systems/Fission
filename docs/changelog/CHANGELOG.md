@@ -7,7 +7,106 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-10 (latest)
+## 2026-04-11 (latest)
+
+### Similarity-first object and prototype wave — stronger canonical semantics, stable benchmark, no material similarity gain yet
+
+This wave targeted the next bottleneck after direct-success stabilization: semantic similarity drift and the oversized `cleanup_stmt_canonical_init_1` family. The intent was to move more object and call semantics into the Rust-owned canonical path while splitting early cleanup into more actionable readiness-gated subfamilies. The benchmark stayed stable on coverage and success, `nir-check` remained green at the fast-lane execution level, but the `putty.exe --limit 50` spot check did not show a meaningful similarity increase yet.
+
+#### fission-pcode — partition-rooted object surfacing and structured field naming
+
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs) now carries canonical prototype/effect metadata and additional object-recovery counters:
+  - `SummarySoundness`
+  - `PrototypeSummary`
+  - `object_root_recovered_count`
+  - `typed_object_shape_refined_count`
+  - `prototype_summary_refined_count`
+  - `cleanup_stmt_fold_count`
+  - `cleanup_boundary_label_count`
+  - `cleanup_loopish_rewrite_count`
+- [`builder/stats.rs`](crates/fission-pcode/src/nir/builder/stats.rs) and [`normalize/wave_stats.rs`](crates/fission-pcode/src/nir/normalize/wave_stats.rs) now initialize and accumulate those counters in the canonical Rust telemetry path.
+- [`normalize/memory/aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) now upgrades aggregate surfacing with canonical field names when a stable Windows structure surface type is known.
+  - The pass consults [`WindowsStructures`](crates/fission-signatures/src/win_types.rs) by type name rather than inventing anonymous `field_*` labels when enough size and interval evidence exists.
+  - Pointer aliases such as `LPRECT` are normalized back to the underlying structure name and surfaced as concrete fields like `left`, `top`, `right`, and `bottom`.
+- This keeps object and field meaning in `fission-pcode` instead of re-inventing it downstream in `fission-static`.
+
+#### fission-pcode — prototype/effect summaries move beyond arity-only tightening
+
+- [`normalize/types/interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs) now splits call summaries into:
+  - `PrototypeSummary`
+  - `CallEffectSummary`
+- Import-backed callees can now seed prototype knowledge directly from [`WIN_API_DB`](crates/fission-signatures/src/win_api_db.rs):
+  - exact arity when known
+  - parameter type lattices
+  - return type lattices
+- [`normalize/types/callsite_type_prop.rs`](crates/fission-pcode/src/nir/normalize/types/callsite_type_prop.rs) now consumes those canonical prototype summaries when import DB matches are absent, instead of relying only on string-local callsite facts.
+- This did not yet materially change the benchmark similarity score, but it removes more summary ownership drift from downstream layers.
+
+#### fission-pcode — staged cleanup family split and readiness-gated early exits
+
+- [`normalize/pipeline/run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now splits the expensive statement-canonical cleanup family into readiness-gated subfamilies:
+  - `cleanup_stmt_fold_*`
+  - `cleanup_boundary_label_*`
+  - `cleanup_loopish_rewrite_*`
+- Cleanup execution now uses:
+  - explicit statement/block/round budgets
+  - body-shape readiness checks
+  - dedicated boundary-label cleanup instead of always paying for the full statement-canonical sweep
+- [`cleanup_stmt_list`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) was refactored to accept bounded options so family passes can run with narrower responsibilities and explicit round limits.
+- The fast lane is still held by `cleanup_stmt_canonical_init_1`, but the surrounding attribution is now more actionable and less monolithic.
+
+#### fission-automation — family attribution follows the canonical counters
+
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now reads the new canonical counters directly from [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs).
+- The quality-family mapping now attributes:
+  - `memory_shape` using object-root and typed-object counters
+  - `call_signature` using prototype summary refinement counters
+  - `cleanup` using the split statement/boundary/loopish cleanup counters
+- No parallel telemetry schema was added in automation; it still only aggregates the canonical source of truth from `fission-pcode`.
+
+#### Duplicate-logic audit
+
+- Object and field semantics:
+  - canonical owner remains `fission-pcode`
+  - this wave did not add new semantic rewrite logic to `fission-static`
+- Call prototype / effect summary semantics:
+  - canonical owner remains `fission-pcode`
+  - `fission-static` remains a provenance and fact supplier only
+- Cleanup family taxonomy:
+  - canonical owner remains [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs)
+  - `fission-automation` only groups and reports those counters
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli --release`
+- `nir-check`:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+  - lane completed successfully with `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant costs remain:
+    - `cleanup_stmt_canonical_init_1 (118.3ms)`
+    - `cleanup_dead_binding_init_1 (41.3ms)`
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-similarity-next-wave`
+  - seeded shared coverage: `100.00%`
+  - independent top-N coverage: `96.00%`
+  - `both_success=100.000%`
+  - `avg_normalized_similarity=37.44%`
+  - Fission wall `0.508s`, pyghidra wall `2.947s`
+
+#### Known residual risk
+
+- This wave improved canonical semantic ownership and made cleanup attribution more actionable, but the `putty.exe --limit 50` similarity score was effectively flat (`37.45% -> 37.44%`).
+- The next bottleneck is now clearer:
+  - semantic surface quality still needs improvement in the canonical object/call path
+  - `cleanup_stmt_canonical_init_1` remains the dominant fast-lane cost family
+
+## 2026-04-10
 
 ### Typed-object and bounded-cleanup wave — semantic owner tightening without similarity regression
 

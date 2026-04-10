@@ -49,6 +49,8 @@ const TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS: usize = 6;
 #[derive(Debug, Clone, Copy)]
 struct PassBudget {
     stmt_limit: usize,
+    block_limit: usize,
+    round_limit: usize,
 }
 
 fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bool) {
@@ -131,7 +133,16 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             func.locals.len()
         );
     }
-    run_cleanup_family_passes(func, "init_1", perf, PassBudget { stmt_limit: 600 });
+    run_cleanup_family_passes(
+        func,
+        "init_1",
+        perf,
+        PassBudget {
+            stmt_limit: 600,
+            block_limit: 120,
+            round_limit: 12,
+        },
+    );
     // Flag recovery: substitute raw x86 EFLAGS variable references in branch
     // conditions with high-level comparison expressions (sf!=of → a<b signed,
     // !zf → a!=b, etc.).  Runs early so that subsequent dead-assignment passes
@@ -375,7 +386,16 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         );
     }
     if changed {
-        run_cleanup_family_passes(func, "init_2", perf, PassBudget { stmt_limit: 600 });
+        run_cleanup_family_passes(
+            func,
+            "init_2",
+            perf,
+            PassBudget {
+                stmt_limit: 600,
+                block_limit: 120,
+                round_limit: 12,
+            },
+        );
     }
     if allow_expensive_passes {
         changed |= run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms);
@@ -387,7 +407,16 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             );
         }
         if changed {
-            run_cleanup_family_passes(func, "init_3", perf, PassBudget { stmt_limit: 600 });
+            run_cleanup_family_passes(
+                func,
+                "init_3",
+                perf,
+                PassBudget {
+                    stmt_limit: 600,
+                    block_limit: 120,
+                    round_limit: 12,
+                },
+            );
         }
     }
     // Pointer arithmetic recovery: convert IntAdd(ptr, k) → PtrOffset and
@@ -626,21 +655,56 @@ fn run_cleanup_family_passes(
 
     if !func.body.is_empty() {
         wave_stats::add_cleanup_family_stmt_canonical(1);
-        changed |= run_pass_logged(
-            func,
-            &format!("cleanup_stmt_canonical_{stage}"),
-            perf,
-            |f| {
-                let before = hir_shape(f);
-                cleanup_stmt_list(&mut f.body, &f.name, 0);
-                if count_hir_stmts(&f.body) <= budget.stmt_limit && body_has_loopish_shapes(&f.body) {
-                    apply_for_loop_folding(&mut f.body);
-                } else if body_has_loopish_shapes(&f.body) {
-                    wave_stats::add_cleanup_budget_skips(1);
-                }
-                before != hir_shape(f)
-            },
-        );
+        if body_needs_stmt_fold_cleanup(&func.body) {
+            wave_stats::add_cleanup_stmt_fold(1);
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_stmt_fold_{stage}"),
+                perf,
+                |f| {
+                    let before = hir_shape(f);
+                    cleanup_stmt_list_with_options(
+                        &mut f.body,
+                        &f.name,
+                        0,
+                        CleanupStmtOptions {
+                            include_boundary_labels: false,
+                            round_limit: budget.round_limit,
+                        },
+                    );
+                    before != hir_shape(f)
+                },
+            );
+        } else {
+            wave_stats::add_cleanup_budget_skips(1);
+        }
+
+        if body_has_boundary_label_shapes(&func.body) {
+            wave_stats::add_cleanup_boundary_label(1);
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_boundary_label_{stage}"),
+                perf,
+                |f| cleanup_boundary_labels_recursive(&mut f.body),
+            );
+        } else {
+            wave_stats::add_cleanup_budget_skips(1);
+        }
+
+        if count_hir_stmts(&func.body) <= budget.stmt_limit
+            && count_hir_blocks(&func.body) <= budget.block_limit
+            && body_has_loopish_shapes(&func.body)
+        {
+            wave_stats::add_cleanup_loopish_rewrite(1);
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_loopish_rewrite_{stage}"),
+                perf,
+                |f| apply_for_loop_folding(&mut f.body),
+            );
+        } else if body_has_loopish_shapes(&func.body) {
+            wave_stats::add_cleanup_budget_skips(1);
+        }
     } else {
         wave_stats::add_cleanup_budget_skips(1);
     }
@@ -766,6 +830,138 @@ fn body_has_loopish_shapes(stmts: &[HirStmt]) -> bool {
     false
 }
 
+fn body_has_boundary_label_shapes(stmts: &[HirStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Label(_) | HirStmt::Goto(_) => return true,
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                if body_has_boundary_label_shapes(body) {
+                    return true;
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if body_has_boundary_label_shapes(then_body)
+                    || body_has_boundary_label_shapes(else_body)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                if cases
+                    .iter()
+                    .any(|case| body_has_boundary_label_shapes(&case.body))
+                    || body_has_boundary_label_shapes(default)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    false
+}
+
+fn body_needs_stmt_fold_cleanup(stmts: &[HirStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } if looks_like_trivial_temp_name(name) => return true,
+            HirStmt::Return(Some(HirExpr::Var(name))) if looks_like_trivial_temp_name(name) => {
+                return true;
+            }
+            HirStmt::If { cond, then_body, else_body } => {
+                if matches!(cond, HirExpr::Const(_, _))
+                    || then_body.is_empty()
+                    || else_body.is_empty()
+                    || (matches!(then_body.last(), Some(HirStmt::Return(_)))
+                        && matches!(else_body.last(), Some(HirStmt::Return(_))))
+                    || body_needs_stmt_fold_cleanup(then_body)
+                    || body_needs_stmt_fold_cleanup(else_body)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                if body_needs_stmt_fold_cleanup(body) {
+                    return true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                if cases.iter().any(|case| body_needs_stmt_fold_cleanup(&case.body))
+                    || body_needs_stmt_fold_cleanup(default)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    false
+}
+
+fn looks_like_trivial_temp_name(name: &str) -> bool {
+    name == "result"
+        || name == "retval"
+        || name.starts_with("uVar")
+        || name.starts_with("iVar")
+        || name.starts_with("xVar")
+        || name.starts_with("bVar")
+}
+
+fn count_hir_blocks(stmts: &[HirStmt]) -> usize {
+    fn count_stmt(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => 1 + count_hir_blocks(body),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => 1 + count_hir_blocks(then_body) + count_hir_blocks(else_body),
+            HirStmt::Switch { cases, default, .. } => {
+                1 + cases.iter().map(|case| count_hir_blocks(&case.body)).sum::<usize>()
+                    + count_hir_blocks(default)
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => 0,
+        }
+    }
+
+    stmts.iter().map(count_stmt).sum()
+}
+
 pub(crate) fn normalize_stmt(stmt: &mut HirStmt) {
     match stmt {
         HirStmt::Assign { rhs, .. } => normalize_expr(rhs),
@@ -857,41 +1053,64 @@ fn normalize_condition_expr(expr: &mut HirExpr) {
     *expr = current;
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CleanupStmtOptions {
+    include_boundary_labels: bool,
+    round_limit: usize,
+}
+
 fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
+    cleanup_stmt_list_with_options(
+        stmts,
+        func_name,
+        depth,
+        CleanupStmtOptions {
+            include_boundary_labels: true,
+            round_limit: 16,
+        },
+    );
+}
+
+fn cleanup_stmt_list_with_options(
+    stmts: &mut Vec<HirStmt>,
+    func_name: &str,
+    depth: usize,
+    options: CleanupStmtOptions,
+) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                cleanup_stmt_list(body, func_name, depth + 1)
+                cleanup_stmt_list_with_options(body, func_name, depth + 1, options)
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let HirStmt::Block(b) = &mut **i {
-                        cleanup_stmt_list(b, func_name, depth + 1);
+                        cleanup_stmt_list_with_options(b, func_name, depth + 1, options);
                     }
                 }
                 if let Some(u) = update {
                     if let HirStmt::Block(b) = &mut **u {
-                        cleanup_stmt_list(b, func_name, depth + 1);
+                        cleanup_stmt_list_with_options(b, func_name, depth + 1, options);
                     }
                 }
-                cleanup_stmt_list(body, func_name, depth + 1)
+                cleanup_stmt_list_with_options(body, func_name, depth + 1, options)
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                cleanup_stmt_list(then_body, func_name, depth + 1);
-                cleanup_stmt_list(else_body, func_name, depth + 1);
+                cleanup_stmt_list_with_options(then_body, func_name, depth + 1, options);
+                cleanup_stmt_list_with_options(else_body, func_name, depth + 1, options);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    cleanup_stmt_list(&mut case.body, func_name, depth + 1);
+                    cleanup_stmt_list_with_options(&mut case.body, func_name, depth + 1, options);
                 }
-                cleanup_stmt_list(default, func_name, depth + 1);
+                cleanup_stmt_list_with_options(default, func_name, depth + 1, options);
             }
             HirStmt::Assign { .. }
             | HirStmt::VaStart { .. }
@@ -943,7 +1162,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             changed = true;
             last_changed_pass = Some("promote_guarded_jump_target_tail");
         }
-        if cleanup_redundant_boundary_labels(stmts) {
+        if options.include_boundary_labels && cleanup_redundant_boundary_labels(stmts) {
             changed = true;
             last_changed_pass = Some("cleanup_redundant_boundary_labels");
         }
@@ -952,6 +1171,9 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             last_changed_pass = Some("remove_unreferenced_leading_labels");
         }
         if !changed {
+            break;
+        }
+        if iterations >= options.round_limit {
             break;
         }
         if diag && iterations % 50 == 0 {
@@ -977,6 +1199,43 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             loop_start.elapsed().as_secs_f64()
         );
     }
+}
+
+fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = cleanup_redundant_boundary_labels(stmts) || remove_unreferenced_leading_labels(stmts);
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                changed |= cleanup_boundary_labels_recursive(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= cleanup_boundary_labels_recursive(then_body);
+                changed |= cleanup_boundary_labels_recursive(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= cleanup_boundary_labels_recursive(&mut case.body);
+                }
+                changed |= cleanup_boundary_labels_recursive(default);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed
 }
 
 pub(crate) fn normalize_expr(expr: &mut HirExpr) {
