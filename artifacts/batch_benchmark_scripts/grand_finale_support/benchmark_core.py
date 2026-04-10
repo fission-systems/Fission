@@ -1642,6 +1642,15 @@ def summarize_engine_failures(entries: dict[str, dict[str, Any]]) -> dict[str, A
     }
 
 
+def is_fission_direct_success(entry: dict[str, Any]) -> bool:
+    if not entry.get("success") or entry.get("fell_back"):
+        return False
+    engine_used = str(entry.get("engine_used") or "").strip()
+    if not engine_used:
+        return False
+    return engine_used not in {"pyghidra", "pcode_dump", "legacy"}
+
+
 def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: bool = False) -> dict[str, Any]:
     success_entries = [entry for entry in entries.values() if entry.get("success")]
     goto_values = [int((entry.get("metrics") or {}).get("goto_count", 0)) for entry in success_entries]
@@ -1696,7 +1705,7 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         "top_level_label_median": round(statistics.median(label_values), 3) if label_values else 0.0,
         "empty_if_total": sum(int((entry.get("metrics") or {}).get("empty_if_count", 0)) for entry in success_entries),
         "constant_if_total": sum(int((entry.get("metrics") or {}).get("constant_if_count", 0)) for entry in success_entries),
-        "direct_success_count": sum(1 for entry in success_entries if fission and entry.get("engine_used") == "mlil_preview" and not entry.get("fell_back")),
+        "direct_success_count": sum(1 for entry in success_entries if fission and is_fission_direct_success(entry)),
         "fpu_op_total": sum(fpu_values),
         "fpu_function_count": sum(1 for value in fpu_values if value > 0),
         "jump_table_total": sum(jump_table_values),

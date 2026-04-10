@@ -9,6 +9,23 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Benchmark contract fix — Fission direct-success summary now reports the Rust canonical path correctly
+
+The benchmark harness had drifted behind the current execution contract. Public summaries were reporting `fission direct-success 0/50` even when the seeded `putty.exe --limit 50` spot-check had `success_count=50`, `both_success=100%`, and all Fission rows were produced by the canonical `rust_sleigh` path without fallback.
+
+- [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now defines Fission direct-success as:
+  - `success == true`
+  - `fell_back == false`
+  - engine is a canonical Fission engine, including `rust_sleigh`
+- This fixes the stale `mlil_preview`-only accounting that forced direct-success to zero after the Rust canonical path took over.
+- Validation:
+  - reran [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe) with `--limit 50`
+  - public summary now reports `fission direct-success 50/50`
+  - seeded shared coverage remains `100.00%`
+  - independent top-N coverage remains `96.00%`
+  - `both_success` remains `100.000%`
+  - `avg_normalized_similarity` remains in the same band (`37.43%` on the rerun; previous run `37.45%`)
+
 ### Fact-driven similarity recovery wave — canonical typed facts landed, similarity held flat
 
 This wave moved another semantic ownership layer into the Rust canonical pipeline by introducing a shared typed-fact inventory, extending prototype and effect summaries with wrapper provenance and region-level effect facts, and wiring indirect-control telemetry into canonical `NirBuildStats`. The quality guardrails held on the short seeded `putty.exe --limit 50` spot-check, but the primary KPI still plateaued: similarity remained at `37.45%`.
