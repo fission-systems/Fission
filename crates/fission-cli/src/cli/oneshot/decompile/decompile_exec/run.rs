@@ -846,7 +846,13 @@ pub(crate) fn run_decompilation(
         eprintln!("[*] Decompilation engine = {:?}", engine_mode);
     }
 
-    let functions = collect_target_functions(binary, cli.address, cli.decomp_all, cli.decomp_limit);
+    let functions = collect_target_functions(
+        binary,
+        cli.address,
+        cli.addresses_file.as_deref(),
+        cli.decomp_all,
+        cli.decomp_limit,
+    );
 
     if matches!(engine_mode, EngineMode::RustSleigh) {
         let effective_no_header = cli.no_header || cli.ghidra_compat;

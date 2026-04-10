@@ -9,6 +9,63 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Similarity-first recovery wave — partial output retention and object surfacing
+
+This wave focused on the next bottleneck after coverage alignment: keeping seeded functions present even when structuring still fails, while tightening a few low-signal surfaces in the Rust-owned canonical path.
+
+#### fission-cli — canonical batch selection and panic-to-partial fallback
+
+- [`decompile_targets.rs`](crates/fission-cli/src/cli/oneshot/decompile/decompile_targets.rs) now treats `--addresses-file` as a first-class canonical selector input for the regular decomp-all path, not only the inventory and legacy-adjacent helper paths.
+- [`decompile_exec/run.rs`](crates/fission-cli/src/cli/oneshot/decompile/decompile_exec/run.rs) now routes batch decomp through the same address-file-aware selector contract used by the seeded benchmark harness.
+- [`decompile_rust_sleigh.rs`](crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs) now converts worker-thread panics into deterministic per-function partial results instead of silently dropping the function row from batch JSON output.
+  - When Rust-Sleigh panics during render, the batch row is still emitted with `fell_back=true`, error metadata, and a `code` payload so seeded coverage remains an availability metric rather than a panic artifact.
+
+#### fission-pcode — virtual-block index hardening and surface cleanup
+
+- [`builder/mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs), [`builder/terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs), and [`structuring/linear.rs`](crates/fission-pcode/src/nir/structuring/linear.rs) now project virtual split-block indices back to canonical P-code block indices before looking up block target keys and fallthrough metadata.
+- [`builder/stack_slots.rs`](crates/fission-pcode/src/nir/builder/stack_slots.rs) now surfaces ABI-classified stack roles with role-specific names:
+  - `home_*`
+  - `arg_out_*`
+  - `ret_scaffold_*`
+  instead of collapsing them into generic `stack_*` locals.
+- [`normalize/memory/aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) now upgrades `Ptr(Unknown)` bindings into `Ptr(Aggregate { .. })` when partitioned access intervals provide enough proof to recover a stable object shape.
+- [`normalize/memory/partition.rs`](crates/fission-pcode/src/nir/normalize/memory/partition.rs) now recognizes `ret_scaffold_*` as stack-like memory for partition classification.
+
+#### Duplicate-logic audit
+
+- Canonical owner for batch address selection remains `fission-cli`:
+  - `--decomp-all`
+  - seeded benchmark execution
+  - exact-address file selection
+  now all consume the same selector contract.
+- Canonical owner for “panic but function still present in benchmark corpus” is now the Rust-only decomp boundary in [`decompile_rust_sleigh.rs`](crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs), not the Python harness.
+- Object-shape upgrade remains owned by `fission-pcode`; the benchmark harness still only reads emitted rows and never infers shape semantics itself.
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli --release`
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+- `nir-check`:
+  - lane completed successfully
+  - gate remains `stop_hold_p5h3f`
+  - dominant remaining perf blocker is still `cleanup_init_1` (`167.0ms` in the latest fast-lane run)
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-similarity-wave`
+  - seeded shared coverage: `100.00%` (up from `98.00%`)
+  - independent top-N coverage: `96.00%` (unchanged)
+  - `avg_normalized_similarity=37.50%` (up from `37.22%`)
+  - `both_success=98.000%`
+  - Fission wall `0.507s`, pyghidra wall `3.055s`, throughput speedup `6.02x`
+
+#### Known residual risk
+
+- Seeded coverage is now fully closed for this `putty.exe --limit 50` spot check, but one function (`0x140006ef0`) still falls back to an emitted error row because a virtual-block structuring panic remains unresolved deeper in `fission-pcode`.
+- Similarity improved only slightly; the next meaningful gains still require deeper semantic cleanup and object/call recovery rather than more benchmark-contract work.
+
 ### Coverage-first alignment wave — canonical function selection and seeded pairing
 
 This wave changes the meaning of benchmark coverage from “independent top-N address intersection” to “seeded common canonical-function availability.” The main goal is not printer similarity polish, but getting `fission-cli`, inventory emission, and the whole-binary benchmark onto the same function identity and ordering contract.

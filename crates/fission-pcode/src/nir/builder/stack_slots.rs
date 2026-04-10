@@ -154,11 +154,13 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<(String, NirType)> {
         let origin = self.classify_stack_slot_origin(base, offset);
         let kind_name = match origin {
-            NirBindingOrigin::HomeSlot(home_offset) => format!("stack_{home_offset:x}"),
+            NirBindingOrigin::HomeSlot(home_offset) => format!("home_{home_offset:x}"),
+            NirBindingOrigin::OutgoingArgSlot(arg_offset) => format!("arg_out_{arg_offset:x}"),
+            NirBindingOrigin::ReturnScaffold => format!("ret_scaffold_{:x}", offset.unsigned_abs()),
             _ => match base {
-            StackBase::Rbp if offset > 0 => format!("param_{:x}", offset),
-            StackBase::Rbp => format!("local_{:x}", offset.unsigned_abs()),
-            StackBase::Rsp => format!("local_{:x}", self.rsp_local_display_offset(offset)),
+                StackBase::Rbp if offset > 0 => format!("param_{:x}", offset),
+                StackBase::Rbp => format!("local_{:x}", offset.unsigned_abs()),
+                StackBase::Rsp => format!("local_{:x}", self.rsp_local_display_offset(offset)),
             },
         };
 

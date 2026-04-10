@@ -25,9 +25,14 @@ pub(crate) fn select_candidate_functions<'a>(
 pub(crate) fn collect_target_functions<'a>(
     binary: &'a LoadedBinary,
     address: Option<u64>,
+    addresses_file: Option<&std::path::Path>,
     decomp_all: bool,
     decomp_limit: Option<usize>,
 ) -> Vec<&'a FunctionInfo> {
+    if let Some(address_file) = addresses_file {
+        return select_functions_from_addresses_file(binary, address_file).unwrap_or_default();
+    }
+
     if decomp_all {
         let collected = canonical_functions_sorted(binary);
         if let Some(n) = decomp_limit {

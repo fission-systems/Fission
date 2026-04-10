@@ -216,6 +216,7 @@ fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
                 || name.starts_with("local_")
                 || name.starts_with("home_")
                 || name.starts_with("arg_out_")
+                || name.starts_with("ret_scaffold_")
             {
                 MemoryAccessClass::Stack
             } else if name.starts_with("param_") {

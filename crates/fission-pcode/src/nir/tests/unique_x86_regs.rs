@@ -147,7 +147,7 @@ fn unique_rsp_based_store_surfaces_stack_slot() {
     let code = render_mlil_preview(&func, "test_stack_slot", 0x140002100, &preview_options())
         .expect("preview render");
     assert!(
-        code.contains("stack_70"),
+        code.contains("home_70"),
         "expected unique-rsp stack slot surfacing, got:\n{code}"
     );
 }

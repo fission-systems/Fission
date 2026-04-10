@@ -63,52 +63,83 @@ fn record_access(var_name: &str, offset: u32, access_ty: NirType, out: &mut Offs
     *best = merge_field_ty(best, &access_ty);
 }
 
-fn collect_offsets(func: &HirFunction, agg_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
+fn collect_offsets(func: &HirFunction, tracked_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
     for access in collect_partitioned_memory_accesses(&func.body) {
         let HirExpr::Var(name) = &access.base else {
             continue;
         };
-        if !agg_vars.contains_key(name.as_str()) || access.const_offset < 0 {
+        if !tracked_vars.contains_key(name.as_str()) || access.const_offset < 0 {
             continue;
         }
         record_access(name, access.const_offset as u32, access.access_ty.clone(), out);
     }
 }
 
-/// Collect all variables (locals + params) whose type is
-/// `Ptr(Aggregate { .. })`.  Returns a map from the variable name to the inner
-/// `Aggregate` type.
-fn collect_agg_ptr_vars(func: &HirFunction) -> HashMap<String, NirType> {
+fn collect_pointer_like_vars(func: &HirFunction) -> HashMap<String, NirType> {
     func.locals
         .iter()
         .chain(func.params.iter())
-        .filter_map(|b| match &b.ty {
-            NirType::Ptr(inner) => match inner.as_ref() {
-                NirType::Aggregate { .. } => Some((b.name.clone(), *inner.clone())),
-                _ => None,
-            },
+        .filter_map(|binding| match &binding.ty {
+            NirType::Ptr(_) => Some((binding.name.clone(), binding.ty.clone())),
             _ => None,
         })
         .collect()
+}
+
+fn inferred_aggregate_size(offsets: &HashMap<u32, NirType>) -> Option<u32> {
+    let mut max_end = 0u32;
+    for (&offset, ty) in offsets {
+        let width = type_bits_bytes(ty).max(1);
+        max_end = max_end.max(offset.saturating_add(width));
+    }
+    (max_end > 0).then_some(max_end)
+}
+
+fn should_infer_aggregate(offsets: &HashMap<u32, NirType>) -> bool {
+    if offsets.len() >= 2 {
+        return true;
+    }
+    offsets.keys().any(|offset| *offset != 0)
+}
+
+fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
+    matches!(&binding.ty, NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown))
 }
 
 /// Apply aggregate field layout recovery to a function.
 ///
 /// Returns `true` if any `NirType::Aggregate` had fields added to it.
 pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
-    let agg_ptr_vars = collect_agg_ptr_vars(func);
-    if agg_ptr_vars.is_empty() {
+    let tracked_ptr_vars = collect_pointer_like_vars(func);
+    if tracked_ptr_vars.is_empty() {
         return false;
     }
 
     let mut offset_map: OffsetMap = HashMap::new();
-    collect_offsets(func, &agg_ptr_vars, &mut offset_map);
+    collect_offsets(func, &tracked_ptr_vars, &mut offset_map);
 
     if offset_map.is_empty() {
         return false;
     }
 
     let mut changed = false;
+
+    for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
+        let Some(offsets) = offset_map.get(&binding.name) else {
+            continue;
+        };
+        if !can_upgrade_binding_to_aggregate(binding) || !should_infer_aggregate(offsets) {
+            continue;
+        }
+        let Some(size) = inferred_aggregate_size(offsets) else {
+            continue;
+        };
+        binding.ty = NirType::Ptr(Box::new(NirType::Aggregate {
+            size,
+            fields: Vec::new(),
+        }));
+        changed = true;
+    }
 
     // Update each NirBinding that is Ptr(Aggregate { .. }) with discovered fields.
     let update_binding = |binding: &mut NirBinding, offset_map: &OffsetMap| -> bool {
@@ -141,4 +172,55 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ptr_unknown() -> NirType {
+        NirType::Ptr(Box::new(NirType::Unknown))
+    }
+
+    #[test]
+    fn aggregate_fields_upgrades_unknown_pointer_to_aggregate() {
+        let mut func = HirFunction {
+            name: "test".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: ptr_unknown(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var("param_1".to_string())),
+                    offset: 8,
+                }),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }))],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer param");
+        };
+        let NirType::Aggregate { size, fields } = inner.as_ref() else {
+            panic!("expected inferred aggregate");
+        };
+        assert_eq!(*size, 12);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].offset, 8);
+    }
 }

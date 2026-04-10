@@ -9,12 +9,13 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(cached.clone());
         }
 
-        let block = &self.pcode.blocks[idx];
+        let pcode_idx = self.pcode_block_idx(idx);
+        let block = &self.pcode.blocks[pcode_idx];
         let lowered = if let Some(term_idx) = self.block_terminator_index(block) {
             let op = &block.ops[term_idx];
             self.with_lowering_site(
                 LoweringSite {
-                    block_idx: idx,
+                    block_idx: pcode_idx,
                     op_idx: term_idx,
                 },
                 |this| match op.opcode {

@@ -300,12 +300,20 @@ fn resolve_decomp_stack_size_bytes() -> usize {
     mb * 1024 * 1024
 }
 
-fn make_internal_error_result(func: &FunctionInfo, message: String) -> FunctionRenderResult {
-    let plain = format!(
-        "// Error decompiling {} (0x{:x}): {}",
-        func.name, func.address, message
-    );
-    let entry = serde_json::json!({
+fn make_internal_error_result(
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+    message: String,
+    config: RenderConfig,
+) -> FunctionRenderResult {
+    let fallback = make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &message);
+    let plain = fallback.clone().unwrap_or_else(|| {
+        format!(
+            "// Error decompiling {} (0x{:x}): {}",
+            func.name, func.address, message
+        )
+    });
+    let mut entry = serde_json::json!({
         "address": format!("0x{:x}", func.address),
         "name": func.name,
         "engine_used": "rust_sleigh",
@@ -313,6 +321,16 @@ fn make_internal_error_result(func: &FunctionInfo, message: String) -> FunctionR
         "fallback_reason": "rust_sleigh:worker_internal_error",
         "error": message,
     });
+    if let Some(code) = fallback {
+        entry["code"] = serde_json::json!(code);
+        entry["fallback"] = serde_json::json!("assembly");
+    } else {
+        entry["code"] = serde_json::json!(plain.clone());
+    }
+    if config.benchmark {
+        entry["decomp_sec"] = serde_json::json!(0.0);
+        entry["postprocess_sec"] = serde_json::json!(0.0);
+    }
 
     FunctionRenderResult {
         address: func.address,
@@ -342,13 +360,17 @@ fn render_one_function_on_large_stack(
         Ok(handle) => match handle.join() {
             Ok(result) => result,
             Err(_) => make_internal_error_result(
+                binary.as_ref(),
                 &func_for_error,
                 "worker thread panicked while rendering function".to_string(),
+                config,
             ),
         },
         Err(err) => make_internal_error_result(
+            binary.as_ref(),
             &func_for_error,
             format!("failed to spawn render worker: {err}"),
+            config,
         ),
     }
 }
@@ -381,7 +403,17 @@ fn run_worker_fanout_fanin(
                 Ok(func) => func,
                 Err(_) => return,
             };
-            let rendered = render_one_function(binary.as_ref(), &func, config);
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                render_one_function(binary.as_ref(), &func, config)
+            }))
+            .unwrap_or_else(|_| {
+                make_internal_error_result(
+                    binary.as_ref(),
+                    &func,
+                    "worker thread panicked while rendering function".to_string(),
+                    config,
+                )
+            });
             if tx.send(rendered).is_err() {
                 return;
             }

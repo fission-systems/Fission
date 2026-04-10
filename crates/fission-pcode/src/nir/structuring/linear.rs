@@ -1458,7 +1458,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn fallthrough_index(&self, idx: usize) -> Option<usize> {
-        self.layout_fallthrough[idx].filter(|succ| self.successors[idx].contains(succ))
+        let layout_idx = self.pcode_block_idx(idx);
+        self.layout_fallthrough[layout_idx]
+            .filter(|succ| self.successors[layout_idx].contains(succ))
     }
 
     pub(super) fn find_block_index_by_address(&self, address: u64) -> Option<usize> {

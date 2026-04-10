@@ -221,11 +221,14 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
-        self.layout_fallthrough[idx].map(|next_idx| self.block_target_key(next_idx))
+        let layout_idx = self.pcode_block_idx(idx);
+        self.layout_fallthrough[layout_idx].map(|next_idx| {
+            self.block_target_keys[self.pcode_block_idx(next_idx)]
+        })
     }
 
     pub(super) fn block_target_key(&self, idx: usize) -> u64 {
-        self.block_target_keys[idx]
+        self.block_target_keys[self.pcode_block_idx(idx)]
     }
 
     pub(super) fn ensure_temp_binding_for_output(
