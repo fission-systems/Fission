@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
 mod abstract_location;
+mod abi;
 mod builder;
 mod cfg;
 mod normalize;
@@ -19,6 +20,7 @@ mod vsa;
 
 pub(super) use self::support::*;
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
+pub(crate) use self::abi::*;
 pub use self::support::CallingConvention;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,

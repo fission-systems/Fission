@@ -1,10 +1,10 @@
 //! Promote entry-block spills `tmp = <abi param reg>` to canonical `param_k` names.
 //!
-//! Uses the same register↔slot ordering as [`crate::nir::support::CallingConvention::param_reg_slots_64`].
+//! Uses the same provider-backed ABI carrier assignment as preview building.
 //! Conservatively only renames when the RHS is a plain (or cast-wrapped) hardware register
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
-use crate::nir::support::{x64_ghidra_reg_name, CallingConvention};
+use crate::nir::{AbiState, CallingConvention};
 use crate::nir::types::{HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType};
 use crate::nir::var_rename::rename_vars_in_stmts;
 use std::collections::HashSet;
@@ -12,9 +12,7 @@ use std::collections::HashSet;
 use super::super::wave_stats::add_entry_param_promotions;
 
 fn param_slot_for_hw_register(reg: &str, abi: CallingConvention) -> Option<usize> {
-    abi.param_offsets().iter().position(|&off| {
-        x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(reg))
-    })
+    AbiState::new(abi, true, 8, 0).param_slot_for_name(reg)
 }
 
 fn peel_var_name<'a>(expr: &'a HirExpr) -> Option<&'a str> {
@@ -242,7 +240,7 @@ fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
 }
 
 fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str> {
-    abi.param_offsets().get(slot).copied().and_then(x64_ghidra_reg_name)
+    AbiState::new(abi, true, 8, 0).param_hw_name(slot)
 }
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.

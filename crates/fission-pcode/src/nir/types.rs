@@ -55,6 +55,17 @@ pub enum NirBindingOrigin {
     Temp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CarrierClass {
+    Gpr,
+    Fpr,
+    Vec,
+    StackArg,
+    HomeSlot,
+    LocalSlot,
+    ReturnSlot,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirFunction {
     pub name: String,

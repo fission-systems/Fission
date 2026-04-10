@@ -28,6 +28,7 @@
 ///
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
+use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use std::collections::HashMap;
 
 /// Map: variable name → (offset → best NirType for that field).
@@ -35,14 +36,7 @@ type OffsetMap = HashMap<String, HashMap<u32, NirType>>;
 
 /// Return the byte width of a type (0 = unknown).
 fn type_bits_bytes(ty: &NirType) -> u32 {
-    match ty {
-        NirType::Bool => 1,
-        NirType::Int { bits, .. } => bits / 8,
-        NirType::Ptr(_) => 8,
-        NirType::Float { bits } => bits / 8,
-        NirType::Aggregate { size, .. } => *size,
-        NirType::Unknown => 0,
-    }
+    type_byte_size(ty).unwrap_or(0)
 }
 
 /// Merge a new candidate `NirType` into the best-so-far type for an offset.
@@ -63,115 +57,21 @@ fn merge_field_ty(current: &NirType, candidate: &NirType) -> NirType {
     }
 }
 
-/// Build a map from variable_name → { offset → best_field_type } by walking
-/// all expressions and statements in the function body.
-fn collect_offsets(
-    stmts: &[HirStmt],
-    agg_vars: &HashMap<String, NirType>, // name → Aggregate type
-    out: &mut OffsetMap,
-) {
-    for stmt in stmts {
-        collect_offsets_stmt(stmt, agg_vars, out);
-    }
-}
-
 fn record_access(var_name: &str, offset: u32, access_ty: NirType, out: &mut OffsetMap) {
     let entry = out.entry(var_name.to_owned()).or_default();
     let best = entry.entry(offset).or_insert(NirType::Unknown);
     *best = merge_field_ty(best, &access_ty);
 }
 
-fn collect_offsets_expr(expr: &HirExpr, agg_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
-    match expr {
-        // Load through a PtrOffset: the base is a pointer-to-aggregate, the
-        // load type tells us the field type.
-        HirExpr::Load {
-            ptr:
-                box_expr @ _,
-            ty: load_ty,
-        } => {
-            if let HirExpr::PtrOffset { base, offset } = box_expr.as_ref() {
-                if let HirExpr::Var(name) = base.as_ref() {
-                    if agg_vars.contains_key(name.as_str()) && *offset >= 0 {
-                        record_access(name, *offset as u32, load_ty.clone(), out);
-                    }
-                }
-            }
-            collect_offsets_expr(box_expr.as_ref(), agg_vars, out);
+fn collect_offsets(func: &HirFunction, agg_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
+    for access in collect_partitioned_memory_accesses(&func.body) {
+        let HirExpr::Var(name) = &access.base else {
+            continue;
+        };
+        if !agg_vars.contains_key(name.as_str()) || access.const_offset < 0 {
+            continue;
         }
-        HirExpr::PtrOffset { base, .. } => collect_offsets_expr(base, agg_vars, out),
-        HirExpr::Cast { expr, .. } => collect_offsets_expr(expr, agg_vars, out),
-        HirExpr::Unary { expr, .. } => collect_offsets_expr(expr, agg_vars, out),
-        HirExpr::Binary { lhs, rhs, .. } => {
-            collect_offsets_expr(lhs, agg_vars, out);
-            collect_offsets_expr(rhs, agg_vars, out);
-        }
-        HirExpr::Call { args, .. } => {
-            for arg in args {
-                collect_offsets_expr(arg, agg_vars, out);
-            }
-        }
-        HirExpr::Index { base, index, .. } => {
-            collect_offsets_expr(base, agg_vars, out);
-            collect_offsets_expr(index, agg_vars, out);
-        }
-        HirExpr::AggregateCopy { src, .. } => collect_offsets_expr(src, agg_vars, out),
-        _ => {}
-    }
-}
-
-fn collect_offsets_lvalue(lhs: &HirLValue, agg_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
-    match lhs {
-        HirLValue::Deref { ptr, ty: store_ty } => {
-            if let HirExpr::PtrOffset { base, offset } = ptr.as_ref() {
-                if let HirExpr::Var(name) = base.as_ref() {
-                    if agg_vars.contains_key(name.as_str()) && *offset >= 0 {
-                        record_access(name, *offset as u32, store_ty.clone(), out);
-                    }
-                }
-            }
-            collect_offsets_expr(ptr, agg_vars, out);
-        }
-        HirLValue::Index { base, index, .. } => {
-            collect_offsets_expr(base, agg_vars, out);
-            collect_offsets_expr(index, agg_vars, out);
-        }
-        HirLValue::Var(_) => {}
-    }
-}
-
-fn collect_offsets_stmt(stmt: &HirStmt, agg_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
-    match stmt {
-        HirStmt::Assign { lhs, rhs } => {
-            collect_offsets_lvalue(lhs, agg_vars, out);
-            collect_offsets_expr(rhs, agg_vars, out);
-        }
-        HirStmt::Expr(expr) => collect_offsets_expr(expr, agg_vars, out),
-        HirStmt::Return(Some(expr)) => collect_offsets_expr(expr, agg_vars, out),
-        HirStmt::Block(body) => collect_offsets(body, agg_vars, out),
-        HirStmt::If { cond, then_body, else_body } => {
-            collect_offsets_expr(cond, agg_vars, out);
-            collect_offsets(then_body, agg_vars, out);
-            collect_offsets(else_body, agg_vars, out);
-        }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
-            collect_offsets_expr(cond, agg_vars, out);
-            collect_offsets(body, agg_vars, out);
-        }
-        HirStmt::For { init, cond, update, body } => {
-            if let Some(i) = init { collect_offsets_stmt(i, agg_vars, out); }
-            if let Some(c) = cond { collect_offsets_expr(c, agg_vars, out); }
-            if let Some(u) = update { collect_offsets_stmt(u, agg_vars, out); }
-            collect_offsets(body, agg_vars, out);
-        }
-        HirStmt::Switch { expr, cases, default } => {
-            collect_offsets_expr(expr, agg_vars, out);
-            for case in cases {
-                collect_offsets(&case.body, agg_vars, out);
-            }
-            collect_offsets(default, agg_vars, out);
-        }
-        _ => {}
+        record_access(name, access.const_offset as u32, access.access_ty.clone(), out);
     }
 }
 
@@ -202,7 +102,7 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     }
 
     let mut offset_map: OffsetMap = HashMap::new();
-    collect_offsets(&func.body, &agg_ptr_vars, &mut offset_map);
+    collect_offsets(func, &agg_ptr_vars, &mut offset_map);
 
     if offset_map.is_empty() {
         return false;

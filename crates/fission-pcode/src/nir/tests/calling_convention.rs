@@ -4,6 +4,7 @@
 /// `("param_N", Some(N-1))` for parameter registers or `(hw_name, None)` for others.
 /// The distinction depends on the active `CallingConvention`.
 use super::*;
+use crate::nir::AbiState;
 
 // ── Windows x64 ────────────────────────────────────────────────────────────────
 
@@ -144,4 +145,25 @@ fn ghidra_reg_name_is_hardware_canonical() {
     assert_eq!(x64_ghidra_reg_name(0x80), Some("r8"));
     assert_eq!(x64_ghidra_reg_name(0x88), Some("r9"));
     assert_eq!(x64_ghidra_reg_name(0xDEAD), None);
+}
+
+#[test]
+fn abi_state_classifies_win64_home_slot() {
+    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0x40);
+    assert_eq!(
+        abi.classify_stack_slot_origin(StackBase::Rsp, 0x40),
+        NirBindingOrigin::HomeSlot(0x40)
+    );
+    assert_eq!(
+        abi.classify_stack_slot_origin(StackBase::Rsp, 0x20),
+        NirBindingOrigin::StackOffset(0x20)
+    );
+}
+
+#[test]
+fn abi_state_recovers_win64_stack_arg_index() {
+    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0x40);
+    assert_eq!(abi.stack_argument_index(0x20), Some(0));
+    assert_eq!(abi.stack_argument_index(0x28), Some(1));
+    assert_eq!(abi.stack_argument_index(0x18), None);
 }

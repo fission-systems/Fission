@@ -2,38 +2,32 @@ use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
-        match base {
-            StackBase::Rsp
-                if self.options.is_64bit
-                    && self.options.calling_convention == CallingConvention::WindowsX64
-                    && offset >= self.stack_frame_size =>
-            {
-                NirBindingOrigin::HomeSlot(offset)
-            }
-            _ => NirBindingOrigin::StackOffset(offset),
-        }
+        self.abi_state().classify_stack_slot_origin(base, offset)
     }
 
     pub(super) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
-        if vn.space_id != REGISTER_SPACE_ID {
-            return None;
-        }
         if !self.options.is_64bit {
             return None;
         }
-        let (name, index) = register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
-        if let Some(index) = index {
-            self.params.entry(index).or_insert_with(|| NirBinding {
-                name: name.to_string(),
+        let abi = self.abi_state();
+        let Some(index) = abi.param_slot_for_varnode(vn) else {
+            if vn.space_id != REGISTER_SPACE_ID {
+                return None;
+            }
+            let (name, _) =
+                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
+            return Some(name.to_string());
+        };
+        let name = abi.param_name(index);
+        self.params.entry(index).or_insert_with(|| NirBinding {
+                name: name.clone(),
                 ty: type_from_size(vn.size, false),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::ParamIndex(index)),
                 initializer: None,
             });
-            return Some(name.to_string());
-        }
         if let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied() {
-            let alias_name = format!("param_{}", param_index + 1);
+            let alias_name = abi.param_name(param_index);
             self.params
                 .entry(param_index)
                 .or_insert_with(|| NirBinding {
@@ -45,7 +39,7 @@ impl<'a> PreviewBuilder<'a> {
                 });
             return Some(alias_name);
         }
-        Some(name.to_string())
+        Some(name)
     }
 
     pub(super) fn try_stack_slot_lvalue_for_memory_op(

@@ -9,6 +9,70 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Decompile quality wave — semantics-first core upgrade
+
+This wave moves semantic recovery deeper into the canonical Rust-owned pipeline instead of relying on printer-level cleanup. The primary themes are shared ABI carrier modeling, shared memory-partition evidence for slot/aggregate recovery, costed structuring candidate selection, and automation-side family attribution built directly from canonical `NirBuildStats`.
+
+#### fission-pcode — shared ABI state and carrier assignment
+
+- Added [`abi.rs`](crates/fission-pcode/src/nir/abi.rs) and threaded [`AbiState`](crates/fission-pcode/src/nir/abi.rs), [`CarrierResource`](crates/fission-pcode/src/nir/abi.rs), and [`CarrierAssignment`](crates/fission-pcode/src/nir/abi.rs) through the canonical `nir` layer.
+- Added [`CarrierClass`](crates/fission-pcode/src/nir/types.rs) so entry/call carrier reasoning has a typed contract instead of ad-hoc Win64-only naming.
+- [`stack_slots.rs`](crates/fission-pcode/src/nir/builder/stack_slots.rs) and [`call_recovery.rs`](crates/fission-pcode/src/nir/builder/call_recovery.rs) now use shared ABI state for parameter-slot, stack-tail, and home-slot classification, rather than duplicating direct calling-convention logic.
+- [`entry_param_promotion.rs`](crates/fission-pcode/src/nir/normalize/types/entry_param_promotion.rs) now shares the same ABI slot mapping contract as the preview builder.
+
+#### fission-pcode — partitioned memory evidence reuse
+
+- Added [`partition.rs`](crates/fission-pcode/src/nir/normalize/memory/partition.rs) as a shared collector for partitioned memory accesses: base expression, constant offset, stride, optional index, and access type.
+- [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs) now consumes shared partition evidence for slot-family surfacing instead of scanning HIR independently.
+- [`aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) now consumes the same partition collector, removing duplicate offset-walk logic between aggregate recovery and slot surfacing.
+- Duplicate-logic audit outcome for this wave:
+  - stack offset / stride parsing now has a canonical owner in [`partition.rs`](crates/fission-pcode/src/nir/normalize/memory/partition.rs)
+  - aggregate field discovery no longer reimplements its own full HIR memory-access traversal
+  - automation family attribution is derived from canonical [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs), not a parallel metric schema
+
+#### fission-pcode — costed structuring candidate selection
+
+- [`driver.rs`](crates/fission-pcode/src/nir/structuring/driver.rs) no longer commits to the first accepted reducer. It now gathers accepted candidates and picks the minimum-cost region using a deterministic tuple:
+  - loop-header violation
+  - postdom damage
+  - switch fanout damage
+  - guard-chain cut
+  - goto introduction count
+  - label churn
+  - span penalty
+- This preserves canonical short-circuit lowering and avoids plain nested-`if` regressions that showed up when reducer ordering alone was used.
+
+#### fission-automation — semantic family attribution
+
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now publishes family summaries derived from canonical counters:
+  - `abi`
+  - `memory_shape`
+  - `variadic`
+  - `call_signature`
+  - `structuring`
+  - `security`
+- [`insights.rs`](crates/fission-automation/src/report/insights.rs) now exposes a `quality_delta_vector` and uses family-level deltas in the go/stop decision instead of relying only on a single mismatch-specialized counter.
+
+#### Tests / validation
+
+- Added ABI contract coverage in [`calling_convention.rs`](crates/fission-pcode/src/nir/tests/calling_convention.rs) for Win64 home-slot classification and Win64 stack-tail index recovery.
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-pcode`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli`
+  - `cargo build -p fission-cli --release`
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-next-wave`
+  - Result summary: shared coverage `24.00%`, `avg_normalized_similarity=35.79%`, `both_success=100.000%`, Fission wall `1.011s`, pyghidra wall `4.963s`, throughput speedup `4.91x`, Fission max RSS `10.12MB`
+
+#### Known residual risk
+
+- `nir-check` remains non-green for this wave:
+  - fast profile reports a pass-level performance regression on `cleanup_init_1` (`36.9ms -> 177.9ms`, `4.8x`)
+  - release/mid lane still ends in `stop_hold_p5h3f` because the semantic family delta vector is not yet strong enough to clear the quality gate
+- This means the semantic/core refactor is integrated and benchmark-safe on the targeted `putty.exe` sample, but the broader automation lane still needs follow-up work on cleanup-pass performance and gate-improvement signal.
+
 ### Decompile quality wave — ABI carrier recovery, variadic surfacing, security/call cleanup
 
 This update pushes wrapper-quality recovery further in the canonical Rust decompiler pipeline. The focus is **ABI meaning recovery**, not CFG reshaping: Win64 home/shadow slots are separated from ordinary locals, recovered call carriers survive UNIQUE-space lowering, variadic stack regions can surface as `va_start`, and low-signal call/security scaffolding is cleaned from canonical HIR before printing.

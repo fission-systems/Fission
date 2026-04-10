@@ -2,7 +2,162 @@ use super::cleanup::{cleanup_redundant_labels, eliminate_redundant_gotos};
 use super::irreducible::compute_node_splits;
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct EdgeCutCost {
+    loop_header_violation: usize,
+    postdom_damage: usize,
+    switch_fanout_damage: usize,
+    guard_chain_cut: usize,
+    goto_introduction_count: usize,
+    label_churn: usize,
+    span_penalty: usize,
+}
+
+#[derive(Debug, Clone)]
+struct StructuredRegionCandidate {
+    stmt: HirStmt,
+    skip_to: usize,
+    cost: EdgeCutCost,
+}
+
 impl<'a> PreviewBuilder<'a> {
+    fn expr_has_short_circuit_form(expr: &HirExpr) -> bool {
+        matches!(
+            expr,
+            HirExpr::Binary {
+                op: HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr,
+                ..
+            }
+        )
+    }
+
+    fn stmt_has_nested_if(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body.iter().any(|stmt| matches!(stmt, HirStmt::If { .. }))
+                || else_body.iter().any(|stmt| matches!(stmt, HirStmt::If { .. })),
+            _ => false,
+        }
+    }
+
+    fn count_stmt_gotos(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Goto(_) => 1,
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => body.iter().map(Self::count_stmt_gotos).sum(),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body.iter().map(Self::count_stmt_gotos).sum::<usize>()
+                + else_body.iter().map(Self::count_stmt_gotos).sum::<usize>(),
+            HirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|case| case.body.iter().map(Self::count_stmt_gotos).sum::<usize>())
+                    .sum::<usize>()
+                    + default.iter().map(Self::count_stmt_gotos).sum::<usize>()
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => 0,
+        }
+    }
+
+    fn count_stmt_labels(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Label(_) => 1,
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => body.iter().map(Self::count_stmt_labels).sum(),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body.iter().map(Self::count_stmt_labels).sum::<usize>()
+                + else_body.iter().map(Self::count_stmt_labels).sum::<usize>(),
+            HirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|case| case.body.iter().map(Self::count_stmt_labels).sum::<usize>())
+                    .sum::<usize>()
+                    + default.iter().map(Self::count_stmt_labels).sum::<usize>()
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => 0,
+        }
+    }
+
+    fn score_structured_candidate(
+        &self,
+        start_idx: usize,
+        skip_to: usize,
+        stmt: &HirStmt,
+        targeted: &HashSet<u64>,
+    ) -> EdgeCutCost {
+        let internal_target_count = ((start_idx + 1)..skip_to)
+            .filter(|idx| targeted.contains(&self.block_target_key(*idx)))
+            .count();
+        let span = skip_to.saturating_sub(start_idx);
+        let switch_damage = match stmt {
+            HirStmt::Switch { cases, .. } => usize::from(cases.is_empty()),
+            _ => 1,
+        };
+        let guard_chain_cut = match stmt {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => usize::from(!Self::expr_has_short_circuit_form(cond))
+                + usize::from(then_body.is_empty() || else_body.is_empty())
+                + usize::from(Self::stmt_has_nested_if(stmt)),
+            _ => 0,
+        };
+        let loop_header_violation = usize::from(matches!(stmt, HirStmt::Goto(_)));
+        EdgeCutCost {
+            loop_header_violation,
+            postdom_damage: internal_target_count,
+            switch_fanout_damage: switch_damage,
+            guard_chain_cut,
+            goto_introduction_count: Self::count_stmt_gotos(stmt),
+            label_churn: Self::count_stmt_labels(stmt),
+            span_penalty: 256usize.saturating_sub(span.min(256)),
+        }
+    }
+
+    fn consider_structured_candidate(
+        &mut self,
+        start_idx: usize,
+        targeted: &HashSet<u64>,
+        last_structuring_failure: &mut Option<MlilPreviewError>,
+        candidates: &mut Vec<StructuredRegionCandidate>,
+        result: Result<Option<(HirStmt, usize)>, MlilPreviewError>,
+    ) -> Result<(), MlilPreviewError> {
+        if let Some((stmt, skip_to)) =
+            Self::capture_structuring_failure(result, last_structuring_failure)?
+            && self.accept_structured_region(start_idx, skip_to, targeted)
+        {
+            let cost = self.score_structured_candidate(start_idx, skip_to, &stmt, targeted);
+            candidates.push(StructuredRegionCandidate { stmt, skip_to, cost });
+        }
+        Ok(())
+    }
+
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
@@ -148,6 +303,7 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             let pcode_idx = self.pcode_block_idx(idx);
+            let mut structured_candidates = Vec::new();
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=switch elapsed={:.3}s",
@@ -156,15 +312,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_switch(idx),
+            let switch_candidate = self.try_lower_switch(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                switch_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=for elapsed={:.3}s",
@@ -173,15 +328,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_for(idx),
+            let for_candidate = self.try_lower_for(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                for_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=dowhile elapsed={:.3}s",
@@ -190,15 +344,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_dowhile(idx),
+            let dowhile_candidate = self.try_lower_dowhile(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                dowhile_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=while elapsed={:.3}s",
@@ -207,15 +360,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_while(idx),
+            let while_candidate = self.try_lower_while(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                while_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=loop_control elapsed={:.3}s",
@@ -224,15 +376,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_infloop_with_break(idx),
+            let infloop_break_candidate = self.try_lower_infloop_with_break(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                infloop_break_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=infloop elapsed={:.3}s",
@@ -241,15 +392,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_infloop(idx),
+            let infloop_candidate = self.try_lower_infloop(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                infloop_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=multiblock_infloop elapsed={:.3}s",
@@ -258,15 +408,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_multiblock_infloop(idx),
+            let multiblock_infloop_candidate = self.try_lower_multiblock_infloop(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                multiblock_infloop_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=short_if elapsed={:.3}s",
@@ -275,15 +424,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_short_circuit_if(idx),
+            let short_circuit_candidate = self.try_lower_short_circuit_if(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                short_circuit_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if_else_follow elapsed={:.3}s",
@@ -293,15 +441,15 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             // Postdominance-guided if-then-else: try before the heuristic variant.
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_reduce_if_else_with_follow(idx, follow_blocks.get(idx).copied().flatten()),
+            let if_else_follow_candidate =
+                self.try_reduce_if_else_with_follow(idx, follow_blocks.get(idx).copied().flatten());
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                if_else_follow_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if_else elapsed={:.3}s",
@@ -310,15 +458,14 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_if_else(idx),
+            let if_else_candidate = self.try_lower_if_else(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
-                continue;
-            }
+                &mut structured_candidates,
+                if_else_candidate,
+            )?;
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if elapsed={:.3}s",
@@ -327,13 +474,23 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_lower_if(idx),
+            let if_candidate = self.try_lower_if(idx);
+            self.consider_structured_candidate(
+                idx,
+                &targeted,
                 &mut last_structuring_failure,
-            )? && self.accept_structured_region(idx, skip_to, &targeted)
-            {
-                body.push(stmt);
-                idx = skip_to;
+                &mut structured_candidates,
+                if_candidate,
+            )?;
+            structured_candidates.sort_by(|lhs, rhs| {
+                lhs.cost
+                    .cmp(&rhs.cost)
+                    .then_with(|| rhs.skip_to.cmp(&lhs.skip_to))
+            });
+            if let Some(best) = structured_candidates.into_iter().next() {
+                body.push(best.stmt);
+                idx = best.skip_to;
+                last_structuring_failure = None;
                 continue;
             }
             if let Some(err) = last_structuring_failure.take() {

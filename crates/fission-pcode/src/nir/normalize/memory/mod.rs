@@ -1,6 +1,7 @@
 //! Memory slots, aggregate field recovery, and pointer-arithmetic recovery.
 
 mod aggregate_fields;
+mod partition;
 mod ptr_arith;
 mod slots;
 

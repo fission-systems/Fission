@@ -15,6 +15,7 @@ pub struct QualityMeasurementSnapshot {
     pub linear_fallback_ratio_all_rows: f64,
     pub linear_fallback_ratio_success_rows: f64,
     pub top_build_stats: Vec<(String, usize)>,
+    pub build_stat_families: Vec<(String, usize)>,
     pub structuring_fallback_reasons: Vec<(String, usize)>,
 }
 
@@ -280,11 +281,82 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             "variadic_stack_region_fold_count",
             stats.variadic_stack_region_fold_count,
         ),
+        ("abi_slot_recovered_count", stats.abi_slot_recovered_count),
+        ("home_slot_promoted_count", stats.home_slot_promoted_count),
+        ("va_start_recovered_count", stats.va_start_recovered_count),
+        (
+            "call_signature_refined_count",
+            stats.call_signature_refined_count,
+        ),
+        (
+            "security_cookie_fold_count",
+            stats.security_cookie_fold_count,
+        ),
+        (
+            "call_artifact_removed_count",
+            stats.call_artifact_removed_count,
+        ),
         (
             "interproc_signature_constraint_rounds",
             stats.interproc_signature_constraint_rounds,
         ),
     ]
+}
+
+pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)> {
+    let mut families = vec![
+        (
+            "abi".to_string(),
+            stats.entry_param_promotion_spill_rename_count
+                + stats.abi_slot_recovered_count
+                + stats.home_slot_promoted_count,
+        ),
+        (
+            "memory_shape".to_string(),
+            stats.call_artifact_removed_count,
+        ),
+        (
+            "variadic".to_string(),
+            stats.variadic_stack_region_fold_count + stats.va_start_recovered_count,
+        ),
+        (
+            "call_signature".to_string(),
+            stats.call_signature_refined_count + stats.interproc_signature_constraint_rounds,
+        ),
+        (
+            "structuring".to_string(),
+            stats.region_linearize_structuring_count
+                + stats.forced_linear_structuring_count
+                + stats.region_linearize_rejected_non_structuring_failure_count
+                + stats.region_linearize_rejected_no_exit_count
+                + stats.region_linearize_rejected_body_lowering_failed_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count
+                + stats.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count
+                + stats.region_linearize_rejected_body_lowering_successor_inline_rejected_count
+                + stats.region_linearize_rejected_body_lowering_revisit_cycle_count
+                + stats.region_linearize_rejected_body_lowering_unsupported_terminator_count
+                + stats.region_linearize_rejected_non_advancing_count
+                + stats.region_linearize_rejected_irreducible_cfg_count
+                + stats.promotion_candidate_count
+                + stats.promoted_region_count,
+        ),
+        (
+            "security".to_string(),
+            stats.security_cookie_fold_count,
+        ),
+    ];
+    families.retain(|(_, value)| *value > 0);
+    families.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    families
 }
 
 pub(crate) fn top_build_stats(stats: &NirBuildStats, limit: usize) -> Vec<(String, usize)> {
@@ -345,6 +417,7 @@ pub fn build_quality_measurement(summary: &AutomationSummary) -> QualityMeasurem
             summary.aggregate.direct_success_count,
         ),
         top_build_stats: top_build_stats(&summary.aggregate.nir_build_stats_totals, 8),
+        build_stat_families: build_stat_families(&summary.aggregate.nir_build_stats_totals),
         structuring_fallback_reasons: structuring_fallback_reasons(
             &summary.aggregate.nir_build_stats_totals,
         ),

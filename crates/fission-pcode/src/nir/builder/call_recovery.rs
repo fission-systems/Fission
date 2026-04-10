@@ -2,6 +2,15 @@ use super::*;
 use std::collections::HashSet;
 
 impl<'a> PreviewBuilder<'a> {
+    pub(super) fn abi_state(&self) -> AbiState {
+        AbiState::new(
+            self.options.calling_convention,
+            self.options.is_64bit,
+            self.options.pointer_size,
+            self.stack_frame_size,
+        )
+    }
+
     fn surface_call_carrier_name(&mut self, vn: &Varnode) -> Option<String> {
         if let Some(param) = self.register_param(vn) {
             return Some(param);
@@ -17,21 +26,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn param_index_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if vn.space_id == REGISTER_SPACE_ID {
-            return register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
-                .and_then(|(_, index)| index);
-        }
-        if vn.space_id == UNIQUE_SPACE_ID
-            && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
-        {
-            return self
-                .options
-                .calling_convention
-                .param_offsets()
-                .iter()
-                .position(|&off| x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name)));
-        }
-        None
+        self.abi_state().param_slot_for_varnode(vn)
     }
 
     fn debug_call_recovery(&self, message: &str) {
@@ -96,9 +91,8 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
     ) -> Result<Vec<HirExpr>, MlilPreviewError> {
-        if !self.options.is_64bit
-            || self.options.calling_convention != CallingConvention::WindowsX64
-        {
+        let abi = self.abi_state();
+        if !self.options.is_64bit {
             return Ok(Vec::new());
         }
 
@@ -117,10 +111,9 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 continue;
             };
-            if offset < 0x20 || (offset - 0x20) % i64::from(self.options.pointer_size) != 0 {
+            let Some(stack_index) = abi.stack_argument_index(offset) else {
                 continue;
-            }
-            let stack_index = ((offset - 0x20) / i64::from(self.options.pointer_size)) as usize;
+            };
             if recovered.contains_key(&stack_index) {
                 continue;
             }
@@ -148,8 +141,9 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let param_regs = self.options.calling_convention.param_reg_slots_64();
-        let mut recovered: Vec<Option<HirExpr>> = vec![None; param_regs.len()];
+        let abi = self.abi_state();
+        let param_count = self.options.calling_convention.param_reg_slots_64().len();
+        let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
 
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
@@ -202,15 +196,22 @@ impl<'a> PreviewBuilder<'a> {
             recovered[param_index] = Some(expr.clone());
         }
 
-        for (param_index, (offset, size)) in param_regs.iter().enumerate() {
+        let assignments = abi.assign_carriers(
+            block.ops[..call_idx]
+                .iter()
+                .filter_map(|op| op.output.as_ref()),
+        );
+        for assignment in assignments {
+            let param_index = assignment.resource.slot;
             if recovered[param_index].is_some() {
                 continue;
             }
+            let (offset, size) = self.options.calling_convention.param_reg_slots_64()[param_index];
 
             let vn = Varnode {
                 space_id: REGISTER_SPACE_ID,
-                offset: *offset,
-                size: *size,
+                offset,
+                size,
                 is_constant: false,
                 constant_val: 0,
             };

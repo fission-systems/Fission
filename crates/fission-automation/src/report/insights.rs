@@ -1,6 +1,7 @@
 //! Go/stop gate and mismatch-focused decision helpers.
 
 use crate::model::InventoryRow;
+use crate::report::quality::build_stat_families;
 use crate::report::snapshot::AutomationSummary;
 use fission_pcode::NirBuildStats;
 use serde::{Deserialize, Serialize};
@@ -35,10 +36,19 @@ pub struct GoStopDecisionGate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityDeltaFamily {
+    pub family: String,
+    pub baseline: usize,
+    pub current: usize,
+    pub delta: isize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutomationDecisionInsights {
     pub mismatch_subtype_ranking: Vec<(String, usize)>,
     pub top_mismatch_rows: Vec<MismatchRowSnapshot>,
     pub mismatch_row_deltas: Vec<MismatchRowDelta>,
+    pub quality_delta_vector: Vec<QualityDeltaFamily>,
     pub changed_row_count: usize,
     pub go_stop_gate: GoStopDecisionGate,
 }
@@ -185,24 +195,35 @@ pub fn build_decision_insights(
     });
 
     let gate = if let Some(baseline) = baseline_summary {
-        let mismatch_delta = summary
-            .aggregate
-            .nir_build_stats_totals
-            .region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count
-            as isize
-            - baseline
-                .aggregate
-                .nir_build_stats_totals
-                .region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count
-                as isize;
-        let migration = summary
-            .aggregate
-            .nir_build_stats_totals
-            .region_linearize_rejected_body_lowering_failed_count as isize
-            - baseline
-                .aggregate
-                .nir_build_stats_totals
-                .region_linearize_rejected_body_lowering_failed_count as isize;
+        let family_map = |stats: &NirBuildStats| {
+            build_stat_families(stats)
+                .into_iter()
+                .collect::<BTreeMap<_, _>>()
+        };
+        let baseline_families = family_map(&baseline.aggregate.nir_build_stats_totals);
+        let current_families = family_map(&summary.aggregate.nir_build_stats_totals);
+        let structuring_delta = current_families
+            .get("structuring")
+            .copied()
+            .unwrap_or(0) as isize
+            - baseline_families.get("structuring").copied().unwrap_or(0) as isize;
+        let abi_delta = current_families.get("abi").copied().unwrap_or(0) as isize
+            - baseline_families.get("abi").copied().unwrap_or(0) as isize;
+        let variadic_delta = current_families.get("variadic").copied().unwrap_or(0) as isize
+            - baseline_families.get("variadic").copied().unwrap_or(0) as isize;
+        let call_signature_delta =
+            current_families.get("call_signature").copied().unwrap_or(0) as isize
+                - baseline_families
+                    .get("call_signature")
+                    .copied()
+                    .unwrap_or(0) as isize;
+        let security_delta = current_families.get("security").copied().unwrap_or(0) as isize
+            - baseline_families.get("security").copied().unwrap_or(0) as isize;
+        let has_material_improvement = structuring_delta < 0
+            || abi_delta > 0
+            || variadic_delta > 0
+            || call_signature_delta > 0
+            || security_delta > 0;
         let dominant_subtype = subtype_ranking.first().map(|(name, _)| name.as_str());
         let safe_dominant = matches!(
             dominant_subtype,
@@ -226,22 +247,25 @@ pub fn build_decision_insights(
                 .aggregate
                 .nir_build_stats_totals
                 .structuring_irreducible_header_count as isize;
-        if mismatch_delta < 0
-            && migration <= 0
+        if has_material_improvement
+            && structuring_delta <= 0
             && safe_dominant
             && irreducible_scc_delta <= 0
             && irreducible_header_delta <= 0
+            && abi_delta >= 0
+            && variadic_delta >= 0
+            && call_signature_delta >= 0
+            && security_delta >= 0
         {
             GoStopDecisionGate {
                 decision: "go_p5h3g_candidate".to_string(),
-                rationale:
-                    "mismatch decreased with safe dominant subtype and irreducible complexity did not regress"
-                        .to_string(),
+                rationale: "semantic family deltas are non-regressive and structuring complexity did not worsen"
+                    .to_string(),
             }
         } else {
             GoStopDecisionGate {
                 decision: "stop_hold_p5h3f".to_string(),
-                rationale: "no mismatch reduction or irreducible/complexity safety signal is insufficient for P5H3G"
+                rationale: "semantic family delta vector is regressive or structuring safety signals are insufficient"
                     .to_string(),
             }
         }
@@ -254,10 +278,42 @@ pub fn build_decision_insights(
         }
     };
 
+    let quality_delta_vector = if let Some(baseline) = baseline_summary {
+        let baseline_families = build_stat_families(&baseline.aggregate.nir_build_stats_totals)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        let current_families = build_stat_families(&summary.aggregate.nir_build_stats_totals)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        let mut family_names = baseline_families
+            .keys()
+            .chain(current_families.keys())
+            .cloned()
+            .collect::<Vec<_>>();
+        family_names.sort();
+        family_names.dedup();
+        family_names
+            .into_iter()
+            .map(|family| {
+                let baseline = baseline_families.get(&family).copied().unwrap_or(0);
+                let current = current_families.get(&family).copied().unwrap_or(0);
+                QualityDeltaFamily {
+                    family,
+                    baseline,
+                    current,
+                    delta: current as isize - baseline as isize,
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     AutomationDecisionInsights {
         mismatch_subtype_ranking: subtype_ranking,
         top_mismatch_rows: top_rows.into_iter().take(12).collect(),
         mismatch_row_deltas: row_deltas.into_iter().take(32).collect(),
+        quality_delta_vector,
         changed_row_count: changed,
         go_stop_gate: gate,
     }

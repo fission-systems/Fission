@@ -1,6 +1,7 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
 use super::super::*;
+use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,7 +68,7 @@ pub(crate) fn apply_memory_slot_surfacing_cheap(func: &mut HirFunction) -> bool 
 
 fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: bool) -> bool {
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::new();
-    collect_memory_slot_candidates_from_stmts(&func.body, &mut candidates);
+    collect_memory_slot_candidates(func, &mut candidates);
     let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
     let mut family_lanes = HashMap::<MemorySlotFamilyKey, HashSet<i64>>::new();
     let mut family_base_offsets = HashMap::<MemorySlotFamilyKey, i64>::new();
@@ -184,111 +185,32 @@ fn memory_slot_family_key(key: &MemorySlotKey) -> MemorySlotFamilyKey {
     }
 }
 
-fn collect_memory_slot_candidates_from_stmts(
-    stmts: &[HirStmt],
+fn collect_memory_slot_candidates(
+    func: &HirFunction,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
-    for stmt in stmts {
-        match stmt {
-            HirStmt::Assign { lhs, rhs } => {
-                if let HirLValue::Deref { ptr, ty } = lhs {
-                    collect_memory_slot_candidate_from_ptr(ptr, ty, candidates);
-                }
-                collect_memory_slot_candidates_from_expr(rhs, candidates);
-            }
-            HirStmt::VaStart { va_list, .. } => {
-                collect_memory_slot_candidates_from_expr(va_list, candidates);
-            }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                collect_memory_slot_candidates_from_expr(expr, candidates);
-            }
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. }
-            | HirStmt::For { body: stmts, .. } => {
-                collect_memory_slot_candidates_from_stmts(stmts, candidates);
-            }
-            HirStmt::Switch {
-                expr,
-                cases,
-                default,
-            } => {
-                collect_memory_slot_candidates_from_expr(expr, candidates);
-                for case in cases {
-                    collect_memory_slot_candidates_from_stmts(&case.body, candidates);
-                }
-                collect_memory_slot_candidates_from_stmts(default, candidates);
-            }
-            HirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                collect_memory_slot_candidates_from_expr(cond, candidates);
-                collect_memory_slot_candidates_from_stmts(then_body, candidates);
-                collect_memory_slot_candidates_from_stmts(else_body, candidates);
-            }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
-        }
+    for access in collect_partitioned_memory_accesses(&func.body) {
+        let access_size = match type_byte_size(&access.access_ty) {
+            Some(size) => size,
+            None => continue,
+        };
+        let key = MemorySlotKey {
+            base_repr: access.base_repr.clone(),
+            offset: access.const_offset,
+            access_size,
+            stride: access.stride,
+        };
+        candidates
+            .entry(key.clone())
+            .and_modify(|candidate| candidate.count += 1)
+            .or_insert_with(|| MemorySlotCandidate {
+                key: key.clone(),
+                base: access.base.clone(),
+                offset: access.const_offset,
+                elem_ty: access.access_ty.clone(),
+                count: 1,
+            });
     }
-}
-
-fn collect_memory_slot_candidates_from_expr(
-    expr: &HirExpr,
-    candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
-) {
-    match expr {
-        HirExpr::Load { ptr, ty } => {
-            collect_memory_slot_candidate_from_ptr(ptr, ty, candidates);
-            collect_memory_slot_candidates_from_expr(ptr, candidates);
-        }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
-            collect_memory_slot_candidates_from_expr(expr, candidates);
-        }
-        HirExpr::Binary { lhs, rhs, .. } => {
-            collect_memory_slot_candidates_from_expr(lhs, candidates);
-            collect_memory_slot_candidates_from_expr(rhs, candidates);
-        }
-        HirExpr::Call { args, .. } => {
-            for arg in args {
-                collect_memory_slot_candidates_from_expr(arg, candidates);
-            }
-        }
-        HirExpr::PtrOffset { base, .. } => {
-            collect_memory_slot_candidates_from_expr(base, candidates)
-        }
-        HirExpr::Index { base, index, .. } => {
-            collect_memory_slot_candidates_from_expr(base, candidates);
-            collect_memory_slot_candidates_from_expr(index, candidates);
-        }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
-    }
-}
-
-fn collect_memory_slot_candidate_from_ptr(
-    ptr: &HirExpr,
-    elem_ty: &NirType,
-    candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
-) {
-    let Some(pattern) = parse_memory_slot_pattern(ptr, elem_ty) else {
-        return;
-    };
-    candidates
-        .entry(pattern.key.clone())
-        .and_modify(|candidate| candidate.count += 1)
-        .or_insert_with(|| MemorySlotCandidate {
-            key: pattern.key.clone(),
-            base: pattern.base.clone(),
-            offset: pattern.key.offset,
-            elem_ty: pattern.elem_ty.clone(),
-            count: 1,
-        });
 }
 
 fn rewrite_memory_slot_stmts(
@@ -665,15 +587,4 @@ fn zero_index_expr() -> HirExpr {
             signed: false,
         },
     )
-}
-
-pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
-    match ty {
-        NirType::Bool => Some(1),
-        NirType::Int { bits, .. } => Some(bits / 8),
-        NirType::Ptr(_) => Some(8),
-        NirType::Aggregate { size, .. } => Some(*size),
-        NirType::Float { bits } => Some(bits / 8),
-        NirType::Unknown => None,
-    }
 }
