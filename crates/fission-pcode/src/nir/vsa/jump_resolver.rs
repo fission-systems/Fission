@@ -15,6 +15,9 @@
 use super::solver::solve;
 use super::transfer::{eval_expr, RangeEnv};
 use crate::nir::{HirFunction, HirStmt};
+use crate::nir::normalize::wave_stats::{
+    add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
+};
 
 /// Apply VSA-based switch refinement to a function's body.
 ///
@@ -42,6 +45,7 @@ fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
                     .map(|c| c.body.clone())
                     .unwrap_or_else(|| default.clone());
                 stmts.splice(i..=i, replacement);
+                add_dispatcher_shape_recoveries(1);
                 changed = true;
                 // Don't advance i — the replacement stmts need processing.
                 continue;
@@ -88,6 +92,8 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
                     })
                 });
                 if cases.len() != before {
+                    add_indirect_target_set_refinements(1);
+                    add_dispatcher_shape_recoveries(1);
                     changed = true;
                 }
             }

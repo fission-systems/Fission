@@ -305,6 +305,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.object_root_recovered_count,
         ),
         (
+            "typed_fact_evidence_count",
+            stats.typed_fact_evidence_count,
+        ),
+        (
+            "typed_fact_conflict_count",
+            stats.typed_fact_conflict_count,
+        ),
+        (
+            "object_root_fact_promotion_count",
+            stats.object_root_fact_promotion_count,
+        ),
+        (
             "typed_object_shape_refined_count",
             stats.typed_object_shape_refined_count,
         ),
@@ -313,8 +325,16 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.surface_binding_promoted_count,
         ),
         (
+            "surface_fact_promotion_count",
+            stats.surface_fact_promotion_count,
+        ),
+        (
             "prototype_summary_refined_count",
             stats.prototype_summary_refined_count,
+        ),
+        (
+            "prototype_summary_round_count",
+            stats.prototype_summary_round_count,
         ),
         (
             "call_effect_summary_refined_count",
@@ -357,6 +377,14 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.interproc_signature_constraint_rounds,
         ),
         (
+            "indirect_target_set_refined_count",
+            stats.indirect_target_set_refined_count,
+        ),
+        (
+            "dispatcher_shape_recovered_count",
+            stats.dispatcher_shape_recovered_count,
+        ),
+        (
             "structuring_reason_region_legality_count",
             stats.structuring_reason_region_legality_count,
         ),
@@ -396,8 +424,10 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             stats.call_artifact_removed_count
                 + stats.object_shape_recovered_count
                 + stats.object_root_recovered_count
+                + stats.object_root_fact_promotion_count
                 + stats.typed_object_shape_refined_count
-                + stats.surface_binding_promoted_count,
+                + stats.surface_binding_promoted_count
+                + stats.surface_fact_promotion_count,
         ),
         (
             "variadic".to_string(),
@@ -407,9 +437,11 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             "call_signature".to_string(),
             stats.call_signature_refined_count
                 + stats.prototype_summary_refined_count
+                + stats.prototype_summary_round_count
                 + stats.call_effect_summary_refined_count
                 + stats.wrapper_summary_fold_count
-                + stats.interproc_signature_constraint_rounds,
+                + stats.interproc_signature_constraint_rounds
+                + stats.indirect_target_set_refined_count,
         ),
         (
             "cleanup".to_string(),
@@ -433,6 +465,10 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
                 + stats.structuring_reason_budget_count
                 + stats.promotion_candidate_count
                 + stats.promoted_region_count,
+        ),
+        (
+            "dispatcher".to_string(),
+            stats.dispatcher_shape_recovered_count,
         ),
         (
             "security".to_string(),

@@ -10,14 +10,14 @@
 
 use crate::nir::types::{
     parse_call_target_address, CallEdgeKind, CallEffectSummary, CallSummary,
-    CallTargetProvenance, CallTargetRef, HirExpr, HirFunction, HirLValue, HirStmt, NirType,
-    PrototypeSummary, SummarySoundness, WrapperClass,
+    CallTargetProvenance, CallTargetRef, HirExpr, HirFunction, HirLValue, HirStmt,
+    MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness, WrapperClass,
 };
 use indexmap::IndexMap;
 
 use super::super::wave_stats::{
     add_call_effect_summary_refinements, add_interproc_constraint_rounds,
-    add_prototype_summary_refinements, add_wrapper_summary_folds,
+    add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
 };
 use super::callsite_type_prop::win_type_name_to_nir;
 use fission_signatures::win_api::WIN_API_DB;
@@ -29,6 +29,15 @@ fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
 }
 
 fn summary_seed(target: &str) -> CallTargetRef {
+    if WIN_API_DB.get(target).is_some() {
+        return CallTargetRef {
+            address: parse_call_target_address(target),
+            symbol: target.to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 224,
+        };
+    }
     if let Some(address) = parse_call_target_address(target) {
         return CallTargetRef {
             address: Some(address),
@@ -80,7 +89,9 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 reads_memory: None,
                 writes_memory: None,
                 escapes_args: (arity == 0).then_some(false),
+                regions: Vec::new(),
                 wrapper_class: WrapperClass::None,
+                wrapper_of: None,
                 confidence: if arity == 0 { 96 } else { 0 },
             },
         });
@@ -124,20 +135,42 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
     }
     if refinements > 0 {
         summary.prototype.soundness = SummarySoundness::Optimistic;
+        summary.target.provenance = CallTargetProvenance::Import;
+        summary.target.edge_kind = CallEdgeKind::Import;
+        summary.target.confidence = summary.target.confidence.max(224);
+        if sig.params.iter().any(|param| param.type_name.contains('*')) {
+            if summary.effect_summary.reads_memory.is_none() {
+                summary.effect_summary.reads_memory = Some(true);
+                refinements += 1;
+            }
+            if !summary
+                .effect_summary
+                .regions
+                .contains(&MemoryEffectRegion::Aggregate)
+            {
+                summary
+                    .effect_summary
+                    .regions
+                    .push(MemoryEffectRegion::Aggregate);
+            }
+            summary.effect_summary.confidence = summary.effect_summary.confidence.max(128);
+        }
     }
     refinements
 }
 
-fn classify_wrapper_body(func: &HirFunction) -> Option<WrapperClass> {
+fn classify_wrapper_body(func: &HirFunction) -> Option<(WrapperClass, CallTargetRef)> {
     match func.body.as_slice() {
-        [HirStmt::Return(Some(HirExpr::Call { .. }))] => Some(WrapperClass::TailForwarder),
+        [HirStmt::Return(Some(HirExpr::Call { target, .. }))] => {
+            Some((WrapperClass::TailForwarder, summary_seed(target)))
+        }
         [
             HirStmt::Assign {
                 lhs: HirLValue::Var(temp),
-                rhs: HirExpr::Call { .. },
+                rhs: HirExpr::Call { target, .. },
             },
             HirStmt::Return(Some(HirExpr::Var(ret))),
-        ] if temp == ret => Some(WrapperClass::PureAdapter),
+        ] if temp == ret => Some((WrapperClass::PureAdapter, summary_seed(target))),
         _ => None,
     }
 }
@@ -218,8 +251,9 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
     if fresh.is_empty() {
         return false;
     }
+    let saw_summary_round = !summaries.is_empty();
     let mut improved = 0usize;
-    let wrapper_class = classify_wrapper_body(func);
+    let wrapper_shape = classify_wrapper_body(func);
     let mut prototype_refinements = 0usize;
     let mut effect_refinements = 0usize;
     let mut wrapper_refinements = 0usize;
@@ -258,10 +292,17 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                         existing.effect_summary.confidence.max(summary.effect_summary.confidence);
                     effect_refinements += 1;
                 }
-                if existing.effect_summary.wrapper_class == WrapperClass::None
-                    && wrapper_class.is_some()
+                for region in &summary.effect_summary.regions {
+                    if !existing.effect_summary.regions.contains(region) {
+                        existing.effect_summary.regions.push(*region);
+                        effect_refinements += 1;
+                    }
+                }
+                if let Some((wrapper_class, wrapper_target)) = wrapper_shape.as_ref()
+                    && existing.effect_summary.wrapper_class == WrapperClass::None
                 {
-                    existing.effect_summary.wrapper_class = wrapper_class.unwrap_or(WrapperClass::None);
+                    existing.effect_summary.wrapper_class = *wrapper_class;
+                    existing.effect_summary.wrapper_of = Some(wrapper_target.clone());
                     existing.effect_summary.confidence = existing.effect_summary.confidence.max(64);
                     wrapper_refinements += 1;
                 }
@@ -272,8 +313,9 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                 let mut summary = summary;
                 let target_symbol = summary.target.symbol.clone();
                 prototype_refinements += apply_import_signature_seed(&mut summary, &target_symbol);
-                if let Some(wrapper_class) = wrapper_class {
-                    summary.effect_summary.wrapper_class = wrapper_class;
+                if let Some((wrapper_class, wrapper_target)) = wrapper_shape.as_ref() {
+                    summary.effect_summary.wrapper_class = *wrapper_class;
+                    summary.effect_summary.wrapper_of = Some(wrapper_target.clone());
                     summary.effect_summary.confidence = summary.effect_summary.confidence.max(64);
                     wrapper_refinements += 1;
                 }
@@ -285,6 +327,9 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
     }
     if improved > 0 {
         add_interproc_constraint_rounds(1);
+    }
+    if saw_summary_round || !func.callee_summaries.is_empty() {
+        add_prototype_summary_rounds(1);
     }
     add_prototype_summary_refinements(prototype_refinements);
     add_call_effect_summary_refinements(effect_refinements);
@@ -352,5 +397,13 @@ mod tests {
         assert!(apply_interproc_callsite_arity_pass(&mut func));
         let summary = func.callee_summaries.get("sub_140010000").unwrap();
         assert_eq!(summary.effect_summary.wrapper_class, WrapperClass::TailForwarder);
+        assert_eq!(
+            summary
+                .effect_summary
+                .wrapper_of
+                .as_ref()
+                .map(|target| target.symbol.as_str()),
+            Some("sub_140010000")
+        );
     }
 }

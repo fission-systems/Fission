@@ -28,141 +28,14 @@
 ///
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
-use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
+use super::typed_facts::{
+    collect_typed_fact_inventory, inferred_aggregate_size as inferred_size_from_facts,
+    should_infer_aggregate as should_infer_aggregate_from_facts, TypedAccessFacts,
+};
 use crate::nir::normalize::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
     add_typed_object_shape_refinements,
 };
-use fission_signatures::win_types::WindowsStructures;
-use std::collections::HashMap;
-
-/// Map: variable name → (offset → best NirType for that field).
-type OffsetMap = HashMap<String, HashMap<u32, NirType>>;
-
-#[derive(Debug, Clone)]
-struct AccessFacts {
-    ty: NirType,
-    loads: usize,
-    stores: usize,
-}
-
-impl Default for AccessFacts {
-    fn default() -> Self {
-        Self {
-            ty: NirType::Unknown,
-            loads: 0,
-            stores: 0,
-        }
-    }
-}
-
-type AccessFactMap = HashMap<String, HashMap<u32, AccessFacts>>;
-
-/// Return the byte width of a type (0 = unknown).
-fn type_bits_bytes(ty: &NirType) -> u32 {
-    type_byte_size(ty).unwrap_or(0)
-}
-
-/// Merge a new candidate `NirType` into the best-so-far type for an offset.
-/// The wider / more-concrete type wins.
-fn merge_field_ty(current: &NirType, candidate: &NirType) -> NirType {
-    if *current == NirType::Unknown {
-        return candidate.clone();
-    }
-    if *candidate == NirType::Unknown {
-        return current.clone();
-    }
-    let cur_w = type_bits_bytes(current);
-    let cand_w = type_bits_bytes(candidate);
-    if cand_w > cur_w {
-        candidate.clone()
-    } else {
-        current.clone()
-    }
-}
-
-fn record_access(var_name: &str, offset: u32, access_ty: NirType, out: &mut OffsetMap) {
-    let entry = out.entry(var_name.to_owned()).or_default();
-    let best = entry.entry(offset).or_insert(NirType::Unknown);
-    *best = merge_field_ty(best, &access_ty);
-}
-
-fn record_access_fact(
-    var_name: &str,
-    offset: u32,
-    access_ty: NirType,
-    kind: super::partition::MemoryAccessKind,
-    out: &mut AccessFactMap,
-) {
-    let entry = out.entry(var_name.to_owned()).or_default();
-    let facts = entry.entry(offset).or_default();
-    facts.ty = merge_field_ty(&facts.ty, &access_ty);
-    match kind {
-        super::partition::MemoryAccessKind::Load => facts.loads += 1,
-        super::partition::MemoryAccessKind::Store => facts.stores += 1,
-    }
-}
-
-fn collect_offsets(func: &HirFunction, tracked_vars: &HashMap<String, NirType>, out: &mut OffsetMap) {
-    for access in collect_partitioned_memory_accesses(&func.body) {
-        let HirExpr::Var(name) = &access.base else {
-            continue;
-        };
-        if !tracked_vars.contains_key(name.as_str()) || access.const_offset < 0 {
-            continue;
-        }
-        record_access(name, access.const_offset as u32, access.access_ty.clone(), out);
-    }
-}
-
-fn collect_access_facts(
-    func: &HirFunction,
-    tracked_vars: &HashMap<String, NirType>,
-    out: &mut AccessFactMap,
-) {
-    for access in collect_partitioned_memory_accesses(&func.body) {
-        let HirExpr::Var(name) = &access.base else {
-            continue;
-        };
-        if !tracked_vars.contains_key(name.as_str()) || access.const_offset < 0 {
-            continue;
-        }
-        record_access_fact(
-            name,
-            access.const_offset as u32,
-            access.access_ty.clone(),
-            access.kind,
-            out,
-        );
-    }
-}
-
-fn collect_pointer_like_vars(func: &HirFunction) -> HashMap<String, NirType> {
-    func.locals
-        .iter()
-        .chain(func.params.iter())
-        .filter_map(|binding| match &binding.ty {
-            NirType::Ptr(_) => Some((binding.name.clone(), binding.ty.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-fn inferred_aggregate_size(offsets: &HashMap<u32, NirType>) -> Option<u32> {
-    let mut max_end = 0u32;
-    for (&offset, ty) in offsets {
-        let width = type_bits_bytes(ty).max(1);
-        max_end = max_end.max(offset.saturating_add(width));
-    }
-    (max_end > 0).then_some(max_end)
-}
-
-fn should_infer_aggregate(offsets: &HashMap<u32, NirType>) -> bool {
-    if offsets.len() >= 2 {
-        return true;
-    }
-    offsets.keys().any(|offset| *offset != 0)
-}
 
 fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
     matches!(
@@ -191,157 +64,57 @@ fn infer_storage_class(binding: &NirBinding) -> StorageClass {
     }
 }
 
-fn should_emit_surface_binding(binding: &NirBinding, offsets: &HashMap<u32, AccessFacts>) -> bool {
+fn should_emit_surface_binding(
+    binding: &NirBinding,
+    offset_count: usize,
+    has_stores: bool,
+) -> bool {
     if matches!(&binding.ty, NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown)) {
-        return !offsets.is_empty();
+        return offset_count > 0;
     }
     match infer_storage_class(binding) {
-        StorageClass::Param => !offsets.is_empty(),
-        StorageClass::StackLocal => {
-            offsets.len() >= 2 || offsets.values().any(|facts| facts.stores > 0)
-        }
-        _ => offsets.len() >= 2,
+        StorageClass::Param => offset_count > 0,
+        StorageClass::StackLocal => offset_count >= 2 || has_stores,
+        _ => offset_count >= 2,
     }
 }
 
-fn candidate_struct_name(
-    surface_type_name: Option<&str>,
-    structures: &WindowsStructures,
-) -> Option<String> {
-    let type_name = surface_type_name?.trim();
-    if structures.get(type_name).is_some() {
-        return Some(type_name.to_string());
-    }
-    for prefix in ["LP", "P"] {
-        if let Some(candidate) = type_name.strip_prefix(prefix)
-            && structures.get(candidate).is_some()
-        {
-            return Some(candidate.to_string());
-        }
-    }
-    None
-}
-
-fn infer_struct_name_from_offsets(
-    offsets: &HashMap<u32, NirType>,
-    inferred_size: u32,
-    is_64bit: bool,
-    structures: &WindowsStructures,
-) -> Option<String> {
-    let mut matches = structures
-        .structures
-        .iter()
-        .filter_map(|(name, def)| {
-            let struct_size = if is_64bit {
-                def.size_64 as u32
-            } else {
-                def.size_32 as u32
-            };
-            if struct_size == 0 || struct_size != inferred_size {
-                return None;
-            }
-            let all_offsets_match = offsets.keys().all(|offset| {
-                def.fields.iter().any(|field| {
-                    let field_offset = if is_64bit {
-                        field.offset_64 as u32
-                    } else {
-                        field.offset_32 as u32
-                    };
-                    field_offset == *offset
-                })
-            });
-            all_offsets_match.then(|| name.clone())
-        })
-        .collect::<Vec<_>>();
-    if matches.len() == 1 {
-        return matches.pop();
-    }
-    None
-}
-
-fn build_named_fields(
-    surface_type_name: Option<&str>,
-    offsets: &HashMap<u32, NirType>,
-    inferred_size: u32,
-    is_64bit: bool,
-    structures: &WindowsStructures,
-) -> (Vec<StructField>, bool, Option<String>) {
-    let mut named_fields = false;
-    let mut struct_fields = HashMap::new();
-    let resolved_struct_name = candidate_struct_name(surface_type_name, structures)
-        .or_else(|| infer_struct_name_from_offsets(offsets, inferred_size, is_64bit, structures));
-    if let Some(struct_name) = resolved_struct_name.as_ref()
-        && let Some(struct_def) = structures.get(&struct_name)
-    {
-        let struct_size = if is_64bit {
-            struct_def.size_64 as u32
-        } else {
-            struct_def.size_32 as u32
-        };
-        if struct_size == inferred_size {
-            for field in &struct_def.fields {
-                let offset = if is_64bit {
-                    field.offset_64 as u32
-                } else {
-                    field.offset_32 as u32
-                };
-                struct_fields.insert(offset, field.name.clone());
-            }
-        }
-    }
-
-    let mut new_fields: Vec<StructField> = offsets
-        .iter()
-        .map(|(&offset, ty)| {
-            let name = struct_fields
-                .get(&offset)
-                .cloned()
-                .unwrap_or_else(|| format!("field_{offset:x}"));
-            named_fields |= struct_fields.contains_key(&offset);
-            StructField {
-                offset,
-                ty: ty.clone(),
-                name,
-            }
-        })
-        .collect();
-    new_fields.sort_by_key(|f| f.offset);
-    (new_fields, named_fields, resolved_struct_name)
+fn should_emit_surface_binding_from_facts(
+    binding: &NirBinding,
+    offsets: &std::collections::BTreeMap<u32, TypedAccessFacts>,
+) -> bool {
+    should_emit_surface_binding(
+        binding,
+        offsets.len(),
+        offsets.values().any(|facts| facts.stores > 0),
+    )
 }
 
 /// Apply aggregate field layout recovery to a function.
 ///
 /// Returns `true` if any `NirType::Aggregate` had fields added to it.
 pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
-    let tracked_ptr_vars = collect_pointer_like_vars(func);
-    if tracked_ptr_vars.is_empty() {
-        return false;
-    }
-
-    let mut offset_map: OffsetMap = HashMap::new();
-    let mut access_facts: AccessFactMap = HashMap::new();
-    collect_offsets(func, &tracked_ptr_vars, &mut offset_map);
-    collect_access_facts(func, &tracked_ptr_vars, &mut access_facts);
-
-    if offset_map.is_empty() {
+    let inventory = collect_typed_fact_inventory(func, true);
+    if inventory.objects.is_empty() {
         return false;
     }
 
     let mut changed = false;
-    let structures = WindowsStructures::new();
-    let object_root_count = offset_map.len();
+    let object_root_count = inventory.objects.len();
     if object_root_count > 0 {
         add_object_root_recoveries(object_root_count);
     }
 
     for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
-        let Some(offsets) = offset_map.get(&binding.name) else {
+        let Some(facts) = inventory.objects.get(&binding.name) else {
             continue;
         };
-        if !can_upgrade_binding_to_aggregate(binding) || !should_infer_aggregate(offsets) {
+        if !can_upgrade_binding_to_aggregate(binding)
+            || !should_infer_aggregate_from_facts(&facts.accesses)
+        {
             continue;
         }
-        let Some(size) = inferred_aggregate_size(offsets) else {
+        let Some(size) = inferred_size_from_facts(&facts.accesses) else {
             continue;
         };
         binding.ty = NirType::Ptr(Box::new(NirType::Aggregate {
@@ -353,34 +126,35 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     }
 
     // Update each NirBinding that is Ptr(Aggregate { .. }) with discovered fields.
-    let update_binding = |binding: &mut NirBinding, offset_map: &OffsetMap| -> bool {
-        let can_surface = access_facts
-            .get(&binding.name)
-            .map(|accesses| should_emit_surface_binding(binding, accesses))
-            .unwrap_or(false);
+    let update_binding = |binding: &mut NirBinding| -> bool {
+        let Some(object_facts) = inventory.objects.get(&binding.name) else {
+            return false;
+        };
+        let can_surface = should_emit_surface_binding_from_facts(binding, &object_facts.accesses);
         if !can_surface {
             return false;
         }
-        let Some(offsets) = offset_map.get(&binding.name) else { return false; };
-        if offsets.is_empty() { return false; }
-
-        let inferred_size = inferred_aggregate_size(offsets).unwrap_or_default();
-        let surface_type_name = binding.surface_type_name.clone();
-        let (new_fields, named_fields, resolved_struct_name) =
-            build_named_fields(surface_type_name.as_deref(), offsets, inferred_size, func.is_64bit, &structures);
+        if object_facts.shape.fields.is_empty() {
+            return false;
+        }
         {
             let NirType::Ptr(inner) = &mut binding.ty else { return false; };
             let NirType::Aggregate { fields, .. } = inner.as_mut() else { return false; };
             if !fields.is_empty() {
                 return false; // already populated
             }
-            *fields = new_fields;
+            *fields = object_facts.shape.fields.clone();
         }
+        let named_fields = object_facts
+            .shape
+            .fields
+            .iter()
+            .any(|field| !field.name.starts_with("field_"));
         if named_fields {
             add_typed_object_shape_refinements(1);
         }
         if binding.surface_type_name.is_none()
-            && let Some(struct_name) = resolved_struct_name
+            && let Some(struct_name) = object_facts.resolved_struct_name.as_ref()
         {
             binding.surface_type_name = Some(format!("{struct_name} *"));
         }
@@ -388,13 +162,13 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
     };
 
     for binding in func.locals.iter_mut() {
-        if update_binding(binding, &offset_map) {
+        if update_binding(binding) {
             add_surface_binding_promotions(1);
             changed = true;
         }
     }
     for binding in func.params.iter_mut() {
-        if update_binding(binding, &offset_map) {
+        if update_binding(binding) {
             add_surface_binding_promotions(1);
             changed = true;
         }

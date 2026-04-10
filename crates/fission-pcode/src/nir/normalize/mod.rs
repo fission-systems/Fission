@@ -9,7 +9,7 @@ mod idioms;
 mod memory;
 mod recovery;
 mod types;
-mod wave_stats;
+pub(crate) mod wave_stats;
 
 #[allow(dead_code)]
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {

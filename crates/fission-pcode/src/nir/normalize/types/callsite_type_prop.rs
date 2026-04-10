@@ -41,8 +41,12 @@
 /// Constraints are injected using the same `merge_constraint` / fixed-point
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
-use super::super::wave_stats::add_call_signature_refinements;
+use super::super::wave_stats::{
+    add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
+};
+use crate::nir::var_rename::rename_vars_in_stmts;
 use fission_signatures::win_api::WIN_API_DB;
+use std::collections::{HashMap, HashSet};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
 /// unconstrained types (void, variadic, …).
@@ -145,8 +149,202 @@ fn resolve_call_target_symbol<'a>(
 ) -> &'a str {
     summaries
         .get(target)
-        .map(|summary| summary.target.symbol.as_str())
+        .and_then(|summary| {
+            summary
+                .effect_summary
+                .wrapper_of
+                .as_ref()
+                .map(|wrapped| wrapped.symbol.as_str())
+                .or(Some(summary.target.symbol.as_str()))
+        })
         .unwrap_or(target)
+}
+
+fn build_call_target_rewrites(
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+) -> HashMap<String, String> {
+    summaries
+        .iter()
+        .filter_map(|(target, summary)| {
+            let canonical = summary
+                .effect_summary
+                .wrapper_of
+                .as_ref()
+                .map(|wrapped| wrapped.symbol.as_str())
+                .unwrap_or_else(|| summary.target.symbol.as_str());
+            (canonical != target).then(|| (target.clone(), canonical.to_string()))
+        })
+        .collect()
+}
+
+fn is_generic_binding_name(name: &str) -> bool {
+    matches!(
+        name,
+        _
+            if name.starts_with("param_")
+                || name.starts_with("local_")
+                || name.starts_with("home_")
+                || name.starts_with("arg_out_")
+                || name.starts_with("ret_scaffold_")
+                || name.starts_with("xVar")
+    )
+}
+
+fn is_renameable_generic_binding(binding: &NirBinding) -> bool {
+    is_generic_binding_name(&binding.name)
+        && !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
+}
+
+fn sanitize_binding_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let lowered = out.to_ascii_lowercase();
+    if lowered.starts_with("arg") && lowered[3..].chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(out)
+}
+
+fn register_name_candidate(
+    candidates: &mut HashMap<String, String>,
+    conflicts: &mut HashSet<String>,
+    binding_name: &str,
+    candidate_name: &str,
+) {
+    let Some(candidate_name) = sanitize_binding_name(candidate_name) else {
+        return;
+    };
+    if let Some(existing) = candidates.get(binding_name) {
+        if existing != &candidate_name {
+            conflicts.insert(binding_name.to_string());
+        }
+        return;
+    }
+    candidates.insert(binding_name.to_string(), candidate_name);
+}
+
+fn apply_binding_surface_renames(
+    func: &mut HirFunction,
+    rename_candidates: HashMap<String, String>,
+    conflicts: &HashSet<String>,
+) -> usize {
+    if rename_candidates.is_empty() {
+        return 0;
+    }
+
+    let mut reserved_names = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| binding.name.clone())
+        .collect::<HashSet<_>>();
+    let mut renames = Vec::new();
+
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        if !is_renameable_generic_binding(binding) || conflicts.contains(&binding.name) {
+            continue;
+        }
+        let Some(candidate_name) = rename_candidates.get(&binding.name) else {
+            continue;
+        };
+        if candidate_name == &binding.name {
+            continue;
+        }
+        if reserved_names.contains(candidate_name) {
+            continue;
+        }
+        reserved_names.remove(&binding.name);
+        reserved_names.insert(candidate_name.clone());
+        renames.push((binding.name.clone(), candidate_name.clone()));
+        binding.name = candidate_name.clone();
+    }
+
+    if renames.is_empty() {
+        return 0;
+    }
+    rename_vars_in_stmts(&mut func.body, &renames);
+    renames.len()
+}
+
+fn rewrite_call_targets_stmts(stmts: &mut [HirStmt], rewrites: &HashMap<String, String>) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+                changed |= rewrite_call_targets_expr(rhs, rewrites);
+            }
+            HirStmt::VaStart { va_list, .. } => changed |= rewrite_call_targets_expr(va_list, rewrites),
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                changed |= rewrite_call_targets_stmts(body, rewrites);
+            }
+            HirStmt::Switch { expr, cases, default } => {
+                changed |= rewrite_call_targets_expr(expr, rewrites);
+                for case in cases {
+                    changed |= rewrite_call_targets_stmts(&mut case.body, rewrites);
+                }
+                changed |= rewrite_call_targets_stmts(default, rewrites);
+            }
+            HirStmt::If { cond, then_body, else_body } => {
+                changed |= rewrite_call_targets_expr(cond, rewrites);
+                changed |= rewrite_call_targets_stmts(then_body, rewrites);
+                changed |= rewrite_call_targets_stmts(else_body, rewrites);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed
+}
+
+fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, String>) -> bool {
+    let mut changed = false;
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            if let Some(replacement) = rewrites.get(target) {
+                *target = replacement.clone();
+                changed = true;
+            }
+            for arg in args {
+                changed |= rewrite_call_targets_expr(arg, rewrites);
+            }
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            changed |= rewrite_call_targets_expr(lhs, rewrites);
+            changed |= rewrite_call_targets_expr(rhs, rewrites);
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            changed |= rewrite_call_targets_expr(expr, rewrites);
+        }
+        HirExpr::Index { base, index, .. } => {
+            changed |= rewrite_call_targets_expr(base, rewrites);
+            changed |= rewrite_call_targets_expr(index, rewrites);
+        }
+        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+    changed
 }
 
 /// Apply call-site type propagation to a function.
@@ -158,10 +356,13 @@ fn resolve_call_target_symbol<'a>(
 pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
+    let mut rename_candidates = HashMap::<String, String>::new();
+    let mut rename_conflicts = HashSet::<String>::new();
 
     // Collect call sites: (receiver_name_opt, callee_name, arg_var_names)
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
     collect_callsites_stmts(&func.body, &mut callsites);
+    let call_target_rewrites = build_call_target_rewrites(&func.callee_summaries);
 
     for (receiver, callee, arg_vars) in &callsites {
         let resolved_callee = resolve_call_target_symbol(callee, &func.callee_summaries);
@@ -223,18 +424,46 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
         for (i, arg_var_opt) in arg_vars.iter().enumerate() {
             let Some(arg_var) = arg_var_opt else { continue; };
             let Some(param) = sig.params.get(i) else { break; };
-            let Some(param_ty) = win_type_name_to_nir(&param.type_name) else { continue; };
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                let tightened = tighten_binding_ty(b, &param_ty);
-                changed |= tightened;
-                refined_here |= tightened;
+                let tightened = win_type_name_to_nir(&param.type_name)
+                    .map(|param_ty| tighten_binding_ty(b, &param_ty))
+                    .unwrap_or(false);
+                let surface_tightened =
+                    b.surface_type_name.is_none() && !param.type_name.trim().is_empty();
+                if surface_tightened {
+                    b.surface_type_name = Some(param.type_name.trim().to_string());
+                }
+                changed |= tightened || surface_tightened;
+                refined_here |= tightened || surface_tightened;
+                if !matches!(b.origin, Some(NirBindingOrigin::ParamIndex(_)))
+                    && is_generic_binding_name(arg_var)
+                {
+                    register_name_candidate(
+                        &mut rename_candidates,
+                        &mut rename_conflicts,
+                        arg_var,
+                        &param.name,
+                    );
+                }
             }
         }
         if refined_here {
             add_call_signature_refinements(1);
         }
+    }
+
+    let rename_count = apply_binding_surface_renames(func, rename_candidates, &rename_conflicts);
+    if rename_count > 0 {
+        add_surface_fact_promotions(rename_count);
+        changed = true;
+    }
+    if !rename_conflicts.is_empty() {
+        add_typed_fact_conflicts(rename_conflicts.len());
+    }
+    if !call_target_rewrites.is_empty() && rewrite_call_targets_stmts(&mut func.body, &call_target_rewrites) {
+        changed = true;
     }
 
     changed
@@ -336,5 +565,115 @@ fn collect_callsites_expr(
         }
         HirExpr::AggregateCopy { src, .. } => collect_callsites_expr(src, out),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nir::support::CallingConvention;
+
+    fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: NirType::Unknown,
+            surface_type_name: None,
+            origin,
+            initializer: None,
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![
+                unknown_binding("param_1", Some(NirBindingOrigin::ParamIndex(0))),
+            ],
+            locals: vec![unknown_binding(
+                "local_2",
+                Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),
+            )],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "GetWindowRect".to_string(),
+                args: vec![
+                    HirExpr::Var("param_1".to_string()),
+                    HirExpr::Var("local_2".to_string()),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.locals[0].name, "lpRect");
+        assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("LPRECT"));
+    }
+
+    #[test]
+    fn callsite_type_prop_rewrites_target_through_wrapper_summary() {
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "wrapper_foo".to_string(),
+                args: vec![],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([(
+                "wrapper_foo".to_string(),
+                CallSummary {
+                    target: CallTargetRef {
+                        address: None,
+                        symbol: "wrapper_foo".to_string(),
+                        provenance: CallTargetProvenance::Reference,
+                        edge_kind: CallEdgeKind::Reference,
+                        confidence: 128,
+                    },
+                    prototype: PrototypeSummary {
+                        min_arity: 0,
+                        max_arity: 0,
+                        locked_exact_arity: Some(0),
+                        return_lattice: NirType::Unknown,
+                        param_lattices: vec![],
+                        soundness: SummarySoundness::Optimistic,
+                    },
+                    effect_summary: CallEffectSummary {
+                        reads_memory: None,
+                        writes_memory: None,
+                        escapes_args: Some(false),
+                        regions: vec![],
+                        wrapper_class: WrapperClass::TailForwarder,
+                        wrapper_of: Some(CallTargetRef {
+                            address: None,
+                            symbol: "MessageBoxA".to_string(),
+                            provenance: CallTargetProvenance::Import,
+                            edge_kind: CallEdgeKind::Import,
+                            confidence: 224,
+                        }),
+                        confidence: 160,
+                    },
+                },
+            )]),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { target, .. }) => {
+                assert_eq!(target, "MessageBoxA");
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
     }
 }

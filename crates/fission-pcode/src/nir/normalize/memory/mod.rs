@@ -4,6 +4,7 @@ mod aggregate_fields;
 mod partition;
 mod ptr_arith;
 mod slots;
+mod typed_facts;
 
 pub(crate) use aggregate_fields::apply_aggregate_fields_pass;
 pub(crate) use partition::{partition_key_for_pointer_expr, PartitionKey};

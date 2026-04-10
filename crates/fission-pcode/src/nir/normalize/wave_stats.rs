@@ -86,6 +86,27 @@ pub(super) fn add_object_root_recoveries(n: usize) {
     WAVE.with(|w| w.borrow_mut().object_root_recovered_count += n);
 }
 
+pub(super) fn add_typed_fact_evidences(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().typed_fact_evidence_count += n);
+}
+
+pub(super) fn add_typed_fact_conflicts(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().typed_fact_conflict_count += n);
+}
+
+pub(super) fn add_object_root_fact_promotions(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().object_root_fact_promotion_count += n);
+}
+
 pub(super) fn add_typed_object_shape_refinements(n: usize) {
     if n == 0 {
         return;
@@ -100,11 +121,25 @@ pub(super) fn add_surface_binding_promotions(n: usize) {
     WAVE.with(|w| w.borrow_mut().surface_binding_promoted_count += n);
 }
 
+pub(super) fn add_surface_fact_promotions(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().surface_fact_promotion_count += n);
+}
+
 pub(super) fn add_prototype_summary_refinements(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().prototype_summary_refined_count += n);
+}
+
+pub(super) fn add_prototype_summary_rounds(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().prototype_summary_round_count += n);
 }
 
 pub(super) fn add_call_effect_summary_refinements(n: usize) {
@@ -175,6 +210,20 @@ pub(super) fn add_interproc_constraint_rounds(n: usize) {
         return;
     }
     WAVE.with(|w| w.borrow_mut().interproc_signature_constraint_rounds += n);
+}
+
+pub(crate) fn add_indirect_target_set_refinements(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().indirect_target_set_refined_count += n);
+}
+
+pub(crate) fn add_dispatcher_shape_recoveries(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().dispatcher_shape_recovered_count += n);
 }
 
 pub(super) fn add_pass_metric(

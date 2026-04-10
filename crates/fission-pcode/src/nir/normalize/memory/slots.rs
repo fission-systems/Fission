@@ -1,6 +1,7 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
 use super::super::*;
+use super::typed_facts::collect_typed_fact_inventory;
 use crate::nir::normalize::wave_stats::add_surface_binding_promotions;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use std::collections::{HashMap, HashSet};
@@ -70,6 +71,7 @@ pub(crate) fn apply_memory_slot_surfacing_cheap(func: &mut HirFunction) -> bool 
 fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: bool) -> bool {
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::new();
     collect_memory_slot_candidates(func, &mut candidates);
+    let inventory = collect_typed_fact_inventory(func, false);
     let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
     let mut family_lanes = HashMap::<MemorySlotFamilyKey, HashSet<i64>>::new();
     let mut family_base_offsets = HashMap::<MemorySlotFamilyKey, i64>::new();
@@ -119,7 +121,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
         func.locals.push(NirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
-            surface_type_name: None,
+            surface_type_name: slot_surface_type_name(&candidate.base, func, &inventory),
             origin: derived_origin,
             initializer: Some(HirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
@@ -134,6 +136,26 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
     add_surface_binding_promotions(aliases.len());
 
     rewrite_memory_slot_stmts(&mut func.body, &aliases)
+}
+
+fn slot_surface_type_name(
+    base: &HirExpr,
+    func: &HirFunction,
+    inventory: &super::typed_facts::TypedFactInventory,
+) -> Option<String> {
+    let HirExpr::Var(name) = base else {
+        return None;
+    };
+    if let Some(object_facts) = inventory.objects.get(name)
+        && let Some(struct_name) = object_facts.resolved_struct_name.as_ref()
+    {
+        return Some(struct_name.clone());
+    }
+    func.params
+        .iter()
+        .chain(func.locals.iter())
+        .find(|binding| binding.name == *name)
+        .and_then(|binding| binding.surface_type_name.clone())
 }
 
 fn derive_slot_alias_origin(func: &HirFunction, base: &HirExpr) -> Option<NirBindingOrigin> {

@@ -9,6 +9,84 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Fact-driven similarity recovery wave — canonical typed facts landed, similarity held flat
+
+This wave moved another semantic ownership layer into the Rust canonical pipeline by introducing a shared typed-fact inventory, extending prototype and effect summaries with wrapper provenance and region-level effect facts, and wiring indirect-control telemetry into canonical `NirBuildStats`. The quality guardrails held on the short seeded `putty.exe --limit 50` spot-check, but the primary KPI still plateaued: similarity remained at `37.45%`.
+
+#### fission-pcode — shared typed-fact inventory now owns object-root and surface promotion evidence
+
+- Added a canonical typed-fact store in [`typed_facts.rs`](crates/fission-pcode/src/nir/normalize/memory/typed_facts.rs).
+- The new inventory produces `TypedFactStore`, `ObjectFact`, and `SurfaceFact` data from partitioned access evidence, explicit surface types, and structural shape facts.
+- [`aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) and [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs) now consume the shared fact inventory instead of independently inventing object surfaces.
+- This removes another duplicated semantic owner from the memory recovery pipeline and keeps escaped/coarse roots conservative.
+
+#### fission-pcode — prototype and effect summaries gained wrapper provenance and canonical promotion telemetry
+
+- [`interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs) now carries `wrapper_of`, effect regions, import-seeded confidence, and prototype-round telemetry through the canonical summary lattice.
+- [`callsite_type_prop.rs`](crates/fission-pcode/src/nir/normalize/types/callsite_type_prop.rs) can now:
+  - rewrite call targets through canonical wrapper summaries
+  - promote high-confidence local surface names from import signatures
+  - count conflicts and successful surface promotions in `NirBuildStats`
+- [`jump_resolver.rs`](crates/fission-pcode/src/nir/vsa/jump_resolver.rs) now records indirect-target and dispatcher recovery telemetry at the canonical owner.
+
+#### Automation and duplicate-logic audit
+
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now reads the new canonical counters directly:
+  - `typed_fact_evidence_count`
+  - `typed_fact_conflict_count`
+  - `object_root_fact_promotion_count`
+  - `surface_fact_promotion_count`
+  - `prototype_summary_round_count`
+  - `indirect_target_set_refined_count`
+  - `dispatcher_shape_recovered_count`
+- Duplicate-logic audit result:
+  - object root / field / surface semantics: canonical owner is `fission-pcode`
+  - prototype / effect / wrapper summaries: canonical owner is `fission-pcode`
+  - `fission-static` remains fact supplier, routing layer, and naming-only polish path
+  - dormant static semantic postprocess modules still exist in-tree, but they are no longer the active semantic owner on the benchmarked Rust path
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli --release`
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+- `nir-check` fast lane:
+  - `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant costs improved slightly but not materially:
+    - `cleanup_stmt_canonical_init_1: 120.7ms -> 118.7ms`
+    - `cleanup_dead_binding_init_1: 42.9ms -> 42.8ms`
+  - new top build stats include `call_effect_summary_refined_count=104`
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-fact-summary-dispatch-wave`
+  - seeded shared coverage: `100.00% -> 100.00%`
+  - independent top-N coverage: `96.00% -> 96.00%`
+  - `both_success: 100.000% -> 100.000%`
+  - `avg_normalized_similarity: 37.45% -> 37.45%`
+  - Fission wall: `0.508s -> 0.507s`
+  - pyghidra wall: `2.597s -> 2.739s`
+
+#### What improved and what did not
+
+- Improved:
+  - canonical object and call semantics now flow through one shared typed-fact / summary path in `fission-pcode`
+  - automation now sees the new fact/prototype/dispatcher telemetry without inventing a parallel schema
+  - fast-lane cleanup cost regressed slightly less than before, with a small improvement in the dominant cleanup passes
+- Did not materially improve:
+  - the primary similarity KPI remained flat at `37.45%`
+  - the current low-sim `putty.exe` cases are still dominated by unresolved indirect/dispatcher semantics and generic surface residue
+
+#### Next bottleneck
+
+- The next wave should focus on proof-driven indirect control recovery and pass-manager cleanup budgeting:
+  - recover dispatcher/helper shapes only when target-set proof is complete
+  - keep ambiguous indirect control explicit instead of forcing weak direct-call surfaces
+  - attack `cleanup_stmt_canonical_init_1` and `cleanup_dead_binding_init_1` directly at the pass-manager level instead of adding more downstream semantic polish
+
 ### Canonical semantics consolidation wave — static semantic rewrites disabled, benchmark stable, similarity still flat
 
 This wave pushed the remaining semantic ownership drift further upstream into the Rust canonical path. The main changes were to stop `fission-static` from owning field/type/aggregate semantic rewrites by default, let `fission-pcode` infer more concrete aggregate surface types when a unique Windows structure shape exists, and split a cheap conditional-return simplification path away from the heavyweight statement-canonical cleanup family. The result is cleaner ownership and slightly better benchmark similarity, but still no material KPI jump on `putty.exe --limit 50`.

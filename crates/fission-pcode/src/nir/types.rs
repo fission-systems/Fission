@@ -42,9 +42,41 @@ pub enum SummarySoundness {
     Optimistic,
 }
 
+pub type ObjectRootId = i64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactEvidenceSource {
+    Partition,
+    ExplicitType,
+    ImportSignature,
+    AbiCarrier,
+    CallsiteRole,
+    LoaderSymbol,
+    StructuralInference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactEvidenceKind {
+    ObjectRoot,
+    TypedShape,
+    SurfaceBinding,
+    PrototypeSummary,
+    CallEffect,
+    IndirectTarget,
+    DispatcherShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactEvidence {
+    pub source: FactEvidenceSource,
+    pub confidence: u8,
+    pub kind: FactEvidenceKind,
+    pub subject: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectRegion {
-    pub root: i64,
+    pub root: ObjectRootId,
     pub storage_class: StorageClass,
     pub escaped: bool,
     pub interval: (i64, i64),
@@ -59,11 +91,35 @@ pub struct TypedObjectShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectFact {
+    pub root: ObjectRootId,
+    pub storage_class: StorageClass,
+    pub escaped: bool,
+    pub interval_set: Vec<(u32, u32)>,
+    pub type_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SurfaceBinding {
-    pub object_id: i64,
+    pub object_id: ObjectRootId,
     pub role: StorageClass,
     pub preferred_name: String,
     pub preferred_type: NirType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceFact {
+    pub binding: String,
+    pub preferred_name: String,
+    pub preferred_type: NirType,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TypedFactStore {
+    pub evidences: Vec<FactEvidence>,
+    pub object_facts: IndexMap<String, ObjectFact>,
+    pub surface_facts: IndexMap<String, SurfaceFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,13 +229,55 @@ pub struct PrototypeSummary {
     pub soundness: SummarySoundness,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryEffectRegion {
+    Stack,
+    Aggregate,
+    HeapLike,
+    GlobalLike,
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallEffectSummary {
     pub reads_memory: Option<bool>,
     pub writes_memory: Option<bool>,
     pub escapes_args: Option<bool>,
+    pub regions: Vec<MemoryEffectRegion>,
     pub wrapper_class: WrapperClass,
+    pub wrapper_of: Option<CallTargetRef>,
     pub confidence: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CallsiteState {
+    pub arg_bindings: Vec<Option<String>>,
+    pub stack_consumption: Option<u32>,
+    pub variadic_state: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndirectTargetSet {
+    pub definite: Vec<CallTargetRef>,
+    pub possible: Vec<CallTargetRef>,
+    pub confidence: u8,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatcherProofKind {
+    JumpTable,
+    ConstantStrideIndex,
+    TailForwarder,
+    BoundedTargetSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatcherShape {
+    pub selector: String,
+    pub target_map: Vec<(i64, CallTargetRef)>,
+    pub default_target: Option<CallTargetRef>,
+    pub proof_kind: DispatcherProofKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,15 +551,30 @@ pub struct NirBuildStats {
     /// Root object regions recovered before field/array surfacing.
     #[serde(default)]
     pub object_root_recovered_count: usize,
+    /// Typed fact evidences collected before canonical object/surface promotion.
+    #[serde(default)]
+    pub typed_fact_evidence_count: usize,
+    /// Conflicting typed facts withheld from canonical promotion.
+    #[serde(default)]
+    pub typed_fact_conflict_count: usize,
+    /// Root-object facts promoted into canonical object inventory.
+    #[serde(default)]
+    pub object_root_fact_promotion_count: usize,
     /// Existing object shapes refined with field/array/opaque range evidence.
     #[serde(default)]
     pub typed_object_shape_refined_count: usize,
     /// New surface bindings/slot aliases promoted from raw partition evidence.
     #[serde(default)]
     pub surface_binding_promoted_count: usize,
+    /// New canonical surface facts promoted before naming/polish.
+    #[serde(default)]
+    pub surface_fact_promotion_count: usize,
     /// Call prototype summaries refined beyond raw call-site arity bounds.
     #[serde(default)]
     pub prototype_summary_refined_count: usize,
+    /// Bounded propagation rounds for canonical prototype summaries.
+    #[serde(default)]
+    pub prototype_summary_round_count: usize,
     /// Call/effect summaries refined beyond plain arity/name recovery.
     #[serde(default)]
     pub call_effect_summary_refined_count: usize,
@@ -492,6 +605,12 @@ pub struct NirBuildStats {
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
+    /// Indirect target sets refined by bounded target proof.
+    #[serde(default)]
+    pub indirect_target_set_refined_count: usize,
+    /// Dispatcher-like control shapes recovered from structural proof.
+    #[serde(default)]
+    pub dispatcher_shape_recovered_count: usize,
     /// Canonical family totals derived from structuring failures/recovery in pcode.
     #[serde(default)]
     pub structuring_reason_region_legality_count: usize,
@@ -642,9 +761,14 @@ impl NirBuildStats {
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.object_shape_recovered_count += other.object_shape_recovered_count;
         self.object_root_recovered_count += other.object_root_recovered_count;
+        self.typed_fact_evidence_count += other.typed_fact_evidence_count;
+        self.typed_fact_conflict_count += other.typed_fact_conflict_count;
+        self.object_root_fact_promotion_count += other.object_root_fact_promotion_count;
         self.typed_object_shape_refined_count += other.typed_object_shape_refined_count;
         self.surface_binding_promoted_count += other.surface_binding_promoted_count;
+        self.surface_fact_promotion_count += other.surface_fact_promotion_count;
         self.prototype_summary_refined_count += other.prototype_summary_refined_count;
+        self.prototype_summary_round_count += other.prototype_summary_round_count;
         self.call_effect_summary_refined_count += other.call_effect_summary_refined_count;
         self.wrapper_summary_fold_count += other.wrapper_summary_fold_count;
         self.cleanup_budget_skip_count += other.cleanup_budget_skip_count;
@@ -655,6 +779,8 @@ impl NirBuildStats {
         self.cleanup_loopish_rewrite_count += other.cleanup_loopish_rewrite_count;
         self.cleanup_family_dead_binding_count += other.cleanup_family_dead_binding_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
+        self.indirect_target_set_refined_count += other.indirect_target_set_refined_count;
+        self.dispatcher_shape_recovered_count += other.dispatcher_shape_recovered_count;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;
         self.structuring_reason_follow_failure_count +=
