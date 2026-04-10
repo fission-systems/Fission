@@ -97,6 +97,10 @@ pub struct PostProcessor {
 }
 
 impl PostProcessor {
+    fn canonical_semantics_owned_upstream() -> bool {
+        true
+    }
+
     pub fn new() -> Self {
         Self {
             options: RustPostProcessOptions::default(),
@@ -226,6 +230,12 @@ impl PostProcessor {
         if !self.options.string_pointers {
             pass_registry.disable("replace_string_pointers");
         }
+        if Self::canonical_semantics_owned_upstream() {
+            pass_registry.disable("field_offsets");
+            pass_registry.disable("promote_rect_params");
+            pass_registry.disable("clean_slate");
+            pass_registry.disable("aggregate_copy_cleanup");
+        }
 
         // Add string map to context when available
         if let Some(ref map) = self.string_map {
@@ -279,15 +289,19 @@ impl PostProcessor {
             .normalize_pointer_offset_aliases_cow(&processed)
             .into_owned();
 
-        // Apply field offset replacement if we have type info
-        if self.options.field_offsets && !self.inferred_types.is_empty() {
-            processed = self.replace_field_offsets(&processed);
-        }
+        if !Self::canonical_semantics_owned_upstream() {
+            // Semantic field/type/aggregate rewrites are owned by fission-pcode.
+            // Keep the legacy string-based transforms available for narrow tests,
+            // but do not run them in the default postprocess pipeline.
+            if self.options.field_offsets && !self.inferred_types.is_empty() {
+                processed = self.replace_field_offsets(&processed);
+            }
 
-        processed = Self::promote_rect_params(&processed);
-        processed = Self::clean_ghidra_artifacts(&processed);
-        if self.options.piece_access_normalization {
-            processed = Self::normalize_aggregate_copies(&processed);
+            processed = Self::promote_rect_params(&processed);
+            processed = Self::clean_ghidra_artifacts(&processed);
+            if self.options.piece_access_normalization {
+                processed = Self::normalize_aggregate_copies(&processed);
+            }
         }
         if self.options.temp_var_inlining {
             processed = Self::inline_single_use_temps(&processed);

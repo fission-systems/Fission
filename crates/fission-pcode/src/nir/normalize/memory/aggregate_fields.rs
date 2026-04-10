@@ -222,16 +222,55 @@ fn candidate_struct_name(
     None
 }
 
+fn infer_struct_name_from_offsets(
+    offsets: &HashMap<u32, NirType>,
+    inferred_size: u32,
+    is_64bit: bool,
+    structures: &WindowsStructures,
+) -> Option<String> {
+    let mut matches = structures
+        .structures
+        .iter()
+        .filter_map(|(name, def)| {
+            let struct_size = if is_64bit {
+                def.size_64 as u32
+            } else {
+                def.size_32 as u32
+            };
+            if struct_size == 0 || struct_size != inferred_size {
+                return None;
+            }
+            let all_offsets_match = offsets.keys().all(|offset| {
+                def.fields.iter().any(|field| {
+                    let field_offset = if is_64bit {
+                        field.offset_64 as u32
+                    } else {
+                        field.offset_32 as u32
+                    };
+                    field_offset == *offset
+                })
+            });
+            all_offsets_match.then(|| name.clone())
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        return matches.pop();
+    }
+    None
+}
+
 fn build_named_fields(
     surface_type_name: Option<&str>,
     offsets: &HashMap<u32, NirType>,
     inferred_size: u32,
     is_64bit: bool,
     structures: &WindowsStructures,
-) -> (Vec<StructField>, bool) {
+) -> (Vec<StructField>, bool, Option<String>) {
     let mut named_fields = false;
     let mut struct_fields = HashMap::new();
-    if let Some(struct_name) = candidate_struct_name(surface_type_name, structures)
+    let resolved_struct_name = candidate_struct_name(surface_type_name, structures)
+        .or_else(|| infer_struct_name_from_offsets(offsets, inferred_size, is_64bit, structures));
+    if let Some(struct_name) = resolved_struct_name.as_ref()
         && let Some(struct_def) = structures.get(&struct_name)
     {
         let struct_size = if is_64bit {
@@ -267,7 +306,7 @@ fn build_named_fields(
         })
         .collect();
     new_fields.sort_by_key(|f| f.offset);
-    (new_fields, named_fields)
+    (new_fields, named_fields, resolved_struct_name)
 }
 
 /// Apply aggregate field layout recovery to a function.
@@ -322,21 +361,28 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
         if !can_surface {
             return false;
         }
-        let NirType::Ptr(inner) = &mut binding.ty else { return false; };
-        let NirType::Aggregate { fields, .. } = inner.as_mut() else { return false; };
-        if !fields.is_empty() {
-            return false; // already populated
-        }
         let Some(offsets) = offset_map.get(&binding.name) else { return false; };
         if offsets.is_empty() { return false; }
 
         let inferred_size = inferred_aggregate_size(offsets).unwrap_or_default();
         let surface_type_name = binding.surface_type_name.clone();
-        let (new_fields, named_fields) =
+        let (new_fields, named_fields, resolved_struct_name) =
             build_named_fields(surface_type_name.as_deref(), offsets, inferred_size, func.is_64bit, &structures);
-        *fields = new_fields;
+        {
+            let NirType::Ptr(inner) = &mut binding.ty else { return false; };
+            let NirType::Aggregate { fields, .. } = inner.as_mut() else { return false; };
+            if !fields.is_empty() {
+                return false; // already populated
+            }
+            *fields = new_fields;
+        }
         if named_fields {
             add_typed_object_shape_refinements(1);
+        }
+        if binding.surface_type_name.is_none()
+            && let Some(struct_name) = resolved_struct_name
+        {
+            binding.surface_type_name = Some(format!("{struct_name} *"));
         }
         true
     };
@@ -548,5 +594,74 @@ mod tests {
         };
         let names = fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
         assert_eq!(names, vec!["left", "top", "right", "bottom"]);
+    }
+
+    #[test]
+    fn aggregate_fields_infers_struct_pointer_surface_when_shape_is_unique() {
+        let mut func = HirFunction {
+            name: "process_info_infer".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: ptr_unknown(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0,
+                    }),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 8,
+                    }),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 16,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 20,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        assert_eq!(
+            func.params[0].surface_type_name.as_deref(),
+            Some("PROCESS_INFORMATION *")
+        );
     }
 }

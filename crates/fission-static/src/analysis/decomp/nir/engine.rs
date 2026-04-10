@@ -150,7 +150,9 @@ mod tests {
             },
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
+                call_target_refs: HashMap::new(),
                 call_param_rules: vec![PreviewCallParamRule {
+                    callee_address: None,
                     callee_name: "MessageBoxW".to_string(),
                     arg_index: 1,
                     pointer_alias: "LPCWSTR".to_string(),
@@ -206,6 +208,8 @@ mod tests {
             recovery_outcome: None,
             recovery_source_signature: None,
             recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
         };
         let decision = selection.routing_decision();
         assert_eq!(decision.engine_used, NirEngineMode::Legacy);
@@ -339,7 +343,9 @@ mod tests {
             .expect("build test binary");
         let type_context = NirTypeContext {
             call_targets: HashMap::from([(0x401000, "KnownName".to_string())]),
+            call_target_refs: HashMap::new(),
             call_param_rules: vec![PreviewCallParamRule {
+                callee_address: None,
                 callee_name: "MessageBoxW".to_string(),
                 arg_index: 1,
                 pointer_alias: "LPCWSTR".to_string(),

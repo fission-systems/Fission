@@ -655,6 +655,14 @@ fn run_cleanup_family_passes(
 
     if !func.body.is_empty() {
         wave_stats::add_cleanup_family_stmt_canonical(1);
+        if body_has_conditional_return_shapes(&func.body) {
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_stmt_fold_conditional_return_{stage}"),
+                perf,
+                |f| collapse_redundant_conditional_returns_recursive(&mut f.body),
+            );
+        }
         if body_needs_stmt_fold_cleanup(&func.body) {
             wave_stats::add_cleanup_stmt_fold(1);
             changed |= run_pass_logged(
@@ -873,6 +881,53 @@ fn body_has_boundary_label_shapes(stmts: &[HirStmt]) -> bool {
     false
 }
 
+fn body_has_conditional_return_shapes(stmts: &[HirStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let then_ret = then_body.last().is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
+                let else_ret = else_body.last().is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
+                if (then_ret && else_ret)
+                    || body_has_conditional_return_shapes(then_body)
+                    || body_has_conditional_return_shapes(else_body)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                if body_has_conditional_return_shapes(body) {
+                    return true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                if cases
+                    .iter()
+                    .any(|case| body_has_conditional_return_shapes(&case.body))
+                    || body_has_conditional_return_shapes(default)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    false
+}
+
 fn body_needs_stmt_fold_cleanup(stmts: &[HirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
@@ -887,8 +942,6 @@ fn body_needs_stmt_fold_cleanup(stmts: &[HirStmt]) -> bool {
                 if matches!(cond, HirExpr::Const(_, _))
                     || then_body.is_empty()
                     || else_body.is_empty()
-                    || (matches!(then_body.last(), Some(HirStmt::Return(_)))
-                        && matches!(else_body.last(), Some(HirStmt::Return(_))))
                     || body_needs_stmt_fold_cleanup(then_body)
                     || body_needs_stmt_fold_cleanup(else_body)
                 {
@@ -1224,6 +1277,43 @@ fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>) -> bool {
                     changed |= cleanup_boundary_labels_recursive(&mut case.body);
                 }
                 changed |= cleanup_boundary_labels_recursive(default);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed
+}
+
+fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = collapse_redundant_conditional_returns(stmts);
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                changed |= collapse_redundant_conditional_returns_recursive(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= collapse_redundant_conditional_returns_recursive(then_body);
+                changed |= collapse_redundant_conditional_returns_recursive(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= collapse_redundant_conditional_returns_recursive(&mut case.body);
+                }
+                changed |= collapse_redundant_conditional_returns_recursive(default);
             }
             HirStmt::Assign { .. }
             | HirStmt::VaStart { .. }

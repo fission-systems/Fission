@@ -9,6 +9,78 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Canonical semantics consolidation wave — static semantic rewrites disabled, benchmark stable, similarity still flat
+
+This wave pushed the remaining semantic ownership drift further upstream into the Rust canonical path. The main changes were to stop `fission-static` from owning field/type/aggregate semantic rewrites by default, let `fission-pcode` infer more concrete aggregate surface types when a unique Windows structure shape exists, and split a cheap conditional-return simplification path away from the heavyweight statement-canonical cleanup family. The result is cleaner ownership and slightly better benchmark similarity, but still no material KPI jump on `putty.exe --limit 50`.
+
+#### fission-static — semantic postprocess aggressively shrunk to naming-only defaults
+
+- [`postprocess.rs`](crates/fission-static/src/analysis/decomp/postprocess.rs) now treats canonical object/type/call semantics as upstream-owned by default.
+- The default postprocess pipeline no longer applies semantic rewrite passes such as:
+  - field-offset semantic replacement
+  - struct/type promotion
+  - aggregate copy normalization
+  - clean-slate semantic artifact rewriting
+- `fission-static` remains responsible for naming and presentation polish, not semantic repair.
+- This removes another duplicated owner for object and field meaning and keeps the benchmark path aligned with the Rust canonical pipeline.
+
+#### fission-pcode — aggregate shape inference can now surface concrete pointer types from unique Windows structure layouts
+
+- [`normalize/memory/aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) now:
+  - resolves canonical structure names from known pointer aliases as before
+  - additionally infers a concrete structure name from observed offsets when the Windows type database has a unique size/offset match
+  - upgrades pointer bindings without an existing surface type to a concrete `STRUCT *` surface when that match is unique
+- The pass still remains conservative:
+  - exact size match required
+  - every observed offset must exist in the candidate structure
+  - ambiguous matches do not promote a concrete type name
+- A new regression test now covers this unique-shape pointer-surface inference using `PROCESS_INFORMATION`.
+
+#### fission-pcode — cheap conditional-return cleanup split from the expensive stmt-canonical sweep
+
+- [`normalize/pipeline/run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now runs a targeted conditional-return cleanup before the broad statement-canonical family.
+- The early gate uses a cheap body-shape check instead of always escalating to the full `cleanup_stmt_fold_*` path.
+- This narrows when the expensive statement-canonical family activates and keeps simple redundant `if (...) return ...; else return ...;` shapes on a cheaper path.
+
+#### Duplicate-logic audit
+
+- Object/field/type semantics:
+  - canonical owner remains `fission-pcode`
+  - `fission-static` no longer runs the removed semantic repair passes by default
+- Cleanup family taxonomy:
+  - canonical owner remains [`NirBuildStats`](crates/fission-pcode/src/nir/types.rs)
+  - the new conditional-return split stays inside the canonical cleanup pipeline instead of creating downstream-only logic
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-pcode`
+  - `cargo check -p fission-static`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli --release`
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+- `nir-check`:
+  - lane completed successfully with `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant costs remain:
+    - `cleanup_stmt_canonical_init_1 (120.7ms)`
+    - `cleanup_dead_binding_init_1 (42.9ms)`
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-similarity-next-wave`
+  - seeded shared coverage: `100.00%`
+  - independent top-N coverage: `96.00%`
+  - `both_success=100.000%`
+  - `avg_normalized_similarity=37.45%`
+  - Fission wall `0.508s`, pyghidra wall `2.597s`
+
+#### Known residual risk
+
+- Similarity moved only marginally (`37.44% -> 37.45%`), so the ownership cleanup was correct but not sufficient to move the primary KPI.
+- The next bottlenecks are still:
+  - canonical semantic surface quality for unresolved call/object naming
+  - `cleanup_stmt_canonical_init_1`
+  - `cleanup_dead_binding_init_1`
+
 ### Similarity-first object and prototype wave — stronger canonical semantics, stable benchmark, no material similarity gain yet
 
 This wave targeted the next bottleneck after direct-success stabilization: semantic similarity drift and the oversized `cleanup_stmt_canonical_init_1` family. The intent was to move more object and call semantics into the Rust-owned canonical path while splitting early cleanup into more actionable readiness-gated subfamilies. The benchmark stayed stable on coverage and success, `nir-check` remained green at the fast-lane execution level, but the `putty.exe --limit 50` spot check did not show a meaningful similarity increase yet.
