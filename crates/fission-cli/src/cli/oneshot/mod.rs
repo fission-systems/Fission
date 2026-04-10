@@ -10,6 +10,7 @@ mod decompile;
 #[cfg(not(feature = "native_decomp"))]
 mod decompile_rust_sleigh;
 mod disasm;
+mod function_select;
 mod functions;
 mod inventory;
 mod strings;

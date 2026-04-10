@@ -1,11 +1,12 @@
+use super::function_select::canonical_functions_sorted;
 use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
 pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Result<()> {
+    let functions = canonical_functions_sorted(binary);
     let mut stdout = io::stdout().lock();
     if json {
-        let funcs: Vec<serde_json::Value> = binary
-            .functions
+        let funcs: Vec<serde_json::Value> = functions
             .iter()
             .map(|f| {
                 serde_json::json!({
@@ -26,10 +27,10 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
             ))?
         )?;
     } else {
-        writeln!(stdout, "Functions ({}):", binary.functions.len())?;
+        writeln!(stdout, "Functions ({}):", functions.len())?;
         writeln!(stdout, "{:>18}  {:>8}  Name", "Address", "Size")?;
         writeln!(stdout, "{:─<60}", "")?;
-        for func in &binary.functions {
+        for func in functions {
             let marker = if func.is_import {
                 " [import]"
             } else if func.is_export {

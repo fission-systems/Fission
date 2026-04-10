@@ -2,7 +2,10 @@ use super::provenance::{
     InventoryCandidateEntry, detect_pdb_source_present, to_inventory_row, update_inventory_summary,
 };
 use super::schema::{FunctionFactsInventorySummary, write_inventory_summary};
-use crate::cli::args::{OneShotArgs, parse_hex_address};
+use crate::cli::args::OneShotArgs;
+use crate::cli::oneshot::function_select::{
+    canonical_functions_sorted, select_functions_from_addresses_file,
+};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::{FactStore, NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use std::fs::{self, OpenOptions};
@@ -164,30 +167,11 @@ fn select_inventory_functions<'a>(
     cli: &OneShotArgs,
     binary: &'a LoadedBinary,
 ) -> io::Result<Vec<&'a FunctionInfo>> {
-    let mut functions = binary.functions.iter().collect::<Vec<_>>();
-    functions.sort_by_key(|func| func.address);
-
     if let Some(address_file) = &cli.addresses_file {
-        let contents = fs::read_to_string(address_file)?;
-        let mut selected = Vec::new();
-        for line in contents.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            let address = parse_hex_address(trimmed)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-            if let Some(func) = functions
-                .iter()
-                .copied()
-                .find(|func| func.address == address)
-            {
-                selected.push(func);
-            }
-        }
-        return Ok(selected);
+        return select_functions_from_addresses_file(binary, address_file);
     }
 
+    let mut functions = canonical_functions_sorted(binary);
     if let Some(address) = cli.address {
         functions.retain(|func| func.address == address);
     } else if let Some(limit) = cli.functions_limit {

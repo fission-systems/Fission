@@ -1,4 +1,7 @@
 use crate::cli::args::OneShotArgs;
+use crate::cli::oneshot::function_select::{
+    canonical_functions_sorted, select_function_by_address, select_functions_from_addresses_file,
+};
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use fission_core::FissionError;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -110,15 +113,21 @@ fn render_with_rust_sleigh(
 
 fn collect_target_functions(cli: &OneShotArgs, binary: &LoadedBinary) -> Vec<FunctionInfo> {
     if let Some(addr) = cli.address {
-        if let Some(func) = binary.function_at(addr) {
+        if let Some(func) = select_function_by_address(binary, addr).or_else(|| binary.function_at(addr)) {
             return vec![func.clone()];
         }
         return Vec::new();
     }
 
     if cli.decomp_all {
-        let mut functions: Vec<FunctionInfo> = binary.functions.clone();
-        functions.sort_by_key(|f| f.address);
+        if let Some(address_file) = &cli.addresses_file {
+            if let Ok(functions) = select_functions_from_addresses_file(binary, address_file) {
+                return functions.into_iter().cloned().collect();
+            }
+            return Vec::new();
+        }
+        let mut functions: Vec<FunctionInfo> =
+            canonical_functions_sorted(binary).into_iter().cloned().collect();
         if let Some(limit) = cli.decomp_limit {
             functions.truncate(limit);
         }

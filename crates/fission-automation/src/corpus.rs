@@ -67,7 +67,12 @@ fn normalize_address(value: &str) -> String {
     if let Some(stripped) = text.strip_prefix("0x") {
         text = stripped.to_string();
     }
-    text
+    let trimmed = text.trim_start_matches('0');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn source_is_nir_aligned(source_meta: Option<&SourceMeta>) -> bool {

@@ -9,6 +9,74 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Coverage-first alignment wave — canonical function selection and seeded pairing
+
+This wave changes the meaning of benchmark coverage from “independent top-N address intersection” to “seeded common canonical-function availability.” The main goal is not printer similarity polish, but getting `fission-cli`, inventory emission, and the whole-binary benchmark onto the same function identity and ordering contract.
+
+#### fission-cli — canonical selector as the single owner
+
+- Added [`function_select.rs`](crates/fission-cli/src/cli/oneshot/function_select.rs) as the canonical selector for:
+  - exact-address deduplication
+  - generic internal-entry filtering
+  - canonical address-file selection
+- [`functions.rs`](crates/fission-cli/src/cli/oneshot/functions.rs) now lists canonical functions instead of the raw loader vector.
+- [`decompile_rust_sleigh.rs`](crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs) now uses the same canonical selector for:
+  - `--decomp-all`
+  - `--decomp-limit`
+  - `--addresses-file`
+  - exact single-address lookup
+- [`inventory/emit.rs`](crates/fission-cli/src/cli/oneshot/inventory/emit.rs) now uses the same selector contract as decomp-all, removing a second copy of function ordering and address-file parsing.
+
+#### Benchmark harness — seeded common pairing is now the primary KPI
+
+- [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now:
+  - builds a canonical seed set from Fission `--list`
+  - runs Fission batch decomp against that seed set via `--addresses-file`
+  - runs Ghidra against the same seed addresses
+  - computes primary coverage from `present` rows, not only key existence
+- Existing independent top-N alignment is retained as a secondary KPI under:
+  - `summary.coverage.independent_top_n_pyghidra_vs_fission`
+- Public benchmark summaries now distinguish:
+  - `seeded shared coverage`
+  - `independent top-N coverage`
+
+#### Duplicate-logic audit
+
+- Function selection owner:
+  - canonical owner is now [`function_select.rs`](crates/fission-cli/src/cli/oneshot/function_select.rs)
+  - decomp-all, inventory, and `--list` no longer maintain separate address-ordering contracts
+- Address normalization owner:
+  - benchmark Python and automation Rust now both strip redundant `0x`/leading-zero variance before corpus keys are built
+- Coverage pairing owner:
+  - benchmark coverage is now defined at the seeded harness layer instead of emerging accidentally from two independent engine-local truncation orders
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-cli function_select -- --nocapture`
+  - `cargo check -p fission-cli`
+  - `cargo check -p fission-static`
+  - `cargo check -p fission-automation`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli --release`
+- `nir-check`:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+    - lane completed
+    - gate remains `stop_hold_p5h3f`
+    - current blocker is still the existing `cleanup_init_1` perf regression, not the new coverage contract
+- 2-way benchmark:
+  - [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe), `--limit 50`, output dir `artifacts/batch_benchmark/putty-coverage-wave`
+  - seeded shared coverage: `98.00%` (up from `24.00%`)
+  - independent top-N coverage: `96.00%`
+  - `avg_normalized_similarity=37.22%`
+  - `both_success=100.000%`
+  - Fission wall `0.504s`, pyghidra wall `2.944s`, throughput speedup `5.721x`
+
+#### Known residual risk
+
+- Seeded coverage is now the primary availability KPI, so comparisons against older benchmark summaries must account for the contract change.
+- One seed function is still absent from the Fission seeded batch output in the current `putty.exe --limit 50` run, so the seeded coverage result is `98.00%` rather than `100.00%`.
+
 ### Decompile quality wave — typed call semantics / partitioned MemSSA / structuring ownership
 
 This wave moves three pieces of semantic ownership back into the Rust-only canonical path: typed call identity and summary propagation, partition-backed memory SSA aliasing, and canonical structuring recovery/family attribution. The goal is not printer-only cleanup for a single sample, but a tighter `fission-pcode -> fission-static -> fission-automation` contract with less duplicated policy.
