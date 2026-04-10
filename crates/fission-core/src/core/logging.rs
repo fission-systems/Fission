@@ -1,38 +1,128 @@
-//! Fission Logging Utilities
+//! Fission logging and diagnostics utilities.
 //!
-//! Provides level-based logging using the `tracing` ecosystem.
-//!
-//! ## Recommended usage
-//!
-//! Prefer `tracing` macros directly — they support lazy evaluation (format
-//! strings are only evaluated when the level is enabled) and structured fields:
-//!
-//! ```rust,ignore
-//! use tracing::{debug, error, info, warn};
-//!
-//! info!(addr = %addr, "function decompiled");           // structured field
-//! warn!(error = %e, file = %path, "load failed");       // multiple fields
-//! debug!("decompiler cache cleared");                   // simple message
-//! ```
-//!
-//! Add `tracing = "0.1"` to the crate's `Cargo.toml` to use the macros
-//! directly.
-//!
-//! ## Legacy usage (backward-compatible)
-//!
-//! The function wrappers below (`logging::info`, `logging::warn`, …) are kept
-//! for backward compatibility.  They always format the message string **before**
-//! calling into tracing, even when the log level is disabled — prefer the
-//! macro style for hot paths.
+//! The canonical tracing subscriber is assembled here so CLI, automation, and
+//! worker entrypoints all share the same output, file logging, and span-aware
+//! error context behavior.
 
-use std::sync::Once;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Once, OnceLock};
 
 use crate::config::LogConfig;
 use crate::config::LogLevel as ConfigLogLevel;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_error::{ErrorLayer, SpanTrace};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::writer::{BoxMakeWriter, MakeWriterExt};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{EnvFilter, Registry, fmt, util::SubscriberInitExt};
 
 pub use tracing::Level as LogLevel;
 
 static TRACING_INIT: Once = Once::new();
+static FILE_LOGGING_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+static LOG_GUARDS: OnceLock<Vec<WorkerGuard>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoggingMode {
+    ConsoleOnly,
+    ConsoleAndFile,
+    FileOnly,
+}
+
+impl LoggingMode {
+    fn console_enabled(self) -> bool {
+        matches!(self, Self::ConsoleOnly | Self::ConsoleAndFile)
+    }
+
+    fn file_enabled(self) -> bool {
+        matches!(self, Self::ConsoleAndFile | Self::FileOnly)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoggingFormat {
+    Compact,
+    Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoggingTargets {
+    Hidden,
+    Visible,
+}
+
+impl LoggingTargets {
+    fn enabled(self) -> bool {
+        matches!(self, Self::Visible)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LoggingOptions {
+    pub level: String,
+    pub mode: LoggingMode,
+    pub format: LoggingFormat,
+    pub file_path: Option<PathBuf>,
+    pub targets: LoggingTargets,
+    pub include_timestamp: bool,
+    pub include_span_events: bool,
+}
+
+impl LoggingOptions {
+    pub fn new(level: impl Into<String>) -> Self {
+        Self {
+            level: level.into(),
+            mode: LoggingMode::ConsoleOnly,
+            format: LoggingFormat::Compact,
+            file_path: None,
+            targets: LoggingTargets::Hidden,
+            include_timestamp: true,
+            include_span_events: false,
+        }
+    }
+
+    pub fn from_config(config: &LogConfig) -> Self {
+        let env_file_path = std::env::var("FISSION_LOG_FILE")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from);
+        let file_path = env_file_path.or_else(|| {
+            (config.file_enabled && !config.file_path.is_empty())
+                .then(|| PathBuf::from(config.file_path.clone()))
+        });
+        let mode = match (config.console_enabled, file_path.is_some()) {
+            (true, true) => LoggingMode::ConsoleAndFile,
+            (true, false) => LoggingMode::ConsoleOnly,
+            (false, true) => LoggingMode::FileOnly,
+            (false, false) => LoggingMode::ConsoleOnly,
+        };
+        Self {
+            level: config_log_level_to_directive(config.level).to_string(),
+            mode,
+            format: LoggingFormat::Compact,
+            file_path,
+            targets: if config.include_target {
+                LoggingTargets::Visible
+            } else {
+                LoggingTargets::Hidden
+            },
+            include_timestamp: config.include_timestamp,
+            include_span_events: false,
+        }
+    }
+
+    pub fn with_file_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.file_path = Some(path.into());
+        self.mode = match self.mode {
+            LoggingMode::ConsoleOnly => LoggingMode::ConsoleAndFile,
+            LoggingMode::ConsoleAndFile => LoggingMode::ConsoleAndFile,
+            LoggingMode::FileOnly => LoggingMode::FileOnly,
+        };
+        self
+    }
+}
 
 fn tracing_level_to_directive(level: tracing::Level) -> &'static str {
     match level {
@@ -54,87 +144,166 @@ fn config_log_level_to_directive(level: ConfigLogLevel) -> &'static str {
     }
 }
 
+fn resolve_file_path(options: &LoggingOptions) -> Option<PathBuf> {
+    options
+        .file_path
+        .clone()
+        .or_else(|| FILE_LOGGING_OVERRIDE.get().cloned())
+}
+
+fn span_events(enabled: bool) -> FmtSpan {
+    if enabled {
+        FmtSpan::NEW | FmtSpan::CLOSE
+    } else {
+        FmtSpan::NONE
+    }
+}
+
+fn build_file_writer(path: &Path) -> io::Result<(NonBlocking, WorkerGuard)> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(dir)?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "log file path has no name"))?;
+    let appender = tracing_appender::rolling::daily(dir, file_name.to_string_lossy().to_string());
+    Ok(tracing_appender::non_blocking(appender))
+}
+
+fn build_make_writer(options: &LoggingOptions, guards: &mut Vec<WorkerGuard>) -> BoxMakeWriter {
+    let file_writer = if options.mode.file_enabled() {
+        resolve_file_path(options).and_then(|path| match build_file_writer(&path) {
+            Ok((writer, guard)) => {
+                guards.push(guard);
+                Some(writer)
+            }
+            Err(error) => {
+                eprintln!(
+                    "[fission-core] file logging disabled: {} ({error})",
+                    path.display()
+                );
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    match (options.mode.console_enabled(), file_writer) {
+        (true, Some(file)) => BoxMakeWriter::new(std::io::stderr.and(file)),
+        (true, None) => BoxMakeWriter::new(std::io::stderr),
+        (false, Some(file)) => BoxMakeWriter::new(file),
+        (false, None) => BoxMakeWriter::new(std::io::sink),
+    }
+}
+
 /// Build an [`EnvFilter`] from `RUST_LOG` when set and parseable; otherwise `default_filter`
 /// (e.g. `"warn"`, `"info"`).
-pub fn env_filter_from_rust_log_or_default(default_filter: &str) -> tracing_subscriber::EnvFilter {
+pub fn env_filter_from_rust_log_or_default(default_filter: &str) -> EnvFilter {
     match std::env::var("RUST_LOG") {
-        Ok(s) if !s.is_empty() => tracing_subscriber::EnvFilter::try_new(&s).unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new(default_filter)
-        }),
-        _ => tracing_subscriber::EnvFilter::new(default_filter),
+        Ok(s) if !s.is_empty() => {
+            EnvFilter::try_new(&s).unwrap_or_else(|_| EnvFilter::new(default_filter))
+        }
+        _ => EnvFilter::new(default_filter),
     }
 }
 
-/// Idempotent `tracing` subscriber setup (first successful init wins).
-///
-/// Honors `RUST_LOG` when set and valid. Uses a compact console format without target paths.
-pub fn try_init_tracing(default_filter: &str) {
-    TRACING_INIT.call_once(|| {
-        let env_filter = env_filter_from_rust_log_or_default(default_filter);
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_target(false)
-            .try_init();
-    });
-}
-
-/// Initialize the logger with a minimum log level
-pub fn init(level: LogLevel) {
-    try_init_tracing(tracing_level_to_directive(level));
-}
-
-/// Initialize logger from LogConfig
-pub fn init_from_config(config: &LogConfig) {
-    // Always apply C++ logger env hint even if the tracing subscriber was already initialized
-    // elsewhere (e.g. CLI `try_init_tracing` in the same process).
-    if let Some((key, value)) = config.get_cpp_log_file_env() {
-        // SAFETY: We're setting an environment variable in a single-threaded init context.
-        // The C++ logger will read this value once during its initialization.
-        unsafe { std::env::set_var(key, value) };
-    }
-
-    let include_target = config.include_target;
-    let include_timestamp = config.include_timestamp;
-    let default_directive = config_log_level_to_directive(config.level);
-
+/// Idempotent tracing subscriber setup (first successful init wins).
+pub fn init_with_options(options: LoggingOptions) {
     TRACING_INIT.call_once(move || {
-        let env_filter = env_filter_from_rust_log_or_default(default_directive);
-        let _ = if include_timestamp {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_target(include_target)
-                .try_init()
-        } else {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_target(include_target)
-                .without_time()
-                .try_init()
+        let env_filter = env_filter_from_rust_log_or_default(&options.level);
+        let mut guards = Vec::new();
+        let writer = build_make_writer(&options, &mut guards);
+        let _ = LOG_GUARDS.set(guards);
+        let show_target = options.targets.enabled();
+        let span_events = span_events(options.include_span_events);
+
+        let registry = Registry::default().with(env_filter).with(ErrorLayer::default());
+        let _ = match (options.format, options.include_timestamp) {
+            (LoggingFormat::Compact, true) => registry
+                .with(
+                    fmt::layer()
+                        .compact()
+                        .with_ansi(!matches!(options.mode, LoggingMode::FileOnly))
+                        .with_target(show_target)
+                        .with_span_events(span_events)
+                        .with_writer(writer),
+                )
+                .try_init(),
+            (LoggingFormat::Compact, false) => registry
+                .with(
+                    fmt::layer()
+                        .compact()
+                        .with_ansi(!matches!(options.mode, LoggingMode::FileOnly))
+                        .with_target(show_target)
+                        .with_span_events(span_events)
+                        .without_time()
+                        .with_writer(writer),
+                )
+                .try_init(),
+            (LoggingFormat::Json, true) => registry
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_ansi(false)
+                        .with_target(show_target)
+                        .with_span_events(span_events)
+                        .with_writer(writer),
+                )
+                .try_init(),
+            (LoggingFormat::Json, false) => registry
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_ansi(false)
+                        .with_target(show_target)
+                        .with_span_events(span_events)
+                        .without_time()
+                        .with_writer(writer),
+                )
+                .try_init(),
         };
     });
 }
 
-/// Initialize logger using global CONFIG
+/// Idempotent tracing setup that honors `RUST_LOG` and uses compact console output.
+pub fn try_init_tracing(default_filter: &str) {
+    init_with_options(LoggingOptions::new(default_filter));
+}
+
+/// Initialize the logger with a minimum log level.
+pub fn init(level: LogLevel) {
+    try_init_tracing(tracing_level_to_directive(level));
+}
+
+/// Initialize logger from [`LogConfig`].
+pub fn init_from_config(config: &LogConfig) {
+    if let Some((key, value)) = config.get_cpp_log_file_env() {
+        unsafe { std::env::set_var(key, value) };
+    }
+    init_with_options(LoggingOptions::from_config(config));
+}
+
+/// Initialize logger using global [`crate::CONFIG`].
 pub fn init_from_global_config() {
     init_from_config(&crate::CONFIG.logging);
 }
 
-pub fn enable_file_logging(_path: &str) -> std::io::Result<()> {
-    // Tracing doesn't easily support adding file output *after* init without more complex setup (ReloadLayer).
-    // For this step, we'll log a warning that dynamic file logging is limited.
-    warn("Dynamic file logging enabling is not fully implemented in tracing migration yet.");
-    Ok(())
+/// Configure a file sink before the shared subscriber is initialized.
+pub fn enable_file_logging(path: &str) -> io::Result<()> {
+    FILE_LOGGING_OVERRIDE
+        .set(PathBuf::from(path))
+        .map_err(|_| io::Error::new(io::ErrorKind::AlreadyExists, "file logging already configured"))
 }
 
-pub fn disable_file_logging() {
-    // No-op
+/// Dynamic post-init file logging is intentionally unsupported.
+pub fn disable_file_logging() {}
+
+/// Capture the current [`SpanTrace`] for boundary error rendering.
+pub fn capture_span_trace() -> SpanTrace {
+    SpanTrace::capture()
 }
 
-// ── Legacy function wrappers ─────────────────────────────────────────────────
-// These always evaluate the message string before calling tracing, even when
-// the log level is disabled.  Prefer `tracing::{debug!, info!, warn!, error!}`
-// macros in new code.
-
+// Legacy wrappers kept for backward compatibility.
 #[track_caller]
 pub fn trace(message: &str) {
     tracing::trace!("{}", message);
@@ -165,9 +334,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_log_wrapper() {
-        // Just verify the function wrappers compile and dispatch to tracing
-        info("Test info log");
-        warn(&format!("Test warn log {}", 123));
+    fn env_filter_falls_back_when_rust_log_empty() {
+        unsafe { std::env::set_var("RUST_LOG", "") };
+        let filter = env_filter_from_rust_log_or_default("warn");
+        assert_eq!(format!("{filter:?}"), format!("{:?}", EnvFilter::new("warn")));
+        unsafe { std::env::remove_var("RUST_LOG") };
+    }
+
+    #[test]
+    fn logging_init_is_idempotent() {
+        init_with_options(LoggingOptions::new("warn"));
+        init_with_options(LoggingOptions::new("info"));
+    }
+
+    #[test]
+    fn capture_span_trace_is_available() {
+        init_with_options(LoggingOptions::new("info"));
+        let span = tracing::info_span!("logging_test_span");
+        let _entered = span.enter();
+        let trace = capture_span_trace();
+        assert!(!format!("{trace:?}").is_empty());
     }
 }

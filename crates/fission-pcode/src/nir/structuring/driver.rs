@@ -654,6 +654,9 @@ impl<'a> PreviewBuilder<'a> {
                 self.promotion_candidate_count, self.promoted_region_count
             );
         }
+        metrics::histogram!("fission.structuring.total_ms")
+            .record(total_start.elapsed().as_secs_f64() * 1000.0);
+        metrics::counter!("fission.structuring.invocations_total").increment(1);
         let body = eliminate_redundant_gotos(body);
         Ok(cleanup_redundant_labels(body))
     }

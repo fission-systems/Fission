@@ -27,6 +27,7 @@ use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
 use crate::cli::args::{FunctionDiscoveryProfileArg, OneShotArgs};
+use anyhow::{Context, Result};
 use clap::Parser;
 use fission_loader::loader::{FunctionDiscoveryProfile, LoadedBinary};
 use std::fs;
@@ -41,54 +42,59 @@ fn map_discovery_profile_arg(profile: FunctionDiscoveryProfileArg) -> FunctionDi
 }
 
 /// Entry point for one-shot CLI mode
-pub fn run_oneshot() -> io::Result<()> {
+pub fn run_oneshot() -> Result<()> {
     run()
 }
 
 /// Main entry point (for bin/fission_cli.rs binary)
-pub fn main() -> io::Result<()> {
+pub fn main() -> Result<()> {
     run_oneshot()
 }
 
-fn run() -> io::Result<()> {
+fn run() -> Result<()> {
     let cli = OneShotArgs::parse();
-
-    let default_filter = if cli.verbose { "info" } else { "warn" };
-    fission_core::logging::try_init_tracing(default_filter);
+    let mut logging_options =
+        fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
+    logging_options.level = if cli.verbose { "info" } else { "warn" }.to_string();
+    logging_options.include_span_events = cli.verbose;
+    fission_core::logging::init_with_options(logging_options);
+    if cli.verbose {
+        tracing::info!(binary = %cli.binary.display(), "initialized one-shot CLI");
+    }
 
     // Capture BrokenPipe errors gracefully
-    if let Err(e) = execute_command(&cli)
-        && e.kind() != io::ErrorKind::BrokenPipe
-    {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
+    if let Err(error) = execute_command(&cli) {
+        if error
+            .downcast_ref::<io::Error>()
+            .is_some_and(|err| err.kind() == io::ErrorKind::BrokenPipe)
+        {
+            return Ok(());
+        }
+        let span_trace = fission_core::logging::capture_span_trace();
+        return Err(error.context(format!("span trace:\n{span_trace}")));
     }
     Ok(())
 }
 
-fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
+fn execute_command(cli: &OneShotArgs) -> Result<()> {
     if cli.verbose {
         eprintln!("[*] Loading binary: {}", cli.binary.display());
     }
 
-    let binary_data = match fs::read(&cli.binary) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error: Failed to read binary: {}", e);
-            std::process::exit(1);
-        }
-    };
+    anyhow::ensure!(
+        cli.binary.exists(),
+        "binary path does not exist: {}",
+        cli.binary.display()
+    );
 
-    let mut binary = match LoadedBinary::from_bytes(
+    let binary_data = fs::read(&cli.binary)
+        .with_context(|| format!("failed to read binary `{}`", cli.binary.display()))?;
+
+    let mut binary = LoadedBinary::from_bytes(
         binary_data.clone(),
         cli.binary.to_string_lossy().to_string(),
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Error: Failed to parse binary: {}", e);
-            std::process::exit(1);
-        }
-    };
+    )
+    .with_context(|| format!("failed to parse binary `{}`", cli.binary.display()))?;
 
     if let Some(profile_arg) = cli.function_discovery_profile {
         let profile = map_discovery_profile_arg(profile_arg);
@@ -114,23 +120,23 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
     }
 
     if cli.info {
-        return print_binary_info(&binary, cli.json);
+        return Ok(print_binary_info(&binary, cli.json)?);
     }
 
     if cli.sections {
-        return print_sections(&binary, cli.json);
+        return Ok(print_sections(&binary, cli.json)?);
     }
 
     if cli.imports {
-        return print_imports(&binary, cli.json);
+        return Ok(print_imports(&binary, cli.json)?);
     }
 
     if cli.exports {
-        return print_exports(&binary, cli.json);
+        return Ok(print_exports(&binary, cli.json)?);
     }
 
     if cli.list {
-        return print_function_list(&binary, cli.json);
+        return Ok(print_function_list(&binary, cli.json)?);
     }
 
     if cli.preview_candidate_inventory {
@@ -141,10 +147,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!(
-                "Error: preview candidate inventory is deprecated with native_decomp removal"
-            );
-            std::process::exit(1);
+            anyhow::bail!("preview candidate inventory is deprecated with native_decomp removal");
         }
     }
 
@@ -156,27 +159,24 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!(
-                "Error: preview candidate scan batch is deprecated with native_decomp removal"
-            );
-            std::process::exit(1);
+            anyhow::bail!("preview candidate scan batch is deprecated with native_decomp removal");
         }
     }
 
     if cli.emit_function_facts_inventory {
-        return emit_function_facts_inventory(cli, &binary, &binary_data);
+        return Ok(emit_function_facts_inventory(cli, &binary, &binary_data)?);
     }
 
     if let Some(min_len) = cli.strings {
-        return print_strings(&binary_data, min_len.max(4), cli.json);
+        return Ok(print_strings(&binary_data, min_len.max(4), cli.json)?);
     }
 
     if let Some(addr) = cli.disasm {
-        return disassemble(&binary, &binary_data, addr, cli.count, cli.json);
+        return Ok(disassemble(&binary, &binary_data, addr, cli.count, cli.json)?);
     }
 
     if let Some(addr) = cli.disasm_function {
-        return disassemble_function(&binary, &binary_data, addr, cli.json);
+        return Ok(disassemble_function(&binary, &binary_data, addr, cli.json)?);
     }
 
     if cli.address.is_some() || cli.decomp_all {

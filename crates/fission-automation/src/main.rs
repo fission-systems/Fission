@@ -155,8 +155,21 @@ fn pick_focus_binaries_from_baseline(rows: &[InventoryRow], top_n: usize) -> BTr
         .collect()
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = run_main() {
+        let error = error.context(format!(
+            "span trace:\n{}",
+            fission_core::logging::capture_span_trace()
+        ));
+        eprintln!("{:?}", miette::Report::msg(format!("{error:#}")));
+        std::process::exit(1);
+    }
+}
+
+fn run_main() -> Result<()> {
     let cli = Cli::parse();
+    let root = repo_root();
+    init_automation_logging(&root);
     match cli.command {
         Commands::NirCheck(args) => run_nir_check(args),
     }
@@ -352,6 +365,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         );
     }
     let inventory_elapsed_ms = inventory_started.elapsed().as_millis() as u64;
+    metrics::histogram!("fission.automation.nir_check.inventory_ms").record(inventory_elapsed_ms as f64);
 
     let corpus_artifacts = build_corpus_artifacts(&root, &datasets);
     let diagnosis_started = Instant::now();
@@ -370,6 +384,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         binaries: diagnosis_entries,
     };
     let diagnosis_elapsed_ms = diagnosis_started.elapsed().as_millis() as u64;
+    metrics::histogram!("fission.automation.nir_check.diagnosis_ms").record(diagnosis_elapsed_ms as f64);
 
     let mut automation_summary = build_summary(
         isoish_now(),
@@ -403,6 +418,14 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     automation_summary.diagnosis_elapsed_ms = diagnosis_elapsed_ms;
     automation_summary.write_outputs_elapsed_ms = write_started.elapsed().as_millis() as u64;
     automation_summary.total_elapsed_ms = run_started.elapsed().as_millis() as u64;
+    metrics::histogram!("fission.automation.nir_check.write_outputs_ms")
+        .record(automation_summary.write_outputs_elapsed_ms as f64);
+    metrics::histogram!("fission.automation.nir_check.total_ms")
+        .record(automation_summary.total_elapsed_ms as f64);
+    metrics::counter!("fission.automation.nir_check.targets_total")
+        .increment(automation_summary.target_count as u64);
+    metrics::counter!("fission.automation.nir_check.changed_rows_total")
+        .increment(decision_insights.changed_row_count as u64);
     write_json_pretty(base_output_dir.join("summary.json"), &automation_summary)?;
     let markdown = render_markdown(
         &automation_summary,
@@ -443,6 +466,11 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     );
 
     if args.fail_on_stop && !decision_insights.go_stop_gate.decision.starts_with("go_") {
+        metrics::counter!(
+            "fission.automation.nir_check.gate_stop_total",
+            "decision" => decision_insights.go_stop_gate.decision.clone()
+        )
+        .increment(1);
         anyhow::bail!(
             "go/stop gate is `{}` (rationale: {}); --fail-on-stop requested",
             decision_insights.go_stop_gate.decision,
@@ -467,6 +495,11 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
                 if base_agg.total_time_ms > 10.0 {
                     let ratio = current_agg.total_time_ms / base_agg.total_time_ms;
                     if ratio > 1.25 {
+                        metrics::counter!(
+                            "fission.automation.nir_check.pass_regression_total",
+                            "pass" => pass_name.clone()
+                        )
+                        .increment(1);
                         anyhow::bail!(
                             "performance regression detected in pass '{}': {:.1}ms -> {:.1}ms ({:.1}x increase)",
                             pass_name,
@@ -481,6 +514,19 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn init_automation_logging(root: &Path) {
+    let log_path = root
+        .join("artifacts")
+        .join("fission-automation")
+        .join("logs")
+        .join("fission-automation.log");
+    let options =
+        fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging)
+            .with_file_path(log_path);
+    fission_core::logging::init_with_options(options);
+    fission_core::logging::info("initialized fission-automation logging");
 }
 
 fn write_outputs(

@@ -9,6 +9,55 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-10 (latest)
 
+### Logging and diagnostics wave — canonical observability owner
+
+This wave upgrades Fission's Rust-first observability path without introducing ad-hoc subscribers in boundary crates. The canonical owner remains [`fission-core/src/core/logging.rs`](crates/fission-core/src/core/logging.rs): file logging, span-aware boundary diagnostics, and runtime metrics are now wired through that shared layer, while CLI and automation only adapt process-boundary behavior.
+
+#### fission-core — canonical logging / span trace owner
+
+- Added `tracing-appender` and `tracing-error` to [`fission-core`](crates/fission-core/Cargo.toml).
+- [`logging.rs`](crates/fission-core/src/core/logging.rs) now provides:
+  - `LoggingMode`
+  - `LoggingFormat`
+  - `LoggingTargets`
+  - `LoggingOptions`
+  - `init_with_options(...)`
+  - `capture_span_trace()`
+- Replaced the placeholder `enable_file_logging()` behavior with pre-init file sink configuration and shared rolling file output.
+- `LoggingOptions::from_config(...)` now treats `FISSION_LOG_FILE` as an explicit runtime override, so CLI/automation can enable file logging without editing TOML.
+- Subscriber ownership remains centralized in `fission-core`; no other crate assembles a tracing subscriber.
+
+#### fission-pcode / fission-automation — runtime metrics
+
+- Added `metrics` to canonical runtime producers:
+  - [`wave_stats.rs`](crates/fission-pcode/src/nir/normalize/wave_stats.rs) now emits normalize-pass invocation, outcome, and duration metrics.
+  - [`driver.rs`](crates/fission-pcode/src/nir/structuring/driver.rs) now emits total structuring duration and invocation metrics.
+  - [`main.rs`](crates/fission-automation/src/main.rs) now emits lane-level runtime histograms/counters for inventory, diagnosis, write, total runtime, changed rows, and gate/perf-regression events.
+- `NirBuildStats` remains the semantic-quality owner. Runtime metrics were added alongside it, not as a competing telemetry schema.
+
+#### CLI / automation — boundary-only diagnostics
+
+- Added `miette` to [`fission-cli`](crates/fission-cli/Cargo.toml) and [`fission-automation`](crates/fission-automation/Cargo.toml) for process-boundary rendering only.
+- [`fission_cli`](crates/fission-cli/src/bin/fission_cli.rs) now renders top-level failures through `miette`, while [`oneshot/mod.rs`](crates/fission-cli/src/cli/oneshot/mod.rs) propagates contextual errors instead of exiting from deep helper branches.
+- [`fission-automation`](crates/fission-automation/src/main.rs) now initializes shared logging before lane execution, writes a default rolling log under `artifacts/fission-automation/logs/`, and attaches a captured span trace when surfacing top-level failures.
+
+#### Duplicate-logic audit
+
+- Logging subscriber assembly remains canonical in [`fission-core`](crates/fission-core/src/core/logging.rs); CLI and automation now consume shared options instead of building separate tracing stacks.
+- Runtime latency metrics are emitted from canonical producers (`fission-pcode`, `fission-automation`) rather than duplicating pass/runtime ownership in downstream reporting layers.
+
+#### Tests / validation
+
+- Passed:
+  - `cargo test -p fission-core`
+  - `cargo test -p fission-automation`
+  - `cargo build -p fission-cli`
+  - `cargo build -p fission-cli --release`
+  - CLI file logging verification with `FISSION_LOG_FILE=/tmp/fission-cli-logtest/fission-cli.log` produced `/tmp/fission-cli-logtest/fission-cli.log.2026-04-10`
+  - automation default file logging verification produced `artifacts/fission-automation/logs/fission-automation.log.2026-04-10`
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli` still exits non-zero on the existing performance gate:
+  - `cleanup_init_1`: `38.9ms -> 162.4ms (4.2x increase)`
+
 ### Decompile quality wave — semantics-first core upgrade
 
 This wave moves semantic recovery deeper into the canonical Rust-owned pipeline instead of relying on printer-level cleanup. The primary themes are shared ABI carrier modeling, shared memory-partition evidence for slot/aggregate recovery, costed structuring candidate selection, and automation-side family attribution built directly from canonical `NirBuildStats`.

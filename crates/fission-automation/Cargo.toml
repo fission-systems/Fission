@@ -22,6 +22,9 @@ rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+metrics = "0.24"
+miette = { version = "7.4", features = ["fancy"] }
+fission-core = { path = "../fission-core" }
 fission-pcode = { path = "../fission-pcode" }
 mimalloc = { version = "0.1", optional = true }
 jemallocator = { version = "0.5", optional = true }

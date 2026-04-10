@@ -88,6 +88,17 @@ pub(super) fn add_pass_metric(
     before_locals: usize,
     after_locals: usize,
 ) {
+    metrics::counter!("fission.normalize.pass.invocations_total", "pass" => name.to_string())
+        .increment(1);
+    metrics::histogram!("fission.normalize.pass.duration_ms", "pass" => name.to_string())
+        .record(elapsed_ms);
+    let changed_metric = if changed { "changed" } else { "unchanged" };
+    metrics::counter!(
+        "fission.normalize.pass.outcome_total",
+        "pass" => name.to_string(),
+        "outcome" => changed_metric
+    )
+    .increment(1);
     WAVE.with(|w| {
         let mut stats = w.borrow_mut();
         let agg = stats.pass_metrics.entry(name.to_string()).or_default();

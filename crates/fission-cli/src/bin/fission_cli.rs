@@ -13,6 +13,9 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-fn main() -> std::io::Result<()> {
-    fission_cli::cli::oneshot::run_oneshot()
+fn main() {
+    if let Err(error) = fission_cli::cli::oneshot::run_oneshot() {
+        eprintln!("{:?}", miette::Report::msg(format!("{error:#}")));
+        std::process::exit(1);
+    }
 }
