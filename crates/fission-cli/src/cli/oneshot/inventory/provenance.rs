@@ -2,7 +2,7 @@ use super::schema::{
     ExplicitFactBreakdown, FactSourcesPresent, FunctionFactsInventoryRow,
     FunctionFactsInventorySummary, ProvenanceFactBreakdown,
 };
-use fission_pcode::{NirBuildStats, NirHintStats};
+use fission_pcode::{IndirectControlClassification, NirBuildStats, NirHintStats};
 use fission_static::analysis::decomp::{FactStore, FunctionFacts};
 
 #[derive(Debug, Clone)]
@@ -114,6 +114,12 @@ impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCa
 }
 
 pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {
+    let indirect = IndirectControlClassification::from_flags(
+        entry.has_indirect_control_flow,
+        entry.has_preserved_indirect_surface,
+        entry.has_unresolved_unsupported_indirect,
+        entry.has_dispatcher_recovery,
+    );
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
         stats.pointer_alias_hits > 0
@@ -127,7 +133,7 @@ pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bo
         )
     });
     entry.preview_direct_success
-        && !entry.has_unresolved_unsupported_indirect
+        && indirect.allows_heuristic_surface_candidate()
         && (heuristic_hits || has_reason_tag)
 }
 
@@ -190,10 +196,15 @@ fn strict_explicit_candidate_row(
     entry: &InventoryCandidateEntry,
     explicit_fact_total: usize,
 ) -> bool {
+    let indirect = IndirectControlClassification::from_flags(
+        entry.has_indirect_control_flow,
+        entry.has_preserved_indirect_surface,
+        entry.has_unresolved_unsupported_indirect,
+        entry.has_dispatcher_recovery,
+    );
     explicit_fact_total >= 2
         && entry.preview_direct_success
-        && !entry.has_unresolved_unsupported_indirect
-        && entry.pcode_op_count <= 800
+        && indirect.allows_strict_explicit_candidate(entry.pcode_op_count)
 }
 
 fn admission_block_stage(entry: &InventoryCandidateEntry, inventory_surface_gap: bool) -> String {

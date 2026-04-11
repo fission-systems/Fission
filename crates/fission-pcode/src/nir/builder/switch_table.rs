@@ -22,7 +22,14 @@
 /// Ghidra reference: `ActionNormalizeSetup` + jump-table analysis in
 /// `jumptable.cc`.  Our approach is simpler (HIR-level only) but covers the
 /// common compiler output.
-use super::super::types::{HirBinaryOp, HirExpr, NirRenderOptions, NirType};
+use super::super::types::{DispatcherProofKind, HirBinaryOp, HirExpr, NirRenderOptions, NirType};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RecoveredSwitchSelector {
+    pub discriminant: HirExpr,
+    pub min_val: i64,
+    pub proof_kind: DispatcherProofKind,
+}
 
 /// Try to recover `(discriminant_expr, min_val)` from a jump-table load.
 ///
@@ -36,14 +43,14 @@ use super::super::types::{HirBinaryOp, HirExpr, NirRenderOptions, NirType};
 pub(super) fn recover_switch_discriminant(
     switch_expr: &HirExpr,
     options: &NirRenderOptions,
-) -> Option<(HirExpr, i64)> {
+) -> Option<RecoveredSwitchSelector> {
     // The switch expression must be a LOAD whose address is the jump-table entry.
     let HirExpr::Load { ptr: addr_expr, .. } = switch_expr else {
         return None;
     };
 
     // Extract (table_base_addr, selector_expr, _scale) from the address.
-    let (table_base, selector_expr) = extract_table_base_and_selector(addr_expr)?;
+    let (table_base, selector_expr, scaled_by_mul) = extract_table_base_and_selector(addr_expr)?;
 
     // Validate: table_base must be a mapped section address (jump table lives
     // in .rdata / .text, not on the stack).
@@ -56,10 +63,18 @@ pub(super) fn recover_switch_discriminant(
     let selector_inner = peel_cast(selector_expr);
 
     // Detect `selector = orig - min_val` pattern.
-    let (discriminant, min_val) = extract_min_val_sub(selector_inner)
-        .unwrap_or_else(|| (selector_inner.clone(), 0));
+    let (discriminant, min_val) =
+        extract_min_val_sub(selector_inner).unwrap_or_else(|| (selector_inner.clone(), 0));
 
-    Some((discriminant, min_val))
+    Some(RecoveredSwitchSelector {
+        discriminant,
+        min_val,
+        proof_kind: if scaled_by_mul {
+            DispatcherProofKind::JumpTable
+        } else {
+            DispatcherProofKind::ConstantStrideIndex
+        },
+    })
 }
 
 /// Try to decompose `addr` into `(table_base_addr, selector_expr)`.
@@ -74,7 +89,7 @@ pub(super) fn recover_switch_discriminant(
 /// Const(base) + selector                        (scale == 1)
 /// selector * Const(scale) + Const(base)         (commuted)
 /// ```
-fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr)> {
+fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr, bool)> {
     let HirExpr::Binary {
         op: HirBinaryOp::Add,
         lhs,
@@ -87,14 +102,14 @@ fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr)> {
 
     // Try Const(base) + scaled_selector.
     if let HirExpr::Const(base, _) = lhs.as_ref() {
-        let selector = extract_unscaled_selector(rhs)?;
-        return Some((*base as u64, selector));
+        let (selector, scaled_by_mul) = extract_unscaled_selector(rhs)?;
+        return Some((*base as u64, selector, scaled_by_mul));
     }
 
     // Try scaled_selector + Const(base).
     if let HirExpr::Const(base, _) = rhs.as_ref() {
-        let selector = extract_unscaled_selector(lhs)?;
-        return Some((*base as u64, selector));
+        let (selector, scaled_by_mul) = extract_unscaled_selector(lhs)?;
+        return Some((*base as u64, selector, scaled_by_mul));
     }
 
     None
@@ -108,7 +123,7 @@ fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr)> {
 /// - `Const(_scale) * selector`
 /// - `selector << Const(_log2)`
 /// - `selector` (scale = 1; no extra operation)
-fn extract_unscaled_selector(expr: &HirExpr) -> Option<&HirExpr> {
+fn extract_unscaled_selector(expr: &HirExpr) -> Option<(&HirExpr, bool)> {
     match expr {
         // selector * scale  or  scale * selector
         HirExpr::Binary {
@@ -118,9 +133,9 @@ fn extract_unscaled_selector(expr: &HirExpr) -> Option<&HirExpr> {
             ..
         } => {
             if matches!(rhs.as_ref(), HirExpr::Const(..)) {
-                Some(lhs)
+                Some((lhs, true))
             } else if matches!(lhs.as_ref(), HirExpr::Const(..)) {
-                Some(rhs)
+                Some((rhs, true))
             } else {
                 None
             }
@@ -131,9 +146,48 @@ fn extract_unscaled_selector(expr: &HirExpr) -> Option<&HirExpr> {
             lhs,
             rhs,
             ..
-        } if matches!(rhs.as_ref(), HirExpr::Const(..)) => Some(lhs),
+        } if matches!(rhs.as_ref(), HirExpr::Const(..)) => Some((lhs, false)),
         // scale == 1: selector directly (any non-constant expression)
-        other if !matches!(other, HirExpr::Const(..)) => Some(other),
+        other if !matches!(other, HirExpr::Const(..)) => Some((other, false)),
+        _ => None,
+    }
+}
+
+pub(super) fn proves_single_target_dispatcher_surface(
+    switch_expr: &HirExpr,
+    targets: &[u64],
+    current_block: u64,
+    options: &NirRenderOptions,
+) -> bool {
+    if targets.len() != 1 || targets[0] != current_block {
+        return false;
+    }
+    recover_switch_discriminant(switch_expr, options).is_some()
+        || is_mapped_global_load_source(switch_expr, options)
+}
+
+fn is_mapped_global_load_source(expr: &HirExpr, options: &NirRenderOptions) -> bool {
+    match expr {
+        HirExpr::Load { ptr, .. } => extract_mapped_global_address(ptr, options).is_some(),
+        HirExpr::Cast { expr: inner, .. } => is_mapped_global_load_source(inner, options),
+        _ => false,
+    }
+}
+
+fn extract_mapped_global_address(expr: &HirExpr, options: &NirRenderOptions) -> Option<u64> {
+    match expr {
+        HirExpr::Const(addr, _) if *addr >= 0 => {
+            let addr = *addr as u64;
+            options.is_mapped_global(addr).then_some(addr)
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => extract_mapped_global_address(lhs, options)
+            .or_else(|| extract_mapped_global_address(rhs, options)),
+        HirExpr::Cast { expr: inner, .. } => extract_mapped_global_address(inner, options),
         _ => None,
     }
 }
@@ -198,14 +252,23 @@ mod tests {
     }
 
     fn uint64() -> NirType {
-        NirType::Int { bits: 64, signed: false }
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
     }
     fn uint32() -> NirType {
-        NirType::Int { bits: 32, signed: false }
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
     }
 
     fn load(ptr: HirExpr) -> HirExpr {
-        HirExpr::Load { ptr: Box::new(ptr), ty: uint64() }
+        HirExpr::Load {
+            ptr: Box::new(ptr),
+            ty: uint64(),
+        }
     }
 
     fn add(lhs: HirExpr, rhs: HirExpr) -> HirExpr {
@@ -253,7 +316,10 @@ mod tests {
     }
 
     fn cast_u64(inner: HirExpr) -> HirExpr {
-        HirExpr::Cast { ty: uint64(), expr: Box::new(inner) }
+        HirExpr::Cast {
+            ty: uint64(),
+            expr: Box::new(inner),
+        }
     }
 
     // switch_expr = Load(0x40b000 + sel * 8)
@@ -265,9 +331,10 @@ mod tests {
         let expr = load(add(cst(0x40b000), mul(sel.clone(), cst(8))));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
-        let (disc, mv) = result.unwrap();
-        assert_eq!(disc, sel);
-        assert_eq!(mv, 0);
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.min_val, 0);
+        assert_eq!(recovered.proof_kind, DispatcherProofKind::JumpTable);
     }
 
     // switch_expr = Load(0x40b000 + (sel - 5) * 8)
@@ -280,9 +347,10 @@ mod tests {
         let expr = load(add(cst(0x40b000), mul(adj_sel, cst(8))));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
-        let (disc, mv) = result.unwrap();
-        assert_eq!(disc, orig);
-        assert_eq!(mv, 5);
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, orig);
+        assert_eq!(recovered.min_val, 5);
+        assert_eq!(recovered.proof_kind, DispatcherProofKind::JumpTable);
     }
 
     // switch_expr = Load(0x40b000 + (ulonglong)sel * 8)
@@ -294,9 +362,9 @@ mod tests {
         let expr = load(add(cst(0x40b000), mul(cast_u64(inner_sel.clone()), cst(8))));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
-        let (disc, mv) = result.unwrap();
-        assert_eq!(disc, inner_sel);
-        assert_eq!(mv, 0);
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, inner_sel);
+        assert_eq!(recovered.min_val, 0);
     }
 
     // switch_expr = Load(0x40b000 + sel << 3)
@@ -308,9 +376,13 @@ mod tests {
         let expr = load(add(cst(0x40b000), shl(sel.clone(), cst(3))));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
-        let (disc, mv) = result.unwrap();
-        assert_eq!(disc, sel);
-        assert_eq!(mv, 0);
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.min_val, 0);
+        assert_eq!(
+            recovered.proof_kind,
+            DispatcherProofKind::ConstantStrideIndex
+        );
     }
 
     // Base address NOT in a section → should return None
@@ -332,9 +404,10 @@ mod tests {
         let expr = load(add(mul(sel.clone(), cst(8)), cst(0x40b000)));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
-        let (disc, mv) = result.unwrap();
-        assert_eq!(disc, sel);
-        assert_eq!(mv, 0);
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.min_val, 0);
+        assert_eq!(recovered.proof_kind, DispatcherProofKind::JumpTable);
     }
 
     // Not a Load expression → should return None
@@ -343,5 +416,23 @@ mod tests {
         let opts = options_with_section(0x40b000, 0x40c000);
         let expr = var("x");
         assert!(recover_switch_discriminant(&expr, &opts).is_none());
+    }
+
+    #[test]
+    fn proves_single_target_self_loop_dispatcher_from_global_load() {
+        let opts = options_with_section(0x40b000, 0x40c000);
+        let expr = load(cst(0x40b120));
+        assert!(proves_single_target_dispatcher_surface(
+            &expr,
+            &[0x5000],
+            0x5000,
+            &opts
+        ));
+        assert!(!proves_single_target_dispatcher_surface(
+            &expr,
+            &[0x5010],
+            0x5000,
+            &opts
+        ));
     }
 }

@@ -461,14 +461,32 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
                 + stats.indirect_target_set_refined_count,
         ),
         (
-            "cleanup".to_string(),
-            stats.cleanup_budget_skip_count
-                + stats.cleanup_family_binding_init_count
-                + stats.cleanup_family_stmt_canonical_count
-                + stats.cleanup_stmt_fold_count
-                + stats.cleanup_boundary_label_count
-                + stats.cleanup_loopish_rewrite_count
-                + stats.cleanup_family_dead_binding_count,
+            "cleanup_budget".to_string(),
+            stats.cleanup_budget_skip_count,
+        ),
+        (
+            "cleanup_binding_init".to_string(),
+            stats.cleanup_family_binding_init_count,
+        ),
+        (
+            "cleanup_stmt_canonical".to_string(),
+            stats.cleanup_family_stmt_canonical_count,
+        ),
+        (
+            "cleanup_stmt_fold".to_string(),
+            stats.cleanup_stmt_fold_count,
+        ),
+        (
+            "cleanup_boundary_label".to_string(),
+            stats.cleanup_boundary_label_count,
+        ),
+        (
+            "cleanup_loopish_rewrite".to_string(),
+            stats.cleanup_loopish_rewrite_count,
+        ),
+        (
+            "cleanup_dead_binding".to_string(),
+            stats.cleanup_family_dead_binding_count,
         ),
         (
             "structuring".to_string(),

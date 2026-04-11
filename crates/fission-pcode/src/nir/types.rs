@@ -302,6 +302,7 @@ pub struct IndirectTargetSet {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatcherProofKind {
+    SuccessorBounded,
     JumpTable,
     ConstantStrideIndex,
     TailForwarder,
@@ -336,6 +337,31 @@ impl IndirectControlClassification {
                 || stats.unsupported_external_target_count > 0,
             has_dispatcher_recovery: stats.dispatcher_shape_recovered_count > 0,
         }
+    }
+
+    #[must_use]
+    pub fn from_flags(
+        has_indirect_control: bool,
+        has_preserved_indirect_surface: bool,
+        has_unresolved_unsupported_indirect: bool,
+        has_dispatcher_recovery: bool,
+    ) -> Self {
+        Self {
+            has_indirect_control,
+            has_preserved_indirect_surface,
+            has_unresolved_unsupported_indirect,
+            has_dispatcher_recovery,
+        }
+    }
+
+    #[must_use]
+    pub fn allows_heuristic_surface_candidate(&self) -> bool {
+        !self.has_unresolved_unsupported_indirect
+    }
+
+    #[must_use]
+    pub fn allows_strict_explicit_candidate(&self, pcode_op_count: usize) -> bool {
+        !self.has_unresolved_unsupported_indirect && pcode_op_count <= 800
     }
 }
 

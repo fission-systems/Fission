@@ -209,18 +209,27 @@ impl<'a> PreviewBuilder<'a> {
                             })
                         } else {
                             let default_target = this.infer_switch_default_target(idx, &targets);
-                            // Attempt to recover the real switch discriminant from the
-                            // jump-table load pattern: `Load(table + sel * scale)`.
-                            let recovered_discriminant =
+                            // Attempt to recover a proof-bearing selector before we synthesize
+                            // a switch. Single-target self-loop dispatcher shapes stay as
+                            // explicit indirect surfaces instead of becoming degenerate switches.
+                            let recovered_selector =
                                 super::switch_table::recover_switch_discriminant(
                                     &switch_expr,
                                     &this.options,
                                 );
-                            let bounded_switch_targets = targets.len() > 1;
+                            let single_target_dispatcher =
+                                super::switch_table::proves_single_target_dispatcher_surface(
+                                    &switch_expr,
+                                    &targets,
+                                    this.block_target_key(idx),
+                                    &this.options,
+                                );
                             let dispatcher_recovered =
-                                recovered_discriminant.is_some() || bounded_switch_targets;
-                            let (expr, min_val) =
-                                recovered_discriminant.unwrap_or((switch_expr, 0));
+                                recovered_selector.is_some() || single_target_dispatcher;
+                            let (expr, min_val) = recovered_selector
+                                .as_ref()
+                                .map(|selector| (selector.discriminant.clone(), selector.min_val))
+                                .unwrap_or_else(|| (switch_expr.clone(), 0));
                             let non_default_targets = targets
                                 .iter()
                                 .filter(|target| Some(**target) != default_target)
@@ -229,7 +238,7 @@ impl<'a> PreviewBuilder<'a> {
                             if dispatcher_recovered {
                                 this.dispatcher_shape_recovered_count += 1;
                             }
-                            if non_default_targets == 0 {
+                            if non_default_targets == 0 || single_target_dispatcher {
                                 let evidence = UnsupportedControlEvidence {
                                     opcode: format!("{:?}", op.opcode),
                                     source_block: Some(block.start_address),

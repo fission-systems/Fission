@@ -9,6 +9,64 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Proof-complete dispatcher recovery wave — canonical proof state now recovers dispatcher shapes instead of only preserving indirect residue
+
+This wave pushed indirect control recovery one step past bare surface preservation. The canonical owner remains `fission-pcode`, but `BranchInd` lowering now emits proof-aware selector state, degenerate self-loop dispatcher cases stay explicit `DispatcherLike` surfaces instead of collapsing into fake one-case switches, and downstream admission/filtering now reads one canonical indirect classification helper instead of re-deriving policy from local booleans.
+
+- [`switch_table.rs`](crates/fission-pcode/src/nir/builder/switch_table.rs) now returns `RecoveredSwitchSelector` with proof kind metadata and can prove single-target dispatcher-like surfaces from mapped-global selector loads without inventing direct-call targets.
+- [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now:
+  - records selector proof state from `BranchInd` lowering
+  - uses canonical block target identity for self-loop detection
+  - promotes proof-complete single-target cases to explicit `DispatcherLike` unsupported surfaces instead of synthesizing degenerate switches
+  - increments canonical dispatcher/indirect proof counters from the builder owner
+- [`bootstrap_x86.rs`](crates/fission-pcode/src/nir/tests/bootstrap_x86.rs) now contains a regression that locks in the new self-loop dispatcher behavior.
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs) now exposes canonical `IndirectControlClassification` helpers so admission/filtering logic can be reused instead of reimplemented.
+- [`provenance.rs`](crates/fission-cli/src/cli/oneshot/inventory/provenance.rs), [`summary.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/summary.rs), and [`corpus.rs`](crates/fission-automation/src/corpus.rs) now consume the canonical classification helper instead of maintaining separate indirect-control predicates.
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now preserves split cleanup/indirect family attribution instead of recombining everything into one benchmark-side quality bucket.
+
+Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 50` spot-check:
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- public summary direct-success: `50/50 -> 50/50`
+- `avg_normalized_similarity`: `37.55% -> 37.59%`
+- median normalized similarity: `37.75% -> 38.00%`
+- public indirect counters:
+  - `fission unsupported indirect: 1 -> 1`
+  - `fission indirect-surface preserved: 9 -> 15`
+  - `fission jump-table functions: 7 -> 1`
+  - `fission dispatcher recovered: 0 -> 6`
+- representative low-sim rows:
+  - `0x140001160`: `1.42% -> 1.19%`, still unresolved, preserved-indirect `1 -> 2`, dispatcher recovered `0 -> 0`
+  - `0x140008900`: `19.95% -> 19.69%`, preserved-indirect `0 -> 2`, dispatcher recovered `0 -> 1`
+  - `0x140008090`: `33.00% -> 33.11%`, preserved-indirect `0 -> 2`, dispatcher recovered `0 -> 1`
+- `nir-check` fast lane:
+  - `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant slow passes remain the same bottleneck family:
+    - `cleanup_stmt_canonical_init_1: 121.1ms -> 120.3ms`
+    - `cleanup_dead_binding_init_1: 42.2ms -> 42.3ms`
+
+Net effect:
+
+- improved:
+  - canonical dispatcher recovery is now real, not just indirect-surface preservation
+  - duplicate indirect-control admission logic was reduced across `fission-pcode`, CLI inventory/candidate summary, and automation corpus filtering
+  - similarity moved slightly upward while keeping coverage/direct-success guardrails flat
+- did not improve enough:
+  - `0x140001160` remains the worst function and still carries unresolved unsupported indirect control
+  - `0x140008900` now has dispatcher proof, but similarity is still low, so proof completion alone is not sufficient there
+  - cleanup perf is still blocked on the same `cleanup_stmt_canonical_init_1` / `cleanup_dead_binding_init_1` pair
+
+Next bottleneck:
+
+- the next wave should stop treating dispatcher recovery as the only blocker and instead attack the remaining `0x140001160` proof gap plus the pass-manager cleanup gate directly
+- specifically:
+  - complete target-map recovery for the unresolved indirect path in `0x140001160`
+  - move more switch/dispatcher synthesis into proof consumers before late cleanup
+  - split or budget the heavyweight cleanup family at the canonical owner instead of relying on downstream attribution only
+
 ### Dispatcher-proof ownership consolidation wave — canonical indirect-control classification now drives static, CLI, and benchmark consumers
 
 This wave consolidated indirect-control meaning around canonical `fission-pcode` contracts and removed another layer of downstream reinterpretation. It did not complete proof-driven dispatcher recovery yet, but it did move the repository onto one shared indirect-control predicate and one shared unsupported/dispatcher counter contract.

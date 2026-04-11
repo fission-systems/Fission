@@ -713,6 +713,71 @@ fn preview_branchind_single_target_degrades_to_dispatcher_surface() {
 }
 
 #[test]
+fn preview_branchind_self_loop_global_load_prefers_dispatcher_surface() {
+    let switch_var = uniq(0x900, 8);
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x405300,
+            successors: vec![0],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x405300,
+                    output: Some(switch_var.clone()),
+                    inputs: vec![cst(0, 8), cst(0x401380, 8)],
+                    asm_mnemonic: Some("LOAD dispatcher slot".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x405301,
+                    output: None,
+                    inputs: vec![switch_var],
+                    asm_mnemonic: Some("JMP_IND".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Unsupported {
+            evidence,
+            target_expr,
+        } => {
+            assert_eq!(evidence.surface, IndirectControlSurface::DispatcherLike);
+            assert_eq!(
+                evidence.failure_family,
+                UnsupportedControlFamily::NonStructuralDispatcher
+            );
+            assert_eq!(evidence.successor_targets.len(), 1);
+            assert!(target_expr.is_some());
+        }
+        other => panic!("expected dispatcher surface, got {other:?}"),
+    }
+    let stats = builder.preview_build_stats();
+    assert_eq!(stats.dispatcher_shape_recovered_count, 1);
+    assert_eq!(stats.indirect_target_set_refined_count, 1);
+
+    let code = render_mlil_preview(
+        &func,
+        "dispatcher_self_loop_global_load",
+        0x405300,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    assert!(code.contains("__fission_dispatcher_indirect("), "{code}");
+    assert!(!code.contains("switch ("), "{code}");
+}
+
+#[test]
 fn preview_unresolved_cbranch_uses_unique_non_fallthrough_successor() {
     let func = PcodeFunction {
         blocks: vec![

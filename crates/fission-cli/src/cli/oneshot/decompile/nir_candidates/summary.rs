@@ -1,6 +1,8 @@
 use super::super::*;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
-use fission_pcode::{NirBuildStats, pcode_has_indirect_control_flow};
+use fission_pcode::{
+    IndirectControlClassification, NirBuildStats, pcode_has_indirect_control_flow,
+};
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
@@ -152,11 +154,16 @@ pub(super) fn build_quality_tags_and_score(
 }
 
 pub(crate) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
+    let indirect = IndirectControlClassification::from_flags(
+        entry.has_indirect_control_flow,
+        entry.has_preserved_indirect_surface,
+        entry.has_unresolved_unsupported_indirect,
+        entry.has_dispatcher_recovery,
+    );
     (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type))
         >= 2
         && entry.preview_direct_success
-        && !entry.has_unresolved_unsupported_indirect
-        && entry.pcode_op_count <= 800
+        && indirect.allows_strict_explicit_candidate(entry.pcode_op_count)
 }
 
 pub(crate) fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {

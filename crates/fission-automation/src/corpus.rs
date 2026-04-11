@@ -3,6 +3,7 @@ use crate::model::{
     ExplicitBreakdownTotals, FactSourcesPresent, InventoryRow, InventorySummary, SourceMeta,
     SourcePresenceCounts,
 };
+use fission_pcode::IndirectControlClassification;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -100,11 +101,16 @@ pub fn candidate_passes_explicit_quality_prefilter(
     entry: &InventoryRow,
     source_meta: Option<&SourceMeta>,
 ) -> bool {
+    let indirect = IndirectControlClassification::from_flags(
+        entry.has_indirect_control_flow,
+        entry.has_preserved_indirect_surface,
+        entry.has_unresolved_unsupported_indirect,
+        entry.has_dispatcher_recovery,
+    );
     source_is_nir_aligned(source_meta)
         && explicit_fact_total(entry) >= 2
         && entry.nir_direct_success
-        && !entry.has_unresolved_unsupported_indirect
-        && entry.pcode_op_count <= 800
+        && indirect.allows_strict_explicit_candidate(entry.pcode_op_count)
 }
 
 pub fn candidate_passes_heuristic_quality_prefilter(entry: &InventoryRow) -> bool {
