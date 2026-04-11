@@ -216,12 +216,34 @@ impl<'a> PreviewBuilder<'a> {
                                     &switch_expr,
                                     &this.options,
                                 );
-                            let dispatcher_recovered = recovered_discriminant.is_some();
+                            let bounded_switch_targets = targets.len() > 1;
+                            let dispatcher_recovered =
+                                recovered_discriminant.is_some() || bounded_switch_targets;
                             let (expr, min_val) =
                                 recovered_discriminant.unwrap_or((switch_expr, 0));
+                            let non_default_targets = targets
+                                .iter()
+                                .filter(|target| Some(**target) != default_target)
+                                .count();
                             this.indirect_target_set_refined_count += 1;
                             if dispatcher_recovered {
                                 this.dispatcher_shape_recovered_count += 1;
+                            }
+                            if non_default_targets == 0 {
+                                let evidence = UnsupportedControlEvidence {
+                                    opcode: format!("{:?}", op.opcode),
+                                    source_block: Some(block.start_address),
+                                    target_expr: Some(print_expr(&expr)),
+                                    successor_targets: targets,
+                                    failure_family:
+                                        UnsupportedControlFamily::NonStructuralDispatcher,
+                                    surface: IndirectControlSurface::DispatcherLike,
+                                    confidence: if dispatcher_recovered { 60 } else { 40 },
+                                };
+                                return Ok(LoweredTerminator::Unsupported {
+                                    evidence,
+                                    target_expr: Some(expr),
+                                });
                             }
                             Ok(LoweredTerminator::Switch {
                                 expr,

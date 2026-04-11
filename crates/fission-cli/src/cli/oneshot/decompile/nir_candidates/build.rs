@@ -5,6 +5,7 @@ use super::summary::{
     explicit_hint_surface_count, fact_density, pcode_metrics, preview_block_detail,
     preview_block_signature, preview_goto_count, preview_surface_kind_str,
 };
+use fission_pcode::IndirectControlClassification;
 
 fn build_preview_candidate_entry(
     decomp: &mut DecompilerNative,
@@ -158,6 +159,8 @@ fn build_preview_candidate_entry(
         nir_goto_count,
         nir_build_stats,
     );
+    let indirect_classification =
+        IndirectControlClassification::from_stats(nir_build_stats.as_ref(), has_indirect);
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
         if let Some(after) = recovery_goto_count_after {
@@ -230,7 +233,11 @@ fn build_preview_candidate_entry(
         recovery_quality_flags,
         pcode_block_count,
         pcode_op_count,
-        has_indirect_control_flow: has_indirect,
+        has_indirect_control_flow: indirect_classification.has_indirect_control,
+        has_preserved_indirect_surface: indirect_classification.has_preserved_indirect_surface,
+        has_unresolved_unsupported_indirect: indirect_classification
+            .has_unresolved_unsupported_indirect,
+        has_dispatcher_recovery: indirect_classification.has_dispatcher_recovery,
         auto_eligible,
         nir_goto_count,
         nir_output_class,
@@ -333,6 +340,9 @@ fn build_preview_candidate_fallback_entry(
         pcode_block_count: 0,
         pcode_op_count: 0,
         has_indirect_control_flow: false,
+        has_preserved_indirect_surface: false,
+        has_unresolved_unsupported_indirect: false,
+        has_dispatcher_recovery: false,
         auto_eligible: false,
         nir_goto_count: None,
         nir_output_class: None,

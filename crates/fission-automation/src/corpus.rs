@@ -103,7 +103,7 @@ pub fn candidate_passes_explicit_quality_prefilter(
     source_is_nir_aligned(source_meta)
         && explicit_fact_total(entry) >= 2
         && entry.nir_direct_success
-        && !entry.has_indirect_control_flow
+        && !entry.has_unresolved_unsupported_indirect
         && entry.pcode_op_count <= 800
 }
 

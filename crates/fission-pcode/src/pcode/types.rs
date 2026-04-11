@@ -467,6 +467,14 @@ pub struct PcodeFunction {
 }
 
 impl PcodeFunction {
+    #[must_use]
+    pub fn has_indirect_control_flow(&self) -> bool {
+        self.blocks
+            .iter()
+            .flat_map(|block| block.ops.iter())
+            .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
+    }
+
     /// Parse Pcode from JSON (returned by C++ FFI)
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         #[derive(Deserialize)]
@@ -643,7 +651,8 @@ impl PcodeFunction {
             }
             blocks.push(PcodeBasicBlock {
                 index,
-                start_address, successors: vec![],
+                start_address,
+                successors: vec![],
                 ops,
             });
         }
@@ -693,6 +702,11 @@ impl PcodeFunction {
     pub fn all_ops_mut(&mut self) -> impl Iterator<Item = &mut PcodeOp> {
         self.blocks.iter_mut().flat_map(|b| b.ops.iter_mut())
     }
+}
+
+#[must_use]
+pub fn pcode_has_indirect_control_flow(pcode: &PcodeFunction) -> bool {
+    pcode.has_indirect_control_flow()
 }
 
 fn parse_hex_addr(s: &str) -> u64 {

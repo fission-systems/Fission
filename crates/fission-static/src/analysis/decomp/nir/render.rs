@@ -1,13 +1,13 @@
+use super::FactStore;
 use super::nir_types::NirWorkerRequest;
 use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
-use super::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats, NirBuildStats,
-    NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, PcodeOptimizer,
-    PcodeOptimizerConfig,
+    NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode,
+    PcodeOptimizer, PcodeOptimizerConfig, pcode_has_indirect_control_flow, render_nir_with_context,
+    take_last_nir_build_stats, take_last_nir_hint_stats,
 };
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
 use tracing::trace_span;
 
@@ -23,14 +23,8 @@ fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {
 
 fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> String {
     let detail = panic_payload_to_string(payload);
-    nir_diag_event(
-        address,
-        "render_preview_panic",
-        format!("detail={detail}"),
-    );
-    format!(
-        "nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}"
-    )
+    nir_diag_event(address, "render_preview_panic", format!("detail={detail}"));
+    format!("nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}")
 }
 
 pub(crate) fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
@@ -46,14 +40,6 @@ pub(crate) fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
         .map(|op| op.inputs.len())
         .max()
         .unwrap_or(0)
-}
-
-pub(crate) fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
-    pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
 }
 
 pub(crate) fn nir_diag_stage(address: u64, stage: &str, start: Instant) {
@@ -140,7 +126,7 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(pcode) <= 600
-            && !contains_indirect_control_flow(pcode)
+            && !pcode_has_indirect_control_flow(pcode)
             && max_multiequal_fanin(pcode) <= 4)
     {
         return Ok(None);
@@ -368,7 +354,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !contains_indirect_control_flow(&pcode)
+            && !pcode_has_indirect_control_flow(&pcode)
             && max_multiequal_fanin(&pcode) <= 4)
     {
         return Ok(None);
@@ -388,7 +374,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !contains_indirect_control_flow(&pcode)
+            && !pcode_has_indirect_control_flow(&pcode)
             && max_multiequal_fanin(&pcode) <= 4);
 
     if should_use_worker {

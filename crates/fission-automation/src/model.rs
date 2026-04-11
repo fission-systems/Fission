@@ -174,6 +174,12 @@ pub struct InventoryRow {
     #[serde(default)]
     pub has_indirect_control_flow: bool,
     #[serde(default)]
+    pub has_preserved_indirect_surface: bool,
+    #[serde(default)]
+    pub has_unresolved_unsupported_indirect: bool,
+    #[serde(default)]
+    pub has_dispatcher_recovery: bool,
+    #[serde(default)]
     pub auto_eligible: bool,
     #[serde(default)]
     pub nir_goto_count: Option<usize>,

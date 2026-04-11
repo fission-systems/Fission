@@ -46,6 +46,9 @@ pub(super) struct InventoryCandidateEntry {
     pub(super) pcode_block_count: usize,
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
+    pub(super) has_preserved_indirect_surface: bool,
+    pub(super) has_unresolved_unsupported_indirect: bool,
+    pub(super) has_dispatcher_recovery: bool,
     pub(super) auto_eligible: bool,
     pub(super) nir_goto_count: Option<usize>,
     pub(super) nir_output_class: Option<String>,
@@ -97,6 +100,9 @@ impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCa
             pcode_block_count: entry.pcode_block_count,
             pcode_op_count: entry.pcode_op_count,
             has_indirect_control_flow: entry.has_indirect_control_flow,
+            has_preserved_indirect_surface: entry.has_preserved_indirect_surface,
+            has_unresolved_unsupported_indirect: entry.has_unresolved_unsupported_indirect,
+            has_dispatcher_recovery: entry.has_dispatcher_recovery,
             auto_eligible: entry.auto_eligible,
             nir_goto_count: entry.nir_goto_count,
             nir_output_class: entry.nir_output_class,
@@ -121,7 +127,7 @@ pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bo
         )
     });
     entry.preview_direct_success
-        && !entry.has_indirect_control_flow
+        && !entry.has_unresolved_unsupported_indirect
         && (heuristic_hits || has_reason_tag)
 }
 
@@ -186,14 +192,11 @@ fn strict_explicit_candidate_row(
 ) -> bool {
     explicit_fact_total >= 2
         && entry.preview_direct_success
-        && !entry.has_indirect_control_flow
+        && !entry.has_unresolved_unsupported_indirect
         && entry.pcode_op_count <= 800
 }
 
-fn admission_block_stage(
-    entry: &InventoryCandidateEntry,
-    inventory_surface_gap: bool,
-) -> String {
+fn admission_block_stage(entry: &InventoryCandidateEntry, inventory_surface_gap: bool) -> String {
     if entry.preview_direct_success {
         return "none".to_string();
     }
@@ -283,6 +286,9 @@ pub(super) fn to_inventory_row(
         pcode_block_count: entry.pcode_block_count,
         pcode_op_count: entry.pcode_op_count,
         has_indirect_control_flow: entry.has_indirect_control_flow,
+        has_preserved_indirect_surface: entry.has_preserved_indirect_surface,
+        has_unresolved_unsupported_indirect: entry.has_unresolved_unsupported_indirect,
+        has_dispatcher_recovery: entry.has_dispatcher_recovery,
         auto_eligible: entry.auto_eligible,
         nir_goto_count: entry.nir_goto_count,
         nir_output_class: entry.nir_output_class,
@@ -410,7 +416,10 @@ pub(super) fn update_inventory_summary(
         *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
     }
     if let Some(kind) = row.row_error_kind.as_ref() {
-        *summary.row_error_kind_counts.entry(kind.clone()).or_insert(0) += 1;
+        *summary
+            .row_error_kind_counts
+            .entry(kind.clone())
+            .or_insert(0) += 1;
     }
     let is_timeout = row.row_error_kind.as_deref() == Some("preview_timeout")
         || row.preview_fallback_kind_refined.as_deref() == Some("preview_timeout")

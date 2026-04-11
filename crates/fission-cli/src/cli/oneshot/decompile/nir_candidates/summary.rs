@@ -1,17 +1,9 @@
 use super::super::*;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
-use fission_pcode::NirBuildStats;
+use fission_pcode::{NirBuildStats, pcode_has_indirect_control_flow};
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
-}
-
-fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
-    pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
 }
 
 fn slot_alias_candidate(code: &str) -> bool {
@@ -163,7 +155,7 @@ pub(crate) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
     (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type))
         >= 2
         && entry.preview_direct_success
-        && !entry.has_indirect_control_flow
+        && !entry.has_unresolved_unsupported_indirect
         && entry.pcode_op_count <= 800
 }
 
@@ -397,7 +389,7 @@ pub(super) fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
     (
         pcode.blocks.len(),
         pcode_total_ops(pcode),
-        contains_indirect_control_flow(pcode),
+        pcode_has_indirect_control_flow(pcode),
     )
 }
 

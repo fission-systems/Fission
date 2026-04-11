@@ -1,19 +1,17 @@
 use super::FactStore;
 use super::nir_recovery::{
-    is_type_failure_for_nir_rescue, try_structuring_recovery,
-    try_structuring_recovery_from_pcode,
+    is_type_failure_for_nir_rescue, try_structuring_recovery, try_structuring_recovery_from_pcode,
 };
 use super::nir_render::{
-    build_nir_type_context_from_facts, contains_indirect_control_flow, max_multiequal_fanin,
-    pcode_total_ops, render_nir_from_json_with_type_context,
-    render_nir_from_pcode_with_type_context_and_options,
+    build_nir_type_context_from_facts, max_multiequal_fanin, pcode_total_ops,
+    render_nir_from_json_with_type_context, render_nir_from_pcode_with_type_context_and_options,
 };
 use super::nir_taxonomy::classify_native_failure_kind;
 use super::nir_types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{NirRenderOptions, PcodeFunction};
+use fission_pcode::{NirRenderOptions, PcodeFunction, pcode_has_indirect_control_flow};
 use std::time::Instant;
 
 pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
@@ -21,7 +19,7 @@ pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
         && binary.format.to_ascii_uppercase().starts_with("PE")
         && pcode.blocks.len() <= 12
         && pcode_total_ops(pcode) <= 600
-        && !contains_indirect_control_flow(pcode)
+        && !pcode_has_indirect_control_flow(pcode)
         && max_multiequal_fanin(pcode) <= 4
 }
 

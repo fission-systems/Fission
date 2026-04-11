@@ -52,6 +52,35 @@ def _lookup_path(data: dict[str, Any], path: tuple[str, ...], default: Any = Non
             return default
     return cur
 
+
+def _canonical_indirect_flags(preview_build_stats: dict[str, Any]) -> dict[str, Any]:
+    unsupported_indirect = _safe_int(
+        preview_build_stats.get("unsupported_indirect_control_count"), 0
+    )
+    unsupported_call = _safe_int(
+        preview_build_stats.get("unsupported_indirect_call_count"), 0
+    )
+    unsupported_external = _safe_int(
+        preview_build_stats.get("unsupported_external_target_count"), 0
+    )
+    preserved = _safe_int(
+        preview_build_stats.get("indirect_surface_preserved_count"), 0
+    )
+    dispatcher = _safe_int(
+        preview_build_stats.get("dispatcher_shape_recovered_count"), 0
+    )
+    refined = _safe_int(
+        preview_build_stats.get("indirect_target_set_refined_count"), 0
+    )
+    return {
+        "has_unresolved_unsupported_indirect": unsupported_indirect > 0
+        or unsupported_call > 0
+        or unsupported_external > 0,
+        "has_preserved_indirect_surface": preserved > 0,
+        "has_dispatcher_recovery": dispatcher > 0,
+        "has_indirect_target_proof": refined > 0,
+    }
+
 def find_repo_root() -> Path:
     current = Path(__file__).resolve()
     for parent in [current.parent, *current.parents]:
@@ -2122,6 +2151,8 @@ def build_pairwise_engine_comparison(
             row[f"{label}_dispatcher_shape_recovered_count"] = _safe_int(
                 preview_build_stats.get("dispatcher_shape_recovered_count"), 0
             )
+            for flag_name, flag_value in _canonical_indirect_flags(preview_build_stats).items():
+                row[f"{label}_{flag_name}"] = flag_value
         rows.append(row)
         if both_success:
             successful_rows.append(row)
@@ -2606,12 +2637,22 @@ def write_summary_files(
     lines.extend(["", "## Representative Lowest Similarity (`pyghidra_vs_fission`)", ""])
 
     if low_rows:
-        lines.append("| Address | pyghidra | fission | Norm Similarity |")
-        lines.append("|---|---|---|---:|")
+        lines.append("| Address | pyghidra | fission | Norm Similarity | Fission Indirect |")
+        lines.append("|---|---|---|---:|---|")
         for row in low_rows[:10]:
+            indirect_flags = []
+            if row.get("fission_has_unresolved_unsupported_indirect"):
+                indirect_flags.append("unsupported")
+            if row.get("fission_has_preserved_indirect_surface"):
+                indirect_flags.append("preserved")
+            if row.get("fission_has_dispatcher_recovery"):
+                indirect_flags.append("dispatcher")
+            if row.get("fission_has_indirect_target_proof"):
+                indirect_flags.append("target-proof")
             lines.append(
                 f"| `{row['address']}` | `{row['pyghidra_name']}` | `{row['fission_name']}` | "
-                f"{row['normalized_similarity']:.2f}% |"
+                f"{row['normalized_similarity']:.2f}% | "
+                f"`{','.join(indirect_flags) if indirect_flags else 'none'}` |"
             )
     else:
         lines.append("- No shared successful functions to compare.")

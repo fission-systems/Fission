@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Dispatcher-proof ownership consolidation wave — canonical indirect-control classification now drives static, CLI, and benchmark consumers
+
+This wave consolidated indirect-control meaning around canonical `fission-pcode` contracts and removed another layer of downstream reinterpretation. It did not complete proof-driven dispatcher recovery yet, but it did move the repository onto one shared indirect-control predicate and one shared unsupported/dispatcher counter contract.
+
+- Added canonical indirect-control helpers in [`types.rs`](crates/fission-pcode/src/pcode/types.rs) and [`types.rs`](crates/fission-pcode/src/nir/types.rs):
+  - `pcode_has_indirect_control_flow(...)`
+  - `IndirectControlClassification`
+- [`render.rs`](crates/fission-static/src/analysis/decomp/nir/render.rs) and [`routing.rs`](crates/fission-static/src/analysis/decomp/nir/routing.rs) now consume the canonical predicate instead of rescanning `PcodeFunction` with local indirect-control logic.
+- [`summary.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/summary.rs), [`build.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/build.rs), [`schema.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/schema.rs), [`emit.rs`](crates/fission-cli/src/cli/oneshot/inventory/emit.rs), [`provenance.rs`](crates/fission-cli/src/cli/oneshot/inventory/provenance.rs), and [`schema.rs`](crates/fission-cli/src/cli/oneshot/inventory/schema.rs) now pass through canonical indirect classification instead of re-deriving unsupported risk from engine-specific booleans.
+- [`model.rs`](crates/fission-automation/src/model.rs) and [`corpus.rs`](crates/fission-automation/src/corpus.rs) now consume the same canonical indirect flags for candidate filtering.
+- [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now attaches canonical indirect/dispatcher flags to pairwise rows and lowest-sim summaries instead of inventing a separate benchmark-side interpretation.
+- [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now lowers single-target degenerate `BranchInd` cases to explicit dispatcher pseudo-surface evidence (`DispatcherLike` / `NonStructuralDispatcher`) instead of emitting an empty switch wrapper. This keeps unresolved dispatcher residue explicit without reintroducing the old bare unsupported marker path.
+
+Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 50` spot-check:
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- public summary direct-success: `50/50 -> 50/50`
+- `avg_normalized_similarity`: `37.44% -> 37.55%`
+- public indirect counters:
+  - `fission unsupported indirect: 1 -> 1`
+  - `fission indirect-surface preserved: 1 -> 9`
+  - `fission jump-table functions: 8 -> 7`
+  - `fission dispatcher recovered: 0 -> 0`
+- representative low-sim rows:
+  - `0x140001160`: still unresolved, but preserved-indirect attribution `1 -> 2`
+  - `0x140008900`: preserved-indirect attribution `0 -> 1`
+  - `0x140008090`: preserved-indirect attribution `0 -> 1`
+- `nir-check` fast lane:
+  - `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant slow passes remain effectively flat:
+    - `cleanup_stmt_canonical_init_1: 120.6ms -> 121.1ms`
+    - `cleanup_dead_binding_init_1: 42.5ms -> 42.2ms`
+
+Net effect:
+
+- indirect-control ownership drift is lower across `fission-pcode`, `fission-static`, `fission-cli`, automation, and benchmark reporting
+- explicit dispatcher/indirect residue is surfaced more consistently
+- coverage and direct success remain stable
+- similarity improved slightly, but proof-complete dispatcher recovery is still not done
+- the next bottleneck remains actual dispatcher/jump-table proof for `0x140001160`, `0x140008900`, and `0x140008090`, plus the existing cleanup perf gate
+
 ### Unsupported-elimination wave — unresolved indirect control now preserves explicit surface and canonical counters
 
 This wave moved unresolved indirect control out of the old bare `__fission_indirect_cf_unsupported()` bucket and into canonical `fission-pcode` evidence/counter ownership.

@@ -316,6 +316,29 @@ pub struct DispatcherShape {
     pub proof_kind: DispatcherProofKind,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IndirectControlClassification {
+    pub has_indirect_control: bool,
+    pub has_preserved_indirect_surface: bool,
+    pub has_unresolved_unsupported_indirect: bool,
+    pub has_dispatcher_recovery: bool,
+}
+
+impl IndirectControlClassification {
+    #[must_use]
+    pub fn from_stats(stats: Option<&NirBuildStats>, has_indirect_control: bool) -> Self {
+        let stats = stats.cloned().unwrap_or_default();
+        Self {
+            has_indirect_control,
+            has_preserved_indirect_surface: stats.indirect_surface_preserved_count > 0,
+            has_unresolved_unsupported_indirect: stats.unsupported_indirect_control_count > 0
+                || stats.unsupported_indirect_call_count > 0
+                || stats.unsupported_external_target_count > 0,
+            has_dispatcher_recovery: stats.dispatcher_shape_recovered_count > 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirFunction {
     pub name: String,

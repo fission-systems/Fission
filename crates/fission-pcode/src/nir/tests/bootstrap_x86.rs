@@ -247,15 +247,19 @@ fn preview_branchind_without_successors_recovers_constant_target() {
         .lower_block_terminator(0)
         .expect("terminator lowering")
     {
-        LoweredTerminator::Switch {
-            targets,
-            default_target,
-            ..
+        LoweredTerminator::Unsupported {
+            evidence,
+            target_expr,
         } => {
-            assert_eq!(targets, vec![0x405120]);
-            assert_eq!(default_target, Some(0x405120));
+            assert_eq!(evidence.surface, IndirectControlSurface::DispatcherLike);
+            assert_eq!(
+                evidence.failure_family,
+                UnsupportedControlFamily::NonStructuralDispatcher
+            );
+            assert_eq!(evidence.successor_targets, vec![0x405120]);
+            assert!(target_expr.is_some());
         }
-        other => panic!("expected switch terminator, got {other:?}"),
+        other => panic!("expected dispatcher surface, got {other:?}"),
     }
 }
 
@@ -620,7 +624,7 @@ fn preview_cbranch_target_intadd_wrapper_recovers_direct_target() {
 }
 
 #[test]
-fn preview_branchind_load_address_recovers_direct_target() {
+fn preview_branchind_single_target_degrades_to_dispatcher_surface() {
     let switch_var = Varnode {
         space_id: 3,
         offset: 0,
@@ -683,16 +687,29 @@ fn preview_branchind_load_address_recovers_direct_target() {
         .lower_block_terminator(0)
         .expect("terminator lowering")
     {
-        LoweredTerminator::Switch {
-            targets,
-            default_target,
-            ..
+        LoweredTerminator::Unsupported {
+            evidence,
+            target_expr,
         } => {
-            assert_eq!(targets, vec![0x405220]);
-            assert_eq!(default_target, Some(0x405220));
+            assert_eq!(evidence.surface, IndirectControlSurface::DispatcherLike);
+            assert_eq!(
+                evidence.failure_family,
+                UnsupportedControlFamily::NonStructuralDispatcher
+            );
+            assert_eq!(evidence.successor_targets, vec![0x405220]);
+            assert!(target_expr.is_some());
         }
-        other => panic!("expected switch terminator, got {other:?}"),
+        other => panic!("expected dispatcher surface, got {other:?}"),
     }
+
+    let code = render_mlil_preview(
+        &func,
+        "dispatcher_single_target",
+        0x405200,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    assert!(code.contains("__fission_dispatcher_indirect("), "{code}");
 }
 
 #[test]

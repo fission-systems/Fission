@@ -7,7 +7,9 @@ use crate::cli::oneshot::function_select::{
     canonical_functions_sorted, select_functions_from_addresses_file,
 };
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_static::analysis::decomp::{FactStore, NirEngineMode, NirSurfaceKind, auto_nir_eligible};
+use fission_static::analysis::decomp::{
+    FactStore, NirEngineMode, NirSurfaceKind, auto_nir_eligible,
+};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -17,7 +19,9 @@ use crate::cli::oneshot::common::{
     apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
 };
 #[cfg(feature = "native_decomp")]
-use crate::cli::oneshot::decompile::{preview_candidate_entry_with_recovery, select_candidate_functions};
+use crate::cli::oneshot::decompile::{
+    preview_candidate_entry_with_recovery, select_candidate_functions,
+};
 #[cfg(feature = "native_decomp")]
 use crate::cli::output::OutputSilencer;
 #[cfg(feature = "native_decomp")]
@@ -31,7 +35,10 @@ use fission_static::analysis::decomp::{
 #[cfg(not(feature = "native_decomp"))]
 use fission_decompiler_core::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
 #[cfg(not(feature = "native_decomp"))]
-use fission_pcode::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, PcodeOpcode};
+use fission_pcode::{
+    IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
+    pcode_has_indirect_control_flow,
+};
 #[cfg(not(feature = "native_decomp"))]
 use fission_sleigh::lifter::SleighLifter;
 
@@ -132,16 +139,15 @@ pub(crate) fn emit_function_facts_inventory(
 
     for chunk in functions.chunks(chunk_size) {
         for func in chunk {
-            let candidate: InventoryCandidateEntry =
-                preview_candidate_entry_with_recovery(
-                    &mut decomp,
-                    binary,
-                    &fact_store,
-                    &binary_name,
-                    func,
-                    cli.timeout_ms,
-                )
-                .into();
+            let candidate: InventoryCandidateEntry = preview_candidate_entry_with_recovery(
+                &mut decomp,
+                binary,
+                &fact_store,
+                &binary_name,
+                func,
+                cli.timeout_ms,
+            )
+            .into();
             try_ingest_native_inventory_facts(&mut decomp, &mut fact_store, func.address);
             let row = to_inventory_row(&cli.binary, pdb_source_present, &fact_store, candidate);
             serde_json::to_writer(&mut writer, &row)
@@ -423,11 +429,7 @@ fn preview_block_detail(
 #[cfg(not(feature = "native_decomp"))]
 fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
     let total_ops = pcode.blocks.iter().map(|block| block.ops.len()).sum();
-    let has_indirect = pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd));
+    let has_indirect = pcode_has_indirect_control_flow(pcode);
     (pcode.blocks.len(), total_ops, has_indirect)
 }
 
@@ -475,15 +477,11 @@ fn decode_rust_sleigh_pcode(
     retry_on_decode_error: bool,
 ) -> Result<PcodeFunction, String> {
     let bytes = binary.view_bytes(entry_address, max_bytes).ok_or_else(|| {
-        format!(
-            "rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}"
-        )
+        format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}")
     })?;
 
-    let language =
-        sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
-            format!("rust_sleigh: unsupported arch_spec '{}'", binary.arch_spec)
-        })?;
+    let language = sleigh_language_for_arch_spec(&binary.arch_spec)
+        .ok_or_else(|| format!("rust_sleigh: unsupported arch_spec '{}'", binary.arch_spec))?;
 
     let lifter =
         SleighLifter::new_for_language(language).map_err(|e| format!("rust_sleigh: {e:#}"))?;
@@ -657,6 +655,9 @@ fn build_inventory_fallback_entry(
         pcode_block_count: 0,
         pcode_op_count: 0,
         has_indirect_control_flow: false,
+        has_preserved_indirect_surface: false,
+        has_unresolved_unsupported_indirect: false,
+        has_dispatcher_recovery: false,
         auto_eligible: false,
         nir_goto_count: None,
         nir_output_class: None,
@@ -827,6 +828,8 @@ fn build_inventory_candidate_entry_rust(
         nir_goto_count,
         nir_build_stats.as_ref(),
     );
+    let indirect_classification =
+        IndirectControlClassification::from_stats(nir_build_stats.as_ref(), has_indirect);
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
         if let Some(after) = recovery_goto_count_after {
@@ -898,7 +901,11 @@ fn build_inventory_candidate_entry_rust(
         preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
         pcode_block_count,
         pcode_op_count,
-        has_indirect_control_flow: has_indirect,
+        has_indirect_control_flow: indirect_classification.has_indirect_control,
+        has_preserved_indirect_surface: indirect_classification.has_preserved_indirect_surface,
+        has_unresolved_unsupported_indirect: indirect_classification
+            .has_unresolved_unsupported_indirect,
+        has_dispatcher_recovery: indirect_classification.has_dispatcher_recovery,
         auto_eligible,
         nir_goto_count,
         nir_output_class,
