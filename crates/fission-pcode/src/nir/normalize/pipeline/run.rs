@@ -1,19 +1,19 @@
+use super::super::analysis::defuse::{
+    apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
+};
 use super::super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
-    normalize_boolean_logic, recognize_hi_lo_extract, recognize_mod_div_power_of_two,
-    recognize_magic_number_division, recognize_wide_integer_recombine, simplify_subpiece_chain,
+    normalize_boolean_logic, recognize_hi_lo_extract, recognize_magic_number_division,
+    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, simplify_subpiece_chain,
 };
-use super::super::idioms::{
-    apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
-    apply_security_cookie_pass, remove_callee_save_prologue_epilogue,
-};
+use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
-    collapse_redundant_conditional_returns,
-    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
-    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
-    eliminate_dead_temp_assigns, fuse_single_predecessor_boundaries, inline_single_use_temps,
-    promote_guarded_jump_target_tail, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_redundant_conditional_returns,
+    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
+    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
+    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_fallthrough_edges,
 };
@@ -21,30 +21,32 @@ use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
     apply_redundant_load_elimination, apply_sccp_pass,
 };
-use super::super::analysis::defuse::{
-    apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
-};
-use super::super::recovery::{
-    apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
-    apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass,
+use super::super::idioms::{
+    apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
+    apply_security_cookie_pass, remove_callee_save_prologue_epilogue,
 };
 use super::super::memory::{
     apply_aggregate_fields_pass, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
     apply_ptr_arith_recovery_pass, normalize_binding_initializers,
+};
+use super::super::recovery::{
+    apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
+    apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::types::{
     apply_callsite_type_prop_pass, apply_entry_param_promotion_pass,
     apply_interproc_callsite_arity_pass, apply_type_inference_pass,
     apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
-use crate::nir::vsa::apply_jump_resolver_pass;
-use super::super::cleanup::single_pred_label_inline;
 use super::super::wave_stats;
 use super::super::*;
+use crate::nir::vsa::apply_jump_resolver_pass;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
 const TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS: usize = 6;
+const EARLY_CLEANUP_BLOCK_STMT_LIMIT: usize = 2000;
+const EARLY_CLEANUP_BLOCK_BLOCK_LIMIT: usize = 300;
 
 #[derive(Debug, Clone, Copy)]
 struct PassBudget {
@@ -53,14 +55,19 @@ struct PassBudget {
     round_limit: usize,
 }
 
+impl PassBudget {
+    fn allows_body_cleanup(self, stmt_count: usize, block_count: usize) -> bool {
+        stmt_count <= self.stmt_limit && block_count <= self.block_limit
+    }
+}
+
 fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bool) {
     let mut interproc_signature_rounds = 0usize;
     for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
         let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
         let round_start = if perf { Some(Instant::now()) } else { None };
 
-        let def_changed =
-            run_pass_logged(func, "type_inference", perf, apply_type_inference_pass);
+        let def_changed = run_pass_logged(func, "type_inference", perf, apply_type_inference_pass);
         let callsite_changed = run_pass_logged(
             func,
             "callsite_type_prop",
@@ -149,7 +156,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // can eliminate now-dead flag-variable assignments.
     if run_pass_logged(func, "flag_recovery", perf, apply_flag_recovery_pass) {
         run_cleanup_block(func, "cleanup_defuse_4", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             defuse_dead_assignment_pass(f);
@@ -157,13 +163,17 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
     // Parity / popcount dead elimination: remove __popcount-based assignments
     // whose result is not consumed anywhere (e.g., dead parity flag variables
     // remaining after flag recovery or simple unused parity computations).
-    if run_pass_logged(func, "elide_unused_popcount", perf, elide_unused_popcount_assigns) {
+    if run_pass_logged(
+        func,
+        "elide_unused_popcount",
+        perf,
+        elide_unused_popcount_assigns,
+    ) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
@@ -176,7 +186,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         remove_callee_save_prologue_epilogue,
     ) {
         run_cleanup_block(func, "cleanup_defuse_5", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             defuse_dead_assignment_pass(f);
@@ -184,16 +193,21 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
-    let _ = run_pass_logged(func, "call_artifact_cleanup", perf, apply_call_artifact_cleanup_pass);
+    let _ = run_pass_logged(
+        func,
+        "call_artifact_cleanup",
+        perf,
+        apply_call_artifact_cleanup_pass,
+    );
     let _ = run_pass_logged(func, "security_cookie", perf, apply_security_cookie_pass);
     // Run constant folding after the initial cleanup so that folded constants
     // unlock further simplifications in subsequent passes.
-    if run_pass_logged(func, "constant_folding", perf, |f| constant_folding_pass(&mut f.body)) {
+    if run_pass_logged(func, "constant_folding", perf, |f| {
+        constant_folding_pass(&mut f.body)
+    }) {
         run_cleanup_block(func, "cleanup_elim_7", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             eliminate_dead_local_clobber_assigns(f);
@@ -201,7 +215,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
     // ABI-aware entry spill → param_k promotion (HIR, after early cleanup).
@@ -212,7 +225,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_entry_param_promotion_pass,
     ) {
         run_cleanup_block(func, "cleanup_defuse_6", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             defuse_dead_assignment_pass(f);
@@ -220,7 +232,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
     // SCCP: global sparse constant propagation on structured HIR (lattice merge
@@ -231,7 +242,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             constant_folding_pass(&mut f.body)
         }) {
             run_cleanup_block(func, "cleanup_elim_8", perf, |f| {
-
                 cleanup_stmt_list(&mut f.body, &f.name, 0);
 
                 eliminate_dead_local_clobber_assigns(f);
@@ -239,7 +249,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
                 prune_unused_temp_bindings(f);
 
                 prune_unused_dead_local_bindings(f);
-
             });
         }
         run_pass_logged(
@@ -255,7 +264,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // with the variable that first computed them.  Runs right after constant
     // folding so that folded constants are included in the expression map.
     if run_pass_logged(func, "cse", perf, apply_cse_pass) {
-        if run_pass_logged(func, "copy_propagation_after_cse", perf, copy_propagation_pass) {
+        if run_pass_logged(
+            func,
+            "copy_propagation_after_cse",
+            perf,
+            copy_propagation_pass,
+        ) {
             run_pass_logged(
                 func,
                 "defuse_dead_assignment_after_cse_copy",
@@ -303,8 +317,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_branch_prefix_hoist_pass,
     ) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-        if run_pass_logged(func, "copy_propagation_after_branch_hoist", perf, copy_propagation_pass)
-        {
+        if run_pass_logged(
+            func,
+            "copy_propagation_after_branch_hoist",
+            perf,
+            copy_propagation_pass,
+        ) {
             run_pass_logged(
                 func,
                 "defuse_dead_assignment_after_branch_hoist_copy",
@@ -324,7 +342,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
     if run_pass_logged(func, "gvn_join_hoist", perf, apply_gvn_join_hoist_pass) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-        if run_pass_logged(func, "copy_propagation_after_gvn", perf, copy_propagation_pass) {
+        if run_pass_logged(
+            func,
+            "copy_propagation_after_gvn",
+            perf,
+            copy_propagation_pass,
+        ) {
             run_pass_logged(
                 func,
                 "defuse_dead_assignment_after_gvn_copy",
@@ -402,8 +425,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         if diag {
             eprintln!(
                 "[DIAG] normalize bitstream: {} changed={}",
-                func.name,
-                changed,
+                func.name, changed,
             );
         }
         if changed {
@@ -430,11 +452,9 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_ptr_arith_recovery_pass,
     ) {
         run_cleanup_block(func, "cleanup_standalone_12", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
-
         });
-run_pass_logged(
+        run_pass_logged(
             func,
             "defuse_dead_assignment_after_ptr_arith",
             perf,
@@ -444,13 +464,16 @@ run_pass_logged(
     // Memory SSA dead store elimination: remove stack-slot stores that are
     // never observed by any subsequent load.  Must run after ptr_arith_recovery
     // so Deref/PtrOffset patterns are normalised, and before aggregate_fields.
-    if run_pass_logged(func, "dead_store_elimination", perf, apply_dead_store_elimination) {
+    if run_pass_logged(
+        func,
+        "dead_store_elimination",
+        perf,
+        apply_dead_store_elimination,
+    ) {
         run_cleanup_block(func, "cleanup_standalone_13", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
-
         });
-run_pass_logged(
+        run_pass_logged(
             func,
             "defuse_dead_assignment_after_dead_store",
             perf,
@@ -466,11 +489,9 @@ run_pass_logged(
         apply_redundant_load_elimination,
     ) {
         run_cleanup_block(func, "cleanup_standalone_14", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
-
         });
-run_pass_logged(
+        run_pass_logged(
             func,
             "defuse_dead_assignment_after_redundant_load",
             perf,
@@ -506,26 +527,27 @@ run_pass_logged(
     // simplified first.
     if run_pass_logged(func, "iv_recovery", perf, apply_iv_recovery_pass) {
         run_cleanup_block(func, "cleanup_prune_9", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
     // Break/Continue recovery: replace single-predecessor Goto-to-exit-label
     // patterns inside loops with explicit break/continue statements.
-    if run_pass_logged(func, "break_continue_recovery", perf, apply_break_continue_pass) {
+    if run_pass_logged(
+        func,
+        "break_continue_recovery",
+        perf,
+        apply_break_continue_pass,
+    ) {
         run_cleanup_block(func, "cleanup_prune_10", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             prune_unused_temp_bindings(f);
 
             prune_unused_dead_local_bindings(f);
-
         });
     }
     // Loop Invariant Code Motion: hoist pure loop-invariant assignments out of
@@ -533,11 +555,9 @@ run_pass_logged(
     // loop structure is finalised.
     if run_pass_logged(func, "licm", perf, apply_licm_pass) {
         run_cleanup_block(func, "cleanup_standalone_15", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
-
         });
-run_pass_logged(
+        run_pass_logged(
             func,
             "defuse_dead_assignment_after_licm",
             perf,
@@ -556,13 +576,13 @@ run_pass_logged(
     // Value Set Analysis: use range information to eliminate dead switch
     // cases and constant-condition branches.  Runs last so all structural
     // passes have already simplified the body.
-    if run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass) {
+    if !body_exceeds_early_cleanup_budget(&func.body)
+        && run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass)
+    {
         run_cleanup_block(func, "cleanup_prune1_11", perf, |f| {
-
             cleanup_stmt_list(&mut f.body, &f.name, 0);
 
             prune_unused_temp_bindings(f);
-
         });
     }
     if perf {
@@ -617,10 +637,20 @@ fn hir_shape(func: &HirFunction) -> (usize, usize) {
     (count_hir_stmts(&func.body), func.locals.len())
 }
 
+fn body_exceeds_early_cleanup_budget(body: &[HirStmt]) -> bool {
+    count_hir_stmts(body) > EARLY_CLEANUP_BLOCK_STMT_LIMIT
+        || count_hir_blocks(body) > EARLY_CLEANUP_BLOCK_BLOCK_LIMIT
+}
+
 fn run_cleanup_block<F>(func: &mut HirFunction, pass_name: &str, perf: bool, mut block: F) -> bool
 where
     F: FnMut(&mut HirFunction),
 {
+    if body_exceeds_early_cleanup_budget(&func.body) {
+        wave_stats::add_cleanup_budget_skips(1);
+        return false;
+    }
+
     run_pass_logged(func, pass_name, perf, |f| {
         let (before_stmts, before_locals) = hir_shape(f);
         block(f);
@@ -636,19 +666,17 @@ fn run_cleanup_family_passes(
     budget: PassBudget,
 ) -> bool {
     let mut changed = false;
+    let body_stmt_count = count_hir_stmts(&func.body);
+    let body_block_count = count_hir_blocks(&func.body);
+    let within_body_budget = budget.allows_body_cleanup(body_stmt_count, body_block_count);
 
     if has_binding_initializers(&func.locals) {
         wave_stats::add_cleanup_family_binding_init(1);
-        changed |= run_pass_logged(
-            func,
-            &format!("cleanup_binding_init_{stage}"),
-            perf,
-            |f| {
-                let before = collect_initializer_fingerprints(&f.locals);
-                normalize_binding_initializers(&mut f.locals);
-                before != collect_initializer_fingerprints(&f.locals)
-            },
-        );
+        changed |= run_pass_logged(func, &format!("cleanup_binding_init_{stage}"), perf, |f| {
+            let before = collect_initializer_fingerprints(&f.locals);
+            normalize_binding_initializers(&mut f.locals);
+            before != collect_initializer_fingerprints(&f.locals)
+        });
     } else {
         wave_stats::add_cleanup_budget_skips(1);
     }
@@ -663,27 +691,22 @@ fn run_cleanup_family_passes(
                 |f| collapse_redundant_conditional_returns_recursive(&mut f.body),
             );
         }
-        if body_needs_stmt_fold_cleanup(&func.body) {
+        if within_body_budget && body_needs_stmt_fold_cleanup(&func.body) {
             wave_stats::add_cleanup_stmt_fold(1);
-            changed |= run_pass_logged(
-                func,
-                &format!("cleanup_stmt_fold_{stage}"),
-                perf,
-                |f| {
-                    let before = hir_shape(f);
-                    cleanup_stmt_list_with_options(
-                        &mut f.body,
-                        &f.name,
-                        0,
-                        CleanupStmtOptions {
-                            include_boundary_labels: false,
-                            round_limit: budget.round_limit,
-                        },
-                    );
-                    before != hir_shape(f)
-                },
-            );
-        } else {
+            changed |= run_pass_logged(func, &format!("cleanup_stmt_fold_{stage}"), perf, |f| {
+                let before = hir_shape(f);
+                cleanup_stmt_list_with_options(
+                    &mut f.body,
+                    &f.name,
+                    0,
+                    CleanupStmtOptions {
+                        include_boundary_labels: false,
+                        round_limit: budget.round_limit,
+                    },
+                );
+                before != hir_shape(f)
+            });
+        } else if body_needs_stmt_fold_cleanup(&func.body) {
             wave_stats::add_cleanup_budget_skips(1);
         }
 
@@ -699,10 +722,7 @@ fn run_cleanup_family_passes(
             wave_stats::add_cleanup_budget_skips(1);
         }
 
-        if count_hir_stmts(&func.body) <= budget.stmt_limit
-            && count_hir_blocks(&func.body) <= budget.block_limit
-            && body_has_loopish_shapes(&func.body)
-        {
+        if within_body_budget && body_has_loopish_shapes(&func.body) {
             wave_stats::add_cleanup_loopish_rewrite(1);
             changed |= run_pass_logged(
                 func,
@@ -717,21 +737,16 @@ fn run_cleanup_family_passes(
         wave_stats::add_cleanup_budget_skips(1);
     }
 
-    if !func.locals.is_empty() {
+    if !func.locals.is_empty() && within_body_budget {
         wave_stats::add_cleanup_family_dead_binding(1);
-        changed |= run_pass_logged(
-            func,
-            &format!("cleanup_dead_binding_{stage}"),
-            perf,
-            |f| {
-                let before = hir_shape(f);
-                eliminate_dead_local_clobber_assigns(f);
-                prune_unused_temp_bindings(f);
-                prune_unused_dead_local_bindings(f);
-                before != hir_shape(f)
-            },
-        );
-    } else {
+        changed |= run_pass_logged(func, &format!("cleanup_dead_binding_{stage}"), perf, |f| {
+            let before = hir_shape(f);
+            eliminate_dead_local_clobber_assigns(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+            before != hir_shape(f)
+        });
+    } else if !func.locals.is_empty() {
         wave_stats::add_cleanup_budget_skips(1);
     }
 
@@ -889,8 +904,12 @@ fn body_has_conditional_return_shapes(stmts: &[HirStmt]) -> bool {
                 else_body,
                 ..
             } => {
-                let then_ret = then_body.last().is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
-                let else_ret = else_body.last().is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
+                let then_ret = then_body
+                    .last()
+                    .is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
+                let else_ret = else_body
+                    .last()
+                    .is_some_and(|stmt| matches!(stmt, HirStmt::Return(_)));
                 if (then_ret && else_ret)
                     || body_has_conditional_return_shapes(then_body)
                     || body_has_conditional_return_shapes(else_body)
@@ -938,7 +957,11 @@ fn body_needs_stmt_fold_cleanup(stmts: &[HirStmt]) -> bool {
             HirStmt::Return(Some(HirExpr::Var(name))) if looks_like_trivial_temp_name(name) => {
                 return true;
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 if matches!(cond, HirExpr::Const(_, _))
                     || then_body.is_empty()
                     || else_body.is_empty()
@@ -957,7 +980,9 @@ fn body_needs_stmt_fold_cleanup(stmts: &[HirStmt]) -> bool {
                 }
             }
             HirStmt::Switch { cases, default, .. } => {
-                if cases.iter().any(|case| body_needs_stmt_fold_cleanup(&case.body))
+                if cases
+                    .iter()
+                    .any(|case| body_needs_stmt_fold_cleanup(&case.body))
                     || body_needs_stmt_fold_cleanup(default)
                 {
                     return true;
@@ -998,7 +1023,10 @@ fn count_hir_blocks(stmts: &[HirStmt]) -> usize {
                 ..
             } => 1 + count_hir_blocks(then_body) + count_hir_blocks(else_body),
             HirStmt::Switch { cases, default, .. } => {
-                1 + cases.iter().map(|case| count_hir_blocks(&case.body)).sum::<usize>()
+                1 + cases
+                    .iter()
+                    .map(|case| count_hir_blocks(&case.body))
+                    .sum::<usize>()
                     + count_hir_blocks(default)
             }
             HirStmt::Assign { .. }
@@ -1255,7 +1283,8 @@ fn cleanup_stmt_list_with_options(
 }
 
 fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>) -> bool {
-    let mut changed = cleanup_redundant_boundary_labels(stmts) || remove_unreferenced_leading_labels(stmts);
+    let mut changed =
+        cleanup_redundant_boundary_labels(stmts) || remove_unreferenced_leading_labels(stmts);
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body)

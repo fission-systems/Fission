@@ -9,6 +9,64 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Proof-first rust-sleigh lift extension wave - giant indirect functions now survive past `BranchInd`, with fast-lane cleanup gated back under control
+
+This wave fixed the main hidden bottleneck behind the stalled dispatcher work: the Rust sleigh path was still treating `BranchInd` as a hard function terminator, so large dispatcher-heavy bodies such as `0x140001160` were being truncated before `fission-pcode` ever had a chance to reason about them. The canonical fix stays in the Rust-owned pipeline:
+
+- [`mod.rs`](crates/fission-sleigh/src/lifter/mod.rs) and [`mod.rs`](crates/fission-sleigh/src/lifter/backend/mod.rs) now expose `LiftDecodeContract`, separating strict function slicing from decomp-oriented lift contracts that continue past `BranchInd`.
+- [`lib.rs`](crates/fission-decompiler-core/src/lib.rs) now uses the decomp lift contract by default, raises the effective instruction budget for bounded full-body decode, and retries with the old strict stop only when the expanded lift hits unsupported render patterns.
+- [`emit.rs`](crates/fission-cli/src/cli/oneshot/inventory/emit.rs) and [`run.rs`](crates/fission-cli/src/cli/oneshot/decompile/decompile_exec/run.rs) now consume the same decomp lift contract so benchmark, inventory, and direct decompile paths stop disagreeing on how much function body rust-sleigh is allowed to see.
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs), [`routing.rs`](crates/fission-static/src/analysis/decomp/nir/routing.rs), [`render.rs`](crates/fission-static/src/analysis/decomp/nir/render.rs), and [`summary.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/summary.rs) now use the canonical `IndirectControlClassification::from_pcode(...)` helper instead of rescanning raw pcode with local indirect-control predicates.
+- [`run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now gates giant-body cleanup and late jump resolution with explicit size budgets so the new larger lift surface does not blow up `nir-check` fast-lane latency.
+
+Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 50` spot-check:
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- public summary direct-success: `50/50 -> 50/50`
+- `avg_normalized_similarity`: `37.59% -> 37.91%`
+- public indirect counters:
+  - `fission unsupported indirect: 1 -> 11`
+  - `fission indirect-surface preserved: 15 -> 18`
+  - `fission jump-table functions: 7 -> 7`
+  - `fission dispatcher recovered: 6 -> 1`
+- representative low-sim rows:
+  - `0x140001160`: `1.19% -> 27.05%`, now fully lifted instead of truncating at the first indirect branch, but still unresolved semantically with preserved indirect residue
+  - `0x140008900`: direct-success restored and dispatcher proof preserved, `19.84%-ish band -> 19.55%`
+  - `0x140008090`: stays green with indirect target proof, `32.94% -> 33.62%`
+  - `0x140006ef0`: direct-success guardrail stays green at `35.33%`
+- `nir-check` fast lane:
+  - `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - giant cleanup regressions are no longer failing the lane
+  - dominant slow passes moved to:
+    - `sccp: 367.3ms`
+    - `copy_propagation_after_cse: 106.4ms`
+    - `cleanup_standalone_12: 85.0ms`
+    - `jump_resolver: 37.4ms`
+
+Net effect:
+
+- improved:
+  - `0x140001160` is no longer artificially tiny; the Rust decompiler now sees the real giant WndProc body
+  - benchmark direct-success remains `50/50` after adding strict retry fallback for unsupported expanded-lift cases
+  - `nir-check` fast lane is green again after budget-gating giant-body cleanup/jump-resolution work
+  - end-to-end similarity still improved over the previous `37.59%` baseline
+- did not improve enough:
+  - the extra body visibility exposed far more unresolved indirect residue than before, so unsupported indirect attribution rose sharply
+  - `dispatcher_shape_recovered_count` regressed from the previous wave's higher count because the current fix was about body visibility and guardrails, not proof-complete target-map synthesis
+  - `0x140001160` is no longer the worst row, but it is still unresolved and still carries `11` unsupported indirect-control sites
+
+Next bottleneck:
+
+- the next wave should stop spending effort on lift coverage and move back to canonical proof recovery in `fission-pcode`
+- specifically:
+  - prove deterministic target maps for the remaining preserved indirect sites inside `0x140001160`
+  - reduce unsupported-indirect inflation by converting preserved giant-body residue into real switch/dispatcher shapes
+  - finish duplicate-logic cleanup for the remaining `IndirectControlClassification::from_flags(...)` rebuild sites in CLI inventory/automation consumers
+  - if proof recovery does not move similarity materially after that, the next primary KPI should shift to `sccp` / `copy_propagation_after_cse` / `cleanup_standalone_12`
+
 ### Proof-complete dispatcher recovery wave — canonical proof state now recovers dispatcher shapes instead of only preserving indirect residue
 
 This wave pushed indirect control recovery one step past bare surface preservation. The canonical owner remains `fission-pcode`, but `BranchInd` lowering now emits proof-aware selector state, degenerate self-loop dispatcher cases stay explicit `DispatcherLike` surfaces instead of collapsing into fake one-case switches, and downstream admission/filtering now reads one canonical indirect classification helper instead of re-deriving policy from local booleans.

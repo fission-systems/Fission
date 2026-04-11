@@ -327,6 +327,11 @@ pub struct IndirectControlClassification {
 
 impl IndirectControlClassification {
     #[must_use]
+    pub fn from_pcode(pcode: &crate::pcode::PcodeFunction) -> Self {
+        Self::from_flags(crate::pcode_has_indirect_control_flow(pcode), false, false, false)
+    }
+
+    #[must_use]
     pub fn from_stats(stats: Option<&NirBuildStats>, has_indirect_control: bool) -> Self {
         let stats = stats.cloned().unwrap_or_default();
         Self {

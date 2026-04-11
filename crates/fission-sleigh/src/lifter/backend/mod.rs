@@ -3,7 +3,7 @@ pub(super) mod common;
 use anyhow::{anyhow, bail, Context, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode};
 
-use super::{aarch64, x86, LiftStopReason};
+use super::{LiftDecodeContract, LiftStopReason, aarch64, x86};
 
 #[derive(Debug, Clone)]
 pub(super) struct LiftedOps {
@@ -133,7 +133,8 @@ impl BackendKind {
                     ctx.seq_start,
                     ctx.semantic_temp_base(self),
                 );
-                if let Some(mut flow) = x86::decode_control(ctx.insn, ctx.address, ctx.decoded_len) {
+                if let Some(mut flow) = x86::decode_control(ctx.insn, ctx.address, ctx.decoded_len)
+                {
                     ops.append(&mut flow);
                 }
 
@@ -155,7 +156,8 @@ impl BackendKind {
         }
 
         let decoded_len = self.decode_len(bytes)?;
-        let decoded_len_usize = usize::try_from(decoded_len).context("decoded_len does not fit usize")?;
+        let decoded_len_usize =
+            usize::try_from(decoded_len).context("decoded_len does not fit usize")?;
         let insn = &bytes[..decoded_len_usize];
         let decode_ctx = DecodeContext::new(insn, address, decoded_len);
 
@@ -171,13 +173,13 @@ impl BackendKind {
         self,
         bytes: &[u8],
         entry_address: u64,
-        instruction_limit: usize,
+        contract: LiftDecodeContract,
         emit_trace_copy: fn(&[u8], u64) -> PcodeOp,
     ) -> Result<LiftedOps> {
         if bytes.is_empty() {
             bail!("No function bytes available at 0x{:x}", entry_address);
         }
-        if instruction_limit == 0 {
+        if contract.instruction_limit == 0 {
             bail!("instruction_limit must be > 0");
         }
 
@@ -188,7 +190,7 @@ impl BackendKind {
         let mut instruction_count = 0usize;
         let mut stop_reason = LiftStopReason::InputExhausted;
 
-        while offset < bytes.len() && instruction_count < instruction_limit {
+        while offset < bytes.len() && instruction_count < contract.instruction_limit {
             let remaining = &bytes[offset..];
             let (mut ins_ops, decoded_len) = self
                 .decode_and_lift_with_len(remaining, current, emit_trace_copy)
@@ -215,7 +217,7 @@ impl BackendKind {
 
             let terminates = ins_ops
                 .last()
-                .map(|op| super::is_terminal_control_flow(op.opcode))
+                .map(|op| contract.is_terminal_control_flow(op.opcode))
                 .unwrap_or(false);
 
             ops.extend(ins_ops);
@@ -229,7 +231,7 @@ impl BackendKind {
             }
         }
 
-        if instruction_count >= instruction_limit && offset < bytes.len() {
+        if instruction_count >= contract.instruction_limit && offset < bytes.len() {
             stop_reason = LiftStopReason::InstructionLimit;
         }
 

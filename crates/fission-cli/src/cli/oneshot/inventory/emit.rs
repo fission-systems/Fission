@@ -37,10 +37,9 @@ use fission_decompiler_core::{RustSleighDecompileConfig, select_nir_output_from_
 #[cfg(not(feature = "native_decomp"))]
 use fission_pcode::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
-    pcode_has_indirect_control_flow,
 };
 #[cfg(not(feature = "native_decomp"))]
-use fission_sleigh::lifter::SleighLifter;
+use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
 
 #[cfg(feature = "native_decomp")]
 fn prepare_inventory_decompiler(
@@ -429,7 +428,7 @@ fn preview_block_detail(
 #[cfg(not(feature = "native_decomp"))]
 fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
     let total_ops = pcode.blocks.iter().map(|block| block.ops.len()).sum();
-    let has_indirect = pcode_has_indirect_control_flow(pcode);
+    let has_indirect = IndirectControlClassification::from_pcode(pcode).has_indirect_control;
     (pcode.blocks.len(), total_ops, has_indirect)
 }
 
@@ -474,6 +473,7 @@ fn decode_rust_sleigh_pcode(
     entry_address: u64,
     max_bytes: usize,
     instruction_limit: usize,
+    continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
 ) -> Result<PcodeFunction, String> {
     let bytes = binary.view_bytes(entry_address, max_bytes).ok_or_else(|| {
@@ -485,8 +485,13 @@ fn decode_rust_sleigh_pcode(
 
     let lifter =
         SleighLifter::new_for_language(language).map_err(|e| format!("rust_sleigh: {e:#}"))?;
+    let lift_contract = if continue_past_indirect_branch {
+        LiftDecodeContract::decomp_function(instruction_limit)
+    } else {
+        LiftDecodeContract::strict_function(instruction_limit)
+    };
     let result =
-        lifter.lift_raw_pcode_function_with_contract(&bytes, entry_address, instruction_limit);
+        lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);
     match result {
         Ok(lifted) => Ok(lifted.function),
         Err(first_err) => {
@@ -494,10 +499,10 @@ fn decode_rust_sleigh_pcode(
                 let err_str = format!("{first_err:#}");
                 if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
                     if safe > 0 && safe < bytes.len() {
-                        if let Ok(retry) = lifter.lift_raw_pcode_function_with_contract(
+                        if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
                             &bytes[..safe],
                             entry_address,
-                            instruction_limit,
+                            lift_contract,
                         ) {
                             return Ok(retry.function);
                         }
@@ -542,13 +547,24 @@ fn decode_inventory_pcode(
         fallback_default_bytes
     }
     .max(1);
+    let default_instruction_limit = if config.continue_past_indirect_branch {
+        config
+            .instruction_budget_default
+            .max(max_bytes.min(config.instruction_budget_cap.max(1)))
+    } else {
+        config.instruction_budget_default
+    };
+    let instruction_limit = default_instruction_limit
+        .max(1)
+        .min(config.instruction_budget_cap.max(1));
 
     decode_rust_sleigh_pcode(
         binary,
         &func.name,
         entry_address,
         max_bytes,
-        config.instruction_budget_default.max(1),
+        instruction_limit,
+        config.continue_past_indirect_branch,
         config.retry_on_decode_error,
     )
 }

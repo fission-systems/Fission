@@ -31,7 +31,10 @@ fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
 }
 
 #[cfg(test)]
-fn build_cfg_blocks(entry_address: u64, ops: Vec<fission_pcode::PcodeOp>) -> Vec<fission_pcode::PcodeBasicBlock> {
+fn build_cfg_blocks(
+    entry_address: u64,
+    ops: Vec<fission_pcode::PcodeOp>,
+) -> Vec<fission_pcode::PcodeBasicBlock> {
     fission_sleigh::lifter::build_cfg_blocks(entry_address, ops)
 }
 
@@ -52,7 +55,11 @@ fn decode_rust_sleigh_pcode(
             .function_after(func.address)
             .and_then(|next| {
                 let dist = next.address.saturating_sub(func.address) as usize;
-                if dist > 0 { Some(dist.min(0x10000)) } else { None }
+                if dist > 0 {
+                    Some(dist.min(0x10000))
+                } else {
+                    None
+                }
             })
             .unwrap_or(0x4000)
     };
@@ -63,9 +70,14 @@ fn decode_rust_sleigh_pcode(
             func.address
         ))
     })?;
+    let instruction_limit = 512usize.max(max_bytes.min(4096));
 
     let lifted = lifter
-        .lift_raw_pcode_function_with_contract(&bytes, func.address, 512)
+        .lift_raw_pcode_function_with_decode_contract(
+            &bytes,
+            func.address,
+            fission_sleigh::lifter::LiftDecodeContract::decomp_function(instruction_limit),
+        )
         .map_err(|err| {
             FissionError::decompiler(format!(
                 "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
@@ -80,15 +92,24 @@ fn format_varnode_for_pcode(vn: &fission_pcode::Varnode) -> String {
     if vn.is_constant {
         format!("const(0x{:x}:{} )", vn.constant_val as u64, vn.size)
     } else {
-        format!("v(space={},off=0x{:x},size={})", vn.space_id, vn.offset, vn.size)
+        format!(
+            "v(space={},off=0x{:x},size={})",
+            vn.space_id, vn.offset, vn.size
+        )
     }
 }
 
 fn render_pcode_text(func: &FunctionInfo, pcode: &fission_pcode::PcodeFunction) -> String {
     let mut out = String::new();
-    out.push_str(&format!("// rust_sleigh direct pcode output: {}\n", func.name));
+    out.push_str(&format!(
+        "// rust_sleigh direct pcode output: {}\n",
+        func.name
+    ));
     for block in &pcode.blocks {
-        out.push_str(&format!("block_{} @ 0x{:x}\n", block.index, block.start_address));
+        out.push_str(&format!(
+            "block_{} @ 0x{:x}\n",
+            block.index, block.start_address
+        ));
         for op in &block.ops {
             let out_vn = op
                 .output
@@ -145,12 +166,15 @@ fn render_with_rust_sleigh(
     let code = if let Some(code) = selection.nir_code {
         code
     } else {
-        let fallback_reason = selection
-            .fallback_reason
-            .unwrap_or_else(|| "nir skipped: function not supported by Fission NIR builder".to_string());
+        let fallback_reason = selection.fallback_reason.unwrap_or_else(|| {
+            "nir skipped: function not supported by Fission NIR builder".to_string()
+        });
         let lower = fallback_reason.to_ascii_lowercase();
         let is_unsupported_arch = lower.contains("unsupported architecture in mlil-preview")
-            || matches!(selection.fallback_kind_refined, Some("preview_architecture_unsupported"));
+            || matches!(
+                selection.fallback_kind_refined,
+                Some("preview_architecture_unsupported")
+            );
         if is_unsupported_arch {
             return Ok(RenderedCode {
                 code: render_pcode_text(func, &pcode),
@@ -250,7 +274,8 @@ fn run_rust_sleigh_decompilation(
                 let decomp_sec = start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
                 let error_text = e.to_string();
-                if let Some(fallback) = make_assembly_fallback(binary, binary_data, func, &error_text)
+                if let Some(fallback) =
+                    make_assembly_fallback(binary, binary_data, func, &error_text)
                 {
                     if effective_json {
                         let mut entry = serde_json::json!({
@@ -263,19 +288,20 @@ fn run_rust_sleigh_decompilation(
                             "fallback_reason": fallback_reason_with_kind("assembly_fallback", &error_text),
                         });
                         if cli.benchmark {
-                            entry["decomp_sec"] = serde_json::json!(
-                                (decomp_sec * 1_000_000.0).round() / 1_000_000.0
-                            );
+                            entry["decomp_sec"] =
+                                serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                         }
                         json_results.push(entry);
                     } else {
                         if !effective_no_header {
-                            all_output.push_str("// ============================================\n");
+                            all_output
+                                .push_str("// ============================================\n");
                             all_output.push_str(&format!(
                                 "// Function: {} @ 0x{:x}\n",
                                 func.name, func.address
                             ));
-                            all_output.push_str("// ============================================\n\n");
+                            all_output
+                                .push_str("// ============================================\n\n");
                         }
                         all_output.push_str(&fallback);
                         all_output.push_str("\n\n");

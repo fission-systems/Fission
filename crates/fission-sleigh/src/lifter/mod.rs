@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
@@ -31,8 +31,36 @@ pub struct LiftedPcodeFunction {
     pub stop_reason: LiftStopReason,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiftDecodeContract {
+    pub instruction_limit: usize,
+    pub stop_at_indirect_branch: bool,
+}
+
+impl LiftDecodeContract {
+    pub const fn strict_function(instruction_limit: usize) -> Self {
+        Self {
+            instruction_limit,
+            stop_at_indirect_branch: true,
+        }
+    }
+
+    pub const fn decomp_function(instruction_limit: usize) -> Self {
+        Self {
+            instruction_limit,
+            stop_at_indirect_branch: false,
+        }
+    }
+
+    pub const fn is_terminal_control_flow(self, opcode: PcodeOpcode) -> bool {
+        matches!(opcode, PcodeOpcode::Return)
+            || (self.stop_at_indirect_branch && matches!(opcode, PcodeOpcode::BranchInd))
+    }
+}
+
 pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
-    matches!(opcode, PcodeOpcode::BranchInd | PcodeOpcode::Return)
+    LiftDecodeContract::strict_function(DEFAULT_FUNCTION_INSTRUCTION_LIMIT)
+        .is_terminal_control_flow(opcode)
 }
 
 fn cfg_build_diag_enabled() -> bool {
@@ -81,11 +109,7 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
 
     cfg_build_diag_log(
         entry_address,
-        &format!(
-            "start entry=0x{:x} op_count={}",
-            entry_address,
-            ops.len()
-        ),
+        &format!("start entry=0x{:x} op_count={}", entry_address, ops.len()),
     );
 
     let mut addr_to_op_idx: HashMap<u64, usize> = HashMap::new();
@@ -221,7 +245,11 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
             .unwrap_or(entry_address);
         let succ_starts = successors
             .iter()
-            .filter_map(|succ| starts.get(*succ as usize).and_then(|start_idx| ops.get(*start_idx)))
+            .filter_map(|succ| {
+                starts
+                    .get(*succ as usize)
+                    .and_then(|start_idx| ops.get(*start_idx))
+            })
             .map(|op| format!("0x{:x}", op.address))
             .collect::<Vec<_>>();
         cfg_build_diag_log(
@@ -246,11 +274,7 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
 
     cfg_build_diag_log(
         entry_address,
-        &format!(
-            "done entry=0x{:x} blocks={}",
-            entry_address,
-            blocks.len()
-        ),
+        &format!("done entry=0x{:x} blocks={}", entry_address, blocks.len()),
     );
 
     blocks
@@ -293,7 +317,11 @@ impl SleighLifter {
         Ok(ops)
     }
 
-    pub fn lift_raw_pcode_function(&self, bytes: &[u8], entry_address: u64) -> Result<PcodeFunction> {
+    pub fn lift_raw_pcode_function(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+    ) -> Result<PcodeFunction> {
         Ok(self
             .lift_raw_pcode_function_with_contract(
                 bytes,
@@ -309,15 +337,32 @@ impl SleighLifter {
         entry_address: u64,
         instruction_limit: usize,
     ) -> Result<LiftedPcodeFunction> {
+        self.lift_raw_pcode_function_with_decode_contract(
+            bytes,
+            entry_address,
+            LiftDecodeContract::strict_function(instruction_limit),
+        )
+    }
+
+    pub fn lift_raw_pcode_function_with_decode_contract(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: LiftDecodeContract,
+    ) -> Result<LiftedPcodeFunction> {
         let _lift = tracing::trace_span!(
             "sleigh_lift_raw",
             entry_address = entry_address,
-            instruction_limit = instruction_limit
+            instruction_limit = contract.instruction_limit,
+            stop_at_indirect_branch = contract.stop_at_indirect_branch
         )
         .entered();
-        let lifted = self
-            .backend
-            .lift_ops_with_contract(bytes, entry_address, instruction_limit, Self::emit_trace_copy)?;
+        let lifted = self.backend.lift_ops_with_contract(
+            bytes,
+            entry_address,
+            contract,
+            Self::emit_trace_copy,
+        )?;
         debug_assert!(lifted.consumed_bytes <= bytes.len());
 
         Ok(LiftedPcodeFunction {
@@ -329,7 +374,11 @@ impl SleighLifter {
         })
     }
 
-    pub fn decode_and_lift_with_len(&self, bytes: &[u8], address: u64) -> Result<(Vec<PcodeOp>, u64)> {
+    pub fn decode_and_lift_with_len(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64)> {
         self.backend
             .decode_and_lift_with_len(bytes, address, Self::emit_trace_copy)
     }
@@ -471,11 +520,37 @@ mod tests {
     }
 
     #[test]
+    fn decomp_lift_contract_continues_past_branchind() {
+        let lifter = SleighLifter::new_for_language("x86-64").expect("x86-64 sleigh lifter");
+        let bytes = [0xFF, 0xE0, 0x90];
+        let lifted = lifter
+            .lift_raw_pcode_function_with_decode_contract(
+                &bytes,
+                0x2100,
+                LiftDecodeContract::decomp_function(16),
+            )
+            .expect("lift function across branchind");
+
+        assert!(lifted.decoded_instructions >= 2);
+        assert_eq!(lifted.stop_reason, LiftStopReason::InputExhausted);
+        assert!(lifted.function.blocks.len() >= 2);
+        assert!(lifted.function.blocks[0]
+            .ops
+            .iter()
+            .any(|op| op.opcode == PcodeOpcode::BranchInd));
+    }
+
+    #[test]
     fn backend_lift_contract_keeps_trace_order_and_consumed_bytes() {
         let backend = super::backend::BackendKind::X86;
         let bytes = [0x90, 0x90];
         let lifted = backend
-            .lift_ops_with_contract(&bytes, 0x4100, 16, super::SleighLifter::emit_trace_copy)
+            .lift_ops_with_contract(
+                &bytes,
+                0x4100,
+                LiftDecodeContract::strict_function(16),
+                super::SleighLifter::emit_trace_copy,
+            )
             .expect("lift ops through backend contract");
 
         assert_eq!(lifted.decoded_instructions, 2);
@@ -491,17 +566,19 @@ mod tests {
         assert_eq!(trace_ops[0].address, 0x4100);
         assert_eq!(trace_ops[1].address, 0x4101);
 
-        assert!(lifted
-            .ops
-            .windows(2)
-            .all(|w| w[0].seq_num < w[1].seq_num));
+        assert!(lifted.ops.windows(2).all(|w| w[0].seq_num < w[1].seq_num));
     }
 
     #[test]
     fn backend_lift_contract_reports_decode_failure_address() {
         let backend = super::backend::BackendKind::X86;
         let err = backend
-            .lift_ops_with_contract(&[0x90, 0x0F], 0x4200, 16, super::SleighLifter::emit_trace_copy)
+            .lift_ops_with_contract(
+                &[0x90, 0x0F],
+                0x4200,
+                LiftDecodeContract::strict_function(16),
+                super::SleighLifter::emit_trace_copy,
+            )
             .expect_err("expected decode failure on truncated 0x0F escape");
 
         let msg = format!("{err:#}");
