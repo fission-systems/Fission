@@ -126,15 +126,23 @@ pub struct TypedFactStore {
 pub enum NirType {
     Unknown,
     Bool,
-    Int { bits: u32, signed: bool },
+    Int {
+        bits: u32,
+        signed: bool,
+    },
     Ptr(Box<NirType>),
     /// An opaque aggregate (struct/array-like) region.
     ///
     /// `size` is the total byte size.  `fields` is populated by
     /// `aggregate_fields.rs` after pointer-arithmetic recovery; it is empty
     /// until that pass runs.
-    Aggregate { size: u32, fields: Vec<StructField> },
-    Float { bits: u32 },
+    Aggregate {
+        size: u32,
+        fields: Vec<StructField>,
+    },
+    Float {
+        bits: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,6 +264,34 @@ pub struct CallsiteState {
     pub variadic_state: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IndirectControlSurface {
+    BranchInd,
+    CallInd,
+    SwitchLike,
+    DispatcherLike,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum UnsupportedControlFamily {
+    MissingTargets,
+    AmbiguousTargets,
+    NonStructuralDispatcher,
+    ExternalTarget,
+    CallRegion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UnsupportedControlEvidence {
+    pub opcode: String,
+    pub source_block: Option<u64>,
+    pub target_expr: Option<String>,
+    pub successor_targets: Vec<u64>,
+    pub failure_family: UnsupportedControlFamily,
+    pub surface: IndirectControlSurface,
+    pub confidence: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndirectTargetSet {
     pub definite: Vec<CallTargetRef>,
@@ -292,7 +328,7 @@ pub struct NirFunction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirPhiNode {
-    pub dest_id: u32, // Maps to SsaVarId
+    pub dest_id: u32,              // Maps to SsaVarId
     pub operands: Vec<(u32, u32)>, // Pairs of (pred_block_id, src_var_id)
 }
 
@@ -605,6 +641,18 @@ pub struct NirBuildStats {
     /// Rounds of interprocedural signature constraint propagation (call-site arity meet/join).
     #[serde(default)]
     pub interproc_signature_constraint_rounds: usize,
+    /// Unsupported indirect-control terminators observed before explicit surfacing.
+    #[serde(default)]
+    pub unsupported_indirect_control_count: usize,
+    /// Unsupported indirect-call targets observed before explicit surfacing.
+    #[serde(default)]
+    pub unsupported_indirect_call_count: usize,
+    /// Unsupported external branch/call targets that resolved outside the canonical CFG slice.
+    #[serde(default)]
+    pub unsupported_external_target_count: usize,
+    /// Unsupported indirect/control sites preserved as explicit pseudo-surface instead of marker calls.
+    #[serde(default)]
+    pub indirect_surface_preserved_count: usize,
     /// Indirect target sets refined by bounded target proof.
     #[serde(default)]
     pub indirect_target_set_refined_count: usize,
@@ -779,17 +827,19 @@ impl NirBuildStats {
         self.cleanup_loopish_rewrite_count += other.cleanup_loopish_rewrite_count;
         self.cleanup_family_dead_binding_count += other.cleanup_family_dead_binding_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
+        self.unsupported_indirect_control_count += other.unsupported_indirect_control_count;
+        self.unsupported_indirect_call_count += other.unsupported_indirect_call_count;
+        self.unsupported_external_target_count += other.unsupported_external_target_count;
+        self.indirect_surface_preserved_count += other.indirect_surface_preserved_count;
         self.indirect_target_set_refined_count += other.indirect_target_set_refined_count;
         self.dispatcher_shape_recovered_count += other.dispatcher_shape_recovered_count;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;
         self.structuring_reason_follow_failure_count +=
             other.structuring_reason_follow_failure_count;
-        self.structuring_reason_irreducible_count +=
-            other.structuring_reason_irreducible_count;
+        self.structuring_reason_irreducible_count += other.structuring_reason_irreducible_count;
         self.structuring_reason_loop_exit_count += other.structuring_reason_loop_exit_count;
-        self.structuring_reason_switch_shape_count +=
-            other.structuring_reason_switch_shape_count;
+        self.structuring_reason_switch_shape_count += other.structuring_reason_switch_shape_count;
         self.structuring_reason_budget_count += other.structuring_reason_budget_count;
 
         for (name, agg) in &other.pass_metrics {
@@ -803,26 +853,26 @@ impl NirBuildStats {
     }
 
     pub fn refresh_structuring_reason_families(&mut self) {
-        self.structuring_reason_region_legality_count =
-            self.region_linearize_rejected_non_structuring_failure_count
-                + self.region_linearize_rejected_no_exit_count
-                + self.region_linearize_rejected_body_lowering_unsupported_terminator_count
-                + self.rejected_external_entry
-                + self.rejected_not_single_pred_succ;
+        self.structuring_reason_region_legality_count = self
+            .region_linearize_rejected_non_structuring_failure_count
+            + self.region_linearize_rejected_no_exit_count
+            + self.region_linearize_rejected_body_lowering_unsupported_terminator_count
+            + self.rejected_external_entry
+            + self.rejected_not_single_pred_succ;
         self.structuring_reason_follow_failure_count =
             self.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count
                 + self.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count
                 + self.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count
                 + self.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count
                 + self.region_linearize_rejected_body_lowering_successor_inline_rejected_count;
-        self.structuring_reason_irreducible_count =
-            self.region_linearize_rejected_irreducible_cfg_count
-                + self.structuring_irreducible_scc_count
-                + self.structuring_irreducible_header_count;
-        self.structuring_reason_loop_exit_count =
-            self.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count
-                + self.loop_control_rewrite_skipped_nested_scope_count
-                + self.rejected_loop_or_switch_target;
+        self.structuring_reason_irreducible_count = self
+            .region_linearize_rejected_irreducible_cfg_count
+            + self.structuring_irreducible_scc_count
+            + self.structuring_irreducible_header_count;
+        self.structuring_reason_loop_exit_count = self
+            .region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count
+            + self.loop_control_rewrite_skipped_nested_scope_count
+            + self.rejected_loop_or_switch_target;
         self.structuring_reason_switch_shape_count =
             self.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count;
         self.structuring_reason_budget_count =
@@ -1052,8 +1102,7 @@ impl NirRenderOptions {
         // Detect calling convention from binary format.
         // PE (Windows) uses Windows x64 fastcall; ELF and Mach-O use System V AMD64.
         let fmt_upper = binary.format.to_ascii_uppercase();
-        let calling_convention = if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO")
-        {
+        let calling_convention = if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
             CallingConvention::SystemVAmd64
         } else {
             CallingConvention::WindowsX64

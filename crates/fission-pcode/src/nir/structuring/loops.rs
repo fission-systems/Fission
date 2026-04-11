@@ -41,7 +41,10 @@ fn rewrite_loop_control_gotos_in_stmts(
             HirStmt::Block(body) => {
                 rewrite_loop_control_gotos_in_stmts(body, continue_label, break_label, stats);
             }
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } | HirStmt::Switch { .. } => {
+            HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Switch { .. } => {
                 stats.skipped_nested_scope_count += 1;
             }
             HirStmt::Assign { .. }
@@ -77,7 +80,11 @@ fn rewrite_loop_control_gotos_multi(
                     stats.continue_rewrites += 1;
                 }
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 rewrite_loop_control_gotos_multi(then_body, continue_labels, break_labels, stats);
                 rewrite_loop_control_gotos_multi(else_body, continue_labels, break_labels, stats);
             }
@@ -102,7 +109,10 @@ fn rewrite_loop_control_gotos_multi(
 }
 
 impl<'a> PreviewBuilder<'a> {
-    pub(crate) fn get_loop_body(&self, head_idx: usize) -> Option<&crate::nir::structuring::loop_analysis::LoopBody> {
+    pub(crate) fn get_loop_body(
+        &self,
+        head_idx: usize,
+    ) -> Option<&crate::nir::structuring::loop_analysis::LoopBody> {
         self.loop_bodies.iter().find(|lb| lb.head == head_idx)
     }
 
@@ -270,7 +280,9 @@ impl<'a> PreviewBuilder<'a> {
             let exit_addr = self.block_target_key(exit_idx);
 
             let (cond, body_addr) = if true_target == exit_addr {
-                let Some(body_addr) = false_target else { return Ok(None) };
+                let Some(body_addr) = false_target else {
+                    return Ok(None);
+                };
                 (negate_expr(cond), body_addr)
             } else if false_target == Some(exit_addr) {
                 let body_addr = true_target;
@@ -337,7 +349,9 @@ impl<'a> PreviewBuilder<'a> {
             if diag {
                 eprintln!(
                     "[DIAG] try_lower_while done (fast path): idx={} block=0x{:x} elapsed={:.3}s",
-                    idx, block_addr, budget.start.elapsed().as_secs_f64(),
+                    idx,
+                    block_addr,
+                    budget.start.elapsed().as_secs_f64(),
                 );
             }
             return result;
@@ -359,8 +373,11 @@ impl<'a> PreviewBuilder<'a> {
             let exit_addr = self.block_target_key(exit_idx);
 
             // Head must still have a CBranch with one arm pointing to exit.
-            let LoweredTerminator::Cond { cond, true_target, false_target } =
-                self.lower_block_terminator(idx)?
+            let LoweredTerminator::Cond {
+                cond,
+                true_target,
+                false_target,
+            } = self.lower_block_terminator(idx)?
             else {
                 return Ok(None);
             };
@@ -371,7 +388,9 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let (cond, body_addr) = if true_target == exit_addr {
-                let Some(body_addr) = false_target else { return Ok(None) };
+                let Some(body_addr) = false_target else {
+                    return Ok(None);
+                };
                 (negate_expr(cond), body_addr)
             } else if false_target == Some(exit_addr) {
                 (cond, true_target)
@@ -395,12 +414,8 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
 
-            let Some(lowered_body) = self.lower_loop_body_subgraph(
-                &body_set,
-                body_start_idx,
-                Some(exit_idx),
-                idx,
-            )?
+            let Some(lowered_body) =
+                self.lower_loop_body_subgraph(&body_set, body_start_idx, Some(exit_idx), idx)?
             else {
                 return Ok(None);
             };
@@ -546,14 +561,19 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         // ── Confirm head has CBranch with one arm → exit ──
-        let LoweredTerminator::Cond { cond, true_target, false_target } =
-            self.lower_block_terminator(idx)?
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target,
+        } = self.lower_block_terminator(idx)?
         else {
             return Ok(None);
         };
         let exit_addr = self.block_target_key(exit_idx);
         let (while_cond, body_addr) = if true_target == exit_addr {
-            let Some(body_addr) = false_target else { return Ok(None) };
+            let Some(body_addr) = false_target else {
+                return Ok(None);
+            };
             (negate_expr(cond), body_addr)
         } else if false_target == Some(exit_addr) {
             (cond, true_target)
@@ -585,7 +605,10 @@ impl<'a> PreviewBuilder<'a> {
         if init_stmts.len() != 1 {
             return Ok(None);
         }
-        let HirStmt::Assign { lhs: ref init_lhs, .. } = init_stmts[0] else {
+        let HirStmt::Assign {
+            lhs: ref init_lhs, ..
+        } = init_stmts[0]
+        else {
             return Ok(None);
         };
         let init_var_name = match init_lhs {
@@ -600,7 +623,11 @@ impl<'a> PreviewBuilder<'a> {
         if latch_stmts.len() != 1 {
             return Ok(None);
         }
-        let HirStmt::Assign { lhs: ref update_lhs, .. } = latch_stmts[0] else {
+        let HirStmt::Assign {
+            lhs: ref update_lhs,
+            ..
+        } = latch_stmts[0]
+        else {
             return Ok(None);
         };
 
@@ -628,12 +655,8 @@ impl<'a> PreviewBuilder<'a> {
             // Empty body (tight counter loop)
             Vec::new()
         } else {
-            let Some(lowered) = self.lower_loop_body_subgraph(
-                &body_blocks,
-                body_start_idx,
-                Some(exit_idx),
-                idx,
-            )?
+            let Some(lowered) =
+                self.lower_loop_body_subgraph(&body_blocks, body_start_idx, Some(exit_idx), idx)?
             else {
                 return Ok(None);
             };
@@ -701,9 +724,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut pos = start_pos;
 
         // Helper closure: is the skip_to index within the body set or equal to break_idx?
-        let is_valid_skip = |skip_to: usize| -> bool {
-            body_set.contains(&skip_to) || Some(skip_to) == break_idx
-        };
+        let is_valid_skip =
+            |skip_to: usize| -> bool { body_set.contains(&skip_to) || Some(skip_to) == break_idx };
 
         while pos < sorted_body.len() {
             let idx = sorted_body[pos];
@@ -711,10 +733,9 @@ impl<'a> PreviewBuilder<'a> {
             // --- Attempt structured reducers, but only accept if skip_to stays within bounds ---
             macro_rules! try_reducer {
                 ($call:expr) => {{
-                    if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                        $call,
-                        &mut last_structuring_failure,
-                    )? {
+                    if let Some((stmt, skip_to)) =
+                        Self::capture_structuring_failure($call, &mut last_structuring_failure)?
+                    {
                         if is_valid_skip(skip_to)
                             && self.accept_structured_region(idx, skip_to, &targeted)
                         {
@@ -828,11 +849,16 @@ impl<'a> PreviewBuilder<'a> {
                         });
                     }
                 }
-                LoweredTerminator::Unsupported => {
+                LoweredTerminator::Unsupported { .. } => {
                     // Propagate as an unsupported marker; caller will fall back.
                     return Ok(None);
                 }
-                LoweredTerminator::Switch { expr, targets, default_target, min_val } => {
+                LoweredTerminator::Switch {
+                    expr,
+                    targets,
+                    default_target,
+                    min_val,
+                } => {
                     // Switch inside loop body: emit as switch with gotos, rewrite pass will clean
                     let cases = targets
                         .into_iter()
@@ -872,7 +898,12 @@ impl<'a> PreviewBuilder<'a> {
                 let all_exits_labels: std::collections::HashSet<String> = lb
                     .all_exits
                     .iter()
-                    .filter_map(|&exit| self.pcode.blocks.get(exit).map(|b| block_label(b.start_address)))
+                    .filter_map(|&exit| {
+                        self.pcode
+                            .blocks
+                            .get(exit)
+                            .map(|b| block_label(b.start_address))
+                    })
                     .collect();
                 if !all_exits_labels.is_empty() {
                     all_exits_labels
@@ -936,10 +967,9 @@ impl<'a> PreviewBuilder<'a> {
         let body_set: HashSet<usize> = body_blocks.iter().copied().collect();
 
         let Some(lowered) = self.lower_loop_body_subgraph(
-            &body_set,
-            idx,   // start at the loop head
-            None,  // no break exit — truly infinite
-            idx,   // head for continue detection
+            &body_set, idx,  // start at the loop head
+            None, // no break exit — truly infinite
+            idx,  // head for continue detection
         )?
         else {
             return Ok(None);

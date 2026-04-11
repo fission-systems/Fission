@@ -166,7 +166,10 @@ impl<'a> PreviewBuilder<'a> {
                         .collect(),
                 }),
                 LoweredTerminator::Fallthrough(_) => {}
-                LoweredTerminator::Unsupported => {
+                LoweredTerminator::Unsupported {
+                    evidence,
+                    target_expr,
+                } => {
                     self.record_unsupported_inventory_event(
                         "build_linear_multiblock_unsupported_terminator",
                         None,
@@ -177,11 +180,7 @@ impl<'a> PreviewBuilder<'a> {
                         false,
                         "hir_unsupported_emit",
                     );
-                    body.push(HirStmt::Expr(HirExpr::Call {
-                        target: "__fission_indirect_cf_unsupported".to_string(),
-                        args: Vec::new(),
-                        ty: NirType::Unknown,
-                    }));
+                    body.push(self.emit_unsupported_control_surface(evidence, target_expr));
                 }
                 LoweredTerminator::Switch {
                     expr,
@@ -193,11 +192,9 @@ impl<'a> PreviewBuilder<'a> {
                         .into_iter()
                         .filter(|target| Some(*target) != default_target)
                         .enumerate()
-                        .map(|(i, t)| {
-                        crate::nir::types::HirSwitchCase {
+                        .map(|(i, t)| crate::nir::types::HirSwitchCase {
                             values: vec![min_val + i as i64],
                             body: vec![HirStmt::Goto(block_label(t))],
-                        }
                         })
                         .collect();
                     body.push(HirStmt::Switch {
@@ -444,7 +441,10 @@ impl<'a> PreviewBuilder<'a> {
                             LinearBodyRejectReason::ExitMismatch,
                         ));
                     }
-                    return Ok(LinearBodyLoweringOutcome::Lowered((body, self.block_count())));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((
+                        body,
+                        self.block_count(),
+                    )));
                 }
                 LoweredTerminator::Cond {
                     cond,
@@ -661,9 +661,7 @@ impl<'a> PreviewBuilder<'a> {
         // path from the CFG entry to `next_idx` goes through `idx`.
         if self.dom_tree.dominates(idx, next_idx)
             && self.predecessors[next_idx].iter().all(|&pred| {
-                pred == idx
-                    || visited.contains(&pred)
-                    || self.dom_tree.dominates(idx, pred)
+                pred == idx || visited.contains(&pred) || self.dom_tree.dominates(idx, pred)
             })
         {
             return true;

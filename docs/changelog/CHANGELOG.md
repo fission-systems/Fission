@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-11 (latest)
 
+### Unsupported-elimination wave — unresolved indirect control now preserves explicit surface and canonical counters
+
+This wave moved unresolved indirect control out of the old bare `__fission_indirect_cf_unsupported()` bucket and into canonical `fission-pcode` evidence/counter ownership.
+
+- Added canonical unsupported-indirect contracts in [`types.rs`](crates/fission-pcode/src/nir/types.rs):
+  - `UnsupportedControlEvidence`
+  - `IndirectControlSurface`
+  - `UnsupportedControlFamily`
+- [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now preserves evidence for unresolved `Branch`, `CBranch`, and `BranchInd` lowering instead of immediately degrading to a bare unsupported marker.
+- [`lower_expr.rs`](crates/fission-pcode/src/nir/builder/lower_expr.rs) now keeps opaque `CallInd` surfaces as `__fission_callind_opaque()` instead of failing the whole preview for unknown non-trap producers.
+- [`mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs), [`driver.rs`](crates/fission-pcode/src/nir/structuring/driver.rs), and [`linear.rs`](crates/fission-pcode/src/nir/structuring/linear.rs) now emit canonical pseudo-surfaces such as `__fission_branchind(...)` when an explicit indirect surface can be preserved.
+- Added canonical `NirBuildStats` counters:
+  - `unsupported_indirect_control_count`
+  - `unsupported_indirect_call_count`
+  - `unsupported_external_target_count`
+  - `indirect_surface_preserved_count`
+- [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now reads these counters from `preview_build_stats`, includes them in lowest-sim rows, and prints them in the public summary line.
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) now rolls unsupported/preserved-indirect counters into canonical quality-family summaries.
+
+Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 50` spot-check:
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- Fission direct-success public summary: remains `50/50`
+- new public summary counters:
+  - `fission unsupported indirect 1`
+  - `fission indirect-surface preserved 1`
+  - `fission dispatcher recovered 0`
+- `avg_normalized_similarity`: `37.43-37.45%` band remains `37.44%`
+- `nir-check` fast lane:
+  - `changed_rows=0`
+  - gate remains `stop_hold_p5h3f`
+  - dominant slow passes remain effectively flat:
+    - `cleanup_stmt_canonical_init_1: 118.7ms -> 120.6ms`
+    - `cleanup_dead_binding_init_1: 42.8ms -> 42.5ms`
+
+Net effect:
+
+- better unsupported attribution and explicit indirect surface preservation
+- no regression in coverage or direct success
+- no meaningful similarity uplift yet
+- next bottleneck remains proof-driven dispatcher recovery for low-sim functions such as `0x140001160`, plus the existing cleanup perf gate
+
 ### Benchmark contract fix — Fission direct-success summary now reports the Rust canonical path correctly
 
 The benchmark harness had drifted behind the current execution contract. Public summaries were reporting `fission direct-success 0/50` even when the seeded `putty.exe --limit 50` spot-check had `success_count=50`, `both_success=100%`, and all Fission rows were produced by the canonical `rust_sleigh` path without fallback.

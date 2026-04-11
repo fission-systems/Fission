@@ -377,6 +377,22 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.interproc_signature_constraint_rounds,
         ),
         (
+            "unsupported_indirect_control_count",
+            stats.unsupported_indirect_control_count,
+        ),
+        (
+            "unsupported_indirect_call_count",
+            stats.unsupported_indirect_call_count,
+        ),
+        (
+            "unsupported_external_target_count",
+            stats.unsupported_external_target_count,
+        ),
+        (
+            "indirect_surface_preserved_count",
+            stats.indirect_surface_preserved_count,
+        ),
+        (
             "indirect_target_set_refined_count",
             stats.indirect_target_set_refined_count,
         ),
@@ -441,6 +457,7 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
                 + stats.call_effect_summary_refined_count
                 + stats.wrapper_summary_fold_count
                 + stats.interproc_signature_constraint_rounds
+                + stats.unsupported_indirect_call_count
                 + stats.indirect_target_set_refined_count,
         ),
         (
@@ -468,12 +485,12 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
         ),
         (
             "dispatcher".to_string(),
-            stats.dispatcher_shape_recovered_count,
+            stats.dispatcher_shape_recovered_count
+                + stats.unsupported_indirect_control_count
+                + stats.unsupported_external_target_count
+                + stats.indirect_surface_preserved_count,
         ),
-        (
-            "security".to_string(),
-            stats.security_cookie_fold_count,
-        ),
+        ("security".to_string(), stats.security_cookie_fold_count),
     ];
     families.retain(|(_, value)| *value > 0);
     families.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));

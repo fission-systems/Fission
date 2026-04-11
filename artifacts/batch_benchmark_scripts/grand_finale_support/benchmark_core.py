@@ -1335,6 +1335,7 @@ def run_fission_full(
             "engine_used": entry.get("engine_used", cli_engine),
             "fell_back": bool(entry.get("fell_back", False)),
             "fallback_kind": entry.get("fallback_reason"),
+            "preview_build_stats": entry.get("preview_build_stats"),
         }
 
     meta = dict(payload.get("_meta", {}))
@@ -1653,6 +1654,13 @@ def is_fission_direct_success(entry: dict[str, Any]) -> bool:
 
 def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: bool = False) -> dict[str, Any]:
     success_entries = [entry for entry in entries.values() if entry.get("success")]
+    def preview_stat_total(key: str) -> int:
+        if not fission:
+            return 0
+        return sum(
+            _safe_int((entry.get("preview_build_stats") or {}).get(key), 0)
+            for entry in entries.values()
+        )
     goto_values = [int((entry.get("metrics") or {}).get("goto_count", 0)) for entry in success_entries]
     label_values = [int((entry.get("metrics") or {}).get("top_level_label_count", 0)) for entry in success_entries]
     fpu_values = [int((entry.get("metrics") or {}).get("fpu_op_count", 0)) for entry in success_entries]
@@ -1711,6 +1719,12 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         "jump_table_total": sum(jump_table_values),
         "jump_table_function_count": sum(1 for value in jump_table_values if value > 0),
         "fell_back_count": sum(1 for entry in entries.values() if fission and entry.get("fell_back")),
+        "unsupported_indirect_control_count": preview_stat_total("unsupported_indirect_control_count"),
+        "unsupported_indirect_call_count": preview_stat_total("unsupported_indirect_call_count"),
+        "unsupported_external_target_count": preview_stat_total("unsupported_external_target_count"),
+        "indirect_surface_preserved_count": preview_stat_total("indirect_surface_preserved_count"),
+        "indirect_target_set_refined_count": preview_stat_total("indirect_target_set_refined_count"),
+        "dispatcher_shape_recovered_count": preview_stat_total("dispatcher_shape_recovered_count"),
         # Phase 4 pass quality indicators
         "undefined_return_type_total": sum(
             1 for entry in success_entries
@@ -2088,6 +2102,26 @@ def build_pairwise_engine_comparison(
             f"{right_label}_error": right_entry.get("error"),
             "both_success": both_success,
         }
+        for label, entry in ((left_label, left_entry), (right_label, right_entry)):
+            preview_build_stats = entry.get("preview_build_stats") or {}
+            row[f"{label}_unsupported_indirect_control_count"] = _safe_int(
+                preview_build_stats.get("unsupported_indirect_control_count"), 0
+            )
+            row[f"{label}_unsupported_indirect_call_count"] = _safe_int(
+                preview_build_stats.get("unsupported_indirect_call_count"), 0
+            )
+            row[f"{label}_unsupported_external_target_count"] = _safe_int(
+                preview_build_stats.get("unsupported_external_target_count"), 0
+            )
+            row[f"{label}_indirect_surface_preserved_count"] = _safe_int(
+                preview_build_stats.get("indirect_surface_preserved_count"), 0
+            )
+            row[f"{label}_indirect_target_set_refined_count"] = _safe_int(
+                preview_build_stats.get("indirect_target_set_refined_count"), 0
+            )
+            row[f"{label}_dispatcher_shape_recovered_count"] = _safe_int(
+                preview_build_stats.get("dispatcher_shape_recovered_count"), 0
+            )
         rows.append(row)
         if both_success:
             successful_rows.append(row)
@@ -2305,7 +2339,10 @@ def build_comparison(
         f"seeded shared coverage {summary['coverage']['pyghidra_vs_fission']['coverage_ratio_pct']:.2f}%; "
         f"independent top-N coverage {summary['coverage']['independent_top_n_pyghidra_vs_fission']['coverage_ratio_pct']:.2f}%; "
         f"fission direct-success {summary['engines']['fission']['direct_success_count']}/{summary['engines']['fission']['function_count']}; "
-        f"fission jump-table functions {summary['engines']['fission']['jump_table_function_count']}"
+        f"fission unsupported indirect {summary['engines']['fission']['unsupported_indirect_control_count']}; "
+        f"fission indirect-surface preserved {summary['engines']['fission']['indirect_surface_preserved_count']}; "
+        f"fission jump-table functions {summary['engines']['fission']['jump_table_function_count']}; "
+        f"fission dispatcher recovered {summary['engines']['fission']['dispatcher_shape_recovered_count']}"
     )
 
     return {

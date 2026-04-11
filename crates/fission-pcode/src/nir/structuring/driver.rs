@@ -37,8 +37,14 @@ impl<'a> PreviewBuilder<'a> {
                 then_body,
                 else_body,
                 ..
-            } => then_body.iter().any(|stmt| matches!(stmt, HirStmt::If { .. }))
-                || else_body.iter().any(|stmt| matches!(stmt, HirStmt::If { .. })),
+            } => {
+                then_body
+                    .iter()
+                    .any(|stmt| matches!(stmt, HirStmt::If { .. }))
+                    || else_body
+                        .iter()
+                        .any(|stmt| matches!(stmt, HirStmt::If { .. }))
+            }
             _ => false,
         }
     }
@@ -54,8 +60,10 @@ impl<'a> PreviewBuilder<'a> {
                 then_body,
                 else_body,
                 ..
-            } => then_body.iter().map(Self::count_stmt_gotos).sum::<usize>()
-                + else_body.iter().map(Self::count_stmt_gotos).sum::<usize>(),
+            } => {
+                then_body.iter().map(Self::count_stmt_gotos).sum::<usize>()
+                    + else_body.iter().map(Self::count_stmt_gotos).sum::<usize>()
+            }
             HirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
@@ -84,8 +92,10 @@ impl<'a> PreviewBuilder<'a> {
                 then_body,
                 else_body,
                 ..
-            } => then_body.iter().map(Self::count_stmt_labels).sum::<usize>()
-                + else_body.iter().map(Self::count_stmt_labels).sum::<usize>(),
+            } => {
+                then_body.iter().map(Self::count_stmt_labels).sum::<usize>()
+                    + else_body.iter().map(Self::count_stmt_labels).sum::<usize>()
+            }
             HirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
@@ -123,9 +133,11 @@ impl<'a> PreviewBuilder<'a> {
                 cond,
                 then_body,
                 else_body,
-            } => usize::from(!Self::expr_has_short_circuit_form(cond))
-                + usize::from(then_body.is_empty() || else_body.is_empty())
-                + usize::from(Self::stmt_has_nested_if(stmt)),
+            } => {
+                usize::from(!Self::expr_has_short_circuit_form(cond))
+                    + usize::from(then_body.is_empty() || else_body.is_empty())
+                    + usize::from(Self::stmt_has_nested_if(stmt))
+            }
             _ => 0,
         };
         let loop_header_violation = usize::from(matches!(stmt, HirStmt::Goto(_)));
@@ -153,7 +165,11 @@ impl<'a> PreviewBuilder<'a> {
             && self.accept_structured_region(start_idx, skip_to, targeted)
         {
             let cost = self.score_structured_candidate(start_idx, skip_to, &stmt, targeted);
-            candidates.push(StructuredRegionCandidate { stmt, skip_to, cost });
+            candidates.push(StructuredRegionCandidate {
+                stmt,
+                skip_to,
+                cost,
+            });
         }
         Ok(())
     }
@@ -180,17 +196,11 @@ impl<'a> PreviewBuilder<'a> {
         // structured-code reducer to succeed where it would otherwise fall
         // back to goto-based linearisation.
         if scc_irreducible_count > 0 && !force_linear {
-            let block_stmt_counts: Vec<usize> = self
-                .pcode
-                .blocks
-                .iter()
-                .map(|b| b.ops.len())
-                .collect();
-            if let Some(split) = compute_node_splits(
-                &self.successors,
-                &self.predecessors,
-                &block_stmt_counts,
-            ) {
+            let block_stmt_counts: Vec<usize> =
+                self.pcode.blocks.iter().map(|b| b.ops.len()).collect();
+            if let Some(split) =
+                compute_node_splits(&self.successors, &self.predecessors, &block_stmt_counts)
+            {
                 if diag {
                     eprintln!(
                         "[DIAG] node-splitting: applied {} splits, virtual_blocks={}",
@@ -561,7 +571,10 @@ impl<'a> PreviewBuilder<'a> {
                     });
                 }
                 LoweredTerminator::Fallthrough(_) => {}
-                LoweredTerminator::Unsupported => {
+                LoweredTerminator::Unsupported {
+                    evidence,
+                    target_expr,
+                } => {
                     self.record_unsupported_inventory_event(
                         "build_hir_multiblock_unsupported_terminator",
                         None,
@@ -572,11 +585,7 @@ impl<'a> PreviewBuilder<'a> {
                         false,
                         "hir_unsupported_emit",
                     );
-                    body.push(HirStmt::Expr(HirExpr::Call {
-                        target: "__fission_indirect_cf_unsupported".to_string(),
-                        args: Vec::new(),
-                        ty: NirType::Unknown,
-                    }));
+                    body.push(self.emit_unsupported_control_surface(evidence, target_expr));
                 }
                 LoweredTerminator::Switch {
                     expr,
@@ -635,7 +644,7 @@ impl<'a> PreviewBuilder<'a> {
         // Any block with an irreducible exit fails linear structuring and falls back to `lower_block_terminator`,
         // which correctly emits the explicit `If { Goto }` or unconditional `Goto` since it reads from the unmasked p-code.
         // Thus, Phase 4 (Irreducible Goto Pass) is inherently satisfied by the existing fallback mechanisms!
-        
+
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
         if diag {

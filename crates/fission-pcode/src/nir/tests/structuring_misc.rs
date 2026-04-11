@@ -659,7 +659,7 @@ fn trap_like_unknown_producer_can_surface_as_opaque_callind_target() {
 }
 
 #[test]
-fn non_trap_unknown_callind_target_still_fails_preview() {
+fn non_trap_unknown_callind_target_preserves_opaque_surface() {
     let trap_target = uniq(0x6b0, 4);
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
@@ -695,10 +695,7 @@ fn non_trap_unknown_callind_target_still_fails_preview() {
         }],
     };
 
-    let err = render_mlil_preview(&func, "non_trap_callind", 0x6b00, &preview_options_x86())
-        .expect_err("unknown non-trap producer should still fail");
-    assert!(matches!(
-        err,
-        MlilPreviewError::UnsupportedPattern("opcode")
-    ));
+    let code = render_mlil_preview(&func, "non_trap_callind", 0x6b00, &preview_options_x86())
+        .expect("unknown non-trap producer should preserve opaque callind surface");
+    assert!(code.contains("__fission_callind_opaque()"), "{code}");
 }

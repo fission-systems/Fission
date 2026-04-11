@@ -131,4 +131,10 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) condition_fold_and_count: usize,
     pub(crate) condition_fold_or_count: usize,
     pub(crate) condition_fold_rejected_side_effect: usize,
+    pub(crate) unsupported_indirect_control_count: usize,
+    pub(crate) unsupported_indirect_call_count: usize,
+    pub(crate) unsupported_external_target_count: usize,
+    pub(crate) indirect_surface_preserved_count: usize,
+    pub(crate) indirect_target_set_refined_count: usize,
+    pub(crate) dispatcher_shape_recovered_count: usize,
 }

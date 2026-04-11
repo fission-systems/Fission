@@ -36,7 +36,13 @@ pub(super) fn collect_local_surface_hints(
     local_hints: &mut HashMap<String, String>,
 ) {
     let alias_collector = type_hints::StackAliasCollector::new(func);
-    type_hints::collect_local_surface_hints(body, pointer_hints, func, &alias_collector, local_hints);
+    type_hints::collect_local_surface_hints(
+        body,
+        pointer_hints,
+        func,
+        &alias_collector,
+        local_hints,
+    );
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -50,7 +56,10 @@ impl<'a> PreviewBuilder<'a> {
             idx
         } else {
             let v_idx = idx - original_count;
-            self.virtual_block_map.get(v_idx).copied().unwrap_or(idx % original_count.max(1))
+            self.virtual_block_map
+                .get(v_idx)
+                .copied()
+                .unwrap_or(idx % original_count.max(1))
         }
     }
 
@@ -115,7 +124,10 @@ impl<'a> PreviewBuilder<'a> {
                         .into_iter()
                         .collect(),
                 }),
-                LoweredTerminator::Unsupported => {
+                LoweredTerminator::Unsupported {
+                    evidence,
+                    target_expr,
+                } => {
                     self.record_unsupported_inventory_event(
                         "build_hir_single_block_unsupported_terminator",
                         None,
@@ -126,11 +138,7 @@ impl<'a> PreviewBuilder<'a> {
                         false,
                         "hir_unsupported_emit",
                     );
-                    body.push(HirStmt::Expr(HirExpr::Call {
-                        target: "__fission_indirect_cf_unsupported".to_string(),
-                        args: Vec::new(),
-                        ty: NirType::Unknown,
-                    }));
+                    body.push(self.emit_unsupported_control_surface(evidence, target_expr));
                 }
                 LoweredTerminator::Switch {
                     expr,
@@ -143,12 +151,12 @@ impl<'a> PreviewBuilder<'a> {
                         .filter(|target| Some(*target) != default_target)
                         .enumerate()
                         .map(|(i, t)| {
-                        crate::nir::types::HirSwitchCase {
-                            // Use recovered min_val offset; for comparison-chain
-                            // switches min_val is 0 (real values come from the chain).
-                            values: vec![min_val + i as i64],
-                            body: vec![HirStmt::Goto(block_label(t))],
-                        }
+                            crate::nir::types::HirSwitchCase {
+                                // Use recovered min_val offset; for comparison-chain
+                                // switches min_val is 0 (real values come from the chain).
+                                values: vec![min_val + i as i64],
+                                body: vec![HirStmt::Goto(block_label(t))],
+                            }
                         })
                         .collect();
                     body.push(HirStmt::Switch {
@@ -225,6 +233,69 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    pub(crate) fn build_unsupported_control_evidence(
+        &mut self,
+        opcode: PcodeOpcode,
+        source_block: Option<u64>,
+        target_expr: Option<&HirExpr>,
+        successor_targets: Vec<u64>,
+        failure_family: UnsupportedControlFamily,
+        surface: IndirectControlSurface,
+        confidence: u8,
+    ) -> UnsupportedControlEvidence {
+        match surface {
+            IndirectControlSurface::CallInd => {
+                self.unsupported_indirect_call_count += 1;
+            }
+            IndirectControlSurface::BranchInd
+            | IndirectControlSurface::SwitchLike
+            | IndirectControlSurface::DispatcherLike => {
+                self.unsupported_indirect_control_count += 1;
+            }
+        }
+        if matches!(failure_family, UnsupportedControlFamily::ExternalTarget) {
+            self.unsupported_external_target_count += 1;
+        }
+        UnsupportedControlEvidence {
+            opcode: format!("{opcode:?}"),
+            source_block,
+            target_expr: target_expr.map(print_expr),
+            successor_targets,
+            failure_family,
+            surface,
+            confidence,
+        }
+    }
+
+    pub(crate) fn emit_unsupported_control_surface(
+        &mut self,
+        evidence: UnsupportedControlEvidence,
+        target_expr: Option<HirExpr>,
+    ) -> HirStmt {
+        let pseudo_target = match evidence.surface {
+            IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike => {
+                "__fission_branchind"
+            }
+            IndirectControlSurface::DispatcherLike => "__fission_dispatcher_indirect",
+            IndirectControlSurface::CallInd => "__fission_callind_opaque",
+        };
+        let can_preserve =
+            target_expr.is_some() || matches!(evidence.surface, IndirectControlSurface::CallInd);
+        if can_preserve {
+            self.indirect_surface_preserved_count += 1;
+            return HirStmt::Expr(HirExpr::Call {
+                target: pseudo_target.to_string(),
+                args: target_expr.into_iter().collect(),
+                ty: NirType::Unknown,
+            });
+        }
+        HirStmt::Expr(HirExpr::Call {
+            target: "__fission_indirect_cf_unsupported".to_string(),
+            args: Vec::new(),
+            ty: NirType::Unknown,
+        })
+    }
+
     fn with_lowering_site<T>(&mut self, site: LoweringSite, f: impl FnOnce(&mut Self) -> T) -> T {
         let prev = self.current_lowering_site;
         self.lowering_site_depth += 1;
@@ -237,9 +308,8 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
         let layout_idx = self.pcode_block_idx(idx);
-        self.layout_fallthrough[layout_idx].map(|next_idx| {
-            self.block_target_keys[self.pcode_block_idx(next_idx)]
-        })
+        self.layout_fallthrough[layout_idx]
+            .map(|next_idx| self.block_target_keys[self.pcode_block_idx(next_idx)])
     }
 
     pub(super) fn block_target_key(&self, idx: usize) -> u64 {

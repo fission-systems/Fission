@@ -119,6 +119,7 @@ impl<'a> PreviewBuilder<'a> {
                     if let Some(target) = self.recover_opaque_callind_target(target) {
                         target
                     } else {
+                        let target_expr = self.lower_varnode(target, &mut HashSet::new()).ok();
                         self.record_unsupported_inventory_event(
                             "call_target_unsupported",
                             Some(target),
@@ -137,7 +138,17 @@ impl<'a> PreviewBuilder<'a> {
                             target.offset,
                             target.size
                         ));
-                        return Err(MlilPreviewError::UnsupportedPattern("opcode"));
+                        let _evidence = self.build_unsupported_control_evidence(
+                            op.opcode,
+                            self.current_lowering_site
+                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                            target_expr.as_ref(),
+                            Vec::new(),
+                            UnsupportedControlFamily::CallRegion,
+                            IndirectControlSurface::CallInd,
+                            24,
+                        );
+                        "__fission_callind_opaque".to_string()
                     }
                 }
                 Err(err) => {
@@ -191,15 +202,12 @@ impl<'a> PreviewBuilder<'a> {
     fn resolve_call_target_from_asm(&self, op: &PcodeOp) -> Option<String> {
         let asm = op.asm_mnemonic.as_deref()?;
         let addr = parse_call_target_address(asm)?;
-        if let Some(name) = self
-            .type_context
-            .and_then(|ctx| {
-                ctx.call_target_refs
-                    .get(&addr)
-                    .map(|target_ref| target_ref.symbol.clone())
-                    .or_else(|| ctx.call_targets.get(&addr).cloned())
-            })
-        {
+        if let Some(name) = self.type_context.and_then(|ctx| {
+            ctx.call_target_refs
+                .get(&addr)
+                .map(|target_ref| target_ref.symbol.clone())
+                .or_else(|| ctx.call_targets.get(&addr).cloned())
+        }) {
             return Some(name);
         }
         if matches!(op.opcode, PcodeOpcode::Call) {
@@ -314,7 +322,8 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
-            if !self.options.is_64bit && vn.space_id == REGISTER_SPACE_ID
+            if !self.options.is_64bit
+                && vn.space_id == REGISTER_SPACE_ID
                 && let Some(name) = x86_register_name(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));

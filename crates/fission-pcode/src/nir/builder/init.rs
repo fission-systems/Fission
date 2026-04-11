@@ -1,5 +1,5 @@
-use super::*;
 use super::state::{BuilderCacheMap, BuilderCacheSet};
+use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn new(
@@ -200,6 +200,12 @@ impl<'a> PreviewBuilder<'a> {
             condition_fold_and_count: 0,
             condition_fold_or_count: 0,
             condition_fold_rejected_side_effect: 0,
+            unsupported_indirect_control_count: 0,
+            unsupported_indirect_call_count: 0,
+            unsupported_external_target_count: 0,
+            indirect_surface_preserved_count: 0,
+            indirect_target_set_refined_count: 0,
+            dispatcher_shape_recovered_count: 0,
         }
     }
 }

@@ -134,9 +134,14 @@ fn preview_tolerates_branchind_without_targets() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "x86_branchind_unsupported", 0x405000, &preview_options_x86())
-        .expect("preview render");
-    assert!(code.contains("__fission_indirect_cf_unsupported()"), "{code}");
+    let code = render_mlil_preview(
+        &func,
+        "x86_branchind_unsupported",
+        0x405000,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    assert!(code.contains("__fission_branchind("), "{code}");
 }
 
 #[test]
@@ -279,7 +284,7 @@ fn preview_tolerates_unresolved_direct_branch_target() {
         &preview_options_x86(),
     )
     .expect("preview render");
-    assert!(code.contains("__fission_indirect_cf_unsupported()"), "{code}");
+    assert!(code.contains("__fission_branchind("), "{code}");
 }
 
 #[test]
