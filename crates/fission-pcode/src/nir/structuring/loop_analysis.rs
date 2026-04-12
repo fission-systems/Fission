@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use super::cfg_analysis::{CfgAnalysis, EdgeClass};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoopBody {
@@ -271,4 +271,3 @@ impl LoopBody {
         }
     }
 }
-

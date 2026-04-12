@@ -44,20 +44,36 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         if resolved_site.is_none() {
-            resolved_site = self.defs.get(&key).map(|def| LoweringSite {
-                block_idx: def.block_idx,
-                op_idx: def.op_idx,
-            });
-        }
-        if let (Some(scope_site), Some(candidate_site)) = (scope, resolved_site) {
-            let candidate_is_prior = if candidate_site.block_idx == scope_site.block_idx {
-                candidate_site.op_idx < scope_site.op_idx
+            if let Some(scope_site) = scope {
+                resolved_site = self.def_sites.get(&key).and_then(|sites| {
+                    sites.iter()
+                        .filter_map(|site| {
+                            let candidate = LoweringSite {
+                                block_idx: site.block_idx,
+                                op_idx: site.op_idx,
+                            };
+                            if candidate.block_idx == scope_site.block_idx {
+                                return (candidate.op_idx < scope_site.op_idx)
+                                    .then_some((usize::MAX, candidate.op_idx, candidate));
+                            }
+                            self.dom_tree
+                                .dominates(candidate.block_idx, scope_site.block_idx)
+                                .then_some((
+                                    self.dom_tree.dominance_depth(candidate.block_idx),
+                                    candidate.op_idx,
+                                    candidate,
+                                ))
+                        })
+                        .max_by_key(|(dom_depth, op_idx, candidate)| {
+                            (*dom_depth, candidate.block_idx, *op_idx)
+                        })
+                        .map(|(_, _, candidate)| candidate)
+                });
             } else {
-                self.dom_tree
-                    .dominates(candidate_site.block_idx, scope_site.block_idx)
-            };
-            if !candidate_is_prior {
-                resolved_site = None;
+                resolved_site = self.defs.get(&key).map(|def| LoweringSite {
+                    block_idx: def.block_idx,
+                    op_idx: def.op_idx,
+                });
             }
         }
 

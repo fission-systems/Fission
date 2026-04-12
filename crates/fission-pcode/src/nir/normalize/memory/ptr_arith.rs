@@ -74,7 +74,13 @@ fn type_byte_size(ty: &NirType) -> Option<u64> {
 /// Try to recognise `Mul(idx, Const(stride))` or `Mul(Const(stride), idx)`,
 /// returning `(idx_expr, stride)`.
 fn try_extract_index_mul(expr: &HirExpr) -> Option<(HirExpr, i64)> {
-    let HirExpr::Binary { op: HirBinaryOp::Mul, lhs, rhs, .. } = expr else {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Mul,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
         return None;
     };
     match (lhs.as_ref(), rhs.as_ref()) {
@@ -103,7 +109,11 @@ fn try_recover_ptr_arith(
     // Determine if the LHS is a pointer-typed variable.
     let ptr_ty = match ptr_expr {
         HirExpr::Var(name) => binding_types.get(name.as_str()).and_then(|t| {
-            if matches!(t, NirType::Ptr(_)) { Some(t) } else { None }
+            if matches!(t, NirType::Ptr(_)) {
+                Some(t)
+            } else {
+                None
+            }
         })?,
         _ => return None,
     };
@@ -290,7 +300,11 @@ fn recover_in_stmt(stmt: &mut HirStmt, binding_types: &HashMap<String, NirType>)
             }
             changed |= recover_in_stmts(body, binding_types);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= recover_in_expr(expr, binding_types);
             for case in cases.iter_mut() {
                 changed |= recover_in_stmts(&mut case.body, binding_types);
@@ -345,21 +359,30 @@ mod tests {
     /// Add(Var("p"), Const(4)) where p: Ptr(uint32) → PtrOffset { base: p, offset: 4 }
     #[test]
     fn converts_add_const_to_ptr_offset() {
-        let elem_ty = NirType::Int { bits: 32, signed: false };
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
         let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
         let body = vec![HirStmt::Assign {
             lhs: HirLValue::Var("result".to_owned()),
             rhs: HirExpr::Binary {
                 op: HirBinaryOp::Add,
                 lhs: Box::new(HirExpr::Var("p".to_owned())),
-                rhs: Box::new(HirExpr::Const(4, NirType::Int { bits: 64, signed: false })),
-                ty: NirType::Int { bits: 64, signed: false },
+                rhs: Box::new(HirExpr::Const(
+                    4,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             },
         }];
-        let mut func = make_func(
-            vec![make_binding_with_ty("p", p_ty)],
-            body,
-        );
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
         let changed = super::apply_ptr_arith_recovery_pass(&mut func);
         assert!(changed);
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {
@@ -372,7 +395,10 @@ mod tests {
     /// Add(Var("p"), Mul(Var("i"), Const(4))) where p: Ptr(uint32) → Index
     #[test]
     fn converts_add_stride_to_index() {
-        let elem_ty = NirType::Int { bits: 32, signed: false };
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
         let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
         let body = vec![HirStmt::Assign {
             lhs: HirLValue::Var("result".to_owned()),
@@ -382,16 +408,25 @@ mod tests {
                 rhs: Box::new(HirExpr::Binary {
                     op: HirBinaryOp::Mul,
                     lhs: Box::new(HirExpr::Var("i".to_owned())),
-                    rhs: Box::new(HirExpr::Const(4, NirType::Int { bits: 64, signed: false })),
-                    ty: NirType::Int { bits: 64, signed: false },
+                    rhs: Box::new(HirExpr::Const(
+                        4,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
                 }),
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             },
         }];
-        let mut func = make_func(
-            vec![make_binding_with_ty("p", p_ty)],
-            body,
-        );
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
         let changed = super::apply_ptr_arith_recovery_pass(&mut func);
         assert!(changed);
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {

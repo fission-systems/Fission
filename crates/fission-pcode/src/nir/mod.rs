@@ -1,9 +1,10 @@
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_loader::loader::LoadedBinary;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
-mod abstract_location;
 mod abi;
+mod abstract_location;
 mod builder;
 mod cfg;
 mod normalize;
@@ -12,16 +13,16 @@ mod printer;
 mod structuring;
 mod support;
 mod telemetry;
-mod var_rename;
 #[cfg(test)]
 mod tests;
 mod types;
+mod var_rename;
 mod vsa;
 
-pub(super) use self::support::*;
-pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::abi::*;
+pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub use self::support::CallingConvention;
+pub(super) use self::support::*;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
@@ -35,7 +36,7 @@ pub fn render_mlil_preview(
     address: u64,
     options: &MlilPreviewOptions,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_context(pcode, name, address, options, None)
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, None)
 }
 
 pub fn render_nir(
@@ -52,6 +53,17 @@ pub fn render_mlil_preview_with_context(
     name: &str,
     address: u64,
     options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context)
+}
+
+pub fn render_mlil_preview_with_binary_and_context(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
     telemetry::reset_preview_telemetry();
@@ -82,7 +94,7 @@ pub fn render_mlil_preview_with_context(
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
     }
     debug_log("build_hir_start");
-    let mut builder = PreviewBuilder::new(pcode, options, type_context);
+    let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
         let mut stats = builder.preview_build_stats();
         stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
@@ -233,4 +245,15 @@ pub fn render_nir_with_context(
     type_context: Option<&NirTypeContext>,
 ) -> Result<String, MlilPreviewError> {
     render_mlil_preview_with_context(pcode, name, address, options, type_context)
+}
+
+pub fn render_nir_with_binary_and_context(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&NirTypeContext>,
+) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, binary, type_context)
 }

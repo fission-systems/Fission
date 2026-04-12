@@ -64,7 +64,10 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         params: vec![],
         locals: vec![NirBinding {
             name: "local_20".to_string(),
-            ty: NirType::Aggregate { size: 16, fields: vec![] },
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-0x20)),
             initializer: None,
@@ -125,7 +128,10 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::ParamIndex(1)),
                 initializer: None,
@@ -170,7 +176,10 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         params: vec![],
         locals: vec![NirBinding {
             name: "local_20".to_string(),
-            ty: NirType::Aggregate { size: 16, fields: vec![] },
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-0x20)),
             initializer: None,
@@ -255,7 +264,10 @@ fn preview_type_hints_explicit_function_types_override_heuristic_aliases() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::ParamIndex(1)),
                 initializer: None,
@@ -321,7 +333,10 @@ fn preview_type_hints_collect_hint_stats() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -330,14 +345,20 @@ fn preview_type_hints_collect_hint_stats() {
         locals: vec![
             NirBinding {
                 name: "local_20".to_string(),
-                ty: NirType::Aggregate { size: 16, fields: vec![] },
+                ty: NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                },
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::StackOffset(-0x20)),
                 initializer: None,
             },
             NirBinding {
                 name: "slot_20".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),
                 initializer: None,

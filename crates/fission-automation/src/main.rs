@@ -365,7 +365,8 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         );
     }
     let inventory_elapsed_ms = inventory_started.elapsed().as_millis() as u64;
-    metrics::histogram!("fission.automation.nir_check.inventory_ms").record(inventory_elapsed_ms as f64);
+    metrics::histogram!("fission.automation.nir_check.inventory_ms")
+        .record(inventory_elapsed_ms as f64);
 
     let corpus_artifacts = build_corpus_artifacts(&root, &datasets);
     let diagnosis_started = Instant::now();
@@ -384,7 +385,8 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         binaries: diagnosis_entries,
     };
     let diagnosis_elapsed_ms = diagnosis_started.elapsed().as_millis() as u64;
-    metrics::histogram!("fission.automation.nir_check.diagnosis_ms").record(diagnosis_elapsed_ms as f64);
+    metrics::histogram!("fission.automation.nir_check.diagnosis_ms")
+        .record(diagnosis_elapsed_ms as f64);
 
     let mut automation_summary = build_summary(
         isoish_now(),
@@ -522,9 +524,8 @@ fn init_automation_logging(root: &Path) {
         .join("fission-automation")
         .join("logs")
         .join("fission-automation.log");
-    let options =
-        fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging)
-            .with_file_path(log_path);
+    let options = fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging)
+        .with_file_path(log_path);
     fission_core::logging::init_with_options(options);
     fission_core::logging::info("initialized fission-automation logging");
 }

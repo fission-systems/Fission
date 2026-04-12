@@ -1,9 +1,9 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
-use super::predicate::emit_jcc_predicate_with_allocator;
 use super::common::{const_u64, x86_flag_zf, x86_reg, RAM_SPACE_ID, UNIQUE_SPACE_ID};
 #[cfg(test)]
 use super::common::{x86_flag_cf, x86_flag_of, x86_flag_sf};
+use super::predicate::emit_jcc_predicate_with_allocator;
 
 #[derive(Debug, Clone, Copy)]
 struct PrefixState {
@@ -239,14 +239,16 @@ fn decode_loop_jcxz_control(
         address,
         output: None,
         inputs: vec![Varnode::constant(target as i64, 8), cond],
-        asm_mnemonic: Some(match op {
-            0xE0 => "LOOPNE",
-            0xE1 => "LOOPE",
-            0xE2 => "LOOP",
-            0xE3 => "JCXZ",
-            _ => "LOOP_JCXZ",
-        }
-        .to_string()),
+        asm_mnemonic: Some(
+            match op {
+                0xE0 => "LOOPNE",
+                0xE1 => "LOOPE",
+                0xE2 => "LOOP",
+                0xE3 => "JCXZ",
+                _ => "LOOP_JCXZ",
+            }
+            .to_string(),
+        ),
     });
 
     Some(ops)
@@ -289,27 +291,11 @@ fn decode_ff_indirect_control(
     let mut ops = Vec::new();
     let addr_vn = if prefix.address_size_override {
         decode_effective_address_addr32(
-            insn,
-            mode,
-            rm_low,
-            prefix,
-            address,
-            &mut idx,
-            &mut ops,
-            &mut seq,
-            &mut temp,
+            insn, mode, rm_low, prefix, address, &mut idx, &mut ops, &mut seq, &mut temp,
         )?
     } else {
         decode_effective_address_addr64(
-            insn,
-            mode,
-            rm_low,
-            prefix,
-            address,
-            &mut idx,
-            &mut ops,
-            &mut seq,
-            &mut temp,
+            insn, mode, rm_low, prefix, address, &mut idx, &mut ops, &mut seq, &mut temp,
         )?
     };
 
@@ -432,7 +418,8 @@ fn decode_effective_address_addr32(
         disp = d;
     }
 
-    let ea32 = compose_effective_address(base, index, disp, address, ops, seq, temp, 4, "EA32", true)?;
+    let ea32 =
+        compose_effective_address(base, index, disp, address, ops, seq, temp, 4, "EA32", true)?;
     let ea64 = temp.alloc(8);
     ops.push(PcodeOp {
         seq_num: next_seq(seq),
@@ -537,7 +524,8 @@ fn build_jcc_ops(address: u64, target: u64, cond: u8) -> Option<Vec<PcodeOp>> {
         vn
     };
     let mut ops = Vec::new();
-    let pred = emit_jcc_predicate_with_allocator(&mut ops, address, cond, &mut seq, &mut alloc_tmp)?;
+    let pred =
+        emit_jcc_predicate_with_allocator(&mut ops, address, cond, &mut seq, &mut alloc_tmp)?;
     ops.push(PcodeOp {
         seq_num: next_seq(&mut seq),
         opcode: PcodeOpcode::CBranch,
@@ -639,18 +627,7 @@ fn read_i32(insn: &[u8], idx: usize) -> Option<i32> {
 fn is_prefix(byte: u8) -> bool {
     matches!(
         byte,
-        0xF0
-            | 0xF2
-            | 0xF3
-            | 0x2E
-            | 0x36
-            | 0x3E
-            | 0x26
-            | 0x64
-            | 0x65
-            | 0x66
-            | 0x67
-            | 0x40..=0x4F
+        0xF0 | 0xF2 | 0xF3 | 0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 | 0x66 | 0x67 | 0x40..=0x4F
     )
 }
 
@@ -810,7 +787,10 @@ mod tests {
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntNotEqual));
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::BoolNegate));
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::BoolAnd));
-        assert_eq!(ops.last().expect("cbranch").inputs[0].constant_val as u64, address);
+        assert_eq!(
+            ops.last().expect("cbranch").inputs[0].constant_val as u64,
+            address
+        );
     }
 
     #[test]

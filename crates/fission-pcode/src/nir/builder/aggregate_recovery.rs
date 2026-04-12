@@ -303,7 +303,10 @@ impl<'a> PreviewBuilder<'a> {
                 let (slot_name, _) = self.ensure_stack_slot_binding(
                     base,
                     offset,
-                    NirType::Aggregate { size: reg_vn.size, fields: vec![] },
+                    NirType::Aggregate {
+                        size: reg_vn.size,
+                        fields: vec![],
+                    },
                 )?;
                 return Some(HirExpr::Var(slot_name));
             }

@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Debug, Clone)]
+struct InferredJumpTableTargets {
+    unique_targets: Vec<u64>,
+    recovered_cases: Vec<(i64, u64)>,
+    decode_mode: &'static str,
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir) fn lower_block_terminator(
         &mut self,
@@ -165,8 +172,15 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     PcodeOpcode::BranchInd => {
                         let switch_var = &op.inputs[0];
-                        let switch_expr =
-                            this.lower_wrapped_varnode(switch_var, &mut HashSet::new())?;
+                        let switch_expr = this.lower_branchind_switch_expr(idx, switch_var)?;
+                        if preview_builder_diag_enabled() {
+                            eprintln!(
+                                "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
+                                block.start_address,
+                                op.seq_num,
+                                print_expr(&switch_expr)
+                            );
+                        }
                         let mut targets = Vec::new();
                         for succ_idx in &block.successors {
                             let succ_idx = *succ_idx as usize;
@@ -177,10 +191,26 @@ impl<'a> PreviewBuilder<'a> {
                                 }
                             }
                         }
+                        let selector_alias =
+                            this.recover_branchind_jump_table_selector_varnode(idx);
+                        let mut inferred_single_input_target = false;
+                        let mut recovered_case_map = None;
+                        if targets.is_empty()
+                            && let Some(recovered_targets) = this
+                                .infer_branchind_targets_from_jump_table_expr(
+                                    idx,
+                                    &switch_expr,
+                                    selector_alias.as_ref(),
+                                )
+                        {
+                            recovered_case_map = Some(recovered_targets.recovered_cases);
+                            targets.extend(recovered_targets.unique_targets);
+                        }
                         if targets.is_empty()
                             && let Some(inferred_target) =
                                 this.infer_branchind_target_from_input(idx, op, switch_var)
                         {
+                            inferred_single_input_target = true;
                             targets.push(inferred_target);
                         }
                         if targets.is_empty() {
@@ -208,6 +238,44 @@ impl<'a> PreviewBuilder<'a> {
                                 target_expr: Some(switch_expr),
                             })
                         } else {
+                            if inferred_single_input_target
+                                && super::switch_table::has_jump_table_surface(
+                                    &switch_expr,
+                                    &this.options,
+                                )
+                            {
+                                let rendered_target_expr = selector_alias
+                                    .as_ref()
+                                    .map(|alias| {
+                                        this.recover_branchind_render_selector_expr(
+                                            idx,
+                                            alias,
+                                            switch_expr.clone(),
+                                        )
+                                    })
+                                    .or_else(|| {
+                                        this.recover_branchind_switch_expr_from_predecessors(
+                                            idx,
+                                            switch_var,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| switch_expr.clone());
+                                this.indirect_target_set_refined_count += 1;
+                                this.dispatcher_shape_recovered_count += 1;
+                                let evidence = this.build_unsupported_control_evidence(
+                                    op.opcode,
+                                    Some(block.start_address),
+                                    Some(&rendered_target_expr),
+                                    targets,
+                                    UnsupportedControlFamily::NonStructuralDispatcher,
+                                    IndirectControlSurface::DispatcherLike,
+                                    52,
+                                );
+                                return Ok(LoweredTerminator::Unsupported {
+                                    evidence,
+                                    target_expr: Some(rendered_target_expr),
+                                });
+                            }
                             let default_target = this.infer_switch_default_target(idx, &targets);
                             // Attempt to recover a proof-bearing selector before we synthesize
                             // a switch. Single-target self-loop dispatcher shapes stay as
@@ -228,8 +296,50 @@ impl<'a> PreviewBuilder<'a> {
                                 recovered_selector.is_some() || single_target_dispatcher;
                             let (expr, min_val) = recovered_selector
                                 .as_ref()
-                                .map(|selector| (selector.discriminant.clone(), selector.min_val))
+                                .map(|selector| {
+                                    let render_expr = selector_alias
+                                        .as_ref()
+                                        .map(|alias| {
+                                            this.recover_branchind_render_selector_expr(
+                                                idx,
+                                                alias,
+                                                selector.discriminant.clone(),
+                                            )
+                                        })
+                                        .unwrap_or_else(|| selector.discriminant.clone());
+                                    this.normalize_rendered_selector_expr(
+                                        render_expr,
+                                        selector.min_val,
+                                    )
+                                })
                                 .unwrap_or_else(|| (switch_expr.clone(), 0));
+                            let mut guard_set = vec!["successor_bounded".to_string()];
+                            if recovered_selector.is_some() {
+                                guard_set.push("selector_normalized".to_string());
+                            }
+                            if default_target.is_some() {
+                                guard_set.push("follow_candidate".to_string());
+                            }
+                            let proof = Some(DispatcherProofUnit {
+                                selector_expr: print_expr(&expr),
+                                candidate_targets: targets.clone(),
+                                recovered_cases: recovered_case_map.unwrap_or_else(|| {
+                                    targets
+                                        .iter()
+                                        .copied()
+                                        .enumerate()
+                                        .filter_map(|(ordinal, target)| {
+                                            (Some(target) != default_target)
+                                                .then_some((min_val + ordinal as i64, target))
+                                        })
+                                        .collect()
+                                }),
+                                default_target,
+                                guard_set,
+                                follow_block: default_target,
+                                proof_scope: DispatcherProofScope::TerminatorLocal,
+                                failure_family: None,
+                            });
                             let non_default_targets = targets
                                 .iter()
                                 .filter(|target| Some(**target) != default_target)
@@ -259,6 +369,7 @@ impl<'a> PreviewBuilder<'a> {
                                 targets,
                                 default_target,
                                 min_val,
+                                proof,
                             })
                         }
                     }
@@ -622,6 +733,587 @@ impl<'a> PreviewBuilder<'a> {
         let load_addr_vn = def.inputs.last()?;
         let load_addr = self.infer_branch_target_address_one_step(load_addr_vn)?;
         canonical_block_index_for_address(self.pcode, &self.address_to_index, load_addr)
+    }
+
+    fn lower_branchind_switch_expr(
+        &mut self,
+        idx: usize,
+        switch_var: &Varnode,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let exact_expr = self.lower_wrapped_varnode(switch_var, &mut HashSet::new()).ok();
+        let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var);
+        let predecessor_expr = self.recover_branchind_switch_expr_from_predecessors(idx, switch_var);
+
+        let best_jump_table_expr = exact_expr
+            .iter()
+            .chain(alias_expr.iter())
+            .chain(predecessor_expr.iter())
+            .find(|expr| super::switch_table::has_jump_table_surface(expr, &self.options))
+            .cloned();
+
+        match (best_jump_table_expr, exact_expr, alias_expr, predecessor_expr) {
+            (Some(expr), _, _, _) => Ok(expr),
+            (None, Some(expr), _, _) => Ok(expr),
+            (None, None, Some(alias), _) => Ok(alias),
+            (None, None, None, Some(expr)) => Ok(expr),
+            (None, None, None, None) => self.lower_wrapped_varnode(switch_var, &mut HashSet::new()),
+        }
+    }
+
+    fn lower_branchind_same_block_alias_expr(
+        &mut self,
+        idx: usize,
+        switch_var: &Varnode,
+    ) -> Option<HirExpr> {
+        let pcode_idx = self.pcode_block_idx(idx);
+        let block = &self.pcode.blocks[pcode_idx];
+        let term_idx = self.block_terminator_index(block)?;
+        let key = VarnodeKey::from(switch_var);
+        let exact_local = self
+            .block_defs
+            .get(pcode_idx)
+            .and_then(|defs| defs.get(&key))
+            .and_then(|indices| {
+                indices
+                    .iter()
+                    .copied()
+                    .rev()
+                    .find(|def_idx| *def_idx < term_idx)
+            });
+
+        for def_idx in (0..term_idx).rev() {
+            let op = &block.ops[def_idx];
+            let Some(output) = op.output.as_ref() else {
+                continue;
+            };
+            if output.is_constant
+                || output.space_id != switch_var.space_id
+                || output.offset != switch_var.offset
+                || output.size < switch_var.size
+            {
+                continue;
+            }
+            if !is_safe_selector_provenance_opcode(op.opcode) {
+                if exact_local == Some(def_idx) {
+                    continue;
+                }
+                continue;
+            }
+            let site = LoweringSite {
+                block_idx: pcode_idx,
+                op_idx: def_idx,
+            };
+            if let Ok(expr) = self.with_lowering_site(site, |this| {
+                this.lower_selector_source_expr(output, &mut HashSet::new())
+            }) {
+                return Some(expr);
+            }
+        }
+        None
+    }
+
+    fn recover_branchind_render_selector_expr(
+        &mut self,
+        idx: usize,
+        selector_alias: &Varnode,
+        fallback: HirExpr,
+    ) -> HirExpr {
+        self.lower_branchind_same_block_alias_expr(idx, selector_alias)
+            .or_else(|| self.recover_selector_expr_from_predecessors(idx, selector_alias))
+            .unwrap_or(fallback)
+    }
+
+    fn recover_branchind_switch_expr_from_predecessors(
+        &mut self,
+        idx: usize,
+        switch_var: &Varnode,
+    ) -> Option<HirExpr> {
+        let predecessors = self.predecessors.get(idx)?.clone();
+        if preview_builder_diag_enabled() {
+            let pred_blocks = predecessors
+                .iter()
+                .map(|pred_idx| format!("0x{:x}", self.block_start_address(*pred_idx)))
+                .collect::<Vec<_>>()
+                .join(",");
+            eprintln!(
+                "[DIAG] branchind_pred_scan block=0x{:x} preds=[{}] switch_var=space={} off=0x{:x} size={}",
+                self.block_start_address(idx),
+                pred_blocks,
+                switch_var.space_id,
+                switch_var.offset,
+                switch_var.size
+            );
+        }
+        for pred_idx in predecessors {
+            let pcode_idx = self.pcode_block_idx(pred_idx);
+            let block = self.pcode.blocks.get(pcode_idx)?;
+            let term_idx = self
+                .block_terminator_index(block)
+                .unwrap_or(block.ops.len());
+            for op_idx in (0..term_idx).rev() {
+                let op = &block.ops[op_idx];
+                let Some(output) = op.output.as_ref() else {
+                    continue;
+                };
+                if output.is_constant
+                    || output.space_id != switch_var.space_id
+                    || output.offset != switch_var.offset
+                {
+                    continue;
+                }
+                let site = LoweringSite {
+                    block_idx: pcode_idx,
+                    op_idx,
+                };
+                if let Ok(expr) = self.with_lowering_site(site, |this| {
+                    this.lower_wrapped_varnode(output, &mut HashSet::new())
+                }) {
+                    if preview_builder_diag_enabled() {
+                        eprintln!(
+                            "[DIAG] branchind_pred_expr block=0x{:x} pred=0x{:x} op_seq=0x{:x} expr={}",
+                            self.block_start_address(idx),
+                            block.start_address,
+                            op.seq_num,
+                            print_expr(&expr)
+                        );
+                    }
+                    return Some(expr);
+                }
+            }
+            if term_idx < block.ops.len() {
+                let term_op = &block.ops[term_idx];
+                if term_op.opcode == PcodeOpcode::BranchInd
+                    && let Some(term_input) = term_op.inputs.first()
+                {
+                    let site = LoweringSite {
+                        block_idx: pcode_idx,
+                        op_idx: term_idx,
+                    };
+                    if let Ok(expr) = self.with_lowering_site(site, |this| {
+                        this.lower_wrapped_varnode(term_input, &mut HashSet::new())
+                    }) && super::switch_table::has_jump_table_surface(&expr, &self.options)
+                    {
+                        if preview_builder_diag_enabled() {
+                            eprintln!(
+                                "[DIAG] branchind_pred_term_expr block=0x{:x} pred=0x{:x} term_seq=0x{:x} expr={}",
+                                self.block_start_address(idx),
+                                block.start_address,
+                                term_op.seq_num,
+                                print_expr(&expr)
+                            );
+                        }
+                        return Some(expr);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn normalize_rendered_selector_expr(&self, expr: HirExpr, min_val: i64) -> (HirExpr, i64) {
+        let Some((base_expr, offset)) = super::switch_table::split_selector_base_offset(&expr)
+        else {
+            return (expr, min_val);
+        };
+        let Some(next_min) = min_val.checked_add(offset) else {
+            return (expr, min_val);
+        };
+        (base_expr, next_min)
+    }
+
+    fn infer_branchind_targets_from_jump_table_expr(
+        &mut self,
+        idx: usize,
+        switch_expr: &HirExpr,
+        selector_alias: Option<&Varnode>,
+    ) -> Option<InferredJumpTableTargets> {
+        const MAX_JUMP_TABLE_CASES: u64 = 256;
+
+        let binary = self.binary?;
+        let selector =
+            super::switch_table::recover_switch_discriminant(switch_expr, &self.options)?;
+        if preview_builder_diag_enabled() {
+            eprintln!(
+                "[DIAG] branchind_switch_selector block=0x{:x} expr={} discrim={} min={} table=0x{:x} target_base={:?} relative={} entry_size={}",
+                self.block_start_address(idx),
+                print_expr(switch_expr),
+                print_expr(&selector.discriminant),
+                selector.min_val,
+                selector.table_base,
+                selector.target_base.map(|addr| format!("0x{addr:x}")),
+                selector.relative_entries,
+                selector.entry_size
+            );
+        }
+        let normalized_selector = selector_alias
+            .and_then(|alias| self.recover_selector_expr_from_predecessors(idx, alias))
+            .unwrap_or_else(|| selector.discriminant.clone());
+        let max_selector = self
+            .infer_branchind_selector_upper_bound(idx, &normalized_selector, selector.min_val)
+            .or_else(|| {
+                selector_alias.and_then(|alias| {
+                    self.infer_branchind_selector_upper_bound_from_alias_family(
+                        idx,
+                        alias,
+                        selector.min_val,
+                    )
+                })
+            })?;
+        if preview_builder_diag_enabled() {
+            eprintln!(
+                "[DIAG] branchind_switch_bound block=0x{:x} normalized_selector={} max_selector={} min={}",
+                self.block_start_address(idx),
+                print_expr(&normalized_selector),
+                max_selector,
+                selector.min_val
+            );
+        }
+        let case_count = max_selector.saturating_add(1).min(MAX_JUMP_TABLE_CASES);
+        if case_count < 2 || selector.entry_size == 0 {
+            return None;
+        }
+
+        let pointer_size = u64::from(self.options.pointer_size.max(1));
+        let entry_width = selector.entry_size.min(pointer_size).max(4) as usize;
+        let little_endian = !binary.arch_spec.contains(":BE:");
+        let decode_modes = if selector.relative_entries {
+            vec![(
+                "relative_target_base",
+                true,
+                selector.target_base.or(Some(selector.table_base)),
+            )]
+        } else {
+            vec![
+                ("absolute", false, None),
+                ("relative_table_base", true, Some(selector.table_base)),
+            ]
+        };
+
+        let mut best: Option<InferredJumpTableTargets> = None;
+        for (decode_mode, relative_entries, relative_base) in decode_modes {
+            let mut recovered_cases = Vec::new();
+            let mut unique_targets = Vec::new();
+            for ordinal in 0..case_count {
+                let Some(entry_addr) = selector
+                    .table_base
+                    .checked_add(ordinal.saturating_mul(selector.entry_size))
+                else {
+                    break;
+                };
+                let Some(raw) = binary.get_bytes(entry_addr, entry_width) else {
+                    break;
+                };
+                let Some(target_addr) = decode_jump_table_target(
+                    &raw,
+                    little_endian,
+                    relative_entries,
+                    relative_base,
+                ) else {
+                    continue;
+                };
+                let Some(target_idx) = canonical_block_index_for_address(
+                    self.pcode,
+                    &self.address_to_index,
+                    target_addr,
+                ) else {
+                    continue;
+                };
+                let target = self.block_target_key(target_idx);
+                recovered_cases.push((selector.min_val + ordinal as i64, target));
+                if !unique_targets.contains(&target) {
+                    unique_targets.push(target);
+                }
+            }
+            if unique_targets.len() < 2 || recovered_cases.len() < 2 {
+                continue;
+            }
+            let candidate = InferredJumpTableTargets {
+                unique_targets,
+                recovered_cases,
+                decode_mode,
+            };
+            let replace = best.as_ref().is_none_or(|current| {
+                candidate.recovered_cases.len() > current.recovered_cases.len()
+                    || (candidate.recovered_cases.len() == current.recovered_cases.len()
+                        && candidate.unique_targets.len() > current.unique_targets.len())
+            });
+            if replace {
+                best = Some(candidate);
+            }
+        }
+
+        if preview_builder_diag_enabled() {
+            if let Some(best) = best.as_ref() {
+                eprintln!(
+                    "[DIAG] branchind_switch_targets block=0x{:x} mode={} targets={:?} cases={:?}",
+                    self.block_start_address(idx),
+                    best.decode_mode,
+                    best.unique_targets,
+                    best.recovered_cases
+                );
+            } else {
+                eprintln!(
+                    "[DIAG] branchind_switch_targets block=0x{:x} mode=none targets=[]",
+                    self.block_start_address(idx)
+                );
+            }
+        }
+
+        best
+    }
+
+    fn recover_branchind_jump_table_selector_varnode(&self, idx: usize) -> Option<Varnode> {
+        let pcode_idx = self.pcode_block_idx(idx);
+        let block = self.pcode.blocks.get(pcode_idx)?;
+        let term_idx = self.block_terminator_index(block)?;
+        for op_idx in (0..term_idx).rev() {
+            let op = &block.ops[op_idx];
+            if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
+                continue;
+            }
+            if let Some(selector) = self.extract_jump_table_selector_varnode(&op.inputs[1]) {
+                return Some(selector);
+            }
+        }
+        None
+    }
+
+    fn extract_jump_table_selector_varnode(&self, ptr: &Varnode) -> Option<Varnode> {
+        let (_, op) = self.lookup_def_site(ptr)?;
+        if op.opcode != PcodeOpcode::IntAdd || op.inputs.len() != 2 {
+            return None;
+        }
+        self.extract_scaled_selector_varnode(&op.inputs[0])
+            .or_else(|| self.extract_scaled_selector_varnode(&op.inputs[1]))
+    }
+
+    fn extract_scaled_selector_varnode(&self, vn: &Varnode) -> Option<Varnode> {
+        let peeled = self.peel_passthrough_varnode(vn);
+        if peeled.is_constant || self.materializes_const_address(&peeled) {
+            return None;
+        }
+        let (_, op) = self.lookup_def_site(&peeled)?;
+        match op.opcode {
+            PcodeOpcode::IntLeft | PcodeOpcode::IntMult if op.inputs.len() == 2 => {
+                if op.inputs[0].is_constant {
+                    Some(op.inputs[1].clone())
+                } else if op.inputs[1].is_constant {
+                    Some(op.inputs[0].clone())
+                } else {
+                    None
+                }
+            }
+            _ => Some(peeled),
+        }
+    }
+
+    fn materializes_const_address(&self, vn: &Varnode) -> bool {
+        let Some((_, op)) = self.lookup_def_site(vn) else {
+            return false;
+        };
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+                if op.inputs.len() == 1 =>
+            {
+                op.inputs[0].is_constant || self.materializes_const_address(&op.inputs[0])
+            }
+            PcodeOpcode::IntAdd | PcodeOpcode::IntSub if op.inputs.len() == 2 => {
+                op.inputs[0].is_constant && op.inputs[1].is_constant
+            }
+            _ => false,
+        }
+    }
+
+    fn recover_selector_expr_from_predecessors(
+        &mut self,
+        idx: usize,
+        selector_alias: &Varnode,
+    ) -> Option<HirExpr> {
+        let predecessors = self.predecessors.get(idx)?.clone();
+        let selector_family = (selector_alias.space_id, selector_alias.offset);
+        for pred_idx in predecessors {
+            let pcode_idx = self.pcode_block_idx(pred_idx);
+            let block = self.pcode.blocks.get(pcode_idx)?;
+            let term_idx = self
+                .block_terminator_index(block)
+                .unwrap_or(block.ops.len());
+            for op_idx in (0..term_idx).rev() {
+                let op = &block.ops[op_idx];
+                let Some(output) = op.output.as_ref() else {
+                    continue;
+                };
+                if (output.space_id, output.offset) != selector_family {
+                    continue;
+                }
+                let site = LoweringSite {
+                    block_idx: pcode_idx,
+                    op_idx,
+                };
+                if let Ok(expr) = self.with_lowering_site(site, |this| {
+                    this.lower_selector_source_expr(output, &mut HashSet::new())
+                }) {
+                    return Some(expr);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn lower_selector_source_expr(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let peeled = self.peel_passthrough_varnode(vn);
+        if let Some((_, op)) = self.lookup_def_site(&peeled) {
+            match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::SubPiece
+                    if !op.inputs.is_empty() =>
+                {
+                    return self.lower_selector_source_expr(&op.inputs[0], visiting);
+                }
+                _ => {}
+            }
+        }
+        self.lower_wrapped_varnode(&peeled, visiting)
+    }
+
+    fn infer_branchind_selector_upper_bound(
+        &mut self,
+        idx: usize,
+        selector: &HirExpr,
+        min_val: i64,
+    ) -> Option<u64> {
+        let normalized = strip_casts(selector);
+        let mut best: Option<u64> = None;
+        let predecessors = self.predecessors.get(idx)?.clone();
+
+        for pred_idx in predecessors {
+            let LoweredTerminator::Cond {
+                cond,
+                true_target,
+                false_target,
+            } = self.lower_block_terminator(pred_idx).ok()?
+            else {
+                continue;
+            };
+            let current_target = self.block_target_key(idx);
+            let Some(bound) = (if true_target == current_target {
+                extract_selector_upper_bound_from_cond(&cond, &normalized, true)
+            } else if false_target == Some(current_target) {
+                extract_selector_upper_bound_from_cond(&cond, &normalized, false)
+            } else {
+                None
+            }) else {
+                continue;
+            };
+            let normalized_bound = if min_val <= 0 {
+                bound.checked_add((-min_val) as u64)?
+            } else {
+                bound.checked_sub(min_val as u64)?
+            };
+            best = Some(best.map_or(normalized_bound, |existing| existing.min(normalized_bound)));
+        }
+
+        best
+    }
+
+    fn infer_branchind_selector_upper_bound_from_alias_family(
+        &mut self,
+        idx: usize,
+        selector_alias: &Varnode,
+        min_val: i64,
+    ) -> Option<u64> {
+        let mut best: Option<u64> = None;
+        let predecessors = self.predecessors.get(idx)?.clone();
+        let selector_family = (selector_alias.space_id, selector_alias.offset);
+
+        for pred_idx in predecessors {
+            let current_target = self.block_target_key(idx);
+            let LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } = self.lower_block_terminator(pred_idx).ok()?
+            else {
+                continue;
+            };
+            let current_on_true = if true_target == current_target {
+                true
+            } else if false_target == Some(current_target) {
+                false
+            } else {
+                continue;
+            };
+            let bound = self.extract_selector_upper_bound_from_predicate_family(
+                pred_idx,
+                selector_family,
+                current_on_true,
+            )?;
+            let normalized_bound = if min_val <= 0 {
+                bound.checked_add((-min_val) as u64)?
+            } else {
+                bound.checked_sub(min_val as u64)?
+            };
+            best = Some(best.map_or(normalized_bound, |existing| existing.min(normalized_bound)));
+        }
+
+        best
+    }
+
+    fn extract_selector_upper_bound_from_predicate_family(
+        &self,
+        pred_idx: usize,
+        selector_family: (u64, u64),
+        current_on_true: bool,
+    ) -> Option<u64> {
+        let pcode_idx = self.pcode_block_idx(pred_idx);
+        let block = self.pcode.blocks.get(pcode_idx)?;
+        let term_idx = self
+            .block_terminator_index(block)
+            .unwrap_or(block.ops.len());
+        let mut less_than_bound: Option<u64> = None;
+        let mut equality_bound: Option<u64> = None;
+
+        for op in block.ops.iter().take(term_idx) {
+            match op.opcode {
+                PcodeOpcode::IntLess | PcodeOpcode::IntSLess if op.inputs.len() == 2 => {
+                    if same_family_varnode(&op.inputs[0], selector_family)
+                        && op.inputs[1].is_constant
+                    {
+                        less_than_bound = u64::try_from(op.inputs[1].constant_val).ok();
+                    }
+                }
+                PcodeOpcode::IntEqual if op.inputs.len() == 2 => {
+                    if op.inputs[1].is_zero()
+                        && let Some((lhs, rhs)) = self.match_cmp_diff_from_peeled(&op.inputs[0])
+                        && same_family_varnode(&lhs, selector_family)
+                        && rhs.is_constant
+                    {
+                        equality_bound = u64::try_from(rhs.constant_val).ok();
+                    } else if op.inputs[0].is_zero()
+                        && let Some((lhs, rhs)) = self.match_cmp_diff_from_peeled(&op.inputs[1])
+                        && same_family_varnode(&lhs, selector_family)
+                        && rhs.is_constant
+                    {
+                        equality_bound = u64::try_from(rhs.constant_val).ok();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        match (current_on_true, less_than_bound, equality_bound) {
+            (false, Some(less), Some(eq)) if less == eq => Some(less),
+            (true, Some(less), _) => less.checked_sub(1),
+            _ => None,
+        }
     }
 
     fn match_cmp_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {
@@ -1057,4 +1749,123 @@ fn zero_like(expr: &HirExpr) -> HirExpr {
 
 fn same_cmp_pair(lhs: &(Varnode, Varnode), rhs: &(Varnode, Varnode)) -> bool {
     lhs.0 == rhs.0 && lhs.1 == rhs.1
+}
+
+fn decode_jump_table_target(
+    bytes: &[u8],
+    little_endian: bool,
+    relative_entries: bool,
+    target_base: Option<u64>,
+) -> Option<u64> {
+    if relative_entries {
+        let base = i128::from(target_base?);
+        let displacement = match bytes.len() {
+            4 => {
+                let raw = [bytes[0], bytes[1], bytes[2], bytes[3]];
+                i128::from(if little_endian {
+                    i32::from_le_bytes(raw)
+                } else {
+                    i32::from_be_bytes(raw)
+                })
+            }
+            8 => {
+                let raw = [
+                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                ];
+                i128::from(if little_endian {
+                    i64::from_le_bytes(raw)
+                } else {
+                    i64::from_be_bytes(raw)
+                })
+            }
+            _ => return None,
+        };
+        let target = base + displacement;
+        return (0..=i128::from(u64::MAX))
+            .contains(&target)
+            .then_some(target as u64);
+    }
+
+    match bytes.len() {
+        4 => {
+            let raw = [bytes[0], bytes[1], bytes[2], bytes[3]];
+            Some(if little_endian {
+                u32::from_le_bytes(raw) as u64
+            } else {
+                u32::from_be_bytes(raw) as u64
+            })
+        }
+        8 => {
+            let raw = [
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            ];
+            Some(if little_endian {
+                u64::from_le_bytes(raw)
+            } else {
+                u64::from_be_bytes(raw)
+            })
+        }
+        _ => None,
+    }
+}
+
+fn extract_selector_upper_bound_from_cond(
+    cond: &HirExpr,
+    selector: &HirExpr,
+    current_on_true: bool,
+) -> Option<u64> {
+    let cond = strip_casts(cond);
+    if let HirExpr::Unary {
+        op: HirUnaryOp::Not,
+        expr,
+        ..
+    } = cond
+    {
+        return extract_selector_upper_bound_from_cond(&expr, selector, !current_on_true);
+    }
+
+    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return None;
+    };
+
+    let lhs = strip_casts(&lhs);
+    let rhs = strip_casts(&rhs);
+    let selector_match = |expr: &HirExpr| strip_casts(expr) == *selector;
+    let const_u64 = |expr: &HirExpr| match strip_casts(expr) {
+        HirExpr::Const(value, _) if value >= 0 => Some(value as u64),
+        _ => None,
+    };
+
+    match (op, selector_match(&lhs), selector_match(&rhs)) {
+        (HirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
+        (HirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
+        (HirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
+        (HirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
+        (HirBinaryOp::Le | HirBinaryOp::SLe, true, false) if current_on_true => const_u64(&rhs),
+        (HirBinaryOp::Lt | HirBinaryOp::SLt, true, false) if current_on_true => {
+            const_u64(&rhs)?.checked_sub(1)
+        }
+        (HirBinaryOp::Le | HirBinaryOp::SLe, false, true) if !current_on_true => {
+            const_u64(&lhs)?.checked_sub(1)
+        }
+        (HirBinaryOp::Lt | HirBinaryOp::SLt, false, true) if !current_on_true => const_u64(&lhs),
+        _ => None,
+    }
+}
+
+fn is_safe_selector_provenance_opcode(opcode: PcodeOpcode) -> bool {
+    matches!(
+        opcode,
+        PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+    )
+}
+
+fn same_family_varnode(vn: &Varnode, selector_family: (u64, u64)) -> bool {
+    (vn.space_id, vn.offset) == selector_family
 }

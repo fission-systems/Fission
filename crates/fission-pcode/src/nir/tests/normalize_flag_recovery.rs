@@ -187,7 +187,13 @@ fn flag_recovery_jl_sf_ne_of_becomes_slt() {
     let sf_def = b_binary(
         HirBinaryOp::SLt,
         diff,
-        HirExpr::Const(0, NirType::Int { bits: 32, signed: true }),
+        HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
     let cond = b_binary(HirBinaryOp::Ne, var("sf"), var("of"));
@@ -228,7 +234,13 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
     let sf_def = b_binary(
         HirBinaryOp::SLt,
         diff,
-        HirExpr::Const(0, NirType::Int { bits: 32, signed: true }),
+        HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
     let cond = b_binary(HirBinaryOp::Eq, var("sf"), var("of"));
@@ -276,7 +288,13 @@ fn flag_recovery_jg_becomes_signed_gt() {
     let sf_def = b_binary(
         HirBinaryOp::SLt,
         diff,
-        HirExpr::Const(0, NirType::Int { bits: 32, signed: true }),
+        HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
     // !zf && (sf == of)
@@ -311,10 +329,7 @@ fn flag_recovery_jb_cf_becomes_ult() {
     // cf = (a < b)  (unsigned carry)
     // if (cf) { return a; } else { return b; }
     let mut func = make_flag_func(
-        vec![assign(
-            "cf",
-            b_binary(HirBinaryOp::Lt, var("a"), var("b")),
-        )],
+        vec![assign("cf", b_binary(HirBinaryOp::Lt, var("a"), var("b")))],
         var("cf"),
         vec![flag_binding("cf"), u32_binding("a"), u32_binding("b")],
     );

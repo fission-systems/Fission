@@ -37,13 +37,23 @@ impl CircleRange {
     /// The "no information" element — all values possible.
     #[inline]
     pub(crate) fn top(bits: u32) -> Self {
-        Self { lo: 0, hi: 0, bits, is_top: true }
+        Self {
+            lo: 0,
+            hi: 0,
+            bits,
+            is_top: true,
+        }
     }
 
     /// The empty set — dead / unreachable code.
     #[inline]
     pub(crate) fn bottom(bits: u32) -> Self {
-        Self { lo: 0, hi: 0, bits, is_top: false }
+        Self {
+            lo: 0,
+            hi: 0,
+            bits,
+            is_top: false,
+        }
     }
 
     /// Exactly one value.
@@ -52,7 +62,12 @@ impl CircleRange {
         let mask = Self::mask(bits);
         let lo = value & mask;
         let hi = lo.wrapping_add(1) & mask;
-        Self { lo, hi, bits, is_top: false }
+        Self {
+            lo,
+            hi,
+            bits,
+            is_top: false,
+        }
     }
 
     /// An unsigned interval `[lo, hi)` (mod 2^bits).
@@ -64,7 +79,12 @@ impl CircleRange {
             // Would be the full range, use top.
             return Self::top(bits);
         }
-        Self { lo, hi, bits, is_top: false }
+        Self {
+            lo,
+            hi,
+            bits,
+            is_top: false,
+        }
     }
 
     // ── Predicates ─────────────────────────────────────────────────────────
@@ -82,7 +102,9 @@ impl CircleRange {
     /// True if this range contains exactly one value.
     #[inline]
     pub(crate) fn is_singleton(&self) -> bool {
-        if self.is_top || self.is_bottom() { return false; }
+        if self.is_top || self.is_bottom() {
+            return false;
+        }
         // [lo, lo+1 mod 2^n) is a singleton.
         let mask = Self::mask(self.bits);
         self.hi == (self.lo.wrapping_add(1) & mask)
@@ -90,7 +112,11 @@ impl CircleRange {
 
     /// Return the singleton value if this range has exactly one element.
     pub(crate) fn singleton_value(&self) -> Option<u64> {
-        if self.is_singleton() { Some(self.lo) } else { None }
+        if self.is_singleton() {
+            Some(self.lo)
+        } else {
+            None
+        }
     }
 
     /// Number of elements in the range (0 = bottom, 2^n = top).
@@ -108,15 +134,23 @@ impl CircleRange {
 
     /// True if the range is non-empty and has a finite upper bound.
     pub(crate) fn upper_bound(&self) -> Option<u64> {
-        if self.is_top || self.is_bottom() { return None; }
+        if self.is_top || self.is_bottom() {
+            return None;
+        }
         // hi is exclusive; hi - 1 (mod 2^n) is the last value.
         let mask = Self::mask(self.bits);
         Some(self.hi.wrapping_sub(1) & mask)
     }
 
-    pub(crate) fn lo(&self) -> u64 { self.lo }
-    pub(crate) fn hi(&self) -> u64 { self.hi }
-    pub(crate) fn bits(&self) -> u32 { self.bits }
+    pub(crate) fn lo(&self) -> u64 {
+        self.lo
+    }
+    pub(crate) fn hi(&self) -> u64 {
+        self.hi
+    }
+    pub(crate) fn bits(&self) -> u32 {
+        self.bits
+    }
 
     // ── Lattice operations ─────────────────────────────────────────────────
 
@@ -125,10 +159,18 @@ impl CircleRange {
         let bits = self.bits.max(other.bits);
         let a = self.with_bits(bits);
         let b = other.with_bits(bits);
-        if a.is_top || b.is_top { return Self::top(bits); }
-        if a.is_bottom() { return b; }
-        if b.is_bottom() { return a; }
-        if a == b { return a; }
+        if a.is_top || b.is_top {
+            return Self::top(bits);
+        }
+        if a.is_bottom() {
+            return b;
+        }
+        if b.is_bottom() {
+            return a;
+        }
+        if a == b {
+            return a;
+        }
 
         // Compute the minimal arc covering both intervals.
         // Try both orderings and pick the smaller arc.
@@ -146,10 +188,18 @@ impl CircleRange {
         let bits = self.bits.max(other.bits);
         let a = self.with_bits(bits);
         let b = other.with_bits(bits);
-        if a.is_bottom() || b.is_bottom() { return Self::bottom(bits); }
-        if a.is_top { return b; }
-        if b.is_top { return a; }
-        if a == b { return a; }
+        if a.is_bottom() || b.is_bottom() {
+            return Self::bottom(bits);
+        }
+        if a.is_top {
+            return b;
+        }
+        if b.is_top {
+            return a;
+        }
+        if a == b {
+            return a;
+        }
 
         // Intersect two arcs on the circle.
         let mask = Self::mask(bits);
@@ -179,9 +229,15 @@ impl CircleRange {
     /// Widening operator: if the new range is strictly larger than the old
     /// (lattice height increased), jump to top to guarantee termination.
     pub(crate) fn widen(&self, prev: &Self) -> Self {
-        if prev.is_top { return *prev; }
-        if prev.is_bottom() { return *self; }
-        if self.count() <= prev.count() { return *self; }
+        if prev.is_top {
+            return *prev;
+        }
+        if prev.is_bottom() {
+            return *self;
+        }
+        if self.count() <= prev.count() {
+            return *self;
+        }
         // The set grew — widen to top.
         Self::top(self.bits)
     }
@@ -190,30 +246,52 @@ impl CircleRange {
 
     /// `a + b` (unsigned, wrapping).
     pub(crate) fn add(&self, other: &Self) -> Self {
-        if self.is_top || other.is_top { return Self::top(self.bits); }
-        if self.is_bottom() || other.is_bottom() { return Self::bottom(self.bits); }
+        if self.is_top || other.is_top {
+            return Self::top(self.bits);
+        }
+        if self.is_bottom() || other.is_bottom() {
+            return Self::bottom(self.bits);
+        }
         let mask = Self::mask(self.bits);
         let lo = self.lo.wrapping_add(other.lo) & mask;
         let hi = self.hi.wrapping_add(other.hi).wrapping_sub(1) & mask;
         // If lo == hi after wrapping, conservative top.
-        if lo == hi { Self::top(self.bits) } else { Self::interval(lo, hi.wrapping_add(1) & mask, self.bits) }
+        if lo == hi {
+            Self::top(self.bits)
+        } else {
+            Self::interval(lo, hi.wrapping_add(1) & mask, self.bits)
+        }
     }
 
     /// `a - b` (unsigned, wrapping).
     pub(crate) fn sub(&self, other: &Self) -> Self {
-        if self.is_top || other.is_top { return Self::top(self.bits); }
-        if self.is_bottom() || other.is_bottom() { return Self::bottom(self.bits); }
+        if self.is_top || other.is_top {
+            return Self::top(self.bits);
+        }
+        if self.is_bottom() || other.is_bottom() {
+            return Self::bottom(self.bits);
+        }
         let mask = Self::mask(self.bits);
         let lo = self.lo.wrapping_sub(other.hi).wrapping_add(1) & mask;
         let hi = self.hi.wrapping_sub(other.lo) & mask;
-        if lo == hi { Self::top(self.bits) } else { Self::interval(lo, hi, self.bits) }
+        if lo == hi {
+            Self::top(self.bits)
+        } else {
+            Self::interval(lo, hi, self.bits)
+        }
     }
 
     /// Logical right-shift by a constant `k`.
     pub(crate) fn shr_const(&self, k: u32) -> Self {
-        if self.is_top { return Self::top(self.bits); }
-        if self.is_bottom() { return Self::bottom(self.bits); }
-        if k >= self.bits { return Self::singleton(0, self.bits); }
+        if self.is_top {
+            return Self::top(self.bits);
+        }
+        if self.is_bottom() {
+            return Self::bottom(self.bits);
+        }
+        if k >= self.bits {
+            return Self::singleton(0, self.bits);
+        }
         let mask = Self::mask(self.bits);
         // Conservative: shift lo and hi.
         let lo = self.lo >> k;
@@ -227,7 +305,9 @@ impl CircleRange {
 
     /// Bitwise AND with a constant mask.
     pub(crate) fn and_const(&self, mask_val: u64) -> Self {
-        if self.is_bottom() { return Self::bottom(self.bits); }
+        if self.is_bottom() {
+            return Self::bottom(self.bits);
+        }
         let mask = Self::mask(self.bits);
         let m = mask_val & mask;
         // Result is always in [0, m+1) — a conservative upper bound.
@@ -236,8 +316,12 @@ impl CircleRange {
 
     /// Zero-extend or truncate to `new_bits`.
     pub(crate) fn cast_unsigned(&self, new_bits: u32) -> Self {
-        if self.is_top { return Self::top(new_bits); }
-        if self.is_bottom() { return Self::bottom(new_bits); }
+        if self.is_top {
+            return Self::top(new_bits);
+        }
+        if self.is_bottom() {
+            return Self::bottom(new_bits);
+        }
         let new_mask = Self::mask(new_bits);
         // If this range fits in the new width without wrapping, preserve it.
         let lo_fits = self.lo <= new_mask;
@@ -255,16 +339,31 @@ impl CircleRange {
     // ── Helpers ────────────────────────────────────────────────────────────
 
     fn mask(bits: u32) -> u64 {
-        if bits >= 64 { u64::MAX } else { (1u64 << bits).wrapping_sub(1) }
+        if bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << bits).wrapping_sub(1)
+        }
     }
 
     fn with_bits(&self, bits: u32) -> Self {
-        if bits == self.bits { return *self; }
-        if self.is_top { return Self::top(bits); }
-        if self.is_bottom() { return Self::bottom(bits); }
+        if bits == self.bits {
+            return *self;
+        }
+        if self.is_top {
+            return Self::top(bits);
+        }
+        if self.is_bottom() {
+            return Self::bottom(bits);
+        }
         // Reinterpret lo/hi in the new width.
         let mask = Self::mask(bits);
-        Self { lo: self.lo & mask, hi: self.hi & mask, bits, is_top: false }
+        Self {
+            lo: self.lo & mask,
+            hi: self.hi & mask,
+            bits,
+            is_top: false,
+        }
     }
 
     /// True if `v` is in the arc `[lo, hi)` mod 2^n.

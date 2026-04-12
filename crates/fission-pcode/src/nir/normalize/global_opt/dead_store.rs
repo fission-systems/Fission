@@ -1,3 +1,4 @@
+use super::super::*;
 /// Dead store elimination using Memory SSA.
 ///
 /// Removes `HirStmt::Assign { lhs: Deref { .. } | Index { .. }, rhs }` nodes
@@ -18,8 +19,7 @@
 /// References:
 /// - LLVM `DeadStoreElimination.cpp`
 /// - RetDec `reaching_definitions.h`: UD/DU chain based DSE
-use super::mem_ssa::{build_mem_ssa, AliasKey, MemDef};
-use super::super::*;
+use super::mem_ssa::{AliasKey, MemDef, build_mem_ssa};
 
 /// Apply dead store elimination and return `true` if any stores were removed.
 pub(crate) fn apply_dead_store_elimination(func: &mut HirFunction) -> bool {
@@ -108,7 +108,11 @@ impl<'a> DeadStoreCollector<'a> {
                     }
                 }
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 let sub = self.collect_sub(then_body, path.clone(), 0);
                 out.extend(sub);
                 let sub = self.collect_sub(else_body, path.clone(), 1);
@@ -118,18 +122,32 @@ impl<'a> DeadStoreCollector<'a> {
                 let sub = self.collect_sub(body, path.clone(), 0);
                 out.extend(sub);
             }
-            HirStmt::For { init, body, update, .. } => {
+            HirStmt::For {
+                init, body, update, ..
+            } => {
                 if let Some(s) = init {
-                    self.collect_stmt(s, {
-                        let mut p = path.clone(); p.push(0); p
-                    }, out);
+                    self.collect_stmt(
+                        s,
+                        {
+                            let mut p = path.clone();
+                            p.push(0);
+                            p
+                        },
+                        out,
+                    );
                 }
                 let sub = self.collect_sub(body, path.clone(), 1);
                 out.extend(sub);
                 if let Some(s) = update {
-                    self.collect_stmt(s, {
-                        let mut p = path.clone(); p.push(2); p
-                    }, out);
+                    self.collect_stmt(
+                        s,
+                        {
+                            let mut p = path.clone();
+                            p.push(2);
+                            p
+                        },
+                        out,
+                    );
                 }
             }
             HirStmt::Switch { cases, default, .. } => {
@@ -148,7 +166,12 @@ impl<'a> DeadStoreCollector<'a> {
         }
     }
 
-    fn collect_sub(&mut self, stmts: &[HirStmt], mut path: Vec<usize>, branch: usize) -> Vec<StmtPath> {
+    fn collect_sub(
+        &mut self,
+        stmts: &[HirStmt],
+        mut path: Vec<usize>,
+        branch: usize,
+    ) -> Vec<StmtPath> {
         path.push(branch);
         let mut result = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
@@ -202,7 +225,11 @@ fn remove_dead_stores(stmts: &mut Vec<HirStmt>, paths: &[StmtPath]) {
 
 fn recurse_remove(stmt: &mut HirStmt, paths: &[&StmtPath], depth: usize) {
     match stmt {
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             remove_at_branch(then_body, paths, depth, 0);
             remove_at_branch(else_body, paths, depth, 1);
         }
@@ -213,7 +240,8 @@ fn recurse_remove(stmt: &mut HirStmt, paths: &[&StmtPath], depth: usize) {
             remove_at_branch(body, paths, depth, 1);
         }
         HirStmt::Block(stmts) => {
-            let top: std::collections::HashSet<usize> = paths.iter()
+            let top: std::collections::HashSet<usize> = paths
+                .iter()
                 .filter(|p| p.0.len() == depth + 1)
                 .map(|p| p.0[depth])
                 .collect();
@@ -234,13 +262,9 @@ fn recurse_remove(stmt: &mut HirStmt, paths: &[&StmtPath], depth: usize) {
     }
 }
 
-fn remove_at_branch(
-    body: &mut Vec<HirStmt>,
-    paths: &[&StmtPath],
-    depth: usize,
-    branch: usize,
-) {
-    let relevant: Vec<&StmtPath> = paths.iter()
+fn remove_at_branch(body: &mut Vec<HirStmt>, paths: &[&StmtPath], depth: usize, branch: usize) {
+    let relevant: Vec<&StmtPath> = paths
+        .iter()
         .copied()
         .filter(|p| p.0.len() > depth && p.0[depth] == branch)
         .collect();
@@ -248,7 +272,8 @@ fn remove_at_branch(
         return;
     }
     let next_depth = depth + 1;
-    let top_level: std::collections::HashSet<usize> = relevant.iter()
+    let top_level: std::collections::HashSet<usize> = relevant
+        .iter()
         .filter(|p| p.0.len() == next_depth + 1)
         .map(|p| p.0[next_depth])
         .collect();

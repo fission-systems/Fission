@@ -1,9 +1,9 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
 use super::super::*;
+use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use super::typed_facts::collect_typed_fact_inventory;
 use crate::nir::normalize::wave_stats::add_surface_binding_promotions;
-use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,6 +21,7 @@ struct MemorySlotCandidate {
     offset: i64,
     elem_ty: NirType,
     count: usize,
+    first_seen: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -71,11 +72,29 @@ pub(crate) fn apply_memory_slot_surfacing_cheap(func: &mut HirFunction) -> bool 
 fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: bool) -> bool {
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::new();
     collect_memory_slot_candidates(func, &mut candidates);
+    let alias_defs = collect_single_var_aliases(&func.body);
+    let mut ordered_candidates = candidates.values().collect::<Vec<_>>();
+    ordered_candidates.sort_by(|lhs, rhs| {
+        lhs.first_seen
+            .cmp(&rhs.first_seen)
+            .then_with(|| {
+                lhs.key
+            .base_repr
+            .cmp(&rhs.key.base_repr)
+            .then_with(|| lhs.key.offset.cmp(&rhs.key.offset))
+            .then_with(|| lhs.key.access_size.cmp(&rhs.key.access_size))
+            .then_with(|| lhs.key.stride.cmp(&rhs.key.stride))
+            .then_with(|| lhs.offset.cmp(&rhs.offset))
+            .then_with(|| lhs.count.cmp(&rhs.count))
+            .then_with(|| print_expr(&lhs.base).cmp(&print_expr(&rhs.base)))
+            .then_with(|| format!("{:?}", lhs.elem_ty).cmp(&format!("{:?}", rhs.elem_ty)))
+            })
+    });
     let inventory = collect_typed_fact_inventory(func, false);
     let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
     let mut family_lanes = HashMap::<MemorySlotFamilyKey, HashSet<i64>>::new();
     let mut family_base_offsets = HashMap::<MemorySlotFamilyKey, i64>::new();
-    for candidate in candidates.values() {
+    for candidate in &ordered_candidates {
         let family_key = memory_slot_family_key(&candidate.key);
         *family_counts.entry(family_key.clone()).or_insert(0) += candidate.count;
         family_lanes
@@ -95,17 +114,23 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
         .map(|binding| binding.name.clone())
         .collect::<HashSet<_>>();
 
-    for candidate in candidates.values().filter(|candidate| {
+    let mut promoted_bindings = Vec::new();
+    for candidate in ordered_candidates {
         if cheap_only && !is_cheap_slot_candidate(candidate) {
-            return false;
+            continue;
         }
         let family_key = memory_slot_family_key(&candidate.key);
         let family_total = family_counts.get(&family_key).copied().unwrap_or(0);
         let family_lane_count = family_lanes.get(&family_key).map(HashSet::len).unwrap_or(0);
         let exact_indexable = candidate.key.stride.is_none()
             || candidate.key.stride == Some(i64::from(candidate.key.access_size));
-        (exact_indexable && candidate.count >= 2) || (family_total >= 2 && family_lane_count >= 2)
-    }) {
+        if !((exact_indexable && candidate.count >= 2) || (family_total >= 2 && family_lane_count >= 2)) {
+            continue;
+        }
+        let display_base = resolve_slot_alias_base(func, &alias_defs, &candidate.base);
+        if !is_surface_stable_slot_display_base(func, &inventory, &display_base, candidate.offset) {
+            continue;
+        }
         let family_base = family_base_offsets
             .get(&memory_slot_family_key(&candidate.key))
             .copied();
@@ -117,21 +142,24 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
                 elem_ty: candidate.elem_ty.clone(),
             },
         );
-        let derived_origin = derive_slot_alias_origin(func, &candidate.base);
-        func.locals.push(NirBinding {
+        let derived_origin = derive_slot_alias_origin(func, &display_base);
+        promoted_bindings.push(NirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
-            surface_type_name: slot_surface_type_name(&candidate.base, func, &inventory),
+            surface_type_name: slot_surface_type_name(&display_base, func, &inventory),
             origin: derived_origin,
             initializer: Some(HirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
                 expr: Box::new(HirExpr::PtrOffset {
-                    base: Box::new(candidate.base.clone()),
+                    base: Box::new(display_base),
                     offset: candidate.offset,
                 }),
             }),
         });
     }
+
+    promoted_bindings.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    func.locals.extend(promoted_bindings);
 
     add_surface_binding_promotions(aliases.len());
 
@@ -158,6 +186,135 @@ fn slot_surface_type_name(
         .and_then(|binding| binding.surface_type_name.clone())
 }
 
+fn collect_single_var_aliases(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
+    let mut counts = HashMap::<String, usize>::new();
+    let mut defs = HashMap::<String, HirExpr>::new();
+
+    fn visit_stmt(
+        stmt: &HirStmt,
+        counts: &mut HashMap<String, usize>,
+        defs: &mut HashMap<String, HirExpr>,
+    ) {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if matches!(rhs, HirExpr::Var(_)) => {
+                let entry = counts.entry(name.clone()).or_insert(0);
+                *entry += 1;
+                if *entry == 1 {
+                    defs.insert(name.clone(), rhs.clone());
+                } else {
+                    defs.remove(name);
+                }
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. } => {
+                for nested in body {
+                    visit_stmt(nested, counts, defs);
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for nested in then_body {
+                    visit_stmt(nested, counts, defs);
+                }
+                for nested in else_body {
+                    visit_stmt(nested, counts, defs);
+                }
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init.as_deref() {
+                    visit_stmt(init, counts, defs);
+                }
+                if let Some(update) = update.as_deref() {
+                    visit_stmt(update, counts, defs);
+                }
+                for nested in body {
+                    visit_stmt(nested, counts, defs);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for nested in &case.body {
+                        visit_stmt(nested, counts, defs);
+                    }
+                }
+                for nested in default {
+                    visit_stmt(nested, counts, defs);
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_) => {}
+        }
+    }
+
+    for stmt in stmts {
+        visit_stmt(stmt, &mut counts, &mut defs);
+    }
+    defs
+}
+
+fn resolve_slot_alias_base(
+    func: &HirFunction,
+    alias_defs: &HashMap<String, HirExpr>,
+    base: &HirExpr,
+) -> HirExpr {
+    fn resolve_var(
+        func: &HirFunction,
+        alias_defs: &HashMap<String, HirExpr>,
+        name: &str,
+        depth: usize,
+    ) -> HirExpr {
+        if depth >= 8 {
+            return HirExpr::Var(name.to_string());
+        }
+        if let Some(HirExpr::Var(other)) = alias_defs.get(name)
+            && other != name
+        {
+            return resolve_var(func, alias_defs, other, depth + 1);
+        }
+        let maybe_initializer = func
+            .params
+            .iter()
+            .chain(func.locals.iter())
+            .find(|binding| binding.name == name)
+            .and_then(|binding| binding.initializer.as_ref());
+        let Some(initializer) = maybe_initializer else {
+            return HirExpr::Var(name.to_string());
+        };
+        match initializer {
+            HirExpr::Var(other) if other != name => resolve_var(func, alias_defs, other, depth + 1),
+            _ => HirExpr::Var(name.to_string()),
+        }
+    }
+
+    match base {
+        HirExpr::Var(name) => resolve_var(func, alias_defs, name, 0),
+        HirExpr::Cast { ty, expr } => HirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(resolve_slot_alias_base(func, alias_defs, expr)),
+        },
+        HirExpr::PtrOffset { base, offset } => HirExpr::PtrOffset {
+            base: Box::new(resolve_slot_alias_base(func, alias_defs, base)),
+            offset: *offset,
+        },
+        _ => base.clone(),
+    }
+}
+
 fn derive_slot_alias_origin(func: &HirFunction, base: &HirExpr) -> Option<NirBindingOrigin> {
     match base {
         HirExpr::Var(name) => func
@@ -176,6 +333,50 @@ fn derive_slot_alias_origin(func: &HirFunction, base: &HirExpr) -> Option<NirBin
         HirExpr::PtrOffset { base, .. } => derive_slot_alias_origin(func, base),
         _ => None,
     }
+}
+
+fn is_surface_stable_slot_display_base(
+    func: &HirFunction,
+    inventory: &super::typed_facts::TypedFactInventory,
+    base: &HirExpr,
+    offset: i64,
+) -> bool {
+    if offset != 0 {
+        return true;
+    }
+    match base {
+        HirExpr::Var(name) => {
+            if is_cheap_slot_base(base) || slot_surface_type_name(base, func, inventory).is_some() {
+                return true;
+            }
+            if let Some(binding) = func
+                .params
+                .iter()
+                .chain(func.locals.iter())
+                .find(|binding| binding.name == *name)
+            {
+                return !matches!(binding.origin, Some(NirBindingOrigin::Temp));
+            }
+            !looks_like_synthetic_temp_name(name)
+        }
+        HirExpr::Cast { expr, .. } => {
+            is_surface_stable_slot_display_base(func, inventory, expr, offset)
+        }
+        HirExpr::PtrOffset { base, offset: base_offset } => {
+            if *base_offset != 0 {
+                return true;
+            }
+            is_surface_stable_slot_display_base(func, inventory, base, offset)
+        }
+        _ => true,
+    }
+}
+
+fn looks_like_synthetic_temp_name(name: &str) -> bool {
+    name.starts_with("uVar")
+        || name.starts_with("iVar")
+        || name.starts_with("xVar")
+        || name.starts_with("bVar")
 }
 
 fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
@@ -214,7 +415,10 @@ fn collect_memory_slot_candidates(
     func: &HirFunction,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
-    for access in collect_partitioned_memory_accesses(&func.body) {
+    for (first_seen, access) in collect_partitioned_memory_accesses(&func.body)
+        .into_iter()
+        .enumerate()
+    {
         let access_size = match type_byte_size(&access.access_ty) {
             Some(size) => size,
             None => continue,
@@ -234,6 +438,7 @@ fn collect_memory_slot_candidates(
                 offset: access.const_offset,
                 elem_ty: access.access_ty.clone(),
                 count: 1,
+                first_seen,
             });
     }
 }

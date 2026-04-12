@@ -1,5 +1,5 @@
+use super::def_use::{DEFAULT_VARNODE_SIZE, DefUseTracker};
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
-use super::def_use::{DefUseTracker, DEFAULT_VARNODE_SIZE};
 
 pub struct SubvariableFlowOptimizer;
 
@@ -70,16 +70,16 @@ impl SubvariableFlowOptimizer {
             let op = &block.ops[op_idx];
 
             let out_vn = op.output.as_ref().unwrap().clone();
-            
+
             // Allocate a new unique varnode for the narrowed result
             let mut narrowed_out = out_vn.clone();
             narrowed_out.size = target_size;
             // Best practice: allocate new space offset to avoid aliasing.
             // Using a temporary register space usually requires knowing the space_id.
-            // For Pcode, we can just use a unique offset derived from a counter, or 
+            // For Pcode, we can just use a unique offset derived from a counter, or
             // since we don't have func.allocate_temp, we usually use the same offset
             // but change the size. Wait! In Fission's Pcode, `space_id, offset, size` uniquely identify.
-            // If we reuse the same space/offset but different size, it's technically a distinct varnode in `DefUseTracker` 
+            // If we reuse the same space/offset but different size, it's technically a distinct varnode in `DefUseTracker`
             // BUT it might alias physically if not careful!
             // However, this is an intermediate temp variable (most likely in the `unique` space).
             // If it's a register or memory, changing its size might overlap adjacent memory.
@@ -87,10 +87,10 @@ impl SubvariableFlowOptimizer {
             // we'll just treat the lower `target_size` bytes as uniquely identifying enough,
             // OR we can create a new temp. `func.allocate_temp()` usually exists in builder.
             // Oh well, if we just copy the ID and change size, Fission will treat it as a distinct `VarnodeId`.
-            
+
             let mut new_inputs = Vec::new();
             let mut subpiece_ops = Vec::new();
-            
+
             for input in &op.inputs {
                 if input.is_constant {
                     let mut new_const = input.clone();
@@ -105,7 +105,7 @@ impl SubvariableFlowOptimizer {
                     // that shouldn't happen for most bitwise/arithmetic unless it's weird Pcode. Let's just ZExt it.
                     let mut zext_out = input.clone();
                     zext_out.size = target_size;
-                    
+
                     let zext_op = PcodeOp {
                         seq_num: op.seq_num,
                         opcode: PcodeOpcode::IntZExt,
@@ -120,7 +120,7 @@ impl SubvariableFlowOptimizer {
                     // input.size > target_size
                     let mut subpiece_out = input.clone();
                     subpiece_out.size = target_size;
-                    
+
                     // Create subpiece op
                     // SubPiece takes 2 inputs: original value, and CONST offset (in bytes).
                     let offset_const = Varnode {
@@ -130,7 +130,7 @@ impl SubvariableFlowOptimizer {
                         is_constant: true,
                         constant_val: 0,
                     };
-                    
+
                     let subpiece_op = PcodeOp {
                         seq_num: op.seq_num,
                         opcode: PcodeOpcode::SubPiece,
@@ -187,4 +187,3 @@ impl SubvariableFlowOptimizer {
         )
     }
 }
-

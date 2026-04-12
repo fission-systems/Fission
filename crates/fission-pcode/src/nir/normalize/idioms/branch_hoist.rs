@@ -12,8 +12,8 @@
 //!
 //! At most [`MAX_HOIST_PREFIX`] statements are hoisted per `if` to bound work.
 
-use super::super::cleanup::expr_has_side_effects;
 use super::super::analysis::expr_key::pure_expr_key;
+use super::super::cleanup::expr_has_side_effects;
 use super::super::*;
 
 const MAX_HOIST_PREFIX: usize = 32;
@@ -56,14 +56,20 @@ fn hoist_stmts(stmts: &mut Vec<HirStmt>) -> bool {
 fn hoist_stmt_deep(stmt: &mut HirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             changed |= hoist_stmts(then_body);
             changed |= hoist_stmts(else_body);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= hoist_stmts(body);
         }
-        HirStmt::For { init, body, update, .. } => {
+        HirStmt::For {
+            init, body, update, ..
+        } => {
             if let Some(s) = init {
                 changed |= hoist_stmt_deep(s);
             }
@@ -87,9 +93,7 @@ fn hoist_stmt_deep(stmt: &mut HirStmt) -> bool {
 }
 
 fn common_hoist_prefix_len(then_body: &[HirStmt], else_body: &[HirStmt]) -> usize {
-    let max = MAX_HOIST_PREFIX
-        .min(then_body.len())
-        .min(else_body.len());
+    let max = MAX_HOIST_PREFIX.min(then_body.len()).min(else_body.len());
     let mut n = 0;
     while n < max {
         if same_hoistable_pair(&then_body[n], &else_body[n]) {

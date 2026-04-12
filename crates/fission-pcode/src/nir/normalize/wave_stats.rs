@@ -212,6 +212,20 @@ pub(super) fn add_interproc_constraint_rounds(n: usize) {
     WAVE.with(|w| w.borrow_mut().interproc_signature_constraint_rounds += n);
 }
 
+pub(crate) fn add_materialization_stabilized(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().materialization_stabilized_count += n);
+}
+
+pub(crate) fn add_pass_rerun_skipped_by_preservation(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().pass_rerun_skipped_by_preservation_count += n);
+}
+
 pub(crate) fn add_indirect_target_set_refinements(n: usize) {
     if n == 0 {
         return;

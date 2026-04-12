@@ -14,7 +14,7 @@
 /// tree-structured programs.  It is conservative (sound) but may be
 /// imprecise for programs with complex aliasing.
 use super::circle_range::CircleRange;
-use super::transfer::{eval_expr, nir_bits, RangeEnv};
+use super::transfer::{RangeEnv, eval_expr, nir_bits};
 use crate::nir::{HirFunction, HirLValue, HirStmt, NirBinding};
 use std::collections::HashMap;
 
@@ -47,12 +47,7 @@ pub(crate) fn solve(func: &HirFunction) -> RangeEnv {
 ///
 /// `with_widening`: if true, apply the widening operator on assignment to
 /// prevent non-termination in loops.
-fn propagate_stmts(
-    stmts: &[HirStmt],
-    env: &mut RangeEnv,
-    with_widening: bool,
-    changed: &mut bool,
-) {
+fn propagate_stmts(stmts: &[HirStmt], env: &mut RangeEnv, with_widening: bool, changed: &mut bool) {
     for stmt in stmts {
         propagate_stmt(stmt, env, with_widening, changed);
     }
@@ -63,8 +58,15 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
         HirStmt::Assign { lhs, rhs } => {
             let new_range = eval_expr(rhs, env);
             if let HirLValue::Var(name) = lhs {
-                let old = env.get(name.as_str()).copied().unwrap_or_else(|| CircleRange::top(new_range.bits()));
-                let next = if widen { new_range.widen(&old) } else { new_range.join(&old) };
+                let old = env
+                    .get(name.as_str())
+                    .copied()
+                    .unwrap_or_else(|| CircleRange::top(new_range.bits()));
+                let next = if widen {
+                    new_range.widen(&old)
+                } else {
+                    new_range.join(&old)
+                };
                 if next != old {
                     *changed = true;
                     env.insert(name.clone(), next);
@@ -75,7 +77,11 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
         HirStmt::Block(stmts) => {
             propagate_stmts(stmts, env, widen, changed);
         }
-        HirStmt::If { cond: _, then_body, else_body } => {
+        HirStmt::If {
+            cond: _,
+            then_body,
+            else_body,
+        } => {
             // Conservative: join environments from both branches.
             let mut then_env = env.clone();
             let mut else_env = env.clone();
@@ -83,12 +89,20 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
             propagate_stmts(else_body, &mut else_env, widen, changed);
             // Merge back into env.
             for (k, then_r) in &then_env {
-                let else_r = else_env.get(k.as_str()).copied()
+                let else_r = else_env
+                    .get(k.as_str())
+                    .copied()
                     .unwrap_or_else(|| CircleRange::top(then_r.bits()));
                 let joined = then_r.join(&else_r);
-                let old = env.get(k.as_str()).copied()
+                let old = env
+                    .get(k.as_str())
+                    .copied()
                     .unwrap_or_else(|| CircleRange::top(joined.bits()));
-                let next = if widen { joined.widen(&old) } else { joined.join(&old) };
+                let next = if widen {
+                    joined.widen(&old)
+                } else {
+                    joined.join(&old)
+                };
                 if next != old {
                     *changed = true;
                     env.insert(k.clone(), next);
@@ -98,7 +112,9 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             propagate_stmts(body, env, true, changed);
         }
-        HirStmt::For { init, body, update, .. } => {
+        HirStmt::For {
+            init, body, update, ..
+        } => {
             if let Some(init_stmt) = init {
                 propagate_stmt(init_stmt, env, widen, changed);
             }
@@ -121,7 +137,9 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
                 merge_into(&mut merged_env, &def_env, widen, changed);
             }
             for (k, r) in merged_env {
-                let old = env.get(k.as_str()).copied()
+                let old = env
+                    .get(k.as_str())
+                    .copied()
                     .unwrap_or_else(|| CircleRange::top(r.bits()));
                 let next = if widen { r.widen(&old) } else { r.join(&old) };
                 if next != old {
@@ -137,7 +155,9 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
 
 fn merge_into(dst: &mut RangeEnv, src: &RangeEnv, _widen: bool, _changed: &mut bool) {
     for (k, r) in src {
-        let entry = dst.entry(k.clone()).or_insert_with(|| CircleRange::bottom(r.bits()));
+        let entry = dst
+            .entry(k.clone())
+            .or_insert_with(|| CircleRange::bottom(r.bits()));
         *entry = entry.join(r);
     }
 }

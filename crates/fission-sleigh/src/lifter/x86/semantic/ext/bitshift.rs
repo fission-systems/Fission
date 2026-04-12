@@ -11,10 +11,11 @@ pub(super) fn decode_shld_shrd(
     ext: u8,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let use_imm8 = matches!(ext, 0xA4 | 0xAC);
     let is_shld = matches!(ext, 0xA4 | 0xA5);

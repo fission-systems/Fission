@@ -145,71 +145,67 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
 
 fn needs_modrm(opcode: u8, map: OpcodeMap) -> bool {
     match map {
-        OpcodeMap::Map0F => {
-            !matches!(
-                opcode,
-            0x05
-                | 0x06
-                | 0x07
-                | 0x08
-                | 0x09
-                | 0x0B
-                | 0x30
-                | 0x31
-                | 0x32
-                | 0x34
-                | 0x35
-                | 0x77
-                | 0x80..=0x8F
+        OpcodeMap::Map0F => !matches!(
+            opcode,
+        0x05
+            | 0x06
+            | 0x07
+            | 0x08
+            | 0x09
+            | 0x0B
+            | 0x30
+            | 0x31
+            | 0x32
+            | 0x34
+            | 0x35
+            | 0x77
+            | 0x80..=0x8F
+            | 0xA0
+            | 0xA1
+            | 0xA2
+            | 0xA8
+            | 0xA9
+            | 0xAA
+            | 0xC8..=0xCF
+        ),
+        OpcodeMap::Map0F38 | OpcodeMap::Map0F3A | OpcodeMap::VexUnknown => true,
+        OpcodeMap::Primary => !matches!(
+            opcode,
+            0x6A
+                | 0x68
+                | 0x50..=0x5F
+                | 0x90
+                | 0xCC
+                | 0xCD
+                | 0xC3
+                | 0xCB
+                | 0xC2
+                | 0xCA
+                | 0xE0..=0xE3
+                | 0xE8
+                | 0xE9
+                | 0xEB
+                | 0x70..=0x7F
+                | 0x98
+                | 0x99
                 | 0xA0
                 | 0xA1
                 | 0xA2
+                | 0xA3
+                | 0xA4
+                | 0xA5
+                | 0xA6
+                | 0xA7
                 | 0xA8
                 | 0xA9
                 | 0xAA
-                | 0xC8..=0xCF
-            )
-        }
-        OpcodeMap::Map0F38 | OpcodeMap::Map0F3A | OpcodeMap::VexUnknown => true,
-        OpcodeMap::Primary => {
-            !matches!(
-                opcode,
-                0x6A
-                    | 0x68
-                    | 0x50..=0x5F
-                    | 0x90
-                    | 0xCC
-                    | 0xCD
-                    | 0xC3
-                    | 0xCB
-                    | 0xC2
-                    | 0xCA
-                    | 0xE0..=0xE3
-                    | 0xE8
-                    | 0xE9
-                    | 0xEB
-                    | 0x70..=0x7F
-                    | 0x98
-                    | 0x99
-                    | 0xA0
-                    | 0xA1
-                    | 0xA2
-                    | 0xA3
-                    | 0xA4
-                    | 0xA5
-                    | 0xA6
-                    | 0xA7
-                    | 0xA8
-                    | 0xA9
-                    | 0xAA
-                    | 0xAB
-                    | 0xAC
-                    | 0xAD
-                    | 0xAE
-                    | 0xAF
-                    | 0xB0..=0xBF
-            )
-        }
+                | 0xAB
+                | 0xAC
+                | 0xAD
+                | 0xAE
+                | 0xAF
+                | 0xB0..=0xBF
+        ),
     }
 }
 
@@ -225,13 +221,11 @@ fn imm_len(
     match map {
         OpcodeMap::Map0F3A => return 1,
         OpcodeMap::Map0F38 => return 0,
-        OpcodeMap::Map0F => {
-            match opcode {
-                0x80..=0x8F => return full_operand_imm,
-                0x70..=0x73 | 0xA4 | 0xAC | 0xBA | 0xC2 | 0xC4..=0xC6 => return 1,
-                _ => return 0,
-            }
-        }
+        OpcodeMap::Map0F => match opcode {
+            0x80..=0x8F => return full_operand_imm,
+            0x70..=0x73 | 0xA4 | 0xAC | 0xBA | 0xC2 | 0xC4..=0xC6 => return 1,
+            _ => return 0,
+        },
         OpcodeMap::VexUnknown => return 0,
         OpcodeMap::Primary => {}
     }
@@ -278,18 +272,7 @@ fn imm_len(
 fn is_prefix(byte: u8) -> bool {
     matches!(
         byte,
-        0xF0
-            | 0xF2
-            | 0xF3
-            | 0x2E
-            | 0x36
-            | 0x3E
-            | 0x26
-            | 0x64
-            | 0x65
-            | 0x66
-            | 0x67
-            | 0x40..=0x4F
+        0xF0 | 0xF2 | 0xF3 | 0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 | 0x66 | 0x67 | 0x40..=0x4F
     )
 }
 
@@ -299,13 +282,19 @@ mod tests {
 
     #[test]
     fn decode_len_handles_81_83_immediates() {
-        assert_eq!(decode_len(&[0x81, 0xF8, 0x34, 0x12, 0x00, 0x00]).unwrap(), 6);
+        assert_eq!(
+            decode_len(&[0x81, 0xF8, 0x34, 0x12, 0x00, 0x00]).unwrap(),
+            6
+        );
         assert_eq!(decode_len(&[0x83, 0xE8, 0xFF]).unwrap(), 3);
     }
 
     #[test]
     fn decode_len_handles_f7_test_immediate_only_for_group0() {
-        assert_eq!(decode_len(&[0xF7, 0xC0, 0x78, 0x56, 0x34, 0x12]).unwrap(), 6);
+        assert_eq!(
+            decode_len(&[0xF7, 0xC0, 0x78, 0x56, 0x34, 0x12]).unwrap(),
+            6
+        );
         assert_eq!(decode_len(&[0xF7, 0xD0]).unwrap(), 2);
     }
 
@@ -352,13 +341,19 @@ mod tests {
     fn decode_len_handles_mov_imm_opcodes() {
         assert_eq!(decode_len(&[0xB0, 0x7F]).unwrap(), 2);
         assert_eq!(decode_len(&[0xB8, 0x78, 0x56, 0x34, 0x12]).unwrap(), 5);
-        assert_eq!(decode_len(&[0x49, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap(), 10);
+        assert_eq!(
+            decode_len(&[0x49, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap(),
+            10
+        );
     }
 
     #[test]
     fn decode_len_handles_mov_group11_immediates() {
         assert_eq!(decode_len(&[0xC6, 0x00, 0x12]).unwrap(), 3);
-        assert_eq!(decode_len(&[0xC7, 0x00, 0x78, 0x56, 0x34, 0x12]).unwrap(), 6);
+        assert_eq!(
+            decode_len(&[0xC7, 0x00, 0x78, 0x56, 0x34, 0x12]).unwrap(),
+            6
+        );
     }
 
     #[test]
@@ -366,7 +361,10 @@ mod tests {
         assert_eq!(decode_len(&[0x90]).unwrap(), 1);
         assert_eq!(decode_len(&[0xF3, 0x90]).unwrap(), 2);
         assert_eq!(decode_len(&[0x0F, 0x1F, 0x00]).unwrap(), 3);
-        assert_eq!(decode_len(&[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]).unwrap(), 8);
+        assert_eq!(
+            decode_len(&[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]).unwrap(),
+            8
+        );
     }
 
     #[test]
@@ -388,7 +386,10 @@ mod tests {
     fn decode_len_handles_rdtsc_and_clflush_forms() {
         assert_eq!(decode_len(&[0x0F, 0x31]).unwrap(), 2);
         assert_eq!(decode_len(&[0x0F, 0xAE, 0x38]).unwrap(), 3);
-        assert_eq!(decode_len(&[0x0F, 0xAE, 0xBC, 0x00, 0x10, 0x00, 0x00, 0x00]).unwrap(), 8);
+        assert_eq!(
+            decode_len(&[0x0F, 0xAE, 0xBC, 0x00, 0x10, 0x00, 0x00, 0x00]).unwrap(),
+            8
+        );
     }
 
     #[test]
@@ -441,8 +442,14 @@ mod tests {
     #[test]
     fn decode_len_handles_0f_three_byte_escape_maps() {
         assert_eq!(decode_len(&[0x0F, 0x38, 0xF1, 0xC0]).unwrap(), 4); // 0f38 + modrm
-        assert_eq!(decode_len(&[0x0F, 0x38, 0x00, 0x44, 0x24, 0x10]).unwrap(), 6); // sib+disp8
-        assert_eq!(decode_len(&[0x66, 0x0F, 0x3A, 0x0F, 0xC0, 0x04]).unwrap(), 6); // 0f3a + modrm + imm8
+        assert_eq!(
+            decode_len(&[0x0F, 0x38, 0x00, 0x44, 0x24, 0x10]).unwrap(),
+            6
+        ); // sib+disp8
+        assert_eq!(
+            decode_len(&[0x66, 0x0F, 0x3A, 0x0F, 0xC0, 0x04]).unwrap(),
+            6
+        ); // 0f3a + modrm + imm8
     }
 
     #[test]
@@ -472,8 +479,14 @@ mod tests {
 
     #[test]
     fn decode_len_handles_vex_three_byte_map_variants() {
-        assert_eq!(decode_len(&[0xC4, 0xE2, 0x79, 0x00, 0x44, 0x24, 0x10]).unwrap(), 7); // 0f38 map
-        assert_eq!(decode_len(&[0xC4, 0xE3, 0x79, 0x0F, 0xC0, 0x04]).unwrap(), 6); // 0f3a map + imm8
+        assert_eq!(
+            decode_len(&[0xC4, 0xE2, 0x79, 0x00, 0x44, 0x24, 0x10]).unwrap(),
+            7
+        ); // 0f38 map
+        assert_eq!(
+            decode_len(&[0xC4, 0xE3, 0x79, 0x0F, 0xC0, 0x04]).unwrap(),
+            6
+        ); // 0f3a map + imm8
     }
 
     #[test]

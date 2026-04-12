@@ -7,7 +7,78 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-11 (latest)
+## 2026-04-12 (latest)
+
+### Row-fidelity stabilization wave - accepted dispatcher recovery now clears the `0x140007da0` canary without regressing the dispatcher targets
+
+This wave closed the remaining release blocker from the accepted dispatcher-recovery branch. The canonical fix stayed in `fission-pcode`: instead of widening dispatcher proof yet again, the work stabilized rendered slot/materialization choices so zero-offset slot aliases no longer surface through naked synthetic temp bases such as `xVar203`, while nonzero-offset and already-proven slot surfaces continue to survive.
+
+- [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs) now fail-closes zero-offset slot surfacing when the recovered display base is only a naked synthetic temp with no stable provenance, while preserving the existing deterministic first-use alias ordering and final binding-name ordering.
+- [`normalize_slots.rs`](crates/fission-pcode/src/nir/tests/normalize_slots.rs) now locks in the new contract:
+  - deterministic alias order still holds for stable bases
+  - direct/body alias provenance still rewrites slot initializers back to source-like bases
+  - naked synthetic temp bases at zero offset do not get surfaced as synthetic slot locals
+- The accepted output for `0x140007da0` no longer emits `slot_0_1 = (uchar *)xVar203;`; the unresolved pointer stays explicit as `xVar203`, which is less pretty locally but materially improves row-level similarity and removes the unstable fake slot alias from the rendered surface.
+
+Accepted benchmark artifact:
+
+- [`putty-row-fidelity-wave-v8`](../../artifacts/batch_benchmark/putty-row-fidelity-wave-v8)
+
+Accepted benchmark delta vs the prior accepted baseline [`putty-proof-first-wave-final`](../../artifacts/batch_benchmark/putty-proof-first-wave-final):
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- public direct-success: `50/50 -> 50/50`
+- `avg_normalized_similarity`: `37.91 -> 38.79`
+- public indirect counters:
+  - `unsupported_indirect_control_count`: `11 -> 1`
+  - `indirect_surface_preserved_count`: `18 -> 9`
+  - `dispatcher_shape_recovered_count`: `1 -> 12`
+- key rows:
+  - `0x140001160`: `27.05 -> 27.34`
+  - `0x140008900`: `19.55 -> 20.68`
+  - `0x140007da0`: `34.43 -> 34.45`
+  - `0x140008090`: `33.62 -> 35.41`
+  - `0x140006ef0`: `35.33 -> 35.33`
+
+Validation:
+
+- `cargo test -p fission-pcode`
+- `cargo check -p fission-static`
+- `cargo check -p fission-cli`
+- `cargo test -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+- `cargo build -p fission-cli --release`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --fission-bin target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC --output-dir artifacts/batch_benchmark/putty-row-fidelity-wave-v8 --limit 50`
+
+`nir-check` fast lane stayed non-worse:
+
+- `changed_rows=0`
+- gate remains `stop_hold_p5h3f`
+- dominant slow passes moved to:
+  - `sccp: 241.5ms`
+  - `jump_resolver: 28.3ms`
+  - `aggregate_fields: 23.4ms`
+  - `memory_slot_surfacing_full: 21.7ms`
+  - `cleanup_elim_7: 13.6ms`
+
+Duplicate-logic audit result:
+
+- active CLI/static/automation consumer paths no longer rebuild indirect semantics through `IndirectControlClassification::from_flags(...)`
+- no active consumer-side `IndirectControlClassification::from_pcode(...)` rebuild remains in CLI/static/automation
+- remaining `from_pcode`/`from_flags` matches are canonical producer definitions in [`types.rs`](crates/fission-pcode/src/nir/types.rs) or unrelated pcode/CFG construction entrypoints, not downstream semantic rebuild sites
+
+Next bottleneck:
+
+- dispatcher proof is no longer the release blocker; the accepted branch now meets the row-fidelity gates
+- the next primary KPI should move to pass-manager/perf work, specifically:
+  - `sccp`
+  - `copy_propagation_after_cse`
+  - `cleanup_standalone_12`
+  - preserving the current dispatcher/indirect metrics while reducing fast-lane cost
+
+## 2026-04-11
 
 ### Proof-first rust-sleigh lift extension wave - giant indirect functions now survive past `BranchInd`, with fast-lane cleanup gated back under control
 

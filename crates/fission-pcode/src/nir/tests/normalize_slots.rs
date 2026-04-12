@@ -214,6 +214,304 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
 }
 
 #[test]
+fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
+    let byte_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let slot_ptr = |base: &str| HirExpr::PtrOffset {
+        base: Box::new(HirExpr::Var(base.to_string())),
+        offset: 0,
+    };
+    let repeated_load = |base: &str| HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr(base)),
+            ty: byte_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr(base)),
+            ty: byte_ty.clone(),
+        }),
+        ty: byte_ty.clone(),
+    };
+    let mut func = HirFunction {
+        name: "slot_alias_order_fn".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
+        locals: vec![
+            NirBinding {
+                name: "rdi".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "rax".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        return_type: byte_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(repeated_load("rax")),
+                rhs: Box::new(repeated_load("param_1")),
+                ty: byte_ty.clone(),
+            }),
+            rhs: Box::new(repeated_load("rdi")),
+            ty: byte_ty.clone(),
+        }))],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    let surfaced = func
+        .locals
+        .iter()
+        .filter(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_0"))
+        .map(|binding| {
+            (
+                binding.name.clone(),
+                print_expr(binding.initializer.as_ref().expect("initializer")),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        surfaced,
+        vec![
+            ("slot_0".to_string(), "(uchar *)rax".to_string()),
+            ("slot_0_1".to_string(), "(uchar *)param_1".to_string()),
+            ("slot_0_1_1".to_string(), "(uchar *)rdi".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
+    let uint_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let slot_ptr = |offset: i64| HirExpr::PtrOffset {
+        base: Box::new(HirExpr::Var("param_1".to_string())),
+        offset,
+    };
+    let repeated_load = |offset: i64| HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr(offset)),
+            ty: uint_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr(offset)),
+            ty: uint_ty.clone(),
+        }),
+        ty: uint_ty.clone(),
+    };
+    let mut func = HirFunction {
+        name: "slot_decl_order_fn".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
+        locals: vec![],
+        return_type: uint_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(repeated_load(0x12f0)),
+            rhs: Box::new(repeated_load(0)),
+            ty: uint_ty.clone(),
+        }))],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    let surfaced_names = func
+        .locals
+        .iter()
+        .filter(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_"))
+        .map(|binding| binding.name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(surfaced_names, vec!["slot_0".to_string(), "slot_12f0".to_string()]);
+}
+
+#[test]
+fn memory_slot_surfacing_prefers_direct_alias_source_in_initializer() {
+    let byte_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let slot_ptr = HirExpr::PtrOffset {
+        base: Box::new(HirExpr::Var("xVar203".to_string())),
+        offset: 0,
+    };
+    let mut func = HirFunction {
+        name: "slot_alias_source_fn".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "rax".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "xVar203".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(HirExpr::Var("rax".to_string())),
+            },
+        ],
+        return_type: byte_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr.clone()),
+                ty: byte_ty.clone(),
+            }),
+            rhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr),
+                ty: byte_ty.clone(),
+            }),
+            ty: byte_ty.clone(),
+        }))],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    let surfaced = func
+        .locals
+        .iter()
+        .find(|binding| binding.name == "slot_0")
+        .expect("surfaced slot alias");
+    assert_eq!(
+        print_expr(surfaced.initializer.as_ref().expect("initializer")),
+        "(uchar *)rax"
+    );
+}
+
+#[test]
+fn memory_slot_surfacing_prefers_single_def_body_alias_source_in_initializer() {
+    let byte_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let slot_ptr = HirExpr::PtrOffset {
+        base: Box::new(HirExpr::Var("xVar203".to_string())),
+        offset: 0,
+    };
+    let mut func = HirFunction {
+        name: "slot_body_alias_source_fn".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "rax".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
+        return_type: byte_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar203".to_string()),
+                rhs: HirExpr::Var("rax".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr.clone()),
+                    ty: byte_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr),
+                    ty: byte_ty.clone(),
+                }),
+                ty: byte_ty.clone(),
+            })),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    let surfaced = func
+        .locals
+        .iter()
+        .find(|binding| binding.name == "slot_0")
+        .expect("surfaced slot alias");
+    assert_eq!(
+        print_expr(surfaced.initializer.as_ref().expect("initializer")),
+        "(uchar *)rax"
+    );
+}
+
+#[test]
+fn memory_slot_surfacing_skips_zero_offset_naked_temp_bases() {
+    let byte_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let slot_ptr = HirExpr::PtrOffset {
+        base: Box::new(HirExpr::Var("xVar203".to_string())),
+        offset: 0,
+    };
+    let mut func = HirFunction {
+        name: "slot_naked_temp_base_fn".to_string(),
+        params: vec![],
+        locals: vec![],
+        return_type: byte_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr.clone()),
+                ty: byte_ty.clone(),
+            }),
+            rhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr),
+                ty: byte_ty.clone(),
+            }),
+            ty: byte_ty.clone(),
+        }))],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    assert!(
+        !func.locals.iter().any(|binding| binding.name.starts_with("slot_")),
+        "unexpected slot alias locals: {:?}",
+        func.locals
+            .iter()
+            .map(|binding| binding.name.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
     let uint_ty = NirType::Int {
         bits: 32,

@@ -1,5 +1,6 @@
 use super::super::analysis::defuse::{
     apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
+    stabilize_repeated_pure_exprs,
 };
 use super::super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
@@ -40,7 +41,7 @@ use super::super::types::{
 };
 use super::super::wave_stats;
 use super::super::*;
-use crate::nir::vsa::apply_jump_resolver_pass;
+use crate::nir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
@@ -576,7 +577,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Value Set Analysis: use range information to eliminate dead switch
     // cases and constant-condition branches.  Runs last so all structural
     // passes have already simplified the body.
-    if !body_exceeds_early_cleanup_budget(&func.body)
+    if jump_resolver_within_budget(&func.body)
         && run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass)
     {
         run_cleanup_block(func, "cleanup_prune1_11", perf, |f| {
@@ -584,6 +585,18 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
 
             prune_unused_temp_bindings(f);
         });
+    }
+    let stabilized_materializations = stabilize_repeated_pure_exprs(func);
+    if stabilized_materializations > 0 {
+        wave_stats::add_materialization_stabilized(stabilized_materializations);
+        run_pass_logged(
+            func,
+            "proof_fidelity_materialization",
+            perf,
+            |_f| true,
+        );
+    } else {
+        wave_stats::add_pass_rerun_skipped_by_preservation(1);
     }
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
@@ -640,6 +653,14 @@ fn hir_shape(func: &HirFunction) -> (usize, usize) {
 fn body_exceeds_early_cleanup_budget(body: &[HirStmt]) -> bool {
     count_hir_stmts(body) > EARLY_CLEANUP_BLOCK_STMT_LIMIT
         || count_hir_blocks(body) > EARLY_CLEANUP_BLOCK_BLOCK_LIMIT
+}
+
+fn jump_resolver_within_budget(body: &[HirStmt]) -> bool {
+    if !body_exceeds_early_cleanup_budget(body) {
+        return true;
+    }
+    let candidate_count = jump_resolver_candidate_count(body);
+    candidate_count > 0 && candidate_count <= 16
 }
 
 fn run_cleanup_block<F>(func: &mut HirFunction, pass_name: &str, perf: bool, mut block: F) -> bool

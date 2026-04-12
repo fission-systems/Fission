@@ -15,7 +15,7 @@
 
 #[cfg(feature = "native_decomp")]
 compile_error!(
-	"feature 'native_decomp' is deprecated and blocked. Use fission-static Rust-only paths."
+    "feature 'native_decomp' is deprecated and blocked. Use fission-static Rust-only paths."
 );
 
 pub mod prelude;

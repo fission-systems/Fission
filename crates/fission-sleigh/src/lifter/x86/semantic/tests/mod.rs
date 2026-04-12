@@ -1,7 +1,7 @@
 mod helpers;
 
 use super::*;
-use helpers::{has_flag_input, has_flag_zero_copy, has_flag_write, has_pf_pipeline};
+use helpers::{has_flag_input, has_flag_write, has_flag_zero_copy, has_pf_pipeline};
 
 #[test]
 fn decode_cmp_reg_reg_emits_sub_and_branch_flags() {
@@ -43,7 +43,10 @@ fn decode_basic_alu_group_register_forms() {
 
     for (bytes, expected_opcode, expected_mnemonic) in cases {
         let ops = decode_semantic(bytes, 0x3000);
-        assert!(!ops.is_empty(), "expected semantic ops for {expected_mnemonic}");
+        assert!(
+            !ops.is_empty(),
+            "expected semantic ops for {expected_mnemonic}"
+        );
         assert_eq!(ops[0].opcode, expected_opcode, "{expected_mnemonic}");
         assert_eq!(ops[0].asm_mnemonic.as_deref(), Some(expected_mnemonic));
         assert_eq!(ops[0].output.as_ref(), Some(&x86_reg(0, 4)));
@@ -66,7 +69,10 @@ fn decode_immediate_81_83_cmp_sub_forms() {
     assert_eq!(sub_ops[0].opcode, PcodeOpcode::IntSub);
     assert_eq!(sub_ops[0].asm_mnemonic.as_deref(), Some("SUB"));
     assert_eq!(sub_ops[0].inputs[1].size, 4);
-    assert_eq!((sub_ops[0].inputs[1].constant_val as u64) & 0xFFFF_FFFF, 0xFFFF_FFFF);
+    assert_eq!(
+        (sub_ops[0].inputs[1].constant_val as u64) & 0xFFFF_FFFF,
+        0xFFFF_FFFF
+    );
     assert!(has_pf_pipeline(&sub_ops));
 }
 
@@ -92,7 +98,9 @@ fn decode_memory_operand_read_write_forms() {
     let rm_dst = decode_semantic(&[0x01, 0x18], 0x5000); // add [rax], ebx
     assert!(rm_dst.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(rm_dst.iter().any(|op| op.opcode == PcodeOpcode::Store));
-    assert!(rm_dst.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RM_STORE")));
+    assert!(rm_dst
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("RM_STORE")));
     assert!(has_pf_pipeline(&rm_dst));
 
     let reg_dst = decode_semantic(&[0x03, 0x18], 0x5010); // add ebx, [rax]
@@ -118,7 +126,9 @@ fn decode_memory_cmp_has_no_store_but_has_pf_pipeline() {
 fn decode_adc_sbb_paths_consume_cf_and_update_flags() {
     let adc = decode_semantic(&[0x11, 0xD8], 0x6100); // adc eax, ebx
     assert!(!adc.is_empty());
-    assert!(adc.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ADC")));
+    assert!(adc
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ADC")));
     assert!(has_flag_input(&adc, x86_flag_cf()));
     assert!(has_flag_write(&adc, x86_flag_cf()));
     assert!(has_flag_write(&adc, x86_flag_of()));
@@ -126,7 +136,9 @@ fn decode_adc_sbb_paths_consume_cf_and_update_flags() {
 
     let sbb = decode_semantic(&[0x83, 0xD8, 0x01], 0x6110); // sbb eax, 1
     assert!(!sbb.is_empty());
-    assert!(sbb.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SBB")));
+    assert!(sbb
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SBB")));
     assert!(has_flag_input(&sbb, x86_flag_cf()));
     assert!(has_flag_write(&sbb, x86_flag_cf()));
     assert!(has_flag_write(&sbb, x86_flag_of()));
@@ -137,7 +149,9 @@ fn decode_adc_sbb_paths_consume_cf_and_update_flags() {
 fn decode_inc_dec_do_not_write_cf_but_update_other_flags() {
     let inc = decode_semantic(&[0xFF, 0xC0], 0x6200); // inc eax
     assert!(!inc.is_empty());
-    assert!(inc.iter().any(|op| op.asm_mnemonic.as_deref() == Some("INC")));
+    assert!(inc
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("INC")));
     assert!(!has_flag_write(&inc, x86_flag_cf()));
     assert!(has_flag_write(&inc, x86_flag_of()));
     assert!(has_flag_write(&inc, x86_flag_zf()));
@@ -145,7 +159,9 @@ fn decode_inc_dec_do_not_write_cf_but_update_other_flags() {
 
     let dec = decode_semantic(&[0xFF, 0xC8], 0x6210); // dec eax
     assert!(!dec.is_empty());
-    assert!(dec.iter().any(|op| op.asm_mnemonic.as_deref() == Some("DEC")));
+    assert!(dec
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DEC")));
     assert!(!has_flag_write(&dec, x86_flag_cf()));
     assert!(has_flag_write(&dec, x86_flag_of()));
     assert!(has_flag_write(&dec, x86_flag_zf()));
@@ -156,20 +172,26 @@ fn decode_inc_dec_do_not_write_cf_but_update_other_flags() {
 fn decode_neg_and_shift_forms_update_flags_and_memory_paths() {
     let neg = decode_semantic(&[0xF7, 0xD8], 0x6300); // neg eax
     assert!(!neg.is_empty());
-    assert!(neg.iter().any(|op| op.asm_mnemonic.as_deref() == Some("NEG")));
+    assert!(neg
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("NEG")));
     assert!(has_flag_write(&neg, x86_flag_cf()));
     assert!(has_flag_write(&neg, x86_flag_of()));
     assert!(has_pf_pipeline(&neg));
 
     let shl = decode_semantic(&[0xD1, 0xE0], 0x6310); // shl eax,1
     assert!(!shl.is_empty());
-    assert!(shl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHL")));
+    assert!(shl
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHL")));
     assert!(has_flag_write(&shl, x86_flag_cf()));
     assert!(has_pf_pipeline(&shl));
 
     let shr = decode_semantic(&[0xC1, 0xE8, 0x03], 0x6320); // shr eax,3
     assert!(!shr.is_empty());
-    assert!(shr.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHR")));
+    assert!(shr
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHR")));
     assert!(has_flag_write(&shr, x86_flag_cf()));
     assert!(has_pf_pipeline(&shr));
 
@@ -219,7 +241,9 @@ fn decode_d3_shift_uses_cl_with_masking() {
         .iter()
         .any(|op| op.asm_mnemonic.as_deref() == Some("SHIFT_CF_WRITE")));
 
-    assert!(ops.iter().all(|op| op.asm_mnemonic.as_deref() != Some("SHL_OF")));
+    assert!(ops
+        .iter()
+        .all(|op| op.asm_mnemonic.as_deref() != Some("SHL_OF")));
 }
 
 #[test]
@@ -295,9 +319,15 @@ fn decode_rotate_group2_emits_pcode_shift_sequences() {
     // ROL eax, 1  →  explicit SHL | SHR | OR P-code + CF/OF writes
     let rol = decode_semantic(&[0xD1, 0xC0], 0x7058);
     assert!(!rol.is_empty());
-    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL")));
-    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHR")));
-    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL")));
+    assert!(rol
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL")));
+    assert!(rol
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHR")));
+    assert!(rol
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROL")));
     assert!(has_flag_write(&rol, x86_flag_cf()));
     assert!(has_flag_write(&rol, x86_flag_of()));
     assert!(!has_flag_write(&rol, x86_flag_zf()));
@@ -307,10 +337,18 @@ fn decode_rotate_group2_emits_pcode_shift_sequences() {
     // ROR eax, cl  →  needs count zext + mask, then ROR_SHR / ROR_SHL / ROR
     let ror_cl = decode_semantic(&[0xD3, 0xC8], 0x705C);
     assert!(!ror_cl.is_empty());
-    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROT_COUNT_ZEXT")));
-    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHR")));
-    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHL")));
-    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR")));
+    assert!(ror_cl
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROT_COUNT_ZEXT")));
+    assert!(ror_cl
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHR")));
+    assert!(ror_cl
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHL")));
+    assert!(ror_cl
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROR")));
     assert!(has_flag_write(&ror_cl, x86_flag_cf()));
 
     // ROR eax, 0  →  count=0 is suppressed (empty output)
@@ -499,7 +537,9 @@ fn decode_mov_rm_r_emits_store_without_flag_writes() {
     let ops = decode_semantic(&[0x89, 0x18], 0x7100); // mov dword ptr [rax], ebx
     assert!(!ops.is_empty());
     assert!(!ops.iter().any(|op| op.opcode == PcodeOpcode::Load));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_STORE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOV_STORE")));
 
     assert!(!has_flag_write(&ops, x86_flag_cf()));
     assert!(!has_flag_write(&ops, x86_flag_pf()));
@@ -721,8 +761,12 @@ fn decode_movzx_movsx_mem_forms_support_rexw_and_operand_override() {
 fn decode_bsf_bsr_update_zf_and_preserve_other_flags() {
     let bsf = decode_semantic(&[0x0F, 0xBC, 0xC3], 0x716C); // bsf eax, ebx
     assert!(!bsf.is_empty());
-    assert!(bsf.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSF_WRITE")));
-    assert!(bsf.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSF_INDEX")));
+    assert!(bsf
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSF_WRITE")));
+    assert!(bsf
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSF_INDEX")));
     assert!(has_flag_write(&bsf, x86_flag_zf()));
     assert!(!has_flag_write(&bsf, x86_flag_cf()));
     assert!(!has_flag_write(&bsf, x86_flag_pf()));
@@ -732,8 +776,12 @@ fn decode_bsf_bsr_update_zf_and_preserve_other_flags() {
     let bsr = decode_semantic(&[0x0F, 0xBD, 0x18], 0x7170); // bsr ebx, dword ptr [rax]
     assert!(!bsr.is_empty());
     assert!(bsr.iter().any(|op| op.opcode == PcodeOpcode::Load));
-    assert!(bsr.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")));
-    assert!(bsr.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSR_POPCNT")));
+    assert!(bsr
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")));
+    assert!(bsr
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSR_POPCNT")));
     assert!(has_flag_write(&bsr, x86_flag_zf()));
     assert!(!has_flag_write(&bsr, x86_flag_cf()));
     assert!(!has_flag_write(&bsr, x86_flag_pf()));
@@ -746,8 +794,12 @@ fn decode_bt_bts_btr_btc_update_cf_and_apply_rmw_rules() {
     let bt = decode_semantic(&[0x0F, 0xA3, 0xC8], 0x7172); // bt eax, ecx
     assert!(!bt.is_empty());
     assert!(has_flag_write(&bt, x86_flag_cf()));
-    assert!(!bt.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BT_WRITE")));
-    assert!(!bt.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BT_STORE")));
+    assert!(!bt
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BT_WRITE")));
+    assert!(!bt
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BT_STORE")));
     assert!(!has_flag_write(&bt, x86_flag_zf()));
     assert!(!has_flag_write(&bt, x86_flag_sf()));
     assert!(!has_flag_write(&bt, x86_flag_pf()));
@@ -755,35 +807,41 @@ fn decode_bt_bts_btr_btc_update_cf_and_apply_rmw_rules() {
 
     let bts = decode_semantic(&[0x0F, 0xAB, 0xC8], 0x7173); // bts eax, ecx
     assert!(!bts.is_empty());
+    assert!(
+        bts.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BTS_SET")
+                && op.opcode == PcodeOpcode::IntOr)
+    );
     assert!(bts
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTS_SET") && op.opcode == PcodeOpcode::IntOr));
-    assert!(bts
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTS_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BTS_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
     assert!(has_flag_write(&bts, x86_flag_cf()));
 
     let btr = decode_semantic(&[0x0F, 0xB3, 0x18], 0x7174); // btr dword ptr [rax], ebx
     assert!(!btr.is_empty());
+    assert!(btr.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("BTR_MEM_WORD_INDEX")
+            && op.opcode == PcodeOpcode::IntSRight
+    ));
     assert!(btr
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTR_MEM_WORD_INDEX") && op.opcode == PcodeOpcode::IntSRight));
-    assert!(btr
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTR_MEM_LOAD") && op.opcode == PcodeOpcode::Load));
-    assert!(btr
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTR_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BTR_MEM_LOAD")
+            && op.opcode == PcodeOpcode::Load));
+    assert!(btr.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("BTR_STORE") && op.opcode == PcodeOpcode::Store
+    ));
     assert!(has_flag_write(&btr, x86_flag_cf()));
 
     let btc = decode_semantic(&[0x0F, 0xBB, 0x18], 0x7175); // btc dword ptr [rax], ebx
     assert!(!btc.is_empty());
     assert!(btc
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTC_TOGGLE") && op.opcode == PcodeOpcode::IntXor));
-    assert!(btc
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BTC_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BTC_TOGGLE")
+            && op.opcode == PcodeOpcode::IntXor));
+    assert!(btc.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("BTC_STORE") && op.opcode == PcodeOpcode::Store
+    ));
     assert!(has_flag_write(&btc, x86_flag_cf()));
 }
 
@@ -793,10 +851,12 @@ fn decode_shld_shrd_forms_emit_merge_and_rmw_paths() {
     assert!(!shld.is_empty());
     assert!(shld
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHLD_MERGE") && op.opcode == PcodeOpcode::IntOr));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHLD_MERGE")
+            && op.opcode == PcodeOpcode::IntOr));
     assert!(shld
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHLD_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHLD_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let shrd_cl = decode_semantic(&[0x0F, 0xAD, 0xD8], 0x7177); // shrd eax, ebx, cl
     assert!(!shrd_cl.is_empty());
@@ -805,21 +865,25 @@ fn decode_shld_shrd_forms_emit_merge_and_rmw_paths() {
         .any(|op| op.asm_mnemonic.as_deref() == Some("SHXD_COUNT_ZEXT")));
     assert!(shrd_cl
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHRD_MERGE") && op.opcode == PcodeOpcode::IntOr));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHRD_MERGE")
+            && op.opcode == PcodeOpcode::IntOr));
 
     let shrd_mem = decode_semantic(&[0x0F, 0xAC, 0x18, 0x03], 0x7178); // shrd dword ptr [rax], ebx, 3
     assert!(!shrd_mem.is_empty());
     assert!(shrd_mem.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(shrd_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHRD_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHRD_STORE")
+            && op.opcode == PcodeOpcode::Store));
 }
 
 #[test]
 fn decode_imul_two_operand_sets_cf_of_and_writes_destination() {
     let ops = decode_semantic(&[0x0F, 0xAF, 0xC3], 0x7174); // imul eax, ebx
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
     let write = ops
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("IMUL_WRITE"))
@@ -841,7 +905,8 @@ fn decode_imul_immediate_forms_set_cf_of_and_write_destination() {
         .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM")));
     assert!(imul_69
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
     assert!(has_flag_write(&imul_69, x86_flag_cf()));
     assert!(has_flag_write(&imul_69, x86_flag_of()));
 
@@ -850,19 +915,24 @@ fn decode_imul_immediate_forms_set_cf_of_and_write_destination() {
     assert!(imul_6b.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(imul_6b
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE") && op.output.as_ref() == Some(&x86_reg(3, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(3, 4))));
     let rhs_6b = imul_6b
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_RHS_SEXT"))
         .expect("expected imm8 rhs sign extension");
     assert_eq!(rhs_6b.inputs[0].size, 4);
-    assert_eq!((rhs_6b.inputs[0].constant_val as u64) & 0xFFFF_FFFF, 0xFFFF_FFFE);
+    assert_eq!(
+        (rhs_6b.inputs[0].constant_val as u64) & 0xFFFF_FFFF,
+        0xFFFF_FFFE
+    );
 
     let imul_rexw = decode_semantic(&[0x48, 0x69, 0xD9, 0xFF, 0xFF, 0xFF, 0xFF], 0x7178); // imul rbx, rcx, -1
     assert!(!imul_rexw.is_empty());
     assert!(imul_rexw
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE") && op.output.as_ref() == Some(&x86_reg(3, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(3, 8))));
     let rhs_rexw = imul_rexw
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("IMUL_IMM_RHS_SEXT"))
@@ -875,25 +945,33 @@ fn decode_imul_immediate_forms_set_cf_of_and_write_destination() {
 fn decode_f7_mul_imul_write_implicit_accumulator_pair() {
     let mul = decode_semantic(&[0xF7, 0xE3], 0x7178); // mul ebx
     assert!(!mul.is_empty());
-    assert!(mul.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MUL")));
     assert!(mul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_LO_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL")));
     assert!(mul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_HI_WRITE") && op.output.as_ref() == Some(&x86_reg(2, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_LO_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
+    assert!(mul
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_HI_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(2, 4))));
     assert!(has_flag_write(&mul, x86_flag_cf()));
     assert!(has_flag_write(&mul, x86_flag_of()));
 
     let imul = decode_semantic(&[0xF7, 0xEB], 0x717C); // imul ebx
     assert!(!imul.is_empty());
-    assert!(imul.iter().any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
     assert!(imul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_LO_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
     assert!(imul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_HI_WRITE") && op.output.as_ref() == Some(&x86_reg(2, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_LO_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
+    assert!(imul
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_HI_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(2, 4))));
     assert!(has_flag_write(&imul, x86_flag_cf()));
     assert!(has_flag_write(&imul, x86_flag_of()));
 }
@@ -907,17 +985,22 @@ fn decode_f7_div_idiv_emit_policy_marker_and_write_quotient_remainder() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("DIV_EXCEPTION_POLICY"))
         .expect("expected div policy marker");
     assert_eq!(div_policy.opcode, PcodeOpcode::CallOther);
-    assert_eq!(div_policy.inputs[0].constant_val as u64, X86_DIV_EXCEPTION_POLICY_ID);
+    assert_eq!(
+        div_policy.inputs[0].constant_val as u64,
+        X86_DIV_EXCEPTION_POLICY_ID
+    );
     assert_eq!(div_policy.inputs.len(), 5);
     assert_eq!(div_policy.inputs[2], x86_reg(2, 4));
     assert_eq!(div_policy.inputs[3], x86_reg(0, 4));
     assert_eq!(div_policy.inputs[4].constant_val as u64, 4);
     assert!(div
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_QUOT_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_QUOT_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
     assert!(div
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_REM_WRITE") && op.output.as_ref() == Some(&x86_reg(2, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_REM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(2, 4))));
 
     let idiv = decode_semantic(&[0xF7, 0xFB], 0x7184); // idiv ebx
     assert!(!idiv.is_empty());
@@ -926,17 +1009,22 @@ fn decode_f7_div_idiv_emit_policy_marker_and_write_quotient_remainder() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("IDIV_EXCEPTION_POLICY"))
         .expect("expected idiv policy marker");
     assert_eq!(idiv_policy.opcode, PcodeOpcode::CallOther);
-    assert_eq!(idiv_policy.inputs[0].constant_val as u64, X86_IDIV_EXCEPTION_POLICY_ID);
+    assert_eq!(
+        idiv_policy.inputs[0].constant_val as u64,
+        X86_IDIV_EXCEPTION_POLICY_ID
+    );
     assert_eq!(idiv_policy.inputs.len(), 5);
     assert_eq!(idiv_policy.inputs[2], x86_reg(2, 4));
     assert_eq!(idiv_policy.inputs[3], x86_reg(0, 4));
     assert_eq!(idiv_policy.inputs[4].constant_val as u64, 4);
     assert!(idiv
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_QUOT_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_QUOT_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
     assert!(idiv
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_REM_WRITE") && op.output.as_ref() == Some(&x86_reg(2, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_REM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(2, 4))));
 }
 
 #[test]
@@ -952,29 +1040,39 @@ fn decode_f6_group_covers_test_neg_mul_imul_div_idiv_byte_forms() {
 
     let neg = decode_semantic(&[0xF6, 0xD8], 0x7189); // neg al
     assert!(!neg.is_empty());
-    assert!(neg.iter().any(|op| op.asm_mnemonic.as_deref() == Some("NEG")));
+    assert!(neg
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("NEG")));
     assert!(has_flag_write(&neg, x86_flag_cf()));
     assert!(has_flag_write(&neg, x86_flag_of()));
 
     let mul = decode_semantic(&[0xF6, 0xE3], 0x718A); // mul bl
     assert!(!mul.is_empty());
-    assert!(mul.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MUL")));
     assert!(mul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_LO_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL")));
     assert!(mul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_HI_WRITE") && op.output.as_ref() == Some(&x86_reg(4, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_LO_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 1))));
+    assert!(mul
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MUL_HI_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(4, 1))));
 
     let imul = decode_semantic(&[0xF6, 0xEB], 0x718B); // imul bl
     assert!(!imul.is_empty());
-    assert!(imul.iter().any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
     assert!(imul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_LO_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL")));
     assert!(imul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_HI_WRITE") && op.output.as_ref() == Some(&x86_reg(4, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_LO_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 1))));
+    assert!(imul
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IMUL_HI_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(4, 1))));
 
     let div = decode_semantic(&[0xF6, 0xF3], 0x718C); // div bl
     assert!(!div.is_empty());
@@ -983,17 +1081,22 @@ fn decode_f6_group_covers_test_neg_mul_imul_div_idiv_byte_forms() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("DIV_EXCEPTION_POLICY"))
         .expect("expected div policy marker");
     assert_eq!(div_policy.opcode, PcodeOpcode::CallOther);
-    assert_eq!(div_policy.inputs[0].constant_val as u64, X86_DIV_EXCEPTION_POLICY_ID);
+    assert_eq!(
+        div_policy.inputs[0].constant_val as u64,
+        X86_DIV_EXCEPTION_POLICY_ID
+    );
     assert_eq!(div_policy.inputs.len(), 5);
     assert_eq!(div_policy.inputs[2], x86_reg(4, 1));
     assert_eq!(div_policy.inputs[3], x86_reg(0, 1));
     assert_eq!(div_policy.inputs[4].constant_val as u64, 1);
     assert!(div
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_QUOT_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_QUOT_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 1))));
     assert!(div
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_REM_WRITE") && op.output.as_ref() == Some(&x86_reg(4, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIV_REM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(4, 1))));
 
     let idiv = decode_semantic(&[0xF6, 0xFB], 0x718D); // idiv bl
     assert!(!idiv.is_empty());
@@ -1002,17 +1105,22 @@ fn decode_f6_group_covers_test_neg_mul_imul_div_idiv_byte_forms() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("IDIV_EXCEPTION_POLICY"))
         .expect("expected idiv policy marker");
     assert_eq!(idiv_policy.opcode, PcodeOpcode::CallOther);
-    assert_eq!(idiv_policy.inputs[0].constant_val as u64, X86_IDIV_EXCEPTION_POLICY_ID);
+    assert_eq!(
+        idiv_policy.inputs[0].constant_val as u64,
+        X86_IDIV_EXCEPTION_POLICY_ID
+    );
     assert_eq!(idiv_policy.inputs.len(), 5);
     assert_eq!(idiv_policy.inputs[2], x86_reg(4, 1));
     assert_eq!(idiv_policy.inputs[3], x86_reg(0, 1));
     assert_eq!(idiv_policy.inputs[4].constant_val as u64, 1);
     assert!(idiv
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_QUOT_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_QUOT_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 1))));
     assert!(idiv
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_REM_WRITE") && op.output.as_ref() == Some(&x86_reg(4, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("IDIV_REM_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(4, 1))));
 }
 
 #[test]
@@ -1039,8 +1147,12 @@ fn decode_lea_rejects_register_source_modrm_mode3() {
 fn decode_push_reg_decrements_rsp_and_stores_value() {
     let ops = decode_semantic(&[0x53], 0x7200); // push rbx
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("PUSH_REG_SP_SUB")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("PUSH_REG_SP_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PUSH_REG_SP_SUB")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PUSH_REG_SP_WRITE")));
 
     let store = ops
         .iter()
@@ -1054,9 +1166,15 @@ fn decode_push_reg_decrements_rsp_and_stores_value() {
 fn decode_pop_reg_loads_stack_and_increments_rsp() {
     let ops = decode_semantic(&[0x5B], 0x7210); // pop rbx
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_LOAD")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_SP_ADD")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_SP_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_LOAD")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_SP_ADD")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("POP_REG_SP_WRITE")));
 
     let write = ops
         .iter()
@@ -1135,7 +1253,9 @@ fn decode_ret_emits_stack_pop_and_optional_imm_cleanup() {
 fn decode_nop_and_pause_emit_hint_without_stateful_side_effects() {
     let nop = decode_semantic(&[0x90], 0x7280);
     assert!(!nop.is_empty());
-    assert!(nop.iter().any(|op| op.asm_mnemonic.as_deref() == Some("NOP_HINT")));
+    assert!(nop
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("NOP_HINT")));
     assert!(!nop.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(!nop.iter().any(|op| op.opcode == PcodeOpcode::Store));
     assert!(!has_flag_write(&nop, x86_flag_cf()));
@@ -1143,9 +1263,9 @@ fn decode_nop_and_pause_emit_hint_without_stateful_side_effects() {
 
     let pause = decode_semantic(&[0xF3, 0x90], 0x7282);
     assert!(!pause.is_empty());
-    assert!(pause
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PAUSE_HINT") && op.opcode == PcodeOpcode::Copy));
+    assert!(pause.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PAUSE_HINT") && op.opcode == PcodeOpcode::Copy
+    ));
     assert!(!pause.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(!pause.iter().any(|op| op.opcode == PcodeOpcode::Store));
     assert!(!has_flag_write(&pause, x86_flag_cf()));
@@ -1170,7 +1290,8 @@ fn decode_nop_extended_emits_hint_and_rejects_register_form() {
     assert!(!ext_nop.is_empty());
     assert!(ext_nop
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("NOP_EXT_HINT") && op.opcode == PcodeOpcode::Copy));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("NOP_EXT_HINT")
+            && op.opcode == PcodeOpcode::Copy));
     assert!(!ext_nop.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(!ext_nop.iter().any(|op| op.opcode == PcodeOpcode::Store));
 
@@ -1292,28 +1413,33 @@ fn decode_0f_system_instructions_emit_policy_markers() {
 fn decode_string_movs_updates_indices_and_supports_rep_count() {
     let movs = decode_semantic(&[0xA4], 0x7400); // movsb
     assert!(!movs.is_empty());
+    assert!(movs.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("MOVS_LOAD") && op.opcode == PcodeOpcode::Load
+    ));
     assert!(movs
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_LOAD") && op.opcode == PcodeOpcode::Load));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_STORE")
+            && op.opcode == PcodeOpcode::Store));
     assert!(movs
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(6, 8))));
     assert!(movs
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_WRITE") && op.output.as_ref() == Some(&x86_reg(6, 8))));
-    assert!(movs
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_WRITE") && op.output.as_ref() == Some(&x86_reg(7, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(7, 8))));
     assert!(has_flag_input(&movs, x86_flag_df()));
 
     let rep_movs = decode_semantic(&[0xF3, 0xA4], 0x7408); // rep movsb
     assert!(!rep_movs.is_empty());
     assert!(rep_movs
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("REP_COUNT_DEC") && op.opcode == PcodeOpcode::IntSub));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("REP_COUNT_DEC")
+            && op.opcode == PcodeOpcode::IntSub));
     assert!(rep_movs
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("REP_COUNT_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("REP_COUNT_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 8))));
 }
 
 #[test]
@@ -1322,21 +1448,26 @@ fn decode_string_cmps_scas_stos_lods_emit_expected_memory_and_flag_effects() {
     assert!(!cmps.is_empty());
     assert!(cmps
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPS_LOAD_LHS") && op.opcode == PcodeOpcode::Load));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPS_LOAD_LHS")
+            && op.opcode == PcodeOpcode::Load));
     assert!(cmps
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPS_LOAD_RHS") && op.opcode == PcodeOpcode::Load));
-    assert!(cmps.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMP")));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPS_LOAD_RHS")
+            && op.opcode == PcodeOpcode::Load));
+    assert!(cmps
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMP")));
     assert!(has_flag_write(&cmps, x86_flag_zf()));
 
     let scas = decode_semantic(&[0xAE], 0x7420); // scasb
     assert!(!scas.is_empty());
+    assert!(scas.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("SCAS_LOAD") && op.opcode == PcodeOpcode::Load
+    ));
     assert!(scas
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SCAS_LOAD") && op.opcode == PcodeOpcode::Load));
-    assert!(scas
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SCAS_DST_WRITE") && op.output.as_ref() == Some(&x86_reg(7, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SCAS_DST_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(7, 8))));
     assert!(has_flag_write(&scas, x86_flag_zf()));
 
     let stos = decode_semantic(&[0xAB], 0x7430); // stosd
@@ -1350,30 +1481,35 @@ fn decode_string_cmps_scas_stos_lods_emit_expected_memory_and_flag_effects() {
 
     let lods = decode_semantic(&[0xAC], 0x7440); // lodsb
     assert!(!lods.is_empty());
+    assert!(lods.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("LODS_LOAD") && op.opcode == PcodeOpcode::Load
+    ));
     assert!(lods
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("LODS_LOAD") && op.opcode == PcodeOpcode::Load));
-    assert!(lods
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("LODS_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 1))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("LODS_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 1))));
 }
 
 #[test]
 fn decode_string_address_override_uses_esi_edi_index_size() {
     let ops = decode_semantic(&[0x67, 0xA4], 0x7450); // movsb with addr-size override
     assert!(!ops.is_empty());
+    assert!(ops.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_ADDR_ZEXT")
+            && op.opcode == PcodeOpcode::IntZExt
+    ));
+    assert!(ops.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_ADDR_ZEXT")
+            && op.opcode == PcodeOpcode::IntZExt
+    ));
     assert!(ops
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_ADDR_ZEXT") && op.opcode == PcodeOpcode::IntZExt));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(6, 4))));
     assert!(ops
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_ADDR_ZEXT") && op.opcode == PcodeOpcode::IntZExt));
-    assert!(ops
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_SRC_WRITE") && op.output.as_ref() == Some(&x86_reg(6, 4))));
-    assert!(ops
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_WRITE") && op.output.as_ref() == Some(&x86_reg(7, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVS_DST_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(7, 4))));
 }
 
 #[test]
@@ -1399,19 +1535,24 @@ fn decode_0f_extended_markers_and_bswap_semantics_are_emitted() {
 
     // 0F D8 = PSUBUSB (MMX) — now routes to SIMD_POLICY instead of empty
     let x87_mmx = decode_semantic(&[0x0F, 0xD8, 0xC0], 0x7470);
-    assert!(!x87_mmx.is_empty(), "MMX D8 should now route to SIMD_POLICY");
+    assert!(
+        !x87_mmx.is_empty(),
+        "MMX D8 should now route to SIMD_POLICY"
+    );
 
     let bswap32 = decode_semantic(&[0x0F, 0xC8], 0x7474); // bswap eax
     assert!(!bswap32.is_empty());
     assert!(bswap32
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BSWAP_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSWAP_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let bswap64 = decode_semantic(&[0x48, 0x0F, 0xC9], 0x7478); // bswap rcx
     assert!(!bswap64.is_empty());
     assert!(bswap64
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BSWAP_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BSWAP_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 8))));
 }
 
 #[test]
@@ -1420,47 +1561,56 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
     assert!(!pshufb.is_empty());
     assert!(pshufb
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(pshufb
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let sha256rnds2 = decode_semantic(&[0x0F, 0x38, 0xCB, 0xE5], 0x7488); // sha256rnds2 xmm4, xmm5, xmm0
     assert!(!sha256rnds2.is_empty());
+    assert!(sha256rnds2.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("SHA256RNDS2_INTRINSIC")
+        && op.opcode == PcodeOpcode::CallOther));
     assert!(sha256rnds2
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHA256RNDS2_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(sha256rnds2
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SHA256RNDS2_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(4, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SHA256RNDS2_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(4, 16))));
 
     let aes_mem = decode_semantic(&[0x66, 0x0F, 0x38, 0xDD, 0x08], 0x7490); // aesenclast xmm1, [rax]
     assert!(!aes_mem.is_empty());
     assert!(aes_mem.iter().any(|op| op.opcode == PcodeOpcode::Load));
+    assert!(aes_mem.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("AESENCLAST_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
     assert!(aes_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENCLAST_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(aes_mem
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENCLAST_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENCLAST_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let aesenc = decode_semantic(&[0x66, 0x0F, 0x38, 0xDC, 0xCA], 0x7494); // aesenc xmm1, xmm2
     assert!(!aesenc.is_empty());
     assert!(aesenc
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENC_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENC_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(aesenc
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENC_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESENC_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let aesdeclast = decode_semantic(&[0x66, 0x0F, 0x38, 0xDF, 0xC8], 0x7496); // aesdeclast xmm1, xmm0
     assert!(!aesdeclast.is_empty());
+    assert!(aesdeclast.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("AESDECLAST_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
     assert!(aesdeclast
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESDECLAST_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(aesdeclast
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESDECLAST_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESDECLAST_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let palignr = decode_semantic(&[0x66, 0x0F, 0x3A, 0x0F, 0xC9, 0x04], 0x7498); // palignr xmm1, xmm1, 4
     assert!(!palignr.is_empty());
@@ -1469,10 +1619,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PALIGNR_INTRINSIC"))
         .expect("expected PALIGNR intrinsic");
     assert_eq!(palignr_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(palignr_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x04));
+    assert_eq!(
+        palignr_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x04)
+    );
     assert!(palignr
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PALIGNR_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PALIGNR_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let roundps = decode_semantic(&[0x66, 0x0F, 0x3A, 0x08, 0xCA, 0x04], 0x7499); // roundps xmm1, xmm2, 4
     assert!(!roundps.is_empty());
@@ -1480,10 +1634,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPS_INTRINSIC"))
         .expect("expected ROUNDPS intrinsic");
-    assert_eq!(roundps_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x04));
+    assert_eq!(
+        roundps_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x04)
+    );
     assert!(roundps
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPS_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPS_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let roundpd = decode_semantic(&[0x66, 0x0F, 0x3A, 0x09, 0xCA, 0x03], 0x749A); // roundpd xmm1, xmm2, 3
     assert!(!roundpd.is_empty());
@@ -1491,10 +1649,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPD_INTRINSIC"))
         .expect("expected ROUNDPD intrinsic");
-    assert_eq!(roundpd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x03));
+    assert_eq!(
+        roundpd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x03)
+    );
     assert!(roundpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDPD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let blendps = decode_semantic(&[0x66, 0x0F, 0x3A, 0x0C, 0xCA, 0x05], 0x749A); // blendps xmm1, xmm2, 5
     assert!(!blendps.is_empty());
@@ -1502,10 +1664,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("BLENDPS_INTRINSIC"))
         .expect("expected BLENDPS intrinsic");
-    assert_eq!(blendps_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x05));
+    assert_eq!(
+        blendps_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x05)
+    );
     assert!(blendps
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BLENDPS_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BLENDPS_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let blendpd = decode_semantic(&[0x66, 0x0F, 0x3A, 0x0D, 0xCA, 0x02], 0x749A); // blendpd xmm1, xmm2, 2
     assert!(!blendpd.is_empty());
@@ -1513,10 +1679,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("BLENDPD_INTRINSIC"))
         .expect("expected BLENDPD intrinsic");
-    assert_eq!(blendpd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x02));
+    assert_eq!(
+        blendpd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x02)
+    );
     assert!(blendpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("BLENDPD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BLENDPD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let roundss = decode_semantic(&[0x66, 0x0F, 0x3A, 0x0A, 0xC1, 0x01], 0x749B); // roundss xmm0, xmm1, 1
     assert!(!roundss.is_empty());
@@ -1524,10 +1694,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSS_INTRINSIC"))
         .expect("expected ROUNDSS intrinsic");
-    assert_eq!(roundss_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x01));
+    assert_eq!(
+        roundss_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x01)
+    );
     assert!(roundss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSS_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSS_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let roundsd = decode_semantic(&[0x66, 0x0F, 0x3A, 0x0B, 0xC1, 0x02], 0x749C); // roundsd xmm0, xmm1, 2
     assert!(!roundsd.is_empty());
@@ -1535,10 +1709,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSD_INTRINSIC"))
         .expect("expected ROUNDSD intrinsic");
-    assert_eq!(roundsd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x02));
+    assert_eq!(
+        roundsd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x02)
+    );
     assert!(roundsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ROUNDSD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let pclmul = decode_semantic(&[0x66, 0x0F, 0x3A, 0x44, 0xE1, 0x00], 0x74A0); // pclmulqdq xmm4, xmm1, 0
     assert!(!pclmul.is_empty());
@@ -1547,10 +1725,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PCLMULQDQ_INTRINSIC"))
         .expect("expected PCLMULQDQ intrinsic");
     assert_eq!(pclmul_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pclmul_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x00));
+    assert_eq!(
+        pclmul_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x00)
+    );
     assert!(pclmul
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCLMULQDQ_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(4, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PCLMULQDQ_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(4, 16))));
 
     let pextrd = decode_semantic(&[0x66, 0x0F, 0x3A, 0x16, 0xC0, 0x01], 0x74A8); // pextrd eax, xmm0, 1
     assert!(!pextrd.is_empty());
@@ -1559,10 +1741,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PEXTRD_INTRINSIC"))
         .expect("expected PEXTRD intrinsic");
     assert_eq!(pextrd_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pextrd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x01));
+    assert_eq!(
+        pextrd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x01)
+    );
     assert!(pextrd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PEXTRD_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PEXTRD_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let pinsrd = decode_semantic(&[0x66, 0x0F, 0x3A, 0x22, 0xC8, 0x02], 0x74B0); // pinsrd xmm1, eax, 2
     assert!(!pinsrd.is_empty());
@@ -1571,10 +1757,14 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PINSRD_INTRINSIC"))
         .expect("expected PINSRD intrinsic");
     assert_eq!(pinsrd_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pinsrd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x02));
+    assert_eq!(
+        pinsrd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x02)
+    );
     assert!(pinsrd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PINSRD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PINSRD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(1, 16))));
 
     let pcmpistri = decode_semantic(&[0x66, 0x0F, 0x3A, 0x63, 0xC1, 0x0C], 0x74B8); // pcmpistri xmm0, xmm1, 0x0c
     assert!(!pcmpistri.is_empty());
@@ -1583,17 +1773,23 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRI_INTRINSIC"))
         .expect("expected PCMPISTRI intrinsic");
     assert_eq!(pcmpistri_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pcmpistri_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x0C));
-    assert!(pcmpistri
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRI_ECX_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 4))));
+    assert_eq!(
+        pcmpistri_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x0C)
+    );
+    assert!(pcmpistri.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PCMPISTRI_ECX_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 4))
+    ));
 
     let pcmpistri_mem = decode_semantic(&[0x66, 0x41, 0x0F, 0x3A, 0x63, 0x00, 0x40], 0x74C0); // pcmpistri xmm0, [r8], 0x40
     assert!(!pcmpistri_mem.is_empty());
-    assert!(pcmpistri_mem.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(pcmpistri_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRI_ECX_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 4))));
+        .any(|op| op.opcode == PcodeOpcode::Load));
+    assert!(pcmpistri_mem.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("PCMPISTRI_ECX_WRITE")
+        && op.output.as_ref() == Some(&x86_reg(1, 4))));
 
     let pcmpeistri = decode_semantic(&[0x66, 0x0F, 0x3A, 0x61, 0xC1, 0x07], 0x74C8); // pcmpeistri xmm0, xmm1, 7
     assert!(!pcmpeistri.is_empty());
@@ -1602,17 +1798,23 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PCMPESTRI_INTRINSIC"))
         .expect("expected PCMPESTRI intrinsic");
     assert_eq!(pcmpeistri_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pcmpeistri_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x07));
-    assert!(pcmpeistri
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPESTRI_ECX_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 4))));
+    assert_eq!(
+        pcmpeistri_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x07)
+    );
+    assert!(pcmpeistri.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PCMPESTRI_ECX_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 4))
+    ));
 
     let pcmpeistri_mem = decode_semantic(&[0x66, 0x41, 0x0F, 0x3A, 0x61, 0x00, 0x03], 0x74D0); // pcmpeistri xmm0, [r8], 3
     assert!(!pcmpeistri_mem.is_empty());
-    assert!(pcmpeistri_mem.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(pcmpeistri_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPESTRI_ECX_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 4))));
+        .any(|op| op.opcode == PcodeOpcode::Load));
+    assert!(pcmpeistri_mem.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("PCMPESTRI_ECX_WRITE")
+        && op.output.as_ref() == Some(&x86_reg(1, 4))));
 
     let pcmpistrm = decode_semantic(&[0x66, 0x0F, 0x3A, 0x62, 0xC1, 0x0A], 0x74D8); // pcmpistrm xmm0, xmm1, 0x0a
     assert!(!pcmpistrm.is_empty());
@@ -1621,17 +1823,23 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRM_INTRINSIC"))
         .expect("expected PCMPISTRM intrinsic");
     assert_eq!(pcmpistrm_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(pcmpistrm_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x0A));
-    assert!(pcmpistrm
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRM_XMM0_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+    assert_eq!(
+        pcmpistrm_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x0A)
+    );
+    assert!(pcmpistrm.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PCMPISTRM_XMM0_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))
+    ));
 
     let pcmpistrm_mem = decode_semantic(&[0x66, 0x41, 0x0F, 0x3A, 0x62, 0x00, 0x40], 0x74E0); // pcmpistrm xmm0, [r8], 0x40
     assert!(!pcmpistrm_mem.is_empty());
-    assert!(pcmpistrm_mem.iter().any(|op| op.opcode == PcodeOpcode::Load));
     assert!(pcmpistrm_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPISTRM_XMM0_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.opcode == PcodeOpcode::Load));
+    assert!(pcmpistrm_mem.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("PCMPISTRM_XMM0_WRITE")
+        && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let extractps = decode_semantic(&[0x66, 0x0F, 0x3A, 0x17, 0xC8, 0x03], 0x74E8); // extractps eax, xmm1, 3
     assert!(!extractps.is_empty());
@@ -1640,17 +1848,23 @@ fn decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("EXTRACTPS_INTRINSIC"))
         .expect("expected EXTRACTPS intrinsic");
     assert_eq!(extractps_intr.opcode, PcodeOpcode::CallOther);
-    assert_eq!(extractps_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x03));
+    assert_eq!(
+        extractps_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x03)
+    );
     assert!(extractps
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("EXTRACTPS_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("EXTRACTPS_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let extractps_mem = decode_semantic(&[0x66, 0x0F, 0x3A, 0x17, 0x40, 0x04, 0x01], 0x74F0); // extractps [rax+1], xmm0, 4
     assert!(!extractps_mem.is_empty());
+    assert!(extractps_mem.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("EXTRACTPS_INTRINSIC")
+        && op.opcode == PcodeOpcode::CallOther));
     assert!(extractps_mem
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("EXTRACTPS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(extractps_mem.iter().any(|op| op.opcode == PcodeOpcode::Store));
+        .any(|op| op.opcode == PcodeOpcode::Store));
 }
 
 #[test]
@@ -1659,10 +1873,12 @@ fn decode_scalar_simd_two_byte_mandatory_prefix_forms_emit_intrinsics() {
     assert!(!movss.is_empty());
     assert!(movss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
     assert!(!movss
         .iter()
         .any(|op| op.asm_mnemonic.as_deref() == Some("SIMD_POLICY")));
@@ -1671,43 +1887,52 @@ fn decode_scalar_simd_two_byte_mandatory_prefix_forms_emit_intrinsics() {
     assert!(!movsd_store.is_empty());
     assert!(movsd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movsd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSD_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSD_STORE")
+            && op.opcode == PcodeOpcode::Store));
 
     let addss = decode_semantic(&[0xF3, 0x0F, 0x58, 0xC1], 0x7500); // addss xmm0, xmm1
     assert!(!addss.is_empty());
     assert!(addss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ADDSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ADDSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(addss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ADDSS_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ADDSS_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let cvtsi2sd = decode_semantic(&[0xF2, 0x0F, 0x2A, 0xC1], 0x7504); // cvtsi2sd xmm0, ecx
     assert!(!cvtsi2sd.is_empty());
+    assert!(cvtsi2sd.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("CVTSI2SD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
     assert!(cvtsi2sd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTSI2SD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(cvtsi2sd
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTSI2SD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTSI2SD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let cvttss2si = decode_semantic(&[0xF3, 0x0F, 0x2C, 0xC1], 0x7508); // cvttss2si eax, xmm1
     assert!(!cvttss2si.is_empty());
-    assert!(cvttss2si
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTTSS2SI_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
-    assert!(cvttss2si
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTTSS2SI_INTRINSIC") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+    assert!(cvttss2si.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("CVTTSS2SI_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
+    assert!(cvttss2si.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("CVTTSS2SI_INTRINSIC")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))
+    ));
 
     let ucomisd = decode_semantic(&[0x66, 0x0F, 0x2E, 0xC1], 0x750C); // ucomisd xmm0, xmm1
     assert!(!ucomisd.is_empty());
     assert!(ucomisd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("UCOMISD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("UCOMISD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pref_f3_over_66 = decode_semantic(&[0x66, 0xF3, 0x0F, 0x10, 0xC1], 0x7510); // 66 + f3 + movss
     assert!(!pref_f3_over_66.is_empty());
@@ -1735,60 +1960,72 @@ fn decode_scalar_simd_p0_queue_instructions_emit_intrinsics() {
     let divsd = decode_semantic(&[0xF2, 0x0F, 0x5E, 0xC1], 0x7600); // divsd xmm0, xmm1
     assert!(divsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(divsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let divss = decode_semantic(&[0xF3, 0x0F, 0x5E, 0xC1], 0x7604); // divss xmm0, xmm1
     assert!(divss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("DIVSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let sqrtsd = decode_semantic(&[0xF2, 0x0F, 0x51, 0xC1], 0x7608); // sqrtsd xmm0, xmm1
     assert!(sqrtsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SQRTSD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SQRTSD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let sqrtss = decode_semantic(&[0xF3, 0x0F, 0x51, 0xC1], 0x760C); // sqrtss xmm0, xmm1
     assert!(sqrtss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("SQRTSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SQRTSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let cvtsd2ss = decode_semantic(&[0xF2, 0x0F, 0x5A, 0xC1], 0x7610); // cvtsd2ss xmm0, xmm1
-    assert!(cvtsd2ss
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTSD2SS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+    assert!(cvtsd2ss.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("CVTSD2SS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
 
     let cvtss2sd = decode_semantic(&[0xF3, 0x0F, 0x5A, 0xC1], 0x7614); // cvtss2sd xmm0, xmm1
-    assert!(cvtss2sd
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CVTSS2SD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+    assert!(cvtss2sd.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("CVTSS2SD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
 
     let minsd = decode_semantic(&[0xF2, 0x0F, 0x5D, 0xC1], 0x7618); // minsd xmm0, xmm1
     assert!(minsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MINSD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MINSD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let minss = decode_semantic(&[0xF3, 0x0F, 0x5D, 0xC1], 0x761C); // minss xmm0, xmm1
     assert!(minss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MINSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MINSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let maxsd = decode_semantic(&[0xF2, 0x0F, 0x5F, 0xC1], 0x7620); // maxsd xmm0, xmm1
     assert!(maxsd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MAXSD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MAXSD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let maxss = decode_semantic(&[0xF3, 0x0F, 0x5F, 0xC1], 0x7624); // maxss xmm0, xmm1
     assert!(maxss
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MAXSS_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MAXSS_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let comisd = decode_semantic(&[0x66, 0x0F, 0x2F, 0xC1], 0x7628); // comisd xmm0, xmm1
     assert!(comisd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("COMISD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("COMISD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 }
 
 #[test]
@@ -1796,26 +2033,32 @@ fn decode_simd_p1_queue_instructions_emit_intrinsics() {
     let movdqa_load = decode_semantic(&[0x66, 0x0F, 0x6F, 0xC1], 0x7630); // movdqa xmm0, xmm1
     assert!(movdqa_load
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movdqa_load
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let movdqa_store = decode_semantic(&[0x66, 0x0F, 0x7F, 0x00], 0x7634); // movdqa [rax], xmm0
     assert!(movdqa_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movdqa_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVDQA_STORE")
+            && op.opcode == PcodeOpcode::Store));
 
     let pxor = decode_semantic(&[0x66, 0x0F, 0xEF, 0xC1], 0x7638); // pxor xmm0, xmm1
     assert!(pxor
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PXOR_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PXOR_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(pxor
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PXOR_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PXOR_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let crc32_byte = decode_semantic(&[0xF2, 0x0F, 0x38, 0xF0, 0xC1], 0x763C); // crc32 eax, cl
     let crc32b_intr = crc32_byte
@@ -1826,7 +2069,8 @@ fn decode_simd_p1_queue_instructions_emit_intrinsics() {
     assert_eq!(crc32b_intr.inputs.get(2), Some(&x86_reg(1, 1)));
     assert!(crc32_byte
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let crc32_word = decode_semantic(&[0x66, 0xF2, 0x0F, 0x38, 0xF1, 0xC1], 0x7640); // crc32 eax, cx
     let crc32w_intr = crc32_word
@@ -1836,7 +2080,8 @@ fn decode_simd_p1_queue_instructions_emit_intrinsics() {
     assert_eq!(crc32w_intr.inputs.get(2), Some(&x86_reg(1, 2)));
     assert!(crc32_word
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 4))));
 
     let crc32_dword = decode_semantic(&[0xF2, 0x0F, 0x38, 0xF1, 0xC1], 0x7644); // crc32 eax, ecx
     let crc32d_intr = crc32_dword
@@ -1853,15 +2098,18 @@ fn decode_simd_p1_queue_instructions_emit_intrinsics() {
     assert_eq!(crc32q_intr.inputs.get(2), Some(&x86_reg(1, 8)));
     assert!(crc32_qword
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE") && op.output.as_ref() == Some(&x86_reg(0, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CRC32_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(0, 8))));
 
     let aesimc = decode_semantic(&[0x66, 0x0F, 0x38, 0xDB, 0xC1], 0x764C); // aesimc xmm0, xmm1
     assert!(aesimc
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESIMC_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESIMC_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(aesimc
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESIMC_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("AESIMC_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 }
 
 #[test]
@@ -1869,159 +2117,194 @@ fn decode_simd_p1_followup_queue_instructions_emit_intrinsics() {
     let movapd = decode_semantic(&[0x66, 0x0F, 0x28, 0xC1], 0x7650); // movapd xmm0, xmm1
     assert!(movapd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movapd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let movapd_store = decode_semantic(&[0x66, 0x0F, 0x29, 0x00], 0x7654); // movapd [rax], xmm0
     assert!(movapd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movapd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_STORE") && op.opcode == PcodeOpcode::Store));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_STORE")
+            && op.opcode == PcodeOpcode::Store));
 
     let movd = decode_semantic(&[0x66, 0x0F, 0x6E, 0xC1], 0x7658); // movd xmm0, ecx
     assert!(movd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_WRITE")
+            && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 
     let movq = decode_semantic(&[0x66, 0x48, 0x0F, 0x6E, 0xC1], 0x765C); // movq xmm0, rcx
     assert!(movq
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let movd_store = decode_semantic(&[0x66, 0x0F, 0x7E, 0xC1], 0x7660); // movd ecx, xmm0
     assert!(movd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movd_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 4))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVD_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 4))));
 
     let movq_store = decode_semantic(&[0x66, 0x48, 0x0F, 0x7E, 0xC1], 0x7664); // movq rcx, xmm0
     assert!(movq_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
     assert!(movq_store
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_WRITE") && op.output.as_ref() == Some(&x86_reg(1, 8))));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVQ_WRITE")
+            && op.output.as_ref() == Some(&x86_reg(1, 8))));
 
     let andpd = decode_semantic(&[0x66, 0x0F, 0x54, 0xC1], 0x7668); // andpd xmm0, xmm1
     assert!(andpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ANDPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ANDPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let andnpd = decode_semantic(&[0x66, 0x0F, 0x55, 0xC1], 0x766C); // andnpd xmm0, xmm1
     assert!(andnpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ANDNPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ANDNPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let orpd = decode_semantic(&[0x66, 0x0F, 0x56, 0xC1], 0x7670); // orpd xmm0, xmm1
     assert!(orpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ORPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("ORPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let xorpd = decode_semantic(&[0x66, 0x0F, 0x57, 0xC1], 0x7674); // xorpd xmm0, xmm1
     assert!(xorpd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("XORPD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("XORPD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let punpcklqdq = decode_semantic(&[0x66, 0x0F, 0x6C, 0xC1], 0x7676); // punpcklqdq xmm0, xmm1
-    assert!(punpcklqdq
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PUNPCKLQDQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+    assert!(punpcklqdq.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PUNPCKLQDQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
 
     let punpckhqdq = decode_semantic(&[0x66, 0x0F, 0x6D, 0xC1], 0x7677); // punpckhqdq xmm0, xmm1
-    assert!(punpckhqdq
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PUNPCKHQDQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+    assert!(punpckhqdq.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("PUNPCKHQDQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther
+    ));
 
     let pshufd = decode_semantic(&[0x66, 0x0F, 0x70, 0xC1, 0x1B], 0x7678); // pshufd xmm0, xmm1, 0x1b
     let pshufd_intr = pshufd
         .iter()
         .find(|op| op.asm_mnemonic.as_deref() == Some("PSHUFD_INTRINSIC"))
         .expect("expected PSHUFD intrinsic");
-    assert_eq!(pshufd_intr.inputs.last().map(|v| v.constant_val as u64), Some(0x1B));
+    assert_eq!(
+        pshufd_intr.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x1B)
+    );
 
     let paddq = decode_semantic(&[0x66, 0x0F, 0xD4, 0xC1], 0x7679); // paddq xmm0, xmm1
     assert!(paddq
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pmullw = decode_semantic(&[0x66, 0x0F, 0xD5, 0xC1], 0x767A); // pmullw xmm0, xmm1
     assert!(pmullw
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PMULLW_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PMULLW_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pand = decode_semantic(&[0x66, 0x0F, 0xDB, 0xC1], 0x7678); // pand xmm0, xmm1
     assert!(pand
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PAND_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PAND_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pandn = decode_semantic(&[0x66, 0x0F, 0xDF, 0xC1], 0x767C); // pandn xmm0, xmm1
     assert!(pandn
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PANDN_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PANDN_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let por = decode_semantic(&[0x66, 0x0F, 0xEB, 0xC1], 0x7680); // por xmm0, xmm1
     assert!(por
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("POR_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("POR_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let psubb = decode_semantic(&[0x66, 0x0F, 0xF8, 0xC1], 0x7681); // psubb xmm0, xmm1
     assert!(psubb
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBB_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBB_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let psubw = decode_semantic(&[0x66, 0x0F, 0xF9, 0xC1], 0x7682); // psubw xmm0, xmm1
     assert!(psubw
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBW_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBW_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let psubd = decode_semantic(&[0x66, 0x0F, 0xFA, 0xC1], 0x7683); // psubd xmm0, xmm1
     assert!(psubd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let psubq = decode_semantic(&[0x66, 0x0F, 0xFB, 0xC1], 0x7684); // psubq xmm0, xmm1
     assert!(psubq
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBQ_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSUBQ_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let paddb = decode_semantic(&[0x66, 0x0F, 0xFC, 0xC1], 0x7685); // paddb xmm0, xmm1
     assert!(paddb
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDB_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDB_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let paddw = decode_semantic(&[0x66, 0x0F, 0xFD, 0xC1], 0x7686); // paddw xmm0, xmm1
     assert!(paddw
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDW_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDW_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let paddd = decode_semantic(&[0x66, 0x0F, 0xFE, 0xC1], 0x7687); // paddd xmm0, xmm1
     assert!(paddd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PADDD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pcmpeqb = decode_semantic(&[0x66, 0x0F, 0x74, 0xC1], 0x7688); // pcmpeqb xmm0, xmm1
     assert!(pcmpeqb
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQB_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQB_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pcmpeqw = decode_semantic(&[0x66, 0x0F, 0x75, 0xC1], 0x7689); // pcmpeqw xmm0, xmm1
     assert!(pcmpeqw
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQW_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQW_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 
     let pcmpeqd = decode_semantic(&[0x66, 0x0F, 0x76, 0xC1], 0x768A); // pcmpeqd xmm0, xmm1
     assert!(pcmpeqd
         .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQD_INTRINSIC") && op.opcode == PcodeOpcode::CallOther));
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PCMPEQD_INTRINSIC")
+            && op.opcode == PcodeOpcode::CallOther));
 }
 
 #[test]
@@ -2033,10 +2316,13 @@ fn decode_p2_followup_aeskeygenassist_emits_intrinsic() {
         .find(|op| op.asm_mnemonic.as_deref() == Some("AESKEYGENASSIST_INTRINSIC"))
         .expect("expected AESKEYGENASSIST intrinsic");
     assert_eq!(intrinsic.opcode, PcodeOpcode::CallOther);
-    assert_eq!(intrinsic.inputs.last().map(|v| v.constant_val as u64), Some(0x11));
-    assert!(aeskeygenassist
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("AESKEYGENASSIST_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+    assert_eq!(
+        intrinsic.inputs.last().map(|v| v.constant_val as u64),
+        Some(0x11)
+    );
+    assert!(aeskeygenassist.iter().any(|op| op.asm_mnemonic.as_deref()
+        == Some("AESKEYGENASSIST_WRITE")
+        && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
 }
 
 // ── Phase 1: x87 FPU ──────────────────────────────────────────────────────────
@@ -2046,10 +2332,16 @@ fn decode_x87_fadd_reg_form_emits_float_add_on_st0() {
     // D8 C1 = FADD ST(0), ST(1)  (D8 with mod=3, reg=0, rm=1)
     let ops = decode_semantic(&[0xD8, 0xC1], 0x8000);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FADD")
-        && op.opcode == PcodeOpcode::FloatAdd));
+    assert!(
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("FADD")
+                && op.opcode == PcodeOpcode::FloatAdd)
+    );
     // Result written back to ST(0): size=10 (80-bit extended precision)
-    let fadd = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FADD")).unwrap();
+    let fadd = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("FADD"))
+        .unwrap();
     assert_eq!(fadd.output.as_ref().map(|v| v.size), Some(10));
     assert!(!has_flag_write(&ops, x86_flag_zf()));
     assert!(!has_flag_write(&ops, x86_flag_cf()));
@@ -2060,8 +2352,9 @@ fn decode_x87_fmul_reg_form_emits_float_mul_on_st0() {
     // D8 C9 = FMUL ST(0), ST(1)  (D8 with mod=3, reg=1, rm=1)
     let ops = decode_semantic(&[0xD8, 0xC9], 0x8004);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FMUL")
-        && op.opcode == PcodeOpcode::FloatMult));
+    assert!(ops.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("FMUL") && op.opcode == PcodeOpcode::FloatMult
+    ));
 }
 
 #[test]
@@ -2069,8 +2362,9 @@ fn decode_x87_fld_reg_form_copies_stn_to_st0() {
     // D9 C1 = FLD ST(1) — load ST(1) onto the stack top
     let ops = decode_semantic(&[0xD9, 0xC1], 0x8008);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FLD_ST")
-        && op.opcode == PcodeOpcode::Copy));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("FLD_ST") && op.opcode == PcodeOpcode::Copy));
 }
 
 #[test]
@@ -2078,8 +2372,11 @@ fn decode_x87_fsub_emits_float_sub_on_st0() {
     // D8 E1 = FSUB ST(0), ST(1) (D8 mod=3, reg=4, rm=1)
     let ops = decode_semantic(&[0xD8, 0xE1], 0x800C);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FSUB")
-        && op.opcode == PcodeOpcode::FloatSub));
+    assert!(
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("FSUB")
+                && op.opcode == PcodeOpcode::FloatSub)
+    );
 }
 
 #[test]
@@ -2088,9 +2385,15 @@ fn decode_x87_fxch_swaps_st0_and_stn() {
     let ops = decode_semantic(&[0xD9, 0xC9], 0x8010);
     assert!(!ops.is_empty());
     // Should have save + two writes for the swap
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_SAVE")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_ST0")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_STN")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_SAVE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_ST0")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_STN")));
 }
 
 // ── Phase 2: Primary 1-byte flag manipulation gaps ───────────────────────────
@@ -2100,21 +2403,30 @@ fn decode_clc_stc_cmc_set_clear_toggle_cf() {
     let clc = decode_semantic(&[0xF8], 0x8020); // clc
     assert!(!clc.is_empty());
     assert!(has_flag_write(&clc, x86_flag_cf()));
-    let clc_op = clc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CLC")).unwrap();
+    let clc_op = clc
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("CLC"))
+        .unwrap();
     assert_eq!(clc_op.opcode, PcodeOpcode::Copy);
     assert_eq!(clc_op.inputs[0].constant_val, 0);
 
     let stc = decode_semantic(&[0xF9], 0x8021); // stc
     assert!(!stc.is_empty());
     assert!(has_flag_write(&stc, x86_flag_cf()));
-    let stc_op = stc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("STC")).unwrap();
+    let stc_op = stc
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("STC"))
+        .unwrap();
     assert_eq!(stc_op.opcode, PcodeOpcode::Copy);
     assert_eq!(stc_op.inputs[0].constant_val, 1);
 
     let cmc = decode_semantic(&[0xF5], 0x8022); // cmc
     assert!(!cmc.is_empty());
     assert!(has_flag_write(&cmc, x86_flag_cf()));
-    let cmc_op = cmc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CMC")).unwrap();
+    let cmc_op = cmc
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("CMC"))
+        .unwrap();
     assert_eq!(cmc_op.opcode, PcodeOpcode::IntXor);
     assert!(has_flag_input(&cmc, x86_flag_cf()));
 }
@@ -2124,13 +2436,19 @@ fn decode_cld_std_set_clear_df() {
     let cld = decode_semantic(&[0xFC], 0x8023); // cld
     assert!(!cld.is_empty());
     assert!(has_flag_write(&cld, x86_flag_df()));
-    let cld_op = cld.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CLD")).unwrap();
+    let cld_op = cld
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("CLD"))
+        .unwrap();
     assert_eq!(cld_op.inputs[0].constant_val, 0);
 
     let std_op = decode_semantic(&[0xFD], 0x8024); // std
     assert!(!std_op.is_empty());
     assert!(has_flag_write(&std_op, x86_flag_df()));
-    let std = std_op.iter().find(|op| op.asm_mnemonic.as_deref() == Some("STD")).unwrap();
+    let std = std_op
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("STD"))
+        .unwrap();
     assert_eq!(std.inputs[0].constant_val, 1);
 }
 
@@ -2144,9 +2462,13 @@ fn decode_lahf_builds_ah_from_flag_bits() {
     assert!(has_flag_input(&ops, x86_flag_zf()));
     assert!(has_flag_input(&ops, x86_flag_pf()));
     // Must contain a LAHF_CF op
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LAHF_CF")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("LAHF_CF")));
     // Final result written into AX (size 2)
-    assert!(ops.iter().any(|op| op.output.as_ref().map(|v| v.size == 2).unwrap_or(false)));
+    assert!(ops
+        .iter()
+        .any(|op| op.output.as_ref().map(|v| v.size == 2).unwrap_or(false)));
 }
 
 #[test]
@@ -2158,7 +2480,9 @@ fn decode_sahf_writes_flags_from_ah_bits() {
     assert!(has_flag_write(&ops, x86_flag_zf()));
     assert!(has_flag_write(&ops, x86_flag_sf()));
     // Should extract AH as source
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SAHF_AH")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("SAHF_AH")));
 }
 
 // ── Phase 3: ROL/RCL explicit P-code (covered above; extra edge-case) ─────────
@@ -2168,7 +2492,10 @@ fn decode_rol_byte_form_produces_correct_size_operands() {
     // C0 C0 05 = rol al, 5
     let ops = decode_semantic(&[0xC0, 0xC0, 0x05], 0x8030);
     assert!(!ops.is_empty());
-    let rol_shl = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL")).unwrap();
+    let rol_shl = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL"))
+        .unwrap();
     assert_eq!(rol_shl.inputs[0].size, 1); // byte operand
 }
 
@@ -2178,9 +2505,15 @@ fn decode_rcl_reg_count1_emits_rcl_pcode() {
     let ops = decode_semantic(&[0xD1, 0xD0], 0x8034);
     assert!(!ops.is_empty());
     // Must have the SHL step and the CF-inject (zero-extend old CF into the operand)
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL_SHL")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL_CF_ZEXT")));
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("RCL_SHL")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("RCL_CF_ZEXT")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("RCL")));
     // Reads old CF and writes new CF
     assert!(has_flag_input(&ops, x86_flag_cf()));
     assert!(has_flag_write(&ops, x86_flag_cf()));
@@ -2194,10 +2527,13 @@ fn decode_xadd_reg_reg_swaps_and_writes_sum_with_flags() {
     let ops = decode_semantic(&[0x0F, 0xC1, 0xD8], 0x8040);
     assert!(!ops.is_empty());
     // sum = eax + ebx
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XADD_SUM")
-        && op.opcode == PcodeOpcode::IntAdd));
+    assert!(ops.iter().any(
+        |op| op.asm_mnemonic.as_deref() == Some("XADD_SUM") && op.opcode == PcodeOpcode::IntAdd
+    ));
     // old r/m value saved for the register exchange
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XADD_OLD_RM")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("XADD_OLD_RM")));
     // flag updates
     assert!(has_flag_write(&ops, x86_flag_cf()));
     assert!(has_flag_write(&ops, x86_flag_of()));
@@ -2212,8 +2548,10 @@ fn decode_cmpxchg_reg_reg_emits_conditional_update_and_flags() {
     let ops = decode_semantic(&[0x0F, 0xB1, 0xC3], 0x8048);
     assert!(!ops.is_empty());
     // CMP step
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_CMP")
-        && op.opcode == PcodeOpcode::IntSub));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_CMP")
+            && op.opcode == PcodeOpcode::IntSub));
     // ZF update
     assert!(has_flag_write(&ops, x86_flag_zf()));
     // CF/SF/OF updates
@@ -2221,9 +2559,13 @@ fn decode_cmpxchg_reg_reg_emits_conditional_update_and_flags() {
     assert!(has_flag_write(&ops, x86_flag_sf()));
     assert!(has_flag_write(&ops, x86_flag_of()));
     // Conditional write to r/m (ZF=1 path)
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_NEW_RM")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_NEW_RM")));
     // Conditional write to accumulator (ZF=0 path)
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_ACCUM_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_ACCUM_WRITE")));
 }
 
 // ── Phase 5: VEX prefix routing ──────────────────────────────────────────────
@@ -2235,8 +2577,10 @@ fn decode_vex2_vmovapd_routes_to_simd_decoder() {
     let ops = decode_semantic(&[0xC5, 0xF9, 0x28, 0xC1], 0x8060);
     assert!(!ops.is_empty());
     // Routed to existing SSE movapd path
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
-        || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+            || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
 }
 
 #[test]
@@ -2244,8 +2588,10 @@ fn decode_vex2_vmovss_routes_to_simd_decoder() {
     // C5 FA 10 C1 = VMOVSS xmm0, xmm1 (VEX2, pp=10=F3, map=0F, opcode=0x10)
     let ops = decode_semantic(&[0xC5, 0xFA, 0x10, 0xC1], 0x8064);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_INTRINSIC")
-        || op.asm_mnemonic.as_deref() == Some("MOVSS_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_INTRINSIC")
+            || op.asm_mnemonic.as_deref() == Some("MOVSS_WRITE")));
 }
 
 #[test]
@@ -2258,8 +2604,10 @@ fn decode_vex3_map1_routes_to_simd_decoder() {
     // C1: ModRM mod=11, reg=0, rm=1
     let ops = decode_semantic(&[0xC4, 0xE1, 0x79, 0x28, 0xC1], 0x8068);
     assert!(!ops.is_empty());
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
-        || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+            || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
 }
 
 #[test]
@@ -2273,8 +2621,10 @@ fn decode_vex3_map2_routes_to_0f38_decoder() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x79, 0x00, 0xCA], 0x806C);
     assert!(!ops.is_empty());
     // Should route to PSHUFB via 0F38 path
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_INTRINSIC")
-        || op.asm_mnemonic.as_deref() == Some("PSHUFB_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_INTRINSIC")
+            || op.asm_mnemonic.as_deref() == Some("PSHUFB_WRITE")));
 }
 
 // ── Phase A: Byte-form ALU ────────────────────────────────────────────────────
@@ -2380,12 +2730,16 @@ fn decode_movsxd_r64_rm32_emits_sext() {
     let ops = decode_semantic(&[0x48, 0x63, 0xC0], 0x9010);
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt
-            && op.asm_mnemonic.as_deref() == Some("MOVSXD")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntSExt
+                && op.asm_mnemonic.as_deref() == Some("MOVSXD")),
         "expected IntSExt with MOVSXD mnemonic"
     );
     // Output must be 8-byte (64-bit register)
-    let sext_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("MOVSXD")).unwrap();
+    let sext_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("MOVSXD"))
+        .unwrap();
     assert_eq!(sext_op.output.as_ref().unwrap().size, 8);
 }
 
@@ -2395,11 +2749,13 @@ fn decode_leave_emits_rsp_set_and_rbp_restore() {
     let ops = decode_semantic(&[0xC9], 0x9020);
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RSP_SET")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RSP_SET")),
         "expected LEAVE_RSP_SET"
     );
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RBP_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RBP_WRITE")),
         "expected LEAVE_RBP_WRITE"
     );
 }
@@ -2410,15 +2766,18 @@ fn decode_xchg_short_form_emits_three_copy_swap() {
     let ops = decode_semantic(&[0x91], 0x9030);
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_SAVE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_SAVE")),
         "expected XCHG_RAX_SAVE"
     );
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_WRITE")),
         "expected XCHG_RAX_WRITE"
     );
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_REG_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_REG_WRITE")),
         "expected XCHG_REG_WRITE"
     );
 }
@@ -2435,11 +2794,13 @@ fn decode_mov_moffs_a1_load_emits_load_and_write() {
     );
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_LOAD")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_LOAD")),
         "expected MOV_MOFFS_LOAD"
     );
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_WRITE")),
         "expected MOV_MOFFS_WRITE"
     );
 }
@@ -2453,7 +2814,8 @@ fn decode_mov_moffs_a3_store_emits_store() {
     );
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_STORE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_STORE")),
         "expected MOV_MOFFS_STORE"
     );
 }
@@ -2464,10 +2826,9 @@ fn decode_pushfq_assembles_rflags_and_pushes() {
     let ops = decode_semantic(&[0x9C], 0x9050);
     assert!(!ops.is_empty());
     // Reads all individual flags
-    let flag_reads: Vec<_> = ops.iter()
-        .filter(|op| op.inputs.iter().any(|v| {
-            v.size == 1 && !v.is_constant
-        }))
+    let flag_reads: Vec<_> = ops
+        .iter()
+        .filter(|op| op.inputs.iter().any(|v| v.size == 1 && !v.is_constant))
         .collect();
     assert!(!flag_reads.is_empty(), "expected flag reads for PUSHFQ");
     // Final operation must be a stack push (Store or sub from RSP)
@@ -2488,12 +2849,30 @@ fn decode_popfq_restores_flags_from_stack() {
         "expected Load for stack pop in POPFQ"
     );
     // Writes to all individual flag varnodes
-    assert!(has_flag_write(&ops, x86_flag_cf()), "expected CF write in POPFQ");
-    assert!(has_flag_write(&ops, x86_flag_pf()), "expected PF write in POPFQ");
-    assert!(has_flag_write(&ops, x86_flag_zf()), "expected ZF write in POPFQ");
-    assert!(has_flag_write(&ops, x86_flag_sf()), "expected SF write in POPFQ");
-    assert!(has_flag_write(&ops, x86_flag_df()), "expected DF write in POPFQ");
-    assert!(has_flag_write(&ops, x86_flag_of()), "expected OF write in POPFQ");
+    assert!(
+        has_flag_write(&ops, x86_flag_cf()),
+        "expected CF write in POPFQ"
+    );
+    assert!(
+        has_flag_write(&ops, x86_flag_pf()),
+        "expected PF write in POPFQ"
+    );
+    assert!(
+        has_flag_write(&ops, x86_flag_zf()),
+        "expected ZF write in POPFQ"
+    );
+    assert!(
+        has_flag_write(&ops, x86_flag_sf()),
+        "expected SF write in POPFQ"
+    );
+    assert!(
+        has_flag_write(&ops, x86_flag_df()),
+        "expected DF write in POPFQ"
+    );
+    assert!(
+        has_flag_write(&ops, x86_flag_of()),
+        "expected OF write in POPFQ"
+    );
 }
 
 // ── Phase 3차 보강: NOT, BT-imm8, POPCNT, PUSH/POP GS, ENTER ─────────────────
@@ -2509,10 +2888,22 @@ fn decode_not_dword_emits_intnegate_no_flags() {
         "expected IntNegate with NOT_RM mnemonic"
     );
     // NOT must NOT update any flags
-    assert!(!has_flag_write(&ops, x86_flag_cf()), "NOT must not update CF");
-    assert!(!has_flag_write(&ops, x86_flag_of()), "NOT must not update OF");
-    assert!(!has_flag_write(&ops, x86_flag_zf()), "NOT must not update ZF");
-    assert!(!has_flag_write(&ops, x86_flag_sf()), "NOT must not update SF");
+    assert!(
+        !has_flag_write(&ops, x86_flag_cf()),
+        "NOT must not update CF"
+    );
+    assert!(
+        !has_flag_write(&ops, x86_flag_of()),
+        "NOT must not update OF"
+    );
+    assert!(
+        !has_flag_write(&ops, x86_flag_zf()),
+        "NOT must not update ZF"
+    );
+    assert!(
+        !has_flag_write(&ops, x86_flag_sf()),
+        "NOT must not update SF"
+    );
 }
 
 #[test]
@@ -2521,7 +2912,10 @@ fn decode_not_byte_emits_intnegate_no_flags() {
     let ops = decode_semantic(&[0xF6, 0xD0], 0xA001);
     assert!(!ops.is_empty());
     assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntNegate));
-    assert!(!has_flag_write(&ops, x86_flag_cf()), "NOT byte must not update CF");
+    assert!(
+        !has_flag_write(&ops, x86_flag_cf()),
+        "NOT byte must not update CF"
+    );
 }
 
 #[test]
@@ -2535,7 +2929,9 @@ fn decode_bt_imm8_sets_cf_no_write() {
     // Must update CF
     assert!(has_flag_write(&ops, x86_flag_cf()), "BT imm8 must write CF");
     // BT does not modify the operand — no BT_IMM8_WRITE or BT_IMM8_STORE
-    assert!(!ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BT_IMM8_WRITE")));
+    assert!(!ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BT_IMM8_WRITE")));
 }
 
 #[test]
@@ -2543,9 +2939,14 @@ fn decode_bts_imm8_sets_bit_and_cf() {
     // 0F BA E8 03 = BTS EAX, 3  (mod=11, reg/5=BTS, rm=0, imm8=3)
     let ops = decode_semantic(&[0x0F, 0xBA, 0xE8, 0x03], 0xA011);
     assert!(!ops.is_empty());
-    assert!(has_flag_write(&ops, x86_flag_cf()), "BTS imm8 must write CF");
+    assert!(
+        has_flag_write(&ops, x86_flag_cf()),
+        "BTS imm8 must write CF"
+    );
     // BTS writes back the result
-    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BTS_IMM8_WRITE")));
+    assert!(ops
+        .iter()
+        .any(|op| op.asm_mnemonic.as_deref() == Some("BTS_IMM8_WRITE")));
 }
 
 #[test]
@@ -2554,8 +2955,9 @@ fn decode_popcnt_emits_popcount_and_clears_flags() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0xB8, 0xC0], 0xA020);
     assert!(!ops.is_empty());
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::PopCount
-            && op.asm_mnemonic.as_deref() == Some("POPCNT")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::PopCount
+                && op.asm_mnemonic.as_deref() == Some("POPCNT")),
         "expected PopCount opcode with POPCNT mnemonic"
     );
     // ZF = (src == 0)
@@ -2598,13 +3000,16 @@ fn decode_enter_emits_push_rbp_frame_and_alloc() {
     assert!(!ops.is_empty());
     // Must push RBP onto the stack
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_STORE")
-            || op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_PUSH")),
+        ops.iter().any(
+            |op| op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_STORE")
+                || op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_PUSH")
+        ),
         "expected stack push of RBP"
     );
     // MOV RBP, RSP
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ENTER_FRAME")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("ENTER_FRAME")),
         "expected ENTER_FRAME copy"
     );
     // SUB RSP, alloc_size
@@ -2638,8 +3043,15 @@ fn decode_int_n_emits_callother_with_vector() {
         "expected INT_IMM_TRAP CallOther"
     );
     // Must have the vector number as second input
-    let int_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("INT_IMM_TRAP")).unwrap();
-    assert_eq!(int_op.inputs.len(), 2, "INT_IMM_TRAP should have policy_id + vector inputs");
+    let int_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("INT_IMM_TRAP"))
+        .unwrap();
+    assert_eq!(
+        int_op.inputs.len(),
+        2,
+        "INT_IMM_TRAP should have policy_id + vector inputs"
+    );
 }
 
 // =====================================================================
@@ -2826,10 +3238,7 @@ fn decode_andps_emits_xmm_binop() {
 fn decode_x87_fld1_emits_float_int2float() {
     // D9 E8 = FLD1 (reg form: mod=3/E8, reg_field=5, rm_low=0)
     let ops = decode_semantic(&[0xD9, 0xE8], 0x3000);
-    assert!(
-        !ops.is_empty(),
-        "FLD1 should produce ops"
-    );
+    assert!(!ops.is_empty(), "FLD1 should produce ops");
     assert!(
         ops.iter().any(|op| op.opcode == PcodeOpcode::FloatInt2Float
             && op.asm_mnemonic.as_deref() == Some("FLD1")),
@@ -2843,8 +3252,8 @@ fn decode_x87_fldz_emits_copy() {
     let ops = decode_semantic(&[0xD9, 0xEE], 0x3000);
     assert!(!ops.is_empty(), "FLDZ should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
-            && op.asm_mnemonic.as_deref() == Some("FLDZ")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::Copy && op.asm_mnemonic.as_deref() == Some("FLDZ")),
         "FLDZ should emit Copy with zero"
     );
 }
@@ -2909,7 +3318,8 @@ fn decode_tzcnt_f3_0f_bc_emits_tzcnt_write() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0xBC, 0xC1], 0x4000);
     assert!(!ops.is_empty(), "TZCNT should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("TZCNT_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("TZCNT_WRITE")),
         "TZCNT should emit TZCNT_WRITE"
     );
     // Must set ZF and CF
@@ -2923,7 +3333,8 @@ fn decode_bsf_without_f3_prefix_still_emits_bsf() {
     let ops = decode_semantic(&[0x0F, 0xBC, 0xC1], 0x4000);
     assert!(!ops.is_empty(), "BSF should still work without F3 prefix");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSF_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BSF_WRITE")),
         "BSF without F3 should emit BSF_WRITE, not TZCNT"
     );
 }
@@ -2934,7 +3345,8 @@ fn decode_lzcnt_f3_0f_bd_emits_lzcnt_write() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0xBD, 0xC1], 0x4000);
     assert!(!ops.is_empty(), "LZCNT should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LZCNT_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("LZCNT_WRITE")),
         "LZCNT should emit LZCNT_WRITE"
     );
     assert!(has_flag_write(&ops, x86_flag_cf()), "LZCNT should write CF");
@@ -2947,7 +3359,8 @@ fn decode_bsr_without_f3_prefix_still_emits_bsr() {
     let ops = decode_semantic(&[0x0F, 0xBD, 0xC1], 0x4000);
     assert!(!ops.is_empty(), "BSR should still work without F3 prefix");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")),
         "BSR without F3 should emit BSR_WRITE, not LZCNT"
     );
 }
@@ -3054,7 +3467,8 @@ fn decode_cmpps_0f_c2_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0xC2, 0xC0, 0x00], 0x2000);
     assert!(!ops.is_empty(), "CMPPS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CMPPS_INTRINSIC")),
         "CMPPS should emit CMPPS_INTRINSIC"
     );
 }
@@ -3065,7 +3479,8 @@ fn decode_shufps_0f_c6_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0xC6, 0xC0, 0x1B], 0x2000);
     assert!(!ops.is_empty(), "SHUFPS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPS_INTRINSIC")),
         "SHUFPS should emit SHUFPS_INTRINSIC"
     );
 }
@@ -3076,7 +3491,8 @@ fn decode_rsqrtps_0f_52_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0x52, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "RSQRTPS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTPS_INTRINSIC")),
         "RSQRTPS should emit RSQRTPS_INTRINSIC"
     );
 }
@@ -3087,7 +3503,8 @@ fn decode_rcpps_0f_53_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0x53, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "RCPPS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCPPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("RCPPS_INTRINSIC")),
         "RCPPS should emit RCPPS_INTRINSIC"
     );
 }
@@ -3098,7 +3515,8 @@ fn decode_cvtps2pd_0f_5a_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0x5A, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTPS2PD should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2PD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2PD_INTRINSIC")),
         "CVTPS2PD should emit CVTPS2PD_INTRINSIC"
     );
 }
@@ -3109,7 +3527,8 @@ fn decode_cvtdq2ps_0f_5b_emits_intrinsic() {
     let ops = decode_semantic(&[0x0F, 0x5B, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTDQ2PS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PS_INTRINSIC")),
         "CVTDQ2PS should emit CVTDQ2PS_INTRINSIC"
     );
 }
@@ -3134,12 +3553,16 @@ fn decode_vex_andn_emits_intnegate_intand() {
         "ANDN should emit IntNegate for ~src1"
     );
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd
-            && op.asm_mnemonic.as_deref() == Some("ANDN")),
+        ops.iter().any(
+            |op| op.opcode == PcodeOpcode::IntAnd && op.asm_mnemonic.as_deref() == Some("ANDN")
+        ),
         "ANDN should emit IntAnd"
     );
     assert!(has_flag_write(&ops, x86_flag_zf()), "ANDN should write ZF");
-    assert!(has_flag_zero_copy(&ops, x86_flag_cf()), "ANDN should clear CF");
+    assert!(
+        has_flag_zero_copy(&ops, x86_flag_cf()),
+        "ANDN should clear CF"
+    );
 }
 
 #[test]
@@ -3151,7 +3574,8 @@ fn decode_vex_blsr_emits_intand() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x78, 0xF3, 0xC8], 0x3000);
     assert!(!ops.is_empty(), "BLSR should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSR")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BLSR")),
         "BLSR should emit BLSR mnemonic"
     );
     assert!(has_flag_write(&ops, x86_flag_zf()), "BLSR should write ZF");
@@ -3168,7 +3592,8 @@ fn decode_vex_blsi_emits_int2comp_intand() {
         "BLSI should emit Int2Comp for negation"
     );
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSI")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BLSI")),
         "BLSI should emit BLSI mnemonic"
     );
 }
@@ -3181,7 +3606,8 @@ fn decode_vex_bzhi_emits_intleft_intsub_intand() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x70, 0xF5, 0xC2], 0x3000);
     assert!(!ops.is_empty(), "BZHI should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BZHI")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BZHI")),
         "BZHI should emit BZHI mnemonic"
     );
     assert!(has_flag_write(&ops, x86_flag_zf()), "BZHI should write ZF");
@@ -3195,8 +3621,9 @@ fn decode_vex_sarx_emits_intsright() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x72, 0xF7, 0xC2], 0x3000);
     assert!(!ops.is_empty(), "SARX should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSRight
-            && op.asm_mnemonic.as_deref() == Some("SARX")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntSRight
+                && op.asm_mnemonic.as_deref() == Some("SARX")),
         "SARX should emit IntSRight"
     );
 }
@@ -3209,8 +3636,9 @@ fn decode_vex_shlx_emits_intleft() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x71, 0xF7, 0xC2], 0x3000);
     assert!(!ops.is_empty(), "SHLX should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntLeft
-            && op.asm_mnemonic.as_deref() == Some("SHLX")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntLeft
+                && op.asm_mnemonic.as_deref() == Some("SHLX")),
         "SHLX should emit IntLeft"
     );
 }
@@ -3223,8 +3651,9 @@ fn decode_vex_shrx_emits_intright() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x73, 0xF7, 0xC2], 0x3000);
     assert!(!ops.is_empty(), "SHRX should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntRight
-            && op.asm_mnemonic.as_deref() == Some("SHRX")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntRight
+                && op.asm_mnemonic.as_deref() == Some("SHRX")),
         "SHRX should emit IntRight"
     );
 }
@@ -3237,8 +3666,9 @@ fn decode_vex_mulx_emits_intmult() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x7B, 0xF6, 0xC0], 0x3000);
     assert!(!ops.is_empty(), "MULX should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntMult
-            && op.asm_mnemonic.as_deref() == Some("MULX_LO")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntMult
+                && op.asm_mnemonic.as_deref() == Some("MULX_LO")),
         "MULX should emit IntMult for low half"
     );
 }
@@ -3251,7 +3681,8 @@ fn decode_cmppd_66_0f_c2_emits_intrinsic() {
     let ops = decode_semantic(&[0x66, 0x0F, 0xC2, 0xC0, 0x01], 0x2000);
     assert!(!ops.is_empty(), "CMPPD should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CMPPD_INTRINSIC")),
         "CMPPD should emit CMPPD_INTRINSIC"
     );
 }
@@ -3262,7 +3693,8 @@ fn decode_shufpd_66_0f_c6_emits_intrinsic() {
     let ops = decode_semantic(&[0x66, 0x0F, 0xC6, 0xC0, 0x01], 0x2000);
     assert!(!ops.is_empty(), "SHUFPD should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("SHUFPD_INTRINSIC")),
         "SHUFPD should emit SHUFPD_INTRINSIC"
     );
 }
@@ -3273,7 +3705,8 @@ fn decode_rsqrtss_f3_0f_52_emits_intrinsic() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0x52, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "RSQRTSS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTSS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("RSQRTSS_INTRINSIC")),
         "RSQRTSS should emit RSQRTSS_INTRINSIC"
     );
 }
@@ -3284,7 +3717,8 @@ fn decode_rcpss_f3_0f_53_emits_intrinsic() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0x53, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "RCPSS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCPSS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("RCPSS_INTRINSIC")),
         "RCPSS should emit RCPSS_INTRINSIC"
     );
 }
@@ -3295,7 +3729,8 @@ fn decode_cvtps2dq_66_0f_5b_emits_intrinsic() {
     let ops = decode_semantic(&[0x66, 0x0F, 0x5B, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTPS2DQ should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2DQ_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTPS2DQ_INTRINSIC")),
         "CVTPS2DQ should emit CVTPS2DQ_INTRINSIC"
     );
 }
@@ -3306,7 +3741,8 @@ fn decode_cvttps2dq_f3_0f_5b_emits_intrinsic() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0x5B, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTTPS2DQ should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTTPS2DQ_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTTPS2DQ_INTRINSIC")),
         "CVTTPS2DQ should emit CVTTPS2DQ_INTRINSIC"
     );
 }
@@ -3317,7 +3753,8 @@ fn decode_cvtdq2pd_f3_0f_e6_emits_intrinsic() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0xE6, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTDQ2PD should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTDQ2PD_INTRINSIC")),
         "CVTDQ2PD should emit CVTDQ2PD_INTRINSIC"
     );
 }
@@ -3328,7 +3765,8 @@ fn decode_cvtpd2dq_f2_0f_e6_emits_intrinsic() {
     let ops = decode_semantic(&[0xF2, 0x0F, 0xE6, 0xC0], 0x2000);
     assert!(!ops.is_empty(), "CVTPD2DQ should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CVTPD2DQ_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CVTPD2DQ_INTRINSIC")),
         "CVTPD2DQ should emit CVTPD2DQ_INTRINSIC"
     );
 }
@@ -3365,10 +3803,14 @@ fn decode_vex_blsmsk_emits_intxor() {
     let ops = decode_semantic(&[0xC4, 0xE2, 0x78, 0xF3, 0xD8], 0x3000);
     assert!(!ops.is_empty(), "BLSMSK should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BLSMSK")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("BLSMSK")),
         "BLSMSK should emit BLSMSK mnemonic (IntXor)"
     );
-    assert!(has_flag_write(&ops, x86_flag_zf()), "BLSMSK should write ZF");
+    assert!(
+        has_flag_write(&ops, x86_flag_zf()),
+        "BLSMSK should write ZF"
+    );
 }
 
 // ── Phase D & additional tests ─────────────────────────────────────────────────
@@ -3393,7 +3835,8 @@ fn decode_cmpss_f3_0f_c2_emits_intrinsic() {
     let ops = decode_semantic(&[0xF3, 0x0F, 0xC2, 0xC0, 0x04], 0x2000);
     assert!(!ops.is_empty(), "CMPSS should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPSS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CMPSS_INTRINSIC")),
         "CMPSS should emit CMPSS_INTRINSIC"
     );
 }
@@ -3404,7 +3847,8 @@ fn decode_cmpsd_f2_0f_c2_emits_intrinsic() {
     let ops = decode_semantic(&[0xF2, 0x0F, 0xC2, 0xC0, 0x02], 0x2000);
     assert!(!ops.is_empty(), "CMPSD should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPSD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("CMPSD_INTRINSIC")),
         "CMPSD should emit CMPSD_INTRINSIC"
     );
 }
@@ -3435,8 +3879,9 @@ fn decode_rorx_vex_f2_0f3a_f0_imm8_emits_rotate() {
         "RORX should emit IntLeft for left shift part"
     );
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::IntOr
-            && op.asm_mnemonic.as_deref() == Some("RORX_OR")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntOr
+                && op.asm_mnemonic.as_deref() == Some("RORX_OR")),
         "RORX should emit IntOr to combine"
     );
 }
@@ -3451,7 +3896,8 @@ fn decode_vmovaps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x28, 0xC1], 0x5000);
     assert!(!ops.is_empty(), "VMOVAPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
         "VMOVAPS 256-bit should emit VMOVAPS_INTRINSIC"
     );
 }
@@ -3462,7 +3908,8 @@ fn decode_vmovups_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x10, 0xC1], 0x5010);
     assert!(!ops.is_empty(), "VMOVUPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVUPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMOVUPS_INTRINSIC")),
         "VMOVUPS 256-bit should emit VMOVUPS_INTRINSIC"
     );
 }
@@ -3474,7 +3921,8 @@ fn decode_vmovapd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x28, 0xC1], 0x5020);
     assert!(!ops.is_empty(), "VMOVAPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPD_INTRINSIC")),
         "VMOVAPD 256-bit should emit VMOVAPD_INTRINSIC"
     );
 }
@@ -3485,7 +3933,8 @@ fn decode_vaddps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x58, 0xC1], 0x5030);
     assert!(!ops.is_empty(), "VADDPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VADDPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VADDPS_INTRINSIC")),
         "VADDPS 256-bit should emit VADDPS_INTRINSIC"
     );
 }
@@ -3496,7 +3945,8 @@ fn decode_vaddpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x58, 0xC1], 0x5040);
     assert!(!ops.is_empty(), "VADDPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VADDPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VADDPD_INTRINSIC")),
         "VADDPD 256-bit should emit VADDPD_INTRINSIC"
     );
 }
@@ -3507,7 +3957,8 @@ fn decode_vmulps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x59, 0xC1], 0x5050);
     assert!(!ops.is_empty(), "VMULPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMULPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMULPS_INTRINSIC")),
         "VMULPS 256-bit should emit VMULPS_INTRINSIC"
     );
 }
@@ -3518,7 +3969,8 @@ fn decode_vsubps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x5C, 0xC1], 0x5060);
     assert!(!ops.is_empty(), "VSUBPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPS_INTRINSIC")),
         "VSUBPS 256-bit should emit VSUBPS_INTRINSIC"
     );
 }
@@ -3529,7 +3981,8 @@ fn decode_vdivps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x5E, 0xC1], 0x5070);
     assert!(!ops.is_empty(), "VDIVPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VDIVPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VDIVPS_INTRINSIC")),
         "VDIVPS 256-bit should emit VDIVPS_INTRINSIC"
     );
 }
@@ -3540,7 +3993,8 @@ fn decode_vandps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x54, 0xC1], 0x5080);
     assert!(!ops.is_empty(), "VANDPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VANDPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VANDPS_INTRINSIC")),
         "VANDPS 256-bit should emit VANDPS_INTRINSIC"
     );
 }
@@ -3551,7 +4005,8 @@ fn decode_vorps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x56, 0xC1], 0x5090);
     assert!(!ops.is_empty(), "VORPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VORPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VORPS_INTRINSIC")),
         "VORPS 256-bit should emit VORPS_INTRINSIC"
     );
 }
@@ -3562,7 +4017,8 @@ fn decode_vxorps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x57, 0xC1], 0x50A0);
     assert!(!ops.is_empty(), "VXORPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VXORPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VXORPS_INTRINSIC")),
         "VXORPS 256-bit should emit VXORPS_INTRINSIC"
     );
 }
@@ -3573,7 +4029,8 @@ fn decode_vsqrtps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x51, 0xC1], 0x50B0);
     assert!(!ops.is_empty(), "VSQRTPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPS_INTRINSIC")),
         "VSQRTPS 256-bit should emit VSQRTPS_INTRINSIC"
     );
 }
@@ -3584,7 +4041,8 @@ fn decode_vrsqrtps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x52, 0xC1], 0x50C0);
     assert!(!ops.is_empty(), "VRSQRTPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VRSQRTPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VRSQRTPS_INTRINSIC")),
         "VRSQRTPS 256-bit should emit VRSQRTPS_INTRINSIC"
     );
 }
@@ -3595,7 +4053,8 @@ fn decode_vrcpps_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0x53, 0xC1], 0x50D0);
     assert!(!ops.is_empty(), "VRCPPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VRCPPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VRCPPS_INTRINSIC")),
         "VRCPPS 256-bit should emit VRCPPS_INTRINSIC"
     );
 }
@@ -3606,7 +4065,8 @@ fn decode_vcmpps_256_vex_c5_with_imm8_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0xC2, 0xC1, 0x04], 0x50E0);
     assert!(!ops.is_empty(), "VCMPPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPS_INTRINSIC")),
         "VCMPPS 256-bit should emit VCMPPS_INTRINSIC"
     );
 }
@@ -3617,7 +4077,8 @@ fn decode_vshufps_256_vex_c5_with_imm8_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFC, 0xC6, 0xC1, 0x02], 0x50F0);
     assert!(!ops.is_empty(), "VSHUFPS 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPS_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPS_INTRINSIC")),
         "VSHUFPS 256-bit should emit VSHUFPS_INTRINSIC"
     );
 }
@@ -3628,7 +4089,8 @@ fn decode_vandpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x54, 0xC1], 0x5100);
     assert!(!ops.is_empty(), "VANDPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VANDPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VANDPD_INTRINSIC")),
         "VANDPD 256-bit should emit VANDPD_INTRINSIC"
     );
 }
@@ -3639,7 +4101,8 @@ fn decode_vorpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x56, 0xC1], 0x5110);
     assert!(!ops.is_empty(), "VORPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VORPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VORPD_INTRINSIC")),
         "VORPD 256-bit should emit VORPD_INTRINSIC"
     );
 }
@@ -3650,7 +4113,8 @@ fn decode_vxorpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x57, 0xC1], 0x5120);
     assert!(!ops.is_empty(), "VXORPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VXORPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VXORPD_INTRINSIC")),
         "VXORPD 256-bit should emit VXORPD_INTRINSIC"
     );
 }
@@ -3661,7 +4125,8 @@ fn decode_vmulpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x59, 0xC1], 0x5130);
     assert!(!ops.is_empty(), "VMULPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMULPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMULPD_INTRINSIC")),
         "VMULPD 256-bit should emit VMULPD_INTRINSIC"
     );
 }
@@ -3785,15 +4250,21 @@ fn decode_fsin_d9_fe_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xFE], 0x7000);
     assert!(!ops.is_empty(), "FSIN should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("FSIN")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("FSIN")),
         "FSIN should emit CallOther with FSIN mnemonic"
     );
     // Verify ST(0) is in inputs
-    let fsin_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FSIN"));
+    let fsin_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("FSIN"));
     assert!(fsin_op.is_some(), "should have FSIN op");
     let fsin_op = fsin_op.unwrap();
-    assert!(fsin_op.inputs.len() >= 2, "FSIN should have at least policy_id + ST(0) inputs");
+    assert!(
+        fsin_op.inputs.len() >= 2,
+        "FSIN should have at least policy_id + ST(0) inputs"
+    );
 }
 
 #[test]
@@ -3802,12 +4273,19 @@ fn decode_fcos_d9_ff_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xFF], 0x7010);
     assert!(!ops.is_empty(), "FCOS should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("FCOS")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("FCOS")),
         "FCOS should emit CallOther with FCOS mnemonic"
     );
-    let fcos_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FCOS")).unwrap();
-    assert!(fcos_op.inputs.len() >= 2, "FCOS should have policy_id + ST(0) inputs");
+    let fcos_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("FCOS"))
+        .unwrap();
+    assert!(
+        fcos_op.inputs.len() >= 2,
+        "FCOS should have policy_id + ST(0) inputs"
+    );
 }
 
 #[test]
@@ -3816,12 +4294,19 @@ fn decode_fptan_d9_f2_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xF2], 0x7020);
     assert!(!ops.is_empty(), "FPTAN should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("FPTAN")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("FPTAN")),
         "FPTAN should emit CallOther with FPTAN mnemonic"
     );
-    let fptan_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FPTAN")).unwrap();
-    assert!(fptan_op.inputs.len() >= 2, "FPTAN should have policy_id + ST(0) inputs");
+    let fptan_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("FPTAN"))
+        .unwrap();
+    assert!(
+        fptan_op.inputs.len() >= 2,
+        "FPTAN should have policy_id + ST(0) inputs"
+    );
 }
 
 #[test]
@@ -3834,8 +4319,14 @@ fn decode_fpatan_d9_f3_emits_callother_with_st0_input() {
             && op.asm_mnemonic.as_deref() == Some("FPATAN")),
         "FPATAN should emit CallOther with FPATAN mnemonic"
     );
-    let fpatan_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FPATAN")).unwrap();
-    assert!(fpatan_op.inputs.len() >= 2, "FPATAN should have policy_id + ST(0) inputs");
+    let fpatan_op = ops
+        .iter()
+        .find(|op| op.asm_mnemonic.as_deref() == Some("FPATAN"))
+        .unwrap();
+    assert!(
+        fpatan_op.inputs.len() >= 2,
+        "FPATAN should have policy_id + ST(0) inputs"
+    );
 }
 
 #[test]
@@ -3844,8 +4335,9 @@ fn decode_f2xm1_d9_f0_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xF0], 0x7040);
     assert!(!ops.is_empty(), "F2XM1 should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("F2XM1")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("F2XM1")),
         "F2XM1 should emit CallOther with F2XM1 mnemonic"
     );
 }
@@ -3856,8 +4348,9 @@ fn decode_fyl2x_d9_f1_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xF1], 0x7050);
     assert!(!ops.is_empty(), "FYL2X should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("FYL2X")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("FYL2X")),
         "FYL2X should emit CallOther with FYL2X mnemonic"
     );
 }
@@ -3868,8 +4361,9 @@ fn decode_fprem_d9_f8_emits_callother_with_st0_input() {
     let ops = decode_semantic(&[0xD9, 0xF8], 0x7060);
     assert!(!ops.is_empty(), "FPREM should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
-            && op.asm_mnemonic.as_deref() == Some("FPREM")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::CallOther
+                && op.asm_mnemonic.as_deref() == Some("FPREM")),
         "FPREM should emit CallOther with FPREM mnemonic"
     );
 }
@@ -3892,8 +4386,9 @@ fn decode_fabs_d9_e1_emits_float_abs() {
     let ops = decode_semantic(&[0xD9, 0xE1], 0x7080);
     assert!(!ops.is_empty(), "FABS should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatAbs
-            && op.asm_mnemonic.as_deref() == Some("FABS")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::FloatAbs
+                && op.asm_mnemonic.as_deref() == Some("FABS")),
         "FABS should emit FloatAbs P-code"
     );
 }
@@ -3904,8 +4399,9 @@ fn decode_fchs_d9_e0_emits_float_neg() {
     let ops = decode_semantic(&[0xD9, 0xE0], 0x7090);
     assert!(!ops.is_empty(), "FCHS should produce ops");
     assert!(
-        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatNeg
-            && op.asm_mnemonic.as_deref() == Some("FCHS")),
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::FloatNeg
+                && op.asm_mnemonic.as_deref() == Some("FCHS")),
         "FCHS should emit FloatNeg P-code"
     );
 }
@@ -3957,9 +4453,13 @@ fn decode_vmovaps_256_3byte_vex_c4_emits_intrinsic() {
     // 28 = MOVAPS opcode
     // C1 = ModRM: mod=11,reg=0,rm=1
     let ops = decode_semantic(&[0xC4, 0xE1, 0x7C, 0x28, 0xC1], 0x8000);
-    assert!(!ops.is_empty(), "VMOVAPS 256-bit (3-byte VEX) should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
+        !ops.is_empty(),
+        "VMOVAPS 256-bit (3-byte VEX) should produce ops"
+    );
+    assert!(
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VMOVAPS_INTRINSIC")),
         "VMOVAPS 256-bit via 3-byte VEX should emit VMOVAPS_INTRINSIC"
     );
 }
@@ -3973,9 +4473,13 @@ fn decode_vsubpd_256_3byte_vex_c4_emits_intrinsic() {
     // 5C = SUBPD opcode
     // C1 = ModRM: mod=11,reg=0,rm=1
     let ops = decode_semantic(&[0xC4, 0xE1, 0x7D, 0x5C, 0xC1], 0x8010);
-    assert!(!ops.is_empty(), "VSUBPD 256-bit (3-byte VEX) should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPD_INTRINSIC")),
+        !ops.is_empty(),
+        "VSUBPD 256-bit (3-byte VEX) should produce ops"
+    );
+    assert!(
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSUBPD_INTRINSIC")),
         "VSUBPD 256-bit via 3-byte VEX should emit VSUBPD_INTRINSIC"
     );
 }
@@ -3986,7 +4490,8 @@ fn decode_vsqrtpd_256_vex_c5_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0x51, 0xC1], 0x8020);
     assert!(!ops.is_empty(), "VSQRTPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSQRTPD_INTRINSIC")),
         "VSQRTPD 256-bit should emit VSQRTPD_INTRINSIC"
     );
 }
@@ -3997,7 +4502,8 @@ fn decode_vcmppd_256_vex_c5_with_imm8_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0xC2, 0xC1, 0x02], 0x8030);
     assert!(!ops.is_empty(), "VCMPPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VCMPPD_INTRINSIC")),
         "VCMPPD 256-bit should emit VCMPPD_INTRINSIC"
     );
 }
@@ -4008,7 +4514,8 @@ fn decode_vshufpd_256_vex_c5_with_imm8_emits_intrinsic() {
     let ops = decode_semantic(&[0xC5, 0xFD, 0xC6, 0xC1, 0x01], 0x8040);
     assert!(!ops.is_empty(), "VSHUFPD 256-bit should produce ops");
     assert!(
-        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPD_INTRINSIC")),
+        ops.iter()
+            .any(|op| op.asm_mnemonic.as_deref() == Some("VSHUFPD_INTRINSIC")),
         "VSHUFPD 256-bit should emit VSHUFPD_INTRINSIC"
     );
 }

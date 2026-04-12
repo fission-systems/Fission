@@ -111,7 +111,9 @@ impl<'a> PreviewBuilder<'a> {
         if diag {
             eprintln!(
                 "[DIAG] try_lower_if start: idx={} block=0x{:x} x86_guard={}",
-                idx, self.block_start_address(idx), budget.enabled
+                idx,
+                self.block_start_address(idx),
+                budget.enabled
             );
         }
 

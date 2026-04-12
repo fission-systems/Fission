@@ -242,10 +242,7 @@ impl<'a> PreviewBuilder<'a> {
             // Fresh SCC on current successors (tests and some passes mutate `successors` without
             // refreshing `cfg_facts`).
             let scc = SccAnalysis::analyze(&self.successors, &self.predecessors);
-            if region
-                .iter()
-                .any(|&idx| scc.is_irreducible_node(idx))
-            {
+            if region.iter().any(|&idx| scc.is_irreducible_node(idx)) {
                 return self.ensure_graph_invariant_promotion_region(start_idx, &internal, &region);
             }
             return Ok(());

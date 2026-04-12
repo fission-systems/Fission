@@ -1,6 +1,6 @@
 use super::super::*;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
-use fission_pcode::{IndirectControlClassification, NirBuildStats};
+use fission_pcode::{IndirectControlClassification, NirBuildStats, pcode_has_indirect_control_flow};
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
@@ -8,6 +8,24 @@ fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
 
 fn slot_alias_candidate(code: &str) -> bool {
     code.contains("slot_")
+}
+
+fn indirect_classification_from_parts(
+    stats: Option<&NirBuildStats>,
+    has_indirect_control_flow: bool,
+    _has_preserved_indirect_surface: bool,
+    _has_unresolved_unsupported_indirect: bool,
+    _has_dispatcher_recovery: bool,
+) -> IndirectControlClassification {
+    stats.map_or_else(
+        IndirectControlClassification::default,
+        |stats| {
+            IndirectControlClassification::from_stats_or_observation(
+                Some(stats),
+                has_indirect_control_flow,
+            )
+        },
+    )
 }
 
 pub(super) fn preview_goto_count(code: &str) -> usize {
@@ -151,13 +169,20 @@ pub(super) fn build_quality_tags_and_score(
     (score, tags)
 }
 
-pub(crate) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
-    let indirect = IndirectControlClassification::from_flags(
+fn canonical_indirect_classification(
+    entry: &PreviewCandidateEntry,
+) -> IndirectControlClassification {
+    indirect_classification_from_parts(
+        entry.nir_build_stats.as_ref(),
         entry.has_indirect_control_flow,
         entry.has_preserved_indirect_surface,
         entry.has_unresolved_unsupported_indirect,
         entry.has_dispatcher_recovery,
-    );
+    )
+}
+
+pub(crate) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
+    let indirect = canonical_indirect_classification(entry);
     (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type))
         >= 2
         && entry.preview_direct_success
@@ -394,7 +419,7 @@ pub(super) fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
     (
         pcode.blocks.len(),
         pcode_total_ops(pcode),
-        IndirectControlClassification::from_pcode(pcode).has_indirect_control,
+        pcode_has_indirect_control_flow(pcode),
     )
 }
 
@@ -412,4 +437,30 @@ pub(super) fn fact_density(
         has_dwarf_return_type,
         loader_type_count,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stats_prefer_over_raw_flags_for_indirect_classification() {
+        let stats = NirBuildStats {
+            dispatcher_shape_recovered_count: 1,
+            ..Default::default()
+        };
+        let classification =
+            indirect_classification_from_parts(Some(&stats), false, true, true, true);
+        assert!(classification.has_indirect_control);
+        assert!(classification.has_dispatcher_recovery);
+        assert!(!classification.has_unresolved_unsupported_indirect);
+    }
+
+    #[test]
+    fn missing_stats_fail_closed_for_indirect_classification() {
+        let classification = indirect_classification_from_parts(None, true, true, false, false);
+        assert!(!classification.has_indirect_control);
+        assert!(!classification.has_preserved_indirect_surface);
+        assert!(!classification.has_unresolved_unsupported_indirect);
+    }
 }

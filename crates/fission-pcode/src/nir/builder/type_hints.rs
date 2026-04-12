@@ -17,7 +17,9 @@ impl StackAliasCollector {
                 }
             }
         }
-        Self { alias_boundaries: boundaries }
+        Self {
+            alias_boundaries: boundaries,
+        }
     }
 
     fn might_alias(&self, offset: i64, size: u32) -> bool {
@@ -59,7 +61,13 @@ pub(super) fn apply_preview_type_hints(
     }
 
     let mut local_hints: HashMap<String, String> = HashMap::new();
-    collect_local_surface_hints(&func.body, &pointer_hints, func, &alias_collector, &mut local_hints);
+    collect_local_surface_hints(
+        &func.body,
+        &pointer_hints,
+        func,
+        &alias_collector,
+        &mut local_hints,
+    );
 
     for (var_name, surface_type_name) in local_hints {
         if let Some(binding) = func
@@ -334,21 +342,51 @@ pub(super) fn collect_local_surface_hints(
             | HirStmt::While { body: stmts, .. }
             | HirStmt::DoWhile { body: stmts, .. }
             | HirStmt::For { body: stmts, .. } => {
-                collect_local_surface_hints(stmts, pointer_hints, func, alias_collector, local_hints);
+                collect_local_surface_hints(
+                    stmts,
+                    pointer_hints,
+                    func,
+                    alias_collector,
+                    local_hints,
+                );
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_local_surface_hints(&case.body, pointer_hints, func, alias_collector, local_hints);
+                    collect_local_surface_hints(
+                        &case.body,
+                        pointer_hints,
+                        func,
+                        alias_collector,
+                        local_hints,
+                    );
                 }
-                collect_local_surface_hints(default, pointer_hints, func, alias_collector, local_hints);
+                collect_local_surface_hints(
+                    default,
+                    pointer_hints,
+                    func,
+                    alias_collector,
+                    local_hints,
+                );
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_local_surface_hints(then_body, pointer_hints, func, alias_collector, local_hints);
-                collect_local_surface_hints(else_body, pointer_hints, func, alias_collector, local_hints);
+                collect_local_surface_hints(
+                    then_body,
+                    pointer_hints,
+                    func,
+                    alias_collector,
+                    local_hints,
+                );
+                collect_local_surface_hints(
+                    else_body,
+                    pointer_hints,
+                    func,
+                    alias_collector,
+                    local_hints,
+                );
             }
             HirStmt::Expr(_)
             | HirStmt::VaStart { .. }

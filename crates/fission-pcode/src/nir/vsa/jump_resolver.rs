@@ -13,18 +13,59 @@
 /// - Ghidra `jumptable.hh`: `JumpModel`, `PathMeld`
 /// - Ghidra `rangeutil.hh`: `CircleRange`, `ValueSetSolver`
 use super::solver::solve;
-use super::transfer::{eval_expr, RangeEnv};
-use crate::nir::{HirFunction, HirStmt};
+use super::transfer::{RangeEnv, eval_expr};
 use crate::nir::normalize::wave_stats::{
     add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
 };
+use crate::nir::{HirFunction, HirStmt};
 
 /// Apply VSA-based switch refinement to a function's body.
 ///
 /// Returns `true` if any changes were made.
 pub(crate) fn apply_jump_resolver_pass(func: &mut HirFunction) -> bool {
+    if jump_resolver_candidate_count(&func.body) == 0 {
+        return false;
+    }
     let env = solve(func);
     refine_stmts(&mut func.body, &env)
+}
+
+pub(crate) fn jump_resolver_candidate_count(stmts: &[HirStmt]) -> usize {
+    fn count_opt_stmt(stmt: &Option<Box<HirStmt>>) -> usize {
+        stmt.as_deref().map_or(0, count_stmt)
+    }
+
+    fn count_stmt(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Switch { cases, default, .. } => {
+                let local_cost = 1 + cases.len().min(8) + usize::from(!default.is_empty());
+                local_cost
+                    + cases
+                    .iter()
+                    .map(|case| jump_resolver_candidate_count(&case.body))
+                    .sum::<usize>()
+                    + jump_resolver_candidate_count(default)
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                jump_resolver_candidate_count(then_body) + jump_resolver_candidate_count(else_body)
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::Block(body) => {
+                jump_resolver_candidate_count(body)
+            }
+            HirStmt::For {
+                init, body, update, ..
+            } => {
+                count_opt_stmt(init) + jump_resolver_candidate_count(body) + count_opt_stmt(update)
+            }
+            _ => 0,
+        }
+    }
+
+    stmts.iter().map(count_stmt).sum()
 }
 
 fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
@@ -36,12 +77,19 @@ fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
         }
         // If the stmt was reduced to a singleton-constant switch,
         // inline the matching case in place.
-        if let HirStmt::Switch { expr, cases, default } = &stmts[i] {
+        if let HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } = &stmts[i]
+        {
             let range = eval_expr(expr, env);
             if let Some(v) = range.singleton_value() {
                 let v_signed = v as i64;
                 // Find the matching case.
-                let replacement = cases.iter().find(|c| c.values.contains(&v_signed))
+                let replacement = cases
+                    .iter()
+                    .find(|c| c.values.contains(&v_signed))
                     .map(|c| c.body.clone())
                     .unwrap_or_else(|| default.clone());
                 stmts.splice(i..=i, replacement);
@@ -58,7 +106,11 @@ fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
 
 fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
     match stmt {
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             let mut changed = false;
 
             // Recurse into case bodies.
@@ -82,7 +134,11 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
                         // Check if v_u is in range [lo, hi).
                         let lo = range.lo();
                         let hi = range.hi();
-                        let mask = if range.bits() >= 64 { u64::MAX } else { (1u64 << range.bits()) - 1 };
+                        let mask = if range.bits() >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << range.bits()) - 1
+                        };
                         if lo <= hi {
                             lo <= (v_u & mask) && (v_u & mask) < hi
                         } else {
@@ -99,9 +155,15 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
             }
             changed
         }
-        HirStmt::If { then_body, else_body, cond } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            cond,
+        } => {
             let mut changed = refine_stmts(then_body, env);
-            if refine_stmts(else_body, env) { changed = true; }
+            if refine_stmts(else_body, env) {
+                changed = true;
+            }
 
             // Constant condition elimination.
             let range = eval_expr(cond, env);
@@ -117,7 +179,7 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
             changed
         }
         HirStmt::While { body, cond } => {
-            let mut changed = refine_stmts(body, env);
+            let changed = refine_stmts(body, env);
             // If condition is provably false, remove the loop.
             let range = eval_expr(cond, env);
             if range.singleton_value() == Some(0) {
@@ -127,7 +189,12 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
             changed
         }
         HirStmt::DoWhile { body, cond: _ } => refine_stmts(body, env),
-        HirStmt::For { init: _, body, update: _, .. } => refine_stmts(body, env),
+        HirStmt::For {
+            init: _,
+            body,
+            update: _,
+            ..
+        } => refine_stmts(body, env),
         HirStmt::Block(stmts) => refine_stmts(stmts, env),
         _ => false,
     }

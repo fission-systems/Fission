@@ -45,7 +45,9 @@ impl FnvHasher64 {
     pub const PRIME: u64 = 1_099_511_628_211;
 
     pub fn new() -> Self {
-        Self { state: Self::OFFSET_BASIS }
+        Self {
+            state: Self::OFFSET_BASIS,
+        }
     }
 
     /// Feed a byte slice into the hash state.
@@ -185,7 +187,10 @@ pub fn compute_fid_hash(bytes: &[u8], is_64bit: bool) -> Option<FidHashQuad> {
         }
 
         // Count call instructions separately (mirrors Ghidra's fullCount logic).
-        if matches!(instr.flow_control(), FlowControl::Call | FlowControl::IndirectCall) {
+        if matches!(
+            instr.flow_control(),
+            FlowControl::Call | FlowControl::IndirectCall
+        ) {
             call_count += 1;
         }
         code_units += 1;
@@ -274,11 +279,11 @@ mod tests {
     fn compute_fid_hash_is_deterministic() {
         // Simple x64 function: push rbp / mov rbp,rsp / xor eax,eax / pop rbp / ret
         let prologue: &[u8] = &[
-            0x55,             // push rbp
+            0x55, // push rbp
             0x48, 0x89, 0xE5, // mov rbp, rsp
-            0x31, 0xC0,       // xor eax, eax
-            0x5D,             // pop rbp
-            0xC3,             // ret
+            0x31, 0xC0, // xor eax, eax
+            0x5D, // pop rbp
+            0xC3, // ret
         ];
         let a = compute_fid_hash(prologue, true);
         let b = compute_fid_hash(prologue, true);
@@ -289,11 +294,11 @@ mod tests {
     fn full_and_specific_hashes_differ_when_immediates_present() {
         // push rbp / mov rbp,rsp / mov eax, 1 / pop rbp / ret
         let with_imm: &[u8] = &[
-            0x55,             // push rbp
+            0x55, // push rbp
             0x48, 0x89, 0xE5, // mov rbp, rsp
             0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
-            0x5D,             // pop rbp
-            0xC3,             // ret
+            0x5D, // pop rbp
+            0xC3, // ret
         ];
         let quad = compute_fid_hash(with_imm, true).expect("should hash");
         assert!(
@@ -324,16 +329,16 @@ mod tests {
         // jmp near forward: E9 04 00 00 00 (jump +4) vs E9 10 00 00 00 (jump +16)
         // Both should produce the same full_hash because the target is zeroed.
         let jmp4: &[u8] = &[
-            0x55,             // push rbp
+            0x55, // push rbp
             0x48, 0x89, 0xE5, // mov rbp, rsp
             0xE9, 0x04, 0x00, 0x00, 0x00, // jmp near +4
-            0xC3,             // ret
+            0xC3, // ret
         ];
         let jmp16: &[u8] = &[
-            0x55,             // push rbp
+            0x55, // push rbp
             0x48, 0x89, 0xE5, // mov rbp, rsp
             0xE9, 0x10, 0x00, 0x00, 0x00, // jmp near +16
-            0xC3,             // ret
+            0xC3, // ret
         ];
         let q1 = compute_fid_hash(jmp4, true).unwrap();
         let q2 = compute_fid_hash(jmp16, true).unwrap();

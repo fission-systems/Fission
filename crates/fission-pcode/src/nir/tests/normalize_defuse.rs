@@ -17,7 +17,10 @@ use super::*;
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn int(bits: u32) -> NirType {
-    NirType::Int { bits, signed: false }
+    NirType::Int {
+        bits,
+        signed: false,
+    }
 }
 
 fn sint(bits: u32) -> NirType {
@@ -82,7 +85,10 @@ fn constant_folding_binary_add_via_normalize() {
     );
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
-    assert!(code.contains("return 8;"), "expected 'return 8;' in: {code}");
+    assert!(
+        code.contains("return 8;"),
+        "expected 'return 8;' in: {code}"
+    );
 }
 
 #[test]
@@ -100,7 +106,10 @@ fn constant_folding_nested_mul() {
     );
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
-    assert!(code.contains("return 42;"), "expected 'return 42;' in: {code}");
+    assert!(
+        code.contains("return 42;"),
+        "expected 'return 42;' in: {code}"
+    );
 }
 
 #[test]
@@ -137,8 +146,14 @@ fn normalize_collapses_if_else_with_identical_returns() {
 
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
-    assert!(code.contains("return 7;"), "expected collapsed return; got: {code}");
-    assert!(!code.contains("if ("), "redundant if should be removed; got: {code}");
+    assert!(
+        code.contains("return 7;"),
+        "expected collapsed return; got: {code}"
+    );
+    assert!(
+        !code.contains("if ("),
+        "redundant if should be removed; got: {code}"
+    );
 }
 
 #[test]
@@ -158,8 +173,14 @@ fn normalize_collapses_guarded_return_followed_by_same_return() {
 
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
-    assert!(code.contains("return 5;"), "expected return to remain; got: {code}");
-    assert!(!code.contains("if ("), "redundant guarded if should be removed; got: {code}");
+    assert!(
+        code.contains("return 5;"),
+        "expected return to remain; got: {code}"
+    );
+    assert!(
+        !code.contains("if ("),
+        "redundant guarded if should be removed; got: {code}"
+    );
 }
 
 #[test]
@@ -180,8 +201,14 @@ fn normalize_preserves_side_effect_in_redundant_conditional_return() {
 
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
-    assert!(code.contains("check()"), "side-effect call must be preserved; got: {code}");
-    assert!(code.contains("return 9;"), "return must be preserved; got: {code}");
+    assert!(
+        code.contains("check()"),
+        "side-effect call must be preserved; got: {code}"
+    );
+    assert!(
+        code.contains("return 9;"),
+        "return must be preserved; got: {code}"
+    );
 }
 
 // ── Dead assignment elimination (via normalize_hir_function) ─────────────────
@@ -203,7 +230,10 @@ fn defuse_removes_dead_pure_temp_via_normalize() {
         !code.contains("bVar1"),
         "dead temp 'bVar1' should be eliminated; got: {code}"
     );
-    assert!(code.contains("return 0;"), "return 0 should remain; got: {code}");
+    assert!(
+        code.contains("return 0;"),
+        "return 0 should remain; got: {code}"
+    );
 }
 
 #[test]
@@ -220,7 +250,140 @@ fn defuse_preserves_used_temp_assignment() {
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
     // After inline_single_use_temps, bVar1 should be inlined to the return.
-    assert!(code.contains("return"), "return should be present; got: {code}");
+    assert!(
+        code.contains("return"),
+        "return should be present; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_keeps_nontrivial_multi_use_temp_in_single_stmt() {
+    let mut func = make_func(
+        "test_keep_nontrivial_multi_use_temp",
+        vec![temp_binding("uVar1", 32)],
+        vec![
+            assign(
+                "uVar1",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(varexpr("eax")),
+                    rhs: Box::new(const_expr(1, 32)),
+                    ty: int(32),
+                },
+            ),
+            return_expr(HirExpr::Binary {
+                op: HirBinaryOp::LogicalOr,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(varexpr("uVar1")),
+                    rhs: Box::new(const_expr(0, 32)),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(varexpr("uVar1")),
+                    rhs: Box::new(const_expr(1, 32)),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            }),
+        ],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("uVar1 = eax + 1;"),
+        "nontrivial multi-use temp should remain materialized; got: {code}"
+    );
+    assert!(
+        code.contains("return uVar1 == 0 || uVar1 == 1;"),
+        "return should keep the named temp instead of duplicating the expression; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_stabilizes_repeated_nontrivial_pure_expr_in_if_condition() {
+    let diff = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(varexpr("eax")),
+        rhs: Box::new(varexpr("uVar128")),
+        ty: int(32),
+    };
+    let mut func = make_func(
+        "test_stabilize_repeated_if_expr",
+        vec![],
+        vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::LogicalOr,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(diff.clone()),
+                    rhs: Box::new(const_expr(0, 32)),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(diff.clone()),
+                    rhs: Box::new(varexpr("esi")),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            },
+            then_body: vec![return_expr(const_expr(1, 32))],
+            else_body: vec![return_expr(const_expr(0, 32))],
+        }],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("uVar0 = eax - uVar128;"),
+        "repeated nontrivial pure expr should be hoisted once; got: {code}"
+    );
+    assert!(
+        code.contains("if (uVar0 == 0 || uVar0 < esi)"),
+        "condition should reuse the stabilized temp instead of duplicating the expression; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
+    let repeated = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(const_expr(0, 64)),
+        rhs: Box::new(HirExpr::Cast {
+            ty: int(64),
+            expr: Box::new(varexpr("df")),
+        }),
+        ty: int(64),
+    };
+    let mut func = make_func(
+        "test_skip_single_input_repeat",
+        vec![],
+        vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::Lt,
+                lhs: Box::new(repeated.clone()),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(repeated),
+                    rhs: Box::new(const_expr(4, 64)),
+                    ty: int(64),
+                }),
+                ty: NirType::Bool,
+            },
+            then_body: vec![return_expr(const_expr(1, 32))],
+            else_body: vec![return_expr(const_expr(0, 32))],
+        }],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        !code.contains("uVar0 = 0 - (ulonglong)df;"),
+        "single-input repeated expr should stay inline; got: {code}"
+    );
 }
 
 #[test]
@@ -301,15 +464,27 @@ fn consecutive_shr_merges_in_normalize_stmt() {
             lhs: Box::new(HirExpr::Var("param_1".to_string())),
             rhs: Box::new(HirExpr::Const(
                 8,
-                NirType::Int { bits: 64, signed: false },
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             )),
-            ty: NirType::Int { bits: 64, signed: false },
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         }),
         rhs: Box::new(HirExpr::Const(
             4,
-            NirType::Int { bits: 64, signed: false },
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         )),
-        ty: NirType::Int { bits: 64, signed: false },
+        ty: NirType::Int {
+            bits: 64,
+            signed: false,
+        },
     }));
     normalize_stmt(&mut stmt);
     let rendered = print_stmt(&stmt);
@@ -336,21 +511,36 @@ fn subpiece_cast_shr_cast_chain_simplifies() {
     // Shr by 8 gives byte 1.  The inner widening cast should be eliminated:
     // → Cast(Int8, Shr(Cast(Int32, param_1), 8))
     let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
-        ty: NirType::Int { bits: 8, signed: false },
+        ty: NirType::Int {
+            bits: 8,
+            signed: false,
+        },
         expr: Box::new(HirExpr::Binary {
             op: HirBinaryOp::Shr,
             lhs: Box::new(HirExpr::Cast {
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
                 expr: Box::new(HirExpr::Cast {
-                    ty: NirType::Int { bits: 32, signed: false },
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
                     expr: Box::new(HirExpr::Var("param_1".to_string())),
                 }),
             }),
             rhs: Box::new(HirExpr::Const(
                 8,
-                NirType::Int { bits: 64, signed: false },
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             )),
-            ty: NirType::Int { bits: 64, signed: false },
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         }),
     }));
     normalize_stmt(&mut stmt);
@@ -372,24 +562,42 @@ fn wide_integer_recombine_double_cast_piece_pattern() {
     // to x64 via normalize_stmt.
     let x64 = HirExpr::Var("x64".to_string());
     let hi = HirExpr::Cast {
-        ty: NirType::Int { bits: 64, signed: false },
+        ty: NirType::Int {
+            bits: 64,
+            signed: false,
+        },
         expr: Box::new(HirExpr::Cast {
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             expr: Box::new(HirExpr::Binary {
                 op: HirBinaryOp::Shr,
                 lhs: Box::new(x64.clone()),
                 rhs: Box::new(HirExpr::Const(
                     32,
-                    NirType::Int { bits: 64, signed: false },
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
                 )),
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             }),
         }),
     };
     let lo = HirExpr::Cast {
-        ty: NirType::Int { bits: 64, signed: false },
+        ty: NirType::Int {
+            bits: 64,
+            signed: false,
+        },
         expr: Box::new(HirExpr::Cast {
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             expr: Box::new(x64.clone()),
         }),
     };
@@ -400,12 +608,21 @@ fn wide_integer_recombine_double_cast_piece_pattern() {
             lhs: Box::new(hi),
             rhs: Box::new(HirExpr::Const(
                 32,
-                NirType::Int { bits: 64, signed: false },
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             )),
-            ty: NirType::Int { bits: 64, signed: false },
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         }),
         rhs: Box::new(lo),
-        ty: NirType::Int { bits: 64, signed: false },
+        ty: NirType::Int {
+            bits: 64,
+            signed: false,
+        },
     }));
     normalize_stmt(&mut stmt);
     let rendered = print_stmt(&stmt);

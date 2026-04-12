@@ -38,9 +38,7 @@ use std::collections::{HashMap, HashSet};
 
 /// x86-64 callee-saved register names (covers both Windows x64 and
 /// System V AMD64 conventions).
-const CALLEE_SAVED_REGS: &[&str] = &[
-    "rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15",
-];
+const CALLEE_SAVED_REGS: &[&str] = &["rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15"];
 
 fn is_callee_saved(name: &str) -> bool {
     CALLEE_SAVED_REGS.contains(&name)
@@ -115,10 +113,7 @@ fn match_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
 /// Count how many times `ptr_var` appears as an Rvalue reference (i.e., as
 /// `Var(ptr_var)` inside any expression, NOT counting the LHS Deref write).
 fn count_ptr_var_rvalue_uses(stmts: &[HirStmt], ptr_var: &str) -> usize {
-    stmts
-        .iter()
-        .map(|s| count_ptr_in_stmt(s, ptr_var))
-        .sum()
+    stmts.iter().map(|s| count_ptr_in_stmt(s, ptr_var)).sum()
 }
 
 fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
@@ -175,7 +170,11 @@ fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             i + c + u + count_ptr_var_rvalue_uses(body, name)
         }
         HirStmt::Block(body) => count_ptr_var_rvalue_uses(body, name),
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             let e = count_ptr_in_expr(expr, name);
             let c: usize = cases
                 .iter()

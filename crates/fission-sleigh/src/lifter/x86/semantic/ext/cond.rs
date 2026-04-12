@@ -1,5 +1,5 @@
-use super::*;
 use super::super::super::predicate::emit_jcc_predicate_with_allocator;
+use super::*;
 
 pub(super) fn decode_setcc(
     insn: &[u8],
@@ -11,13 +11,15 @@ pub(super) fn decode_setcc(
     cond: u8,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 1, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 1, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let mut alloc_tmp = |size: u32| temp.alloc(size);
-    let pred = match emit_jcc_predicate_with_allocator(&mut ops, address, cond, seq, &mut alloc_tmp) {
+    let pred = match emit_jcc_predicate_with_allocator(&mut ops, address, cond, seq, &mut alloc_tmp)
+    {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -58,15 +60,17 @@ pub(super) fn decode_cmovcc(
     cond: u8,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let dst = x86_reg(decoded.reg_index, size);
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let mut alloc_tmp = |alloc_size: u32| temp.alloc(alloc_size);
-    let pred = match emit_jcc_predicate_with_allocator(&mut ops, address, cond, seq, &mut alloc_tmp) {
+    let pred = match emit_jcc_predicate_with_allocator(&mut ops, address, cond, seq, &mut alloc_tmp)
+    {
         Some(v) => v,
         None => return Vec::new(),
     };

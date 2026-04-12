@@ -33,8 +33,9 @@ pub use nir::{
     PreviewBuildStats, PreviewCallParamRule, PreviewFunctionHints, PreviewHintStats,
     PreviewTypeContext, RecoveryMode, StackSlotId, StructuringFailureKind, StructuringOutcome,
     StructuringReasonFamily, parse_call_target_address, render_mlil_preview,
-    render_mlil_preview_with_context, render_nir, render_nir_with_context,
-    structuring_outcome_for_signature, take_last_nir_build_stats, take_last_nir_hint_stats,
-    take_last_preview_build_stats, take_last_preview_hint_stats,
+    render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
+    render_nir_with_binary_and_context, render_nir_with_context, structuring_outcome_for_signature,
+    take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
+    take_last_preview_hint_stats,
 };
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};

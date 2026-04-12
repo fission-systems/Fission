@@ -10,10 +10,11 @@ pub(super) fn decode_imul_r_rm(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let dst = x86_reg(decoded.reg_index, size);
     let lhs = dst.clone();
@@ -34,14 +35,19 @@ pub(super) fn decode_imul_r_rm_imm(
     is_imm8: bool,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm = match decode_immediate(
         insn,
         decoded.next_idx,
-        if is_imm8 { 1 } else { immediate_bytes_for_operand(size) },
+        if is_imm8 {
+            1
+        } else {
+            immediate_bytes_for_operand(size)
+        },
         size,
         is_imm8 || size == 8,
     ) {
@@ -50,7 +56,9 @@ pub(super) fn decode_imul_r_rm_imm(
     };
     let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let dst = x86_reg(decoded.reg_index, size);
-    emit_signed_imul_with_cf_of(lhs, imm, dst, size, address, &mut ops, temp, seq, "IMUL_IMM");
+    emit_signed_imul_with_cf_of(
+        lhs, imm, dst, size, address, &mut ops, temp, seq, "IMUL_IMM",
+    );
 
     ops
 }

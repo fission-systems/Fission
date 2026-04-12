@@ -472,17 +472,25 @@ fn while_loop_with_mid_body_break() {
         ],
     };
 
-    let code =
-        render_mlil_preview(&func, "mid_break_fn", 0x5000, &preview_options())
-            .expect("preview render");
+    let code = render_mlil_preview(&func, "mid_break_fn", 0x5000, &preview_options())
+        .expect("preview render");
     assert!(
         code.contains("while (") || code.contains("while(!"),
         "expected while loop: {code}"
     );
     assert!(code.contains("break;"), "expected break statement: {code}");
-    assert!(!code.contains("goto block_5030"), "expected no goto to exit: {code}");
-    assert!(code.contains("local_10 = 11;"), "expected first store: {code}");
-    assert!(code.contains("local_14 = 22;"), "expected second store: {code}");
+    assert!(
+        !code.contains("goto block_5030"),
+        "expected no goto to exit: {code}"
+    );
+    assert!(
+        code.contains("local_10 = 11;"),
+        "expected first store: {code}"
+    );
+    assert!(
+        code.contains("local_14 = 22;"),
+        "expected second store: {code}"
+    );
 }
 
 /// While loop whose body has an early continue path.
@@ -616,14 +624,28 @@ fn while_loop_with_early_continue() {
         ],
     };
 
-    let code =
-        render_mlil_preview(&func, "early_cont_fn", 0x6000, &preview_options())
-            .expect("preview render");
-    assert!(code.contains("while (") || code.contains("while(!"), "expected while: {code}");
-    assert!(code.contains("continue;"), "expected continue statement: {code}");
-    assert!(!code.contains("goto block_6000"), "expected no goto to head: {code}");
-    assert!(code.contains("local_10 = 33;"), "expected first store: {code}");
-    assert!(code.contains("local_14 = 44;"), "expected second store: {code}");
+    let code = render_mlil_preview(&func, "early_cont_fn", 0x6000, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("while (") || code.contains("while(!"),
+        "expected while: {code}"
+    );
+    assert!(
+        code.contains("continue;"),
+        "expected continue statement: {code}"
+    );
+    assert!(
+        !code.contains("goto block_6000"),
+        "expected no goto to head: {code}"
+    );
+    assert!(
+        code.contains("local_10 = 33;"),
+        "expected first store: {code}"
+    );
+    assert!(
+        code.contains("local_14 = 44;"),
+        "expected second store: {code}"
+    );
 }
 
 /// Simple for-loop: init → head(cond) → body → latch(update) → head.
@@ -771,16 +793,21 @@ fn for_loop_simple_counter() {
         ],
     };
 
-    let code =
-        render_mlil_preview(&func, "for_simple_fn", 0x7000, &preview_options())
-            .expect("preview render");
+    let code = render_mlil_preview(&func, "for_simple_fn", 0x7000, &preview_options())
+        .expect("preview render");
     // Should produce a for loop (or at minimum a structured while without goto)
     assert!(
         code.contains("for (") || code.contains("while ("),
         "expected structured loop: {code}"
     );
-    assert!(!code.contains("goto block_7010"), "expected no goto to head: {code}");
-    assert!(code.contains("local_10 = 55;"), "expected body store: {code}");
+    assert!(
+        !code.contains("goto block_7010"),
+        "expected no goto to head: {code}"
+    );
+    assert!(
+        code.contains("local_10 = 55;"),
+        "expected body store: {code}"
+    );
 }
 
 /// For-loop with a branch inside the body (body has if/else).
@@ -981,14 +1008,16 @@ fn for_loop_with_body_branch() {
         ],
     };
 
-    let code =
-        render_mlil_preview(&func, "for_body_branch_fn", 0x8000, &preview_options())
-            .expect("preview render");
+    let code = render_mlil_preview(&func, "for_body_branch_fn", 0x8000, &preview_options())
+        .expect("preview render");
     assert!(
         code.contains("for (") || code.contains("while ("),
         "expected structured loop: {code}"
     );
-    assert!(!code.contains("goto block_8010"), "expected no goto to loop head: {code}");
+    assert!(
+        !code.contains("goto block_8010"),
+        "expected no goto to loop head: {code}"
+    );
     // Body stores must appear
     assert!(
         code.contains("local_10 = 77;") || code.contains("local_14 = 88;"),
@@ -1180,17 +1209,22 @@ fn nested_while_inner_break_does_not_escape_outer() {
         ],
     };
 
-    let code =
-        render_mlil_preview(&func, "nested_loops_fn", 0x9000, &preview_options())
-            .expect("preview render");
+    let code = render_mlil_preview(&func, "nested_loops_fn", 0x9000, &preview_options())
+        .expect("preview render");
     // Both loops must appear as while (not goto-based)
     let while_count = code.matches("while (").count() + code.matches("while(!").count();
     assert!(while_count >= 1, "expected at least one while loop: {code}");
     // The inner break must appear
     assert!(code.contains("break;"), "expected inner break: {code}");
     // Both stores must appear
-    assert!(code.contains("local_10 = 99;"), "expected inner store: {code}");
-    assert!(code.contains("local_14 = 111;"), "expected outer-body store: {code}");
+    assert!(
+        code.contains("local_10 = 99;"),
+        "expected inner store: {code}"
+    );
+    assert!(
+        code.contains("local_14 = 111;"),
+        "expected outer-body store: {code}"
+    );
     // The outer loop must not have a stray goto to outer_head
     assert!(
         !code.contains("goto block_9000"),

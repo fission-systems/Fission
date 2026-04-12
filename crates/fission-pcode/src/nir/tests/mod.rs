@@ -4,13 +4,13 @@ use crate::pcode::{PcodeBasicBlock, PcodeOp};
 mod bootstrap_x86;
 mod calling_convention;
 mod entry_param_promotion;
-mod unique_x86_regs;
 mod normalize_arith;
 mod normalize_bitstream;
 mod normalize_defuse;
 mod normalize_flag_recovery;
 mod normalize_slots;
 mod relative_branch_targets;
+mod snapshot_printer;
 mod structuring_conditionals;
 mod structuring_guarded_tail;
 mod structuring_linear;
@@ -22,7 +22,7 @@ mod type_hints_aliases;
 mod type_hints_function_hints;
 mod type_hints_imports;
 mod type_hints_stack_slots;
-mod snapshot_printer;
+mod unique_x86_regs;
 
 fn reg(offset: u64, size: u32) -> Varnode {
     Varnode {

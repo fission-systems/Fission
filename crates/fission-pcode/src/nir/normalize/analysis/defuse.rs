@@ -12,6 +12,9 @@
 ///   RHS has no observable side effects.
 use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
 use super::super::*;
+use crate::nir::normalize::pipeline::normalize_expr;
+use crate::nir::normalize::analysis::expr_key::pure_expr_key;
+use crate::nir::support::{expr_type, next_temp_name};
 use std::collections::HashMap;
 
 // ── DefUseMap ─────────────────────────────────────────────────────────────────
@@ -305,7 +308,11 @@ pub(crate) fn eval_hir_expr_with_const_env(
     match expr {
         HirExpr::Const(v, ty) => Some((*v, ty.clone())),
         HirExpr::Var(name) => env.get(name).map(|(v, t)| (*v, t.clone())),
-        HirExpr::Unary { op, expr: inner, ty } => {
+        HirExpr::Unary {
+            op,
+            expr: inner,
+            ty,
+        } => {
             let (a, _) = eval_hir_expr_with_const_env(inner, env)?;
             let result = eval_unary(*op, a, ty)?;
             Some((result, ty.clone()))
@@ -341,7 +348,11 @@ fn try_fold(expr: &HirExpr) -> Option<HirExpr> {
             let result = eval_binary(*op, *a, *b, ty)?;
             Some(HirExpr::Const(result, ty.clone()))
         }
-        HirExpr::Unary { op, expr: inner, ty } => {
+        HirExpr::Unary {
+            op,
+            expr: inner,
+            ty,
+        } => {
             let HirExpr::Const(a, _) = inner.as_ref() else {
                 return None;
             };
@@ -544,7 +555,9 @@ fn remove_dead_in_stmt_nested(
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             remove_dead_in_stmts(body, map, temp_names, changed);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 remove_dead_in_stmt_nested(i, map, temp_names, changed);
             }
@@ -692,4 +705,322 @@ fn count_mention_expr(expr: &HirExpr, name: &str) -> usize {
             count_mention_expr(base, name) + count_mention_expr(index, name)
         }
     }
+}
+
+pub(crate) fn stabilize_repeated_pure_exprs(func: &mut HirFunction) -> usize {
+    let mut next_temp_id = next_temp_name_seed(&func.locals);
+    stabilize_repeated_pure_exprs_in_stmts(&mut func.body, &mut func.locals, &mut next_temp_id)
+}
+
+fn stabilize_repeated_pure_exprs_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    locals: &mut Vec<NirBinding>,
+    next_temp_id: &mut u32,
+) -> usize {
+    let mut changed = 0usize;
+    let mut rewritten = Vec::with_capacity(stmts.len());
+
+    for mut stmt in stmts.drain(..) {
+        match &mut stmt {
+            HirStmt::Block(body) => {
+                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                changed +=
+                    stabilize_repeated_pure_exprs_in_stmts(then_body, locals, next_temp_id);
+                changed +=
+                    stabilize_repeated_pure_exprs_in_stmts(else_body, locals, next_temp_id);
+                if let Some((temp_stmt, stabilized_cond)) =
+                    stabilize_expr_with_temp(cond, locals, next_temp_id)
+                {
+                    rewritten.push(temp_stmt);
+                    *cond = stabilized_cond;
+                    changed += 1;
+                }
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                for case in cases.iter_mut() {
+                    changed += stabilize_repeated_pure_exprs_in_stmts(
+                        &mut case.body,
+                        locals,
+                        next_temp_id,
+                    );
+                }
+                changed += stabilize_repeated_pure_exprs_in_stmts(default, locals, next_temp_id);
+                if let Some((temp_stmt, stabilized_expr)) =
+                    stabilize_expr_with_temp(expr, locals, next_temp_id)
+                {
+                    rewritten.push(temp_stmt);
+                    *expr = stabilized_expr;
+                    changed += 1;
+                }
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                if let Some((temp_stmt, stabilized_expr)) =
+                    stabilize_expr_with_temp(expr, locals, next_temp_id)
+                {
+                    rewritten.push(temp_stmt);
+                    *expr = stabilized_expr;
+                    changed += 1;
+                }
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init.as_mut() {
+                    let mut nested = vec![(*init.clone())];
+                    changed +=
+                        stabilize_repeated_pure_exprs_in_stmts(&mut nested, locals, next_temp_id);
+                    if let Some(updated) = nested.into_iter().next() {
+                        *init = Box::new(updated);
+                    }
+                }
+                if let Some(update) = update.as_mut() {
+                    let mut nested = vec![(*update.clone())];
+                    changed +=
+                        stabilize_repeated_pure_exprs_in_stmts(&mut nested, locals, next_temp_id);
+                    if let Some(updated) = nested.into_iter().next() {
+                        *update = Box::new(updated);
+                    }
+                }
+                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_) => {}
+        }
+        rewritten.push(stmt);
+    }
+
+    *stmts = rewritten;
+    changed
+}
+
+fn stabilize_expr_with_temp(
+    expr: &HirExpr,
+    locals: &mut Vec<NirBinding>,
+    next_temp_id: &mut u32,
+) -> Option<(HirStmt, HirExpr)> {
+    let best = best_repeated_pure_expr(expr)?;
+    let temp_ty = expr_type(&best);
+    let temp_name = next_temp_name(&temp_ty, next_temp_id);
+    locals.push(NirBinding {
+        name: temp_name.clone(),
+        ty: temp_ty,
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::Temp),
+        initializer: None,
+    });
+    let mut temp_rhs = best.clone();
+    normalize_expr(&mut temp_rhs);
+    let replacement = HirExpr::Var(temp_name.clone());
+    let mut stabilized_expr = replace_matching_pure_expr(expr, &best, &replacement);
+    normalize_expr(&mut stabilized_expr);
+    Some((
+        HirStmt::Assign {
+            lhs: HirLValue::Var(temp_name),
+            rhs: temp_rhs,
+        },
+        stabilized_expr,
+    ))
+}
+
+fn best_repeated_pure_expr(expr: &HirExpr) -> Option<HirExpr> {
+    let mut counts: HashMap<String, (usize, usize, HirExpr)> = HashMap::new();
+    collect_repeated_pure_exprs(expr, &mut counts);
+    let mut candidates = counts
+        .into_values()
+        .filter(|(count, nodes, repr)| {
+            *count > 1
+                && *nodes >= 3
+                && count_nonconst_leaf_inputs(repr) >= 2
+                && is_stabilization_candidate_expr(repr)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| b.0.cmp(&a.0))
+            .then_with(|| print_expr(&a.2).cmp(&print_expr(&b.2)))
+    });
+    candidates.into_iter().next().map(|(_, _, expr)| expr)
+}
+
+fn collect_repeated_pure_exprs(
+    expr: &HirExpr,
+    counts: &mut HashMap<String, (usize, usize, HirExpr)>,
+) {
+    if let Some(key) = pure_expr_key(expr) {
+        let nodes = expr_node_count(expr);
+        let entry = counts.entry(key).or_insert_with(|| (0, nodes, expr.clone()));
+        entry.0 += 1;
+        if nodes > entry.1 {
+            entry.1 = nodes;
+            entry.2 = expr.clone();
+        }
+    }
+
+    match expr {
+        HirExpr::Const(_, _) | HirExpr::Var(_) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => collect_repeated_pure_exprs(expr, counts),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_repeated_pure_exprs(lhs, counts);
+            collect_repeated_pure_exprs(rhs, counts);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_repeated_pure_exprs(arg, counts);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_repeated_pure_exprs(base, counts);
+            collect_repeated_pure_exprs(index, counts);
+        }
+    }
+}
+
+fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &HirExpr) -> HirExpr {
+    if pure_expr_key(expr) == pure_expr_key(needle) {
+        return replacement.clone();
+    }
+
+    match expr {
+        HirExpr::Const(_, _) | HirExpr::Var(_) => expr.clone(),
+        HirExpr::Cast { ty, expr: inner } => HirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
+        },
+        HirExpr::Unary { op, expr: inner, ty } => HirExpr::Unary {
+            op: *op,
+            expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
+            ty: ty.clone(),
+        },
+        HirExpr::Binary { op, lhs, rhs, ty } => HirExpr::Binary {
+            op: *op,
+            lhs: Box::new(replace_matching_pure_expr(lhs, needle, replacement)),
+            rhs: Box::new(replace_matching_pure_expr(rhs, needle, replacement)),
+            ty: ty.clone(),
+        },
+        HirExpr::Call { target, args, ty } => HirExpr::Call {
+            target: target.clone(),
+            args: args
+                .iter()
+                .map(|arg| replace_matching_pure_expr(arg, needle, replacement))
+                .collect(),
+            ty: ty.clone(),
+        },
+        HirExpr::Load { ptr, ty } => HirExpr::Load {
+            ptr: Box::new(replace_matching_pure_expr(ptr, needle, replacement)),
+            ty: ty.clone(),
+        },
+        HirExpr::PtrOffset { base, offset } => HirExpr::PtrOffset {
+            base: Box::new(replace_matching_pure_expr(base, needle, replacement)),
+            offset: *offset,
+        },
+        HirExpr::AggregateCopy { src, size } => HirExpr::AggregateCopy {
+            src: Box::new(replace_matching_pure_expr(src, needle, replacement)),
+            size: *size,
+        },
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => HirExpr::Index {
+            base: Box::new(replace_matching_pure_expr(base, needle, replacement)),
+            index: Box::new(replace_matching_pure_expr(index, needle, replacement)),
+            elem_ty: elem_ty.clone(),
+        },
+    }
+}
+
+fn is_stabilization_candidate_expr(expr: &HirExpr) -> bool {
+    matches!(
+        expr,
+                HirExpr::Binary {
+                    op:
+                        HirBinaryOp::Add
+                    | HirBinaryOp::Sub
+                    | HirBinaryOp::Mul
+                    | HirBinaryOp::And
+                    | HirBinaryOp::Or
+                    | HirBinaryOp::Xor
+                    | HirBinaryOp::Eq
+                    | HirBinaryOp::Ne
+                    | HirBinaryOp::Lt
+                    | HirBinaryOp::Le
+                    | HirBinaryOp::SLt
+                    | HirBinaryOp::SLe
+                    | HirBinaryOp::Shl
+                    | HirBinaryOp::Shr
+                    | HirBinaryOp::Sar,
+            ..
+        } | HirExpr::Unary { .. } | HirExpr::Cast { .. }
+    )
+}
+
+fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
+    match expr {
+        HirExpr::Const(_, _) => 0,
+        HirExpr::Var(_) => 1,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => count_nonconst_leaf_inputs(expr),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            count_nonconst_leaf_inputs(lhs) + count_nonconst_leaf_inputs(rhs)
+        }
+        HirExpr::Call { args, .. } => args.iter().map(count_nonconst_leaf_inputs).sum(),
+        HirExpr::Index { base, index, .. } => {
+            count_nonconst_leaf_inputs(base) + count_nonconst_leaf_inputs(index)
+        }
+    }
+}
+
+fn expr_node_count(expr: &HirExpr) -> usize {
+    match expr {
+        HirExpr::Const(_, _) | HirExpr::Var(_) => 1,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => 1 + expr_node_count(expr),
+        HirExpr::Binary { lhs, rhs, .. } => 1 + expr_node_count(lhs) + expr_node_count(rhs),
+        HirExpr::Call { args, .. } => 1 + args.iter().map(expr_node_count).sum::<usize>(),
+        HirExpr::Index { base, index, .. } => 1 + expr_node_count(base) + expr_node_count(index),
+    }
+}
+
+fn next_temp_name_seed(locals: &[NirBinding]) -> u32 {
+    locals
+        .iter()
+        .filter_map(|binding| temp_name_suffix(&binding.name))
+        .max()
+        .map_or(0, |suffix| suffix.saturating_add(1))
+}
+
+fn temp_name_suffix(name: &str) -> Option<u32> {
+    let digit_start = name.find(|ch: char| ch.is_ascii_digit())?;
+    let prefix = &name[..digit_start];
+    matches!(prefix, "bVar" | "iVar" | "uVar" | "xVar")
+        .then(|| name[digit_start..].parse::<u32>().ok())
+        .flatten()
 }

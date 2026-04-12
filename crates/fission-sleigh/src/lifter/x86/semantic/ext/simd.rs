@@ -233,24 +233,40 @@ fn decode_simd_semantic_vex(
         (SimdMandatoryPrefix::None, 0x2F) => {
             decode_two_byte_scalar_cmp(insn, op_idx, prefix, address, temp, seq, 4, "COMISS")
         }
-        (SimdMandatoryPrefix::F2, 0x2A) => {
-            decode_two_byte_cvtsi_to_scalar(insn, op_idx, prefix, size, address, temp, seq, 8, "CVTSI2SD")
-        }
-        (SimdMandatoryPrefix::F3, 0x2A) => {
-            decode_two_byte_cvtsi_to_scalar(insn, op_idx, prefix, size, address, temp, seq, 4, "CVTSI2SS")
-        }
-        (SimdMandatoryPrefix::F2, 0x2C) => {
-            decode_two_byte_cvtt_scalar_to_si(insn, op_idx, prefix, size, address, temp, seq, 8, "CVTTSD2SI")
-        }
-        (SimdMandatoryPrefix::F3, 0x2C) => {
-            decode_two_byte_cvtt_scalar_to_si(insn, op_idx, prefix, size, address, temp, seq, 4, "CVTTSS2SI")
-        }
-        (SimdMandatoryPrefix::F2, 0x2D) => {
-            decode_two_byte_cvtt_scalar_to_si(insn, op_idx, prefix, size, address, temp, seq, 8, "CVTSD2SI")
-        }
-        (SimdMandatoryPrefix::F3, 0x2D) => {
-            decode_two_byte_cvtt_scalar_to_si(insn, op_idx, prefix, size, address, temp, seq, 4, "CVTSS2SI")
-        }
+        (SimdMandatoryPrefix::F2, 0x2A) => decode_two_byte_cvtsi_to_scalar(
+            insn, op_idx, prefix, size, address, temp, seq, 8, "CVTSI2SD",
+        ),
+        (SimdMandatoryPrefix::F3, 0x2A) => decode_two_byte_cvtsi_to_scalar(
+            insn, op_idx, prefix, size, address, temp, seq, 4, "CVTSI2SS",
+        ),
+        (SimdMandatoryPrefix::F2, 0x2C) => decode_two_byte_cvtt_scalar_to_si(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            8,
+            "CVTTSD2SI",
+        ),
+        (SimdMandatoryPrefix::F3, 0x2C) => decode_two_byte_cvtt_scalar_to_si(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            4,
+            "CVTTSS2SI",
+        ),
+        (SimdMandatoryPrefix::F2, 0x2D) => decode_two_byte_cvtt_scalar_to_si(
+            insn, op_idx, prefix, size, address, temp, seq, 8, "CVTSD2SI",
+        ),
+        (SimdMandatoryPrefix::F3, 0x2D) => decode_two_byte_cvtt_scalar_to_si(
+            insn, op_idx, prefix, size, address, temp, seq, 4, "CVTSS2SI",
+        ),
         (SimdMandatoryPrefix::P66, 0xEF) => {
             decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PXOR")
         }
@@ -512,7 +528,16 @@ pub(super) fn decode_two_byte_scalar_mov_load(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -562,10 +587,11 @@ pub(super) fn decode_two_byte_xmm_mov_load(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -612,10 +638,11 @@ pub(super) fn decode_two_byte_xmm_mov_store(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -671,10 +698,11 @@ pub(super) fn decode_two_byte_xmm_binop(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -721,10 +749,11 @@ pub(super) fn decode_two_byte_xmm_binop_imm8(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
         Some(v) => v,
         None => return Vec::new(),
@@ -777,7 +806,16 @@ fn decode_two_byte_movd_transfer_load(
     let tag = if scalar_size == 8 { "MOVQ" } else { "MOVD" };
 
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -818,7 +856,16 @@ fn decode_two_byte_movd_transfer_store(
     let tag = if scalar_size == 8 { "MOVQ" } else { "MOVD" };
 
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -848,7 +895,16 @@ pub(super) fn decode_two_byte_scalar_mov_store(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -908,7 +964,16 @@ pub(super) fn decode_two_byte_scalar_binop(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -959,7 +1024,16 @@ pub(super) fn decode_two_byte_scalar_cmp(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -1003,7 +1077,16 @@ pub(super) fn decode_two_byte_cvtsi_to_scalar(
 ) -> Vec<PcodeOp> {
     let int_size = if size == 8 { 8 } else { 4 };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, int_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        int_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -1045,7 +1128,16 @@ pub(super) fn decode_two_byte_cvtt_scalar_to_si(
 ) -> Vec<PcodeOp> {
     let out_size = if size == 8 { 8 } else { 4 };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, scalar_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        scalar_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -1088,7 +1180,16 @@ fn decode_two_byte_xmm_movmsk(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, gpr_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        gpr_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -1336,10 +1437,11 @@ fn decode_ymm_mov_load(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -1387,10 +1489,11 @@ fn decode_ymm_mov_store(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -1447,10 +1550,11 @@ fn decode_ymm_binop(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let modrm = match insn.get(op_idx + 2) {
         Some(v) => *v,
         None => return Vec::new(),
@@ -1498,10 +1602,11 @@ fn decode_ymm_binop_imm8(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 32, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
         Some(v) => v,
         None => return Vec::new(),
@@ -1554,7 +1659,16 @@ fn decode_ymm_movmsk(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, gpr_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        gpr_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };

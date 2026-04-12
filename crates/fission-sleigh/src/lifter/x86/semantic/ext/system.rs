@@ -20,7 +20,12 @@ const X86_FSCALE_POLICY_ID: u64 = 0xD9_FD;
 const X86_FNOP_POLICY_ID: u64 = 0xD9_D0;
 const X86_FCMOV_POLICY_BASE_ID: u64 = 0xDA_C0;
 
-pub(super) fn decode_system_policy(address: u64, seq: &mut u32, policy_id: u64, mnemonic: &str) -> Vec<PcodeOp> {
+pub(super) fn decode_system_policy(
+    address: u64,
+    seq: &mut u32,
+    policy_id: u64,
+    mnemonic: &str,
+) -> Vec<PcodeOp> {
     vec![PcodeOp {
         seq_num: next_seq(seq),
         opcode: PcodeOpcode::CallOther,
@@ -51,10 +56,11 @@ pub(super) fn decode_clflush_policy(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 1, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 1, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     if decoded.reg_field != 7 {
         return Vec::new();
@@ -118,7 +124,16 @@ pub(super) fn decode_0fae_group(
     // CLFLUSHOPT: 66 0F AE /7 → same layout as CLFLUSH but distinct policy
     if prefix.operand_size_override {
         let mut ops = Vec::new();
-        let decoded = match decode_modrm_operand(insn, modrm_idx - 1, prefix, 1, address, temp, &mut ops, seq) {
+        let decoded = match decode_modrm_operand(
+            insn,
+            modrm_idx - 1,
+            prefix,
+            1,
+            address,
+            temp,
+            &mut ops,
+            seq,
+        ) {
             Some(v) => v,
             None => return Vec::new(),
         };
@@ -164,10 +179,11 @@ pub(super) fn decode_0fae_group(
     }
 
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, modrm_idx - 1, prefix, 8, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, modrm_idx - 1, prefix, 8, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     match reg_field {
         0 => {
@@ -315,10 +331,11 @@ pub(super) fn decode_nop_extended(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     if decoded.reg_field != 0 {
         return Vec::new();
@@ -562,7 +579,8 @@ pub(crate) fn decode_x87_policy(
             let operand = if is_reg {
                 x87_st(rm_low)
             } else {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -639,13 +657,18 @@ pub(crate) fn decode_x87_policy(
                     // FLD constants: reg_field==5, rm selects constant
                     5 => {
                         let (float_bits, mnem): (u64, &str) = match rm_low {
-                            0 => (0x3FFF_8000_0000_0000_0000u128.to_le_bytes()[0..8].iter().fold(0u64, |a, &b| (a << 8) | u64::from(b)), "FLD1"),
-                            1 => (0, "FLDL2T"),   // log2(10) — CallOther
-                            2 => (0, "FLDL2E"),   // log2(e)  — CallOther
-                            3 => (0, "FLDPI"),    // π        — CallOther
-                            4 => (0, "FLDLG2"),   // log10(2) — CallOther
-                            5 => (0, "FLDLN2"),   // ln(2)    — CallOther
-                            6 => (0, "FLDZ"),     // +0.0     — handled below
+                            0 => (
+                                0x3FFF_8000_0000_0000_0000u128.to_le_bytes()[0..8]
+                                    .iter()
+                                    .fold(0u64, |a, &b| (a << 8) | u64::from(b)),
+                                "FLD1",
+                            ),
+                            1 => (0, "FLDL2T"), // log2(10) — CallOther
+                            2 => (0, "FLDL2E"), // log2(e)  — CallOther
+                            3 => (0, "FLDPI"),  // π        — CallOther
+                            4 => (0, "FLDLG2"), // log10(2) — CallOther
+                            5 => (0, "FLDLN2"), // ln(2)    — CallOther
+                            6 => (0, "FLDZ"),   // +0.0     — handled below
                             _ => {
                                 ops.push(PcodeOp {
                                     seq_num: next_seq(seq),
@@ -780,7 +803,8 @@ pub(crate) fn decode_x87_policy(
                     _ => {} // remaining (FXAM, FTST etc.) → no-op
                 }
             } else {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -814,7 +838,14 @@ pub(crate) fn decode_x87_policy(
                             address,
                             output: None,
                             inputs: vec![const_u64(RAM_SPACE_ID, 8), addr, narrowed],
-                            asm_mnemonic: Some(if reg_field == 2 { "FST_M32" } else { "FSTP_M32" }.to_string()),
+                            asm_mnemonic: Some(
+                                if reg_field == 2 {
+                                    "FST_M32"
+                                } else {
+                                    "FSTP_M32"
+                                }
+                                .to_string(),
+                            ),
                         });
                     }
                     // FLDENV (4), FLDCW (5), FNSTENV (6), FNSTCW (7) → CallOther with address
@@ -850,7 +881,8 @@ pub(crate) fn decode_x87_policy(
         // DA: integer 32-bit arithmetic (memory) or FCMOVcc (register form)
         2 => {
             if !is_reg {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -858,7 +890,8 @@ pub(crate) fn decode_x87_policy(
                 x87_arith(reg_field, operand, st0, &mut ops, address, seq);
             } else {
                 // Register form = FCMOVcc → CallOther (conditional stack move depends on EFLAGS)
-                let policy_id = X86_FCMOV_POLICY_BASE_ID + u64::from(reg_field) * 8 + u64::from(rm_low);
+                let policy_id =
+                    X86_FCMOV_POLICY_BASE_ID + u64::from(reg_field) * 8 + u64::from(rm_low);
                 ops.push(PcodeOp {
                     seq_num: next_seq(seq),
                     opcode: PcodeOpcode::CallOther,
@@ -873,7 +906,8 @@ pub(crate) fn decode_x87_policy(
         // DB: FILD/FIST/FISTP m32int or FCOMI/FUCOMI/FCMOV (register form)
         3 => {
             if !is_reg {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 4, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -908,7 +942,12 @@ pub(crate) fn decode_x87_policy(
                             output: None,
                             inputs: vec![const_u64(RAM_SPACE_ID, 8), addr, truncated],
                             asm_mnemonic: Some(
-                                if reg_field == 2 { "FIST_M32" } else { "FISTP_M32" }.to_string(),
+                                if reg_field == 2 {
+                                    "FIST_M32"
+                                } else {
+                                    "FISTP_M32"
+                                }
+                                .to_string(),
                             ),
                         });
                     }
@@ -959,7 +998,10 @@ pub(crate) fn decode_x87_policy(
                     });
                 } else {
                     // FCMOVcc register form → CallOther
-                    let policy_id = X86_FCMOV_POLICY_BASE_ID + 0x100 + u64::from(reg_field) * 8 + u64::from(rm_low);
+                    let policy_id = X86_FCMOV_POLICY_BASE_ID
+                        + 0x100
+                        + u64::from(reg_field) * 8
+                        + u64::from(rm_low);
                     ops.push(PcodeOp {
                         seq_num: next_seq(seq),
                         opcode: PcodeOpcode::CallOther,
@@ -977,7 +1019,8 @@ pub(crate) fn decode_x87_policy(
             let operand = if is_reg {
                 x87_st(rm_low)
             } else {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 8, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 8, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -1015,7 +1058,8 @@ pub(crate) fn decode_x87_policy(
                     _ => {} // FFREE ST(n) and others → no-op
                 }
             } else {
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 8, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 8, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -1049,7 +1093,14 @@ pub(crate) fn decode_x87_policy(
                             address,
                             output: None,
                             inputs: vec![const_u64(RAM_SPACE_ID, 8), addr, narrowed],
-                            asm_mnemonic: Some(if reg_field == 2 { "FST_M64" } else { "FSTP_M64" }.to_string()),
+                            asm_mnemonic: Some(
+                                if reg_field == 2 {
+                                    "FST_M64"
+                                } else {
+                                    "FSTP_M64"
+                                }
+                                .to_string(),
+                            ),
                         });
                     }
                     _ => {}
@@ -1119,7 +1170,8 @@ pub(crate) fn decode_x87_policy(
                 }
             } else {
                 // m16int arithmetic
-                let addr = match x87_mem_addr(insn, op_idx, prefix, 2, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(insn, op_idx, prefix, 2, address, &mut ops, temp, seq)
+                {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -1132,7 +1184,9 @@ pub(crate) fn decode_x87_policy(
         7 => {
             if !is_reg {
                 let int_size: u32 = if reg_field >= 5 { 8 } else { 2 };
-                let addr = match x87_mem_addr(insn, op_idx, prefix, int_size, address, &mut ops, temp, seq) {
+                let addr = match x87_mem_addr(
+                    insn, op_idx, prefix, int_size, address, &mut ops, temp, seq,
+                ) {
                     Some(a) => a,
                     None => return Vec::new(),
                 };
@@ -1167,7 +1221,12 @@ pub(crate) fn decode_x87_policy(
                             output: None,
                             inputs: vec![const_u64(RAM_SPACE_ID, 8), addr, truncated],
                             asm_mnemonic: Some(
-                                if reg_field == 2 { "FIST_M16" } else { "FISTP_M16" }.to_string(),
+                                if reg_field == 2 {
+                                    "FIST_M16"
+                                } else {
+                                    "FISTP_M16"
+                                }
+                                .to_string(),
                             ),
                         });
                     }

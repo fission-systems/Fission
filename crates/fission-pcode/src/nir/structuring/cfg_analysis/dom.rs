@@ -1,8 +1,7 @@
 //! Dominator trees and dominance frontiers.
 
 use super::util::{
-    compute_dominator_sets, cooper_intersect, compute_rpo, nearest_common_from_sets,
-    reachable_from,
+    compute_dominator_sets, compute_rpo, cooper_intersect, nearest_common_from_sets, reachable_from,
 };
 use crate::fast_hash::FastMap as HashMap;
 use std::collections::HashSet;
@@ -22,9 +21,7 @@ impl ImmDomTree {
     pub(crate) fn compute(successors: &[Vec<usize>], predecessors: &[Vec<usize>]) -> Self {
         let node_count = successors.len();
         if node_count == 0 {
-            return Self {
-                idom: Vec::new(),
-            };
+            return Self { idom: Vec::new() };
         }
 
         let mut roots: Vec<usize> = predecessors
@@ -37,7 +34,11 @@ impl ImmDomTree {
         }
 
         let total_nodes = node_count + if roots.len() > 1 { 1 } else { 0 };
-        let super_root = if roots.len() > 1 { Some(node_count) } else { None };
+        let super_root = if roots.len() > 1 {
+            Some(node_count)
+        } else {
+            None
+        };
 
         let mut fwd_succs: Vec<Vec<usize>> = successors.to_vec();
         fwd_succs.resize(total_nodes, Vec::new());
@@ -108,11 +109,7 @@ impl ImmDomTree {
 
     pub(crate) fn immediate_dominator(&self, n: usize) -> Option<usize> {
         let idom = self.idom.get(n).copied()?;
-        if idom == n {
-            None
-        } else {
-            Some(idom)
-        }
+        if idom == n { None } else { Some(idom) }
     }
 }
 
@@ -222,6 +219,10 @@ impl DomTree {
         self.dominators
             .get(&node)
             .is_some_and(|set| set.contains(&dom))
+    }
+
+    pub(crate) fn dominance_depth(&self, node: usize) -> usize {
+        self.dominators.get(&node).map_or(0, HashSet::len)
     }
 
     pub(crate) fn nearest_common_dominator(&self, nodes: &[usize]) -> Option<usize> {

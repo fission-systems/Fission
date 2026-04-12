@@ -181,10 +181,8 @@ impl DieMatcher {
             Err(_) => {
                 // Fallback keeps behavior correct if regex-set compilation fails.
                 for needle in unique_needles {
-                    self.string_cache.insert(
-                        needle.clone(),
-                        Self::contains_string(data, &needle),
-                    );
+                    self.string_cache
+                        .insert(needle.clone(), Self::contains_string(data, &needle));
                 }
             }
         }
@@ -256,12 +254,11 @@ impl DieMatcher {
                     || self.section_cache.contains_key(name)
             }
 
-            SignatureRule::StringMatch { value } => {
-                self.string_cache
-                    .get(value)
-                    .copied()
-                    .unwrap_or_else(|| Self::contains_string(binary.data.as_slice(), value))
-            }
+            SignatureRule::StringMatch { value } => self
+                .string_cache
+                .get(value)
+                .copied()
+                .unwrap_or_else(|| Self::contains_string(binary.data.as_slice(), value)),
 
             SignatureRule::EpPattern { arch, pattern } => {
                 // Check architecture match

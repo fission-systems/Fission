@@ -1,8 +1,8 @@
-use super::*;
 use self::bitops::BitTestKind;
+use super::*;
 
-mod bitshift;
 mod bitops;
+mod bitshift;
 mod cond;
 mod escape3byte;
 mod imul;
@@ -87,7 +87,16 @@ pub(super) fn decode_extended_semantic(
         // MOV CR0–7, r64 / r64, CR0–7
         0x20 | 0x22 => {
             let mut ops = Vec::new();
-            let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            let decoded = match decode_modrm_operand(
+                insn,
+                op_idx + 1,
+                prefix,
+                size,
+                address,
+                temp,
+                &mut ops,
+                seq,
+            ) {
                 Some(v) => v,
                 None => return Vec::new(),
             };
@@ -105,7 +114,16 @@ pub(super) fn decode_extended_semantic(
         // MOV DR0–7, r64 / r64, DR0–7
         0x21 | 0x23 => {
             let mut ops = Vec::new();
-            let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            let decoded = match decode_modrm_operand(
+                insn,
+                op_idx + 1,
+                prefix,
+                size,
+                address,
+                temp,
+                &mut ops,
+                seq,
+            ) {
                 Some(v) => v,
                 None => return Vec::new(),
             };
@@ -128,10 +146,16 @@ pub(super) fn decode_extended_semantic(
         0x30 => system::decode_system_policy(address, seq, X86_WRMSR_POLICY_ID, "WRMSR_POLICY"),
         0x31 => system::decode_rdtsc_policy(address, seq),
         0x32 => system::decode_system_policy(address, seq, X86_RDMSR_POLICY_ID, "RDMSR_POLICY"),
-        0x34 => system::decode_system_policy(address, seq, X86_SYSENTER_POLICY_ID, "SYSENTER_POLICY"),
+        0x34 => {
+            system::decode_system_policy(address, seq, X86_SYSENTER_POLICY_ID, "SYSENTER_POLICY")
+        }
         0x35 => system::decode_system_policy(address, seq, X86_SYSEXIT_POLICY_ID, "SYSEXIT_POLICY"),
-        0x38 => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, false, 0),
-        0x3A => escape3byte::decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, true, 0),
+        0x38 => escape3byte::decode_three_byte_escape_semantic(
+            insn, op_idx, prefix, size, address, temp, seq, false, 0,
+        ),
+        0x3A => escape3byte::decode_three_byte_escape_semantic(
+            insn, op_idx, prefix, size, address, temp, seq, true, 0,
+        ),
         0x77 => system::decode_system_policy(address, seq, X86_EMMS_POLICY_ID, "EMMS_POLICY"),
         0xA2 => system::decode_system_policy(address, seq, X86_CPUID_POLICY_ID, "CPUID_POLICY"),
         0xA0 => system::decode_system_policy(address, seq, X86_PUSH_FS_POLICY_ID, "PUSH_FS_POLICY"),
@@ -143,13 +167,79 @@ pub(super) fn decode_extended_semantic(
         }
         0xAE => system::decode_0fae_group(insn, op_idx, prefix, address, temp, seq),
         // LSS/LFS/LGS: load far pointer (offset → reg, segment → seg register) → CallOther
-        0xB2 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LSS_POLICY_ID, "LSS_POLICY"),
-        0xB4 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LFS_POLICY_ID, "LFS_POLICY"),
-        0xB5 => decode_lss_lfs_lgs(insn, op_idx, prefix, size, address, temp, seq, X86_LGS_POLICY_ID, "LGS_POLICY"),
-        0xA3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bt),
-        0xAB => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bts),
-        0xB3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Btr),
-        0xBB => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Btc),
+        0xB2 => decode_lss_lfs_lgs(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            X86_LSS_POLICY_ID,
+            "LSS_POLICY",
+        ),
+        0xB4 => decode_lss_lfs_lgs(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            X86_LFS_POLICY_ID,
+            "LFS_POLICY",
+        ),
+        0xB5 => decode_lss_lfs_lgs(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            X86_LGS_POLICY_ID,
+            "LGS_POLICY",
+        ),
+        0xA3 => decode_bt_family(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            BitTestKind::Bt,
+        ),
+        0xAB => decode_bt_family(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            BitTestKind::Bts,
+        ),
+        0xB3 => decode_bt_family(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            BitTestKind::Btr,
+        ),
+        0xBB => decode_bt_family(
+            insn,
+            op_idx,
+            prefix,
+            size,
+            address,
+            temp,
+            seq,
+            BitTestKind::Btc,
+        ),
         // XADD: temp = r/m + r; r = r/m; r/m = temp; flags = ADD flags
         0xC0 | 0xC1 => decode_xadd(insn, op_idx, prefix, size, address, temp, seq, ext),
         // CMPXCHG: compare accumulator with r/m; if equal r/m = r; else accumulator = r/m
@@ -164,7 +254,17 @@ pub(super) fn decode_extended_semantic(
         0xB6 | 0xB7 | 0xBE | 0xBF => {
             let src_size = if matches!(ext, 0xB6 | 0xBE) { 1 } else { 2 };
             let is_sign_extend = matches!(ext, 0xBE | 0xBF);
-            movmuldiv::decode_movx(insn, op_idx, prefix, size, src_size, is_sign_extend, address, temp, seq)
+            movmuldiv::decode_movx(
+                insn,
+                op_idx,
+                prefix,
+                size,
+                src_size,
+                is_sign_extend,
+                address,
+                temp,
+                seq,
+            )
         }
         0xAF => decode_imul_r_rm(insn, op_idx, prefix, size, address, temp, seq),
         // BT/BTS/BTR/BTC r/m, imm8 (/4–/7 in reg field)
@@ -173,8 +273,14 @@ pub(super) fn decode_extended_semantic(
         0xBC => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, false),
         0xBD => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, true),
         0x40..=0x4F => decode_cmovcc(insn, op_idx, prefix, size, address, temp, seq, ext - 0x40),
-        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F | 0xD4 | 0xD5
-        | 0xE0..=0xEF | 0xF8..=0xFE => {
+        0x10..=0x17
+        | 0x28..=0x2F
+        | 0x50..=0x76
+        | 0x78..=0x7F
+        | 0xD4
+        | 0xD5
+        | 0xE0..=0xEF
+        | 0xF8..=0xFE => {
             simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext)
         }
         0x90..=0x9F => decode_setcc(insn, op_idx, prefix, address, temp, seq, ext - 0x90),
@@ -196,10 +302,11 @@ fn decode_0f01_group(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 8, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 8, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let (policy_id, mnem) = match decoded.reg_field {
         0 => (X86_SGDT_POLICY_ID, "SGDT_POLICY"),
         1 => (X86_SIDT_POLICY_ID, "SIDT_POLICY"),
@@ -232,10 +339,11 @@ fn decode_0f00_group(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 2, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 2, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let (policy_id, mnem) = match decoded.reg_field {
         0 => (X86_SLDT_POLICY_ID, "SLDT_POLICY"),
         1 => (X86_STR_POLICY_ID, "STR_POLICY"),
@@ -269,10 +377,11 @@ fn decode_lss_lfs_lgs(
     mnem: &'static str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     ops.push(PcodeOp {
         seq_num: next_seq(seq),
@@ -398,7 +507,16 @@ fn decode_xadd(
 ) -> Vec<PcodeOp> {
     let xadd_size = if ext == 0xC0 { 1 } else { size };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, xadd_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        xadd_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -543,7 +661,16 @@ fn decode_cmpxchg(
 ) -> Vec<PcodeOp> {
     let cmp_size = if ext == 0xB0 { 1 } else { size };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, cmp_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        cmp_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -658,7 +785,14 @@ fn decode_cmpxchg(
         inputs: vec![reg_part, rm_part],
         asm_mnemonic: Some("CMPXCHG_NEW_RM".to_string()),
     });
-    ops = write_rm_value(&decoded.rm, new_rm_val, address, &mut ops, seq, "CMPXCHG_RM");
+    ops = write_rm_value(
+        &decoded.rm,
+        new_rm_val,
+        address,
+        &mut ops,
+        seq,
+        "CMPXCHG_RM",
+    );
 
     // If ZF=0: accumulator = r/m  (use rm & not_zf_mask | accum & zf_mask)
     let accum_part = temp.alloc(cmp_size);
@@ -710,10 +844,11 @@ fn decode_cmpxchg8b(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 8, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, 8, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     if decoded.reg_field != 1 {
         return Vec::new(); // only /1 is CMPXCHG8B
     }
@@ -747,10 +882,11 @@ fn decode_popcnt(
         return Vec::new();
     }
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let src_saved = src.clone();
     let dst = x86_reg(decoded.reg_index, size);

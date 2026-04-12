@@ -117,7 +117,8 @@ impl<'a> PreviewBuilder<'a> {
             if recovered.contains_key(&stack_index) {
                 continue;
             }
-            let value = self.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())?;
+            let value =
+                self.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())?;
             recovered.insert(stack_index, value);
         }
 
@@ -238,7 +239,11 @@ impl<'a> PreviewBuilder<'a> {
             .collect::<Vec<_>>();
         let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
         args.extend(stack_args);
-        self.debug_call_recovery(&format!("reg_args={} total_args={}", contiguous_reg_count, args.len()));
+        self.debug_call_recovery(&format!(
+            "reg_args={} total_args={}",
+            contiguous_reg_count,
+            args.len()
+        ));
         Ok(Some(args))
     }
 }

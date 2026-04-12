@@ -224,12 +224,13 @@ impl<'a> PreviewBuilder<'a> {
         }
         if force_linear {
             self.forced_linear_structuring_count += 1;
-            let result = self.build_linear_multiblock_body();
+            let result = self.build_proof_first_linear_multiblock_body();
             if diag {
                 eprintln!(
-                    "[DIAG] structuring linear done: elapsed={:.3}s success={}",
+                    "[DIAG] structuring linear done: elapsed={:.3}s success={} proof_first={}",
                     total_start.elapsed().as_secs_f64(),
-                    result.is_ok()
+                    result.is_ok(),
+                    true
                 );
             }
             return result;
@@ -311,6 +312,23 @@ impl<'a> PreviewBuilder<'a> {
                     idx,
                     total_start.elapsed().as_secs_f64()
                 );
+            }
+            let block_key = self.block_target_key(idx);
+            let block_start = self.block_start_address(idx);
+            let has_same_start_peer = self
+                .pcode
+                .blocks
+                .iter()
+                .enumerate()
+                .any(|(peer_idx, block)| peer_idx != self.pcode_block_idx(idx) && block.start_address == block_start);
+            let is_orphan_unreachable =
+                idx != 0
+                    && self.predecessors[idx].is_empty()
+                    && !targeted.contains(&block_key)
+                    && !has_same_start_peer;
+            if is_orphan_unreachable {
+                idx += 1;
+                continue;
             }
             let pcode_idx = self.pcode_block_idx(idx);
             let mut structured_candidates = Vec::new();
@@ -519,7 +537,6 @@ impl<'a> PreviewBuilder<'a> {
 
             let pcode_idx_fallback = self.pcode_block_idx(idx);
             let block = &self.pcode.blocks[pcode_idx_fallback];
-            let block_key = self.block_target_key(idx);
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(HirStmt::Label(block_label(block_key)));
             }
@@ -592,14 +609,23 @@ impl<'a> PreviewBuilder<'a> {
                     targets,
                     default_target,
                     min_val,
+                    proof,
                 } => {
-                    // Attempt comparison-chain recovery to obtain real case values.
-                    // For pure BranchInd blocks this returns None (their terminator is
-                    // not Cond), preserving the ordinal-index fallback.  For edge cases
-                    // where a chain was not consumed by try_lower_switch (e.g. region
-                    // boundary rejection) we do get actual constants.
-                    let recovered = self.parse_switch_chain(idx).ok().flatten();
-                    let cases: Vec<HirSwitchCase> = if let Some(parsed) = recovered {
+                    let cases: Vec<HirSwitchCase> = if let Some(proof) = proof.as_ref()
+                        && proof.failure_family.is_none()
+                        && !proof.recovered_cases.is_empty()
+                    {
+                        self.proof_payload_direct_emit_count += 1;
+                        proof
+                            .recovered_cases
+                            .iter()
+                            .filter(|(_, target)| Some(*target) != default_target)
+                            .map(|(value, target)| HirSwitchCase {
+                                values: vec![*value],
+                                body: vec![HirStmt::Goto(block_label(*target))],
+                            })
+                            .collect()
+                    } else if let Some(parsed) = self.parse_switch_chain(idx).ok().flatten() {
                         parsed
                             .cases
                             .into_iter()

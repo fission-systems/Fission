@@ -1,5 +1,5 @@
-use super::*;
 use super::cond::emit_conditional_value_merge;
+use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BitTestKind {
@@ -40,10 +40,11 @@ pub(super) fn decode_bt_family(
     kind: BitTestKind,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let tag = bt_tag(kind);
     let bit_index = x86_reg(decoded.reg_index, size);
@@ -54,7 +55,10 @@ pub(super) fn decode_bt_family(
         opcode: PcodeOpcode::IntAnd,
         address,
         output: Some(local_index.clone()),
-        inputs: vec![bit_index.clone(), const_u64(bits_per_word.saturating_sub(1), size)],
+        inputs: vec![
+            bit_index.clone(),
+            const_u64(bits_per_word.saturating_sub(1), size),
+        ],
         asm_mnemonic: Some(format!("{tag}_BIT_INDEX")),
     });
 
@@ -257,10 +261,11 @@ pub(super) fn decode_bt_imm8(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let kind = match decoded.reg_field {
         4 => BitTestKind::Bt,
@@ -423,10 +428,11 @@ fn decode_tzcnt(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let dst = x86_reg(decoded.reg_index, size);
 
@@ -481,10 +487,11 @@ fn decode_lzcnt(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let dst = x86_reg(decoded.reg_index, size);
     let width_bits = u64::from(size.saturating_mul(8));
@@ -531,7 +538,15 @@ fn decode_lzcnt(
         asm_mnemonic: Some("LZCNT_SRC_NONZERO".to_string()),
     });
     let result = emit_conditional_value_merge(
-        &mut ops, address, size, lzcnt_nonzero, width_const, &is_nonzero, temp, seq, "LZCNT",
+        &mut ops,
+        address,
+        size,
+        lzcnt_nonzero,
+        width_const,
+        &is_nonzero,
+        temp,
+        seq,
+        "LZCNT",
     );
     // ZF = (result == 0) → i.e. result == 0 only when src had MSB set (BSR = width-1)
     ops.push(PcodeOp {
@@ -572,10 +587,11 @@ pub(super) fn decode_bsf_bsr(
         };
     }
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let dst = x86_reg(decoded.reg_index, size);

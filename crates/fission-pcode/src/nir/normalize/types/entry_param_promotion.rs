@@ -4,9 +4,11 @@
 //! Conservatively only renames when the RHS is a plain (or cast-wrapped) hardware register
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
-use crate::nir::{AbiState, CallingConvention};
-use crate::nir::types::{HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType};
+use crate::nir::types::{
+    HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
+};
 use crate::nir::var_rename::rename_vars_in_stmts;
+use crate::nir::{AbiState, CallingConvention};
 use std::collections::HashSet;
 
 use super::super::wave_stats::add_entry_param_promotions;
@@ -46,15 +48,21 @@ fn stmt_contains_rhs_var(stmt: &HirStmt, target: &str) -> bool {
         HirStmt::Block(stmts)
         | HirStmt::While { body: stmts, .. }
         | HirStmt::DoWhile { body: stmts, .. }
-        | HirStmt::For { body: stmts, .. } => stmts.iter().any(|stmt| stmt_contains_rhs_var(stmt, target)),
+        | HirStmt::For { body: stmts, .. } => {
+            stmts.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+        }
         HirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             expr_contains_var(cond, target)
-                || then_body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
-                || else_body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+                || then_body
+                    .iter()
+                    .any(|stmt| stmt_contains_rhs_var(stmt, target))
+                || else_body
+                    .iter()
+                    .any(|stmt| stmt_contains_rhs_var(stmt, target))
         }
         HirStmt::Switch {
             expr,
@@ -62,10 +70,14 @@ fn stmt_contains_rhs_var(stmt: &HirStmt, target: &str) -> bool {
             default,
         } => {
             expr_contains_var(expr, target)
-                || cases
+                || cases.iter().any(|case| {
+                    case.body
+                        .iter()
+                        .any(|stmt| stmt_contains_rhs_var(stmt, target))
+                })
+                || default
                     .iter()
-                    .any(|case| case.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, target)))
-                || default.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
+                    .any(|stmt| stmt_contains_rhs_var(stmt, target))
         }
         HirStmt::Label(_)
         | HirStmt::Goto(_)
@@ -103,7 +115,9 @@ fn stmt_assigns_var(stmt: &HirStmt, target: &str) -> bool {
         HirStmt::Block(stmts)
         | HirStmt::While { body: stmts, .. }
         | HirStmt::DoWhile { body: stmts, .. }
-        | HirStmt::For { body: stmts, .. } => stmts.iter().any(|stmt| stmt_assigns_var(stmt, target)),
+        | HirStmt::For { body: stmts, .. } => {
+            stmts.iter().any(|stmt| stmt_assigns_var(stmt, target))
+        }
         HirStmt::If {
             then_body,
             else_body,
@@ -139,9 +153,14 @@ fn detect_variadic_register_save(func: &HirFunction) -> bool {
                 then_body,
                 else_body,
                 ..
-            } => then_body.iter().any(stmt_has_variadic_shape) || else_body.iter().any(stmt_has_variadic_shape),
+            } => {
+                then_body.iter().any(stmt_has_variadic_shape)
+                    || else_body.iter().any(stmt_has_variadic_shape)
+            }
             HirStmt::Switch { cases, default, .. } => {
-                cases.iter().any(|case| case.body.iter().any(stmt_has_variadic_shape))
+                cases
+                    .iter()
+                    .any(|case| case.body.iter().any(stmt_has_variadic_shape))
                     || default.iter().any(stmt_has_variadic_shape)
             }
             _ => stmt_contains_rhs_var(stmt, "r8") || stmt_contains_rhs_var(stmt, "r9"),
@@ -155,7 +174,11 @@ fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
     let abi = func.calling_convention;
     let variadic_evidence =
         abi == CallingConvention::WindowsX64 && detect_variadic_register_save(func);
-    let max_fixed_slot = if variadic_evidence { 2 } else { abi.param_offsets().len() };
+    let max_fixed_slot = if variadic_evidence {
+        2
+    } else {
+        abi.param_offsets().len()
+    };
     let mut renames = Vec::new();
     let mut promotions = 0usize;
     for slot in 0..max_fixed_slot {
@@ -227,11 +250,12 @@ fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
         return false;
     }
 
-    let removable = func
-        .params
-        .iter()
-        .skip(2)
-        .all(|param| !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, &param.name)));
+    let removable = func.params.iter().skip(2).all(|param| {
+        !func
+            .body
+            .iter()
+            .any(|stmt| stmt_contains_rhs_var(stmt, &param.name))
+    });
     if !removable {
         return false;
     }
@@ -245,60 +269,54 @@ fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str>
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.
 fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvention) {
-    body.retain_mut(|stmt| {
-        match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(lhs_name),
-                rhs,
-            } => {
-                if let Some(slot) = lhs_name
-                    .strip_prefix("param_")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .map(|n| n.saturating_sub(1))
+    body.retain_mut(|stmt| match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } => {
+            if let Some(slot) = lhs_name
+                .strip_prefix("param_")
+                .and_then(|s| s.parse::<usize>().ok())
+                .map(|n| n.saturating_sub(1))
+            {
+                if let Some(hw) = peel_var_name(rhs)
+                    && let Some(expected) = hw_name_for_slot(abi, slot)
+                    && hw.eq_ignore_ascii_case(expected)
                 {
-                    if let Some(hw) = peel_var_name(rhs)
-                        && let Some(expected) = hw_name_for_slot(abi, slot)
-                        && hw.eq_ignore_ascii_case(expected)
-                    {
-                        return false;
-                    }
+                    return false;
                 }
-                true
             }
-            HirStmt::Block(stmts) => {
-                remove_redundant_param_hw_copies(stmts, abi);
-                true
-            }
-            HirStmt::While { body: stmts, .. } | HirStmt::DoWhile { body: stmts, .. } => {
-                remove_redundant_param_hw_copies(stmts, abi);
-                true
-            }
-            HirStmt::For { body: stmts, .. } => {
-                remove_redundant_param_hw_copies(stmts, abi);
-                true
-            }
-            HirStmt::Switch {
-                cases,
-                default,
-                ..
-            } => {
-                for c in cases.iter_mut() {
-                    remove_redundant_param_hw_copies(&mut c.body, abi);
-                }
-                remove_redundant_param_hw_copies(default, abi);
-                true
-            }
-            HirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                remove_redundant_param_hw_copies(then_body, abi);
-                remove_redundant_param_hw_copies(else_body, abi);
-                true
-            }
-            _ => true,
+            true
         }
+        HirStmt::Block(stmts) => {
+            remove_redundant_param_hw_copies(stmts, abi);
+            true
+        }
+        HirStmt::While { body: stmts, .. } | HirStmt::DoWhile { body: stmts, .. } => {
+            remove_redundant_param_hw_copies(stmts, abi);
+            true
+        }
+        HirStmt::For { body: stmts, .. } => {
+            remove_redundant_param_hw_copies(stmts, abi);
+            true
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for c in cases.iter_mut() {
+                remove_redundant_param_hw_copies(&mut c.body, abi);
+            }
+            remove_redundant_param_hw_copies(default, abi);
+            true
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            remove_redundant_param_hw_copies(then_body, abi);
+            remove_redundant_param_hw_copies(else_body, abi);
+            true
+        }
+        _ => true,
     });
 }
 

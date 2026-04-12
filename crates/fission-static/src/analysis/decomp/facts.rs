@@ -145,8 +145,7 @@ impl FactStore {
         if func_list.is_empty() {
             return;
         }
-        let matches =
-            SIGNATURE_DB.identify_functions_in_binary(raw, &func_list, binary.image_base);
+        let matches = SIGNATURE_DB.identify_functions_in_binary(raw, &func_list, binary.image_base);
         for (addr, name) in matches {
             self.ingest_name_fact(addr, name, FactProvenance::StrongFid);
         }

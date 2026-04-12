@@ -1146,4 +1146,3 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
-

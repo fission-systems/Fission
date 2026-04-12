@@ -42,7 +42,9 @@ pub(crate) fn collect_target_functions<'a>(
     }
 
     if let Some(addr) = address {
-        return select_function_by_address(binary, addr).into_iter().collect();
+        return select_function_by_address(binary, addr)
+            .into_iter()
+            .collect();
     }
 
     vec![]

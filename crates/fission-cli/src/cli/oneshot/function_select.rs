@@ -99,7 +99,11 @@ pub(crate) fn select_functions_from_addresses_file<'a>(
         }
         let address = parse_hex_address(trimmed)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(func) = canonical.iter().copied().find(|func| func.address == address) {
+        if let Some(func) = canonical
+            .iter()
+            .copied()
+            .find(|func| func.address == address)
+        {
             selected.push(func);
         }
     }
@@ -112,51 +116,54 @@ mod tests {
     use fission_loader::loader::{LoadedBinaryBuilder, SectionInfo};
 
     fn test_binary() -> LoadedBinary {
-        LoadedBinaryBuilder::new("test.bin".to_string(), fission_loader::loader::DataBuffer::Heap(vec![0; 0x200]))
-            .image_base(0x140000000)
-            .entry_point(0x140001000)
-            .is_64bit(true)
-            .format("PE")
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x140001000,
-                virtual_size: 0x200,
-                file_offset: 0,
-                file_size: 0x200,
-                is_executable: true,
-                is_writable: false,
-                is_readable: true,
-            })
-            .add_function(FunctionInfo {
-                name: "FUN_140001000".to_string(),
-                address: 0x140001000,
-                size: 0x80,
-                is_export: false,
-                is_import: false,
-            })
-            .add_function(FunctionInfo {
-                name: "sub_140001021".to_string(),
-                address: 0x140001021,
-                size: 0,
-                is_export: false,
-                is_import: false,
-            })
-            .add_function(FunctionInfo {
-                name: "meaningful_name".to_string(),
-                address: 0x140001080,
-                size: 0x40,
-                is_export: false,
-                is_import: false,
-            })
-            .add_function(FunctionInfo {
-                name: "sub_140001080".to_string(),
-                address: 0x140001080,
-                size: 0x40,
-                is_export: false,
-                is_import: false,
-            })
-            .build()
-            .expect("build binary")
+        LoadedBinaryBuilder::new(
+            "test.bin".to_string(),
+            fission_loader::loader::DataBuffer::Heap(vec![0; 0x200]),
+        )
+        .image_base(0x140000000)
+        .entry_point(0x140001000)
+        .is_64bit(true)
+        .format("PE")
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x140001000,
+            virtual_size: 0x200,
+            file_offset: 0,
+            file_size: 0x200,
+            is_executable: true,
+            is_writable: false,
+            is_readable: true,
+        })
+        .add_function(FunctionInfo {
+            name: "FUN_140001000".to_string(),
+            address: 0x140001000,
+            size: 0x80,
+            is_export: false,
+            is_import: false,
+        })
+        .add_function(FunctionInfo {
+            name: "sub_140001021".to_string(),
+            address: 0x140001021,
+            size: 0,
+            is_export: false,
+            is_import: false,
+        })
+        .add_function(FunctionInfo {
+            name: "meaningful_name".to_string(),
+            address: 0x140001080,
+            size: 0x40,
+            is_export: false,
+            is_import: false,
+        })
+        .add_function(FunctionInfo {
+            name: "sub_140001080".to_string(),
+            address: 0x140001080,
+            size: 0x40,
+            is_export: false,
+            is_import: false,
+        })
+        .build()
+        .expect("build binary")
     }
 
     #[test]

@@ -59,7 +59,11 @@ fn count_goto_targets_stmt(stmt: &HirStmt, counts: &mut HashMap<String, usize>) 
         HirStmt::Goto(label) => {
             *counts.entry(label.clone()).or_insert(0) += 1;
         }
-        HirStmt::If { cond: _, then_body, else_body } => {
+        HirStmt::If {
+            cond: _,
+            then_body,
+            else_body,
+        } => {
             count_goto_targets(then_body, counts);
             count_goto_targets(else_body, counts);
         }
@@ -88,8 +92,14 @@ fn collect_labels(stmts: &[HirStmt], out: &mut HashSet<String>) {
 
 fn collect_labels_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Label(label) => { out.insert(label.clone()); }
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::Label(label) => {
+            out.insert(label.clone());
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             collect_labels(then_body, out);
             collect_labels(else_body, out);
         }
@@ -141,27 +151,52 @@ fn recover_break_continue_in_body(
 
     let mut i = 0;
     while i < body.len() {
-        let do_break = if let HirStmt::If { then_body, else_body, .. } = &body[i] {
+        let do_break = if let HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &body[i]
+        {
             if else_body.is_empty() {
                 if let [HirStmt::Goto(lbl)] = then_body.as_slice() {
                     if after_labels.contains(lbl) {
                         // Only replace if this is the only goto to this label.
                         goto_counts.get(lbl).copied().unwrap_or(0) == 1
-                    } else { false }
-                } else { false }
-            } else { false }
-        } else { false };
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         let do_continue = if !do_break {
-            if let HirStmt::If { then_body, else_body, .. } = &body[i] {
+            if let HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } = &body[i]
+            {
                 if else_body.is_empty() {
                     if let [HirStmt::Goto(lbl)] = then_body.as_slice() {
-                        head_labels.contains(lbl)
-                            && goto_counts.get(lbl).copied().unwrap_or(0) == 1
-                    } else { false }
-                } else { false }
-            } else { false }
-        } else { false };
+                        head_labels.contains(lbl) && goto_counts.get(lbl).copied().unwrap_or(0) == 1
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         if do_break {
             if let HirStmt::If { then_body, .. } = &mut body[i] {
@@ -222,7 +257,11 @@ fn apply_break_continue_in_stmts(
     // Recurse into If/Block/Switch to catch loops nested there.
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= apply_break_continue_in_stmts(then_body, goto_counts);
                 changed |= apply_break_continue_in_stmts(else_body, goto_counts);
             }
@@ -253,13 +292,25 @@ fn apply_break_continue_in_stmts(
 /// Collect all variable names mentioned in an expression.
 fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => { out.insert(name.clone()); }
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => expr_vars(expr, out),
-        HirExpr::Binary { lhs, rhs, .. } => { expr_vars(lhs, out); expr_vars(rhs, out); }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_vars(lhs, out);
+            expr_vars(rhs, out);
+        }
         HirExpr::Load { ptr, .. } => expr_vars(ptr, out),
         HirExpr::PtrOffset { base, .. } => expr_vars(base, out),
-        HirExpr::Index { base, index, .. } => { expr_vars(base, out); expr_vars(index, out); }
-        HirExpr::Call { args, .. } => { for a in args { expr_vars(a, out); } }
+        HirExpr::Index { base, index, .. } => {
+            expr_vars(base, out);
+            expr_vars(index, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                expr_vars(a, out);
+            }
+        }
         HirExpr::AggregateCopy { src, .. } => expr_vars(src, out),
         HirExpr::Const(_, _) => {}
     }
@@ -283,8 +334,14 @@ fn find_iv_update(
 ) -> Option<(usize, bool)> {
     let mut found: Option<usize> = None;
     for (i, stmt) in body.iter().enumerate() {
-        if let HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } = stmt {
-            if lhs_name != var { continue; }
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } = stmt
+        {
+            if lhs_name != var {
+                continue;
+            }
             // Expect rhs = Var(v) ± k (linear) or affine v*k'+k'' (see below).
             if is_iv_update(rhs, var, loop_variant) {
                 if found.is_some() {
@@ -314,8 +371,12 @@ fn is_linear_update_of(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>
         {
             let lhs_is_var = matches!(lhs.as_ref(), HirExpr::Var(n) if n == var);
             let rhs_is_var = matches!(rhs.as_ref(), HirExpr::Var(n) if n == var);
-            if lhs_is_var && is_loop_invariant(rhs, loop_variant) { return true; }
-            if rhs_is_var && is_loop_invariant(lhs, loop_variant) { return true; }
+            if lhs_is_var && is_loop_invariant(rhs, loop_variant) {
+                return true;
+            }
+            if rhs_is_var && is_loop_invariant(lhs, loop_variant) {
+                return true;
+            }
             false
         }
         // Allow a Cast wrapping a linear update (sign extension on IV).
@@ -344,11 +405,7 @@ fn is_affine_mul_add_update(expr: &HirExpr, var: &str, loop_variant: &HashSet<St
 }
 
 /// `v * e` or `e * v` where `e` has no loop-variant variables.
-fn mul_var_times_invariant(
-    expr: &HirExpr,
-    var: &str,
-    loop_variant: &HashSet<String>,
-) -> bool {
+fn mul_var_times_invariant(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>) -> bool {
     match expr {
         HirExpr::Cast { expr: inner, .. } => mul_var_times_invariant(inner, var, loop_variant),
         HirExpr::Binary {
@@ -387,15 +444,38 @@ fn loop_variant_vars(body: &[HirStmt]) -> HashSet<String> {
 
 fn loop_variant_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Assign { lhs: HirLValue::Var(name), .. } => { out.insert(name.clone()); }
-        HirStmt::If { then_body, else_body, .. } => {
-            for s in then_body { loop_variant_stmt(s, out); }
-            for s in else_body { loop_variant_stmt(s, out); }
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } => {
+            out.insert(name.clone());
         }
-        HirStmt::Block(body) => { for s in body { loop_variant_stmt(s, out); } }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for s in then_body {
+                loop_variant_stmt(s, out);
+            }
+            for s in else_body {
+                loop_variant_stmt(s, out);
+            }
+        }
+        HirStmt::Block(body) => {
+            for s in body {
+                loop_variant_stmt(s, out);
+            }
+        }
         HirStmt::Switch { cases, default, .. } => {
-            for case in cases { for s in &case.body { loop_variant_stmt(s, out); } }
-            for s in default { loop_variant_stmt(s, out); }
+            for case in cases {
+                for s in &case.body {
+                    loop_variant_stmt(s, out);
+                }
+            }
+            for s in default {
+                loop_variant_stmt(s, out);
+            }
         }
         // Nested loops are their own scope for variant purposes.
         HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {}
@@ -411,13 +491,21 @@ fn find_init_before(stmts: &[HirStmt], loop_idx: usize, var: &str) -> Option<usi
     while scan > 0 {
         scan -= 1;
         match &stmts[scan] {
-            HirStmt::Assign { lhs: HirLValue::Var(name), .. } if name == var => {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } if name == var => {
                 return Some(scan);
             }
             // Any control flow or side-effecting statement stops the search.
-            HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::If { .. }
-            | HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. }
-            | HirStmt::Switch { .. } | HirStmt::Expr(_) => break,
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::If { .. }
+            | HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Switch { .. }
+            | HirStmt::Expr(_) => break,
             // Pure assignments to other variables are fine to skip.
             HirStmt::Assign { .. } => break,
             _ => {}
@@ -441,7 +529,9 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
 
     let mut cond_vars = HashSet::new();
     expr_vars(&cond, &mut cond_vars);
-    if cond_vars.is_empty() { return false; }
+    if cond_vars.is_empty() {
+        return false;
+    }
 
     let loop_variant = loop_variant_vars(&body);
 
@@ -451,7 +541,9 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
             None => continue,
         };
         // Update must be the last statement in body (or we'd change semantics).
-        if !is_last { continue; }
+        if !is_last {
+            continue;
+        }
 
         let init_idx = match find_init_before(stmts, loop_idx, var) {
             Some(i) => i,
@@ -494,7 +586,11 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
         }
         // Recurse into nested constructs.
         match &mut stmts[i] {
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= apply_scev_upgrade_in_stmts(then_body);
                 changed |= apply_scev_upgrade_in_stmts(else_body);
             }

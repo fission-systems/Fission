@@ -69,12 +69,7 @@ pub(super) fn resolve_engine_mode(
             _ => EngineMode::Auto,
         };
         let unknown = match normalized.as_str() {
-            "legacy"
-            | "nir"
-            | "mlil-preview"
-            | "mlil_preview"
-            | "auto"
-            | "rust-sleigh"
+            "legacy" | "nir" | "mlil-preview" | "mlil_preview" | "auto" | "rust-sleigh"
             | "rust_sleigh" => None,
             _ => Some(engine.to_string()),
         };

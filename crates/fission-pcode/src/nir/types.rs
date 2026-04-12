@@ -317,6 +317,55 @@ pub struct DispatcherShape {
     pub proof_kind: DispatcherProofKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofFailureFamily {
+    MissingBounds,
+    MixedSelectorFamily,
+    AmbiguousTargetMap,
+    MissingFollow,
+    SharedTailConflict,
+    NonSideEffectFreeSelector,
+    WidthOrSpaceMismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatcherProofScope {
+    TerminatorLocal,
+    OuterDispatch,
+    NestedDispatch,
+    HelperTail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatcherProofUnit {
+    pub selector_expr: String,
+    pub candidate_targets: Vec<u64>,
+    pub recovered_cases: Vec<(i64, u64)>,
+    pub default_target: Option<u64>,
+    pub guard_set: Vec<String>,
+    pub follow_block: Option<u64>,
+    pub proof_scope: DispatcherProofScope,
+    pub failure_family: Option<ProofFailureFamily>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectorNormalization {
+    pub base_subtract: Option<i64>,
+    pub mask: Option<u64>,
+    pub stride: Option<u64>,
+    pub width: Option<u32>,
+    pub address_space: Option<u64>,
+    pub guard_bounds: Vec<(Option<i64>, Option<i64>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredTargetMap {
+    pub cases: Vec<(i64, CallTargetRef)>,
+    pub default_target: Option<CallTargetRef>,
+    pub deterministic: bool,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IndirectControlClassification {
     pub has_indirect_control: bool,
@@ -326,9 +375,18 @@ pub struct IndirectControlClassification {
 }
 
 impl IndirectControlClassification {
+    fn stats_indicate_indirect_control(stats: &NirBuildStats) -> bool {
+        stats.unsupported_indirect_control_count > 0
+            || stats.unsupported_indirect_call_count > 0
+            || stats.unsupported_external_target_count > 0
+            || stats.indirect_surface_preserved_count > 0
+            || stats.indirect_target_set_refined_count > 0
+            || stats.dispatcher_shape_recovered_count > 0
+    }
+
     #[must_use]
     pub fn from_pcode(pcode: &crate::pcode::PcodeFunction) -> Self {
-        Self::from_flags(crate::pcode_has_indirect_control_flow(pcode), false, false, false)
+        Self::from_stats_or_observation(None, crate::pcode_has_indirect_control_flow(pcode))
     }
 
     #[must_use]
@@ -341,6 +399,25 @@ impl IndirectControlClassification {
                 || stats.unsupported_indirect_call_count > 0
                 || stats.unsupported_external_target_count > 0,
             has_dispatcher_recovery: stats.dispatcher_shape_recovered_count > 0,
+        }
+    }
+
+    #[must_use]
+    pub fn from_stats_or_observation(
+        stats: Option<&NirBuildStats>,
+        observed_has_indirect_control: bool,
+    ) -> Self {
+        match stats {
+            Some(stats) => Self::from_stats(
+                Some(stats),
+                Self::stats_indicate_indirect_control(stats) || observed_has_indirect_control,
+            ),
+            None => Self {
+                has_indirect_control: observed_has_indirect_control,
+                has_preserved_indirect_surface: false,
+                has_unresolved_unsupported_indirect: false,
+                has_dispatcher_recovery: false,
+            },
         }
     }
 
@@ -713,6 +790,15 @@ pub struct NirBuildStats {
     /// Dispatcher-like control shapes recovered from structural proof.
     #[serde(default)]
     pub dispatcher_shape_recovered_count: usize,
+    /// Nontrivial repeated pure expressions stabilized into explicit temporaries.
+    #[serde(default)]
+    pub materialization_stabilized_count: usize,
+    /// Switch/dispatcher surfaces emitted directly from proof payloads.
+    #[serde(default)]
+    pub proof_payload_direct_emit_count: usize,
+    /// Heavy reruns skipped because the preserving pass made no structural change.
+    #[serde(default)]
+    pub pass_rerun_skipped_by_preservation_count: usize,
     /// Canonical family totals derived from structuring failures/recovery in pcode.
     #[serde(default)]
     pub structuring_reason_region_legality_count: usize,
@@ -887,6 +973,10 @@ impl NirBuildStats {
         self.indirect_surface_preserved_count += other.indirect_surface_preserved_count;
         self.indirect_target_set_refined_count += other.indirect_target_set_refined_count;
         self.dispatcher_shape_recovered_count += other.dispatcher_shape_recovered_count;
+        self.materialization_stabilized_count += other.materialization_stabilized_count;
+        self.proof_payload_direct_emit_count += other.proof_payload_direct_emit_count;
+        self.pass_rerun_skipped_by_preservation_count +=
+            other.pass_rerun_skipped_by_preservation_count;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;
         self.structuring_reason_follow_failure_count +=

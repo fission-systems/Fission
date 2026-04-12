@@ -173,7 +173,13 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if let Some(addr) = cli.disasm {
-        return Ok(disassemble(&binary, &binary_data, addr, cli.count, cli.json)?);
+        return Ok(disassemble(
+            &binary,
+            &binary_data,
+            addr,
+            cli.count,
+            cli.json,
+        )?);
     }
 
     if let Some(addr) = cli.disasm_function {
@@ -231,9 +237,7 @@ fn print_help() {
     println!("      --no-warnings          Suppress WARNING/NOTICE lines");
     println!("      --benchmark            Add timing metadata to JSON output");
     println!("      --decomp-limit <N>     Limit --decomp-all to first N functions");
-    println!(
-        "      --function-discovery-profile <P>   conservative|balanced|aggressive"
-    );
+    println!("      --function-discovery-profile <P>   conservative|balanced|aggressive");
     println!();
     println!("Examples:");
     println!("  fission_cli app.exe --info");

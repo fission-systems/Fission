@@ -20,12 +20,12 @@ impl<'a> PreviewBuilder<'a> {
         };
         let name = abi.param_name(index);
         self.params.entry(index).or_insert_with(|| NirBinding {
-                name: name.clone(),
-                ty: type_from_size(vn.size, false),
-                surface_type_name: None,
-                origin: Some(NirBindingOrigin::ParamIndex(index)),
-                initializer: None,
-            });
+            name: name.clone(),
+            ty: type_from_size(vn.size, false),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(index)),
+            initializer: None,
+        });
         if let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied() {
             let alias_name = abi.param_name(param_index);
             self.params

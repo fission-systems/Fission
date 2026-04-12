@@ -11,8 +11,8 @@
 //!
 //! At `if` / `while` / `switch` boundaries the cache is conservatively reset
 //! (or forked empty) so we do not assume memory state merges across joins.
-use super::mem_ssa::{alias_key_for_pointer_expr, nir_byte_size, AliasKey};
 use super::super::*;
+use super::mem_ssa::{AliasKey, alias_key_for_pointer_expr, nir_byte_size};
 use std::collections::HashMap;
 
 type LoadCache = HashMap<AliasKey, String>;
@@ -41,20 +41,23 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
             match lhs {
                 HirLValue::Deref { ptr, ty } => {
                     let key = alias_key_for_pointer_expr(ptr, nir_byte_size(ty));
-                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like()) {
+                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                    {
                         cache.remove(&key);
                     }
                 }
                 HirLValue::Index { base, elem_ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(elem_ty));
-                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like()) {
+                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                    {
                         cache.remove(&key);
                     }
                 }
                 HirLValue::Var(name) => {
                     if let HirExpr::Load { ptr, ty } = &*rhs {
                         let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(&ty));
-                        if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like()) {
+                        if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                        {
                             cache.insert(key, name.clone());
                         }
                     }
@@ -140,10 +143,7 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
                 changed = true;
             }
         }
-        HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue => {}
     }
     changed
 }
@@ -153,7 +153,8 @@ fn rewrite_loads_in_expr(expr: &mut HirExpr, cache: &LoadCache, changed: &mut bo
         HirExpr::Load { ptr, ty } => {
             let size = nir_byte_size(&ty);
             let key = alias_key_for_pointer_expr(ptr, size);
-            if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like()) {
+            if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+            {
                 if let Some(v) = cache.get(&key) {
                     *expr = HirExpr::Var(v.clone());
                     *changed = true;
@@ -162,8 +163,9 @@ fn rewrite_loads_in_expr(expr: &mut HirExpr, cache: &LoadCache, changed: &mut bo
             }
             rewrite_loads_in_expr(ptr.as_mut(), cache, changed);
         }
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. } => rewrite_loads_in_expr(inner.as_mut(), cache, changed),
+        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+            rewrite_loads_in_expr(inner.as_mut(), cache, changed)
+        }
         HirExpr::Binary { lhs, rhs, .. } => {
             rewrite_loads_in_expr(lhs.as_mut(), cache, changed);
             rewrite_loads_in_expr(rhs.as_mut(), cache, changed);

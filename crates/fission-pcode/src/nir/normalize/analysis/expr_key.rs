@@ -19,7 +19,11 @@ pub(crate) fn pure_expr_key(expr: &HirExpr) -> Option<PureExprKey> {
             let ik = pure_expr_key(inner)?;
             Some(format!("C({},{})", type_key(ty), ik))
         }
-        HirExpr::Unary { op, expr: inner, ty } => {
+        HirExpr::Unary {
+            op,
+            expr: inner,
+            ty,
+        } => {
             let ik = pure_expr_key(inner)?;
             Some(format!("U({:?},{},{})", op, type_key(ty), ik))
         }
@@ -37,7 +41,9 @@ pub(crate) fn pure_expr_key(expr: &HirExpr) -> Option<PureExprKey> {
             let bk = pure_expr_key(base)?;
             Some(format!("P({},{})", offset, bk))
         }
-        HirExpr::Load { .. } | HirExpr::Call { .. } | HirExpr::AggregateCopy { .. }
+        HirExpr::Load { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::AggregateCopy { .. }
         | HirExpr::Index { .. } => None,
     }
 }

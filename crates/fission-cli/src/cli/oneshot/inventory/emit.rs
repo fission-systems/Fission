@@ -37,6 +37,7 @@ use fission_decompiler_core::{RustSleighDecompileConfig, select_nir_output_from_
 #[cfg(not(feature = "native_decomp"))]
 use fission_pcode::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
+    pcode_has_indirect_control_flow,
 };
 #[cfg(not(feature = "native_decomp"))]
 use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
@@ -428,7 +429,7 @@ fn preview_block_detail(
 #[cfg(not(feature = "native_decomp"))]
 fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
     let total_ops = pcode.blocks.iter().map(|block| block.ops.len()).sum();
-    let has_indirect = IndirectControlClassification::from_pcode(pcode).has_indirect_control;
+    let has_indirect = pcode_has_indirect_control_flow(pcode);
     (pcode.blocks.len(), total_ops, has_indirect)
 }
 

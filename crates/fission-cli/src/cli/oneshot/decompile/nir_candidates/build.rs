@@ -5,7 +5,17 @@ use super::summary::{
     explicit_hint_surface_count, fact_density, pcode_metrics, preview_block_detail,
     preview_block_signature, preview_goto_count, preview_surface_kind_str,
 };
-use fission_pcode::IndirectControlClassification;
+use fission_pcode::{IndirectControlClassification, NirBuildStats};
+
+fn canonical_indirect_classification(
+    build_stats: Option<&NirBuildStats>,
+    raw_has_indirect_control_flow: bool,
+) -> IndirectControlClassification {
+    IndirectControlClassification::from_stats_or_observation(
+        build_stats,
+        raw_has_indirect_control_flow,
+    )
+}
 
 fn build_preview_candidate_entry(
     decomp: &mut DecompilerNative,
@@ -42,6 +52,7 @@ fn build_preview_candidate_entry(
     let mut preview_surface_kind = None;
     let mut preview_hint_stats = None;
     let mut nir_build_stats = None;
+    let mut raw_has_indirect_control_flow = false;
     let mut preview_code = None;
     let mut recovery_strategy_attempted = None;
     let mut recovery_strategy_applied = None;
@@ -59,7 +70,7 @@ fn build_preview_candidate_entry(
                 let metrics = pcode_metrics(&pcode);
                 pcode_block_count = metrics.0;
                 pcode_op_count = metrics.1;
-                has_indirect = metrics.2;
+                raw_has_indirect_control_flow = metrics.2;
                 auto_eligible = auto_nir_eligible(binary, &pcode);
             }
 
@@ -98,6 +109,12 @@ fn build_preview_candidate_entry(
                         Some(explicit_hint_surface_count(preview_hint_stats));
                 }
             }
+
+            let indirect_classification = canonical_indirect_classification(
+                nir_build_stats.as_ref(),
+                raw_has_indirect_control_flow,
+            );
+            has_indirect = indirect_classification.has_indirect_control;
         }
         Err(err) => {
             preview_fallback_kind = Some("preview_unsupported".to_string());
@@ -105,6 +122,7 @@ fn build_preview_candidate_entry(
             preview_fallback_reason = Some(format!(
                 "mlil-preview frontend unavailable: failed to load pcode: {err}"
             ));
+            has_indirect = raw_has_indirect_control_flow;
         }
     }
 
@@ -394,4 +412,32 @@ fn panic_payload_to_string(payload: &(dyn Any + Send)) -> Option<String> {
     payload
         .downcast_ref::<&str>()
         .map(|message| (*message).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_stats_prefer_over_raw_flags_for_indirect_classification() {
+        let classification = canonical_indirect_classification(
+            Some(&NirBuildStats {
+                unsupported_indirect_control_count: 1,
+                ..Default::default()
+            }),
+            false,
+        );
+
+        assert!(classification.has_indirect_control);
+        assert!(classification.has_unresolved_unsupported_indirect);
+        assert!(!classification.has_preserved_indirect_surface);
+    }
+
+    #[test]
+    fn legacy_flags_remain_fallback_when_stats_missing() {
+        let classification = canonical_indirect_classification(None, true);
+
+        assert!(classification.has_indirect_control);
+        assert!(!classification.has_unresolved_unsupported_indirect);
+    }
 }

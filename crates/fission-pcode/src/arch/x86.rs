@@ -31,20 +31,20 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
         if delta % 8 == 0 {
             let idx = (delta / 8) as usize;
             const GPR64: [&str; 16] = [
-                "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
-                "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15",
+                "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11",
+                "r12", "r13", "r14", "r15",
             ];
             const GPR32: [&str; 16] = [
-                "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi",
-                "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
+                "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi", "r8d", "r9d", "r10d",
+                "r11d", "r12d", "r13d", "r14d", "r15d",
             ];
             const GPR16: [&str; 16] = [
-                "ax",  "cx",  "dx",  "bx",  "sp",  "bp",  "si",  "di",
-                "r8w", "r9w", "r10w","r11w","r12w","r13w","r14w","r15w",
+                "ax", "cx", "dx", "bx", "sp", "bp", "si", "di", "r8w", "r9w", "r10w", "r11w",
+                "r12w", "r13w", "r14w", "r15w",
             ];
             const GPR8: [&str; 16] = [
-                "al",  "cl",  "dl",  "bl",  "spl", "bpl", "sil", "dil",
-                "r8b", "r9b", "r10b","r11b","r12b","r13b","r14b","r15b",
+                "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil", "r8b", "r9b", "r10b", "r11b",
+                "r12b", "r13b", "r14b", "r15b",
             ];
             return match size {
                 1 => GPR8.get(idx).copied(),
@@ -62,8 +62,8 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
         if delta % 16 == 0 {
             let idx = (delta / 16) as usize;
             const XMM: [&str; 16] = [
-                "xmm0", "xmm1", "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",
-                "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+                "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9",
+                "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
             ];
             return XMM.get(idx).copied();
         }
@@ -76,8 +76,8 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
         if delta % 32 == 0 {
             let idx = (delta / 32) as usize;
             const YMM: [&str; 16] = [
-                "ymm0", "ymm1", "ymm2",  "ymm3",  "ymm4",  "ymm5",  "ymm6",  "ymm7",
-                "ymm8", "ymm9", "ymm10", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15",
+                "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6", "ymm7", "ymm8", "ymm9",
+                "ymm10", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15",
             ];
             return YMM.get(idx).copied();
         }
@@ -98,15 +98,15 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
     // EFLAGS individual bits
     if offset >= X86_EFLAGS_BASE && offset < X86_EFLAGS_BASE + 0x100 && size == 1 {
         return match offset - X86_EFLAGS_BASE {
-            0  => Some("cf"),
-            2  => Some("pf"),
-            4  => Some("af"),
-            6  => Some("zf"),
-            7  => Some("sf"),
-            9  => Some("if_"),
+            0 => Some("cf"),
+            2 => Some("pf"),
+            4 => Some("af"),
+            6 => Some("zf"),
+            7 => Some("sf"),
+            9 => Some("if_"),
             10 => Some("df"),
             11 => Some("of"),
-            _  => None,
+            _ => None,
         };
     }
 
@@ -125,8 +125,8 @@ mod tests {
     #[test]
     fn gpr64_names_round_trip() {
         let expected = [
-            "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
-            "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15",
+            "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11",
+            "r12", "r13", "r14", "r15",
         ];
         for (i, name) in expected.iter().enumerate() {
             let offset = X86_REG_BASE + (i as u64) * 8;
@@ -141,8 +141,8 @@ mod tests {
     #[test]
     fn gpr32_names_round_trip() {
         let expected = [
-            "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi",
-            "r8d", "r9d", "r10d","r11d","r12d","r13d","r14d","r15d",
+            "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi", "r8d", "r9d", "r10d", "r11d",
+            "r12d", "r13d", "r14d", "r15d",
         ];
         for (i, name) in expected.iter().enumerate() {
             let offset = X86_REG_BASE + (i as u64) * 8;
@@ -177,7 +177,10 @@ mod tests {
         assert_eq!(unique_x86_register_name(X86_EFLAGS_BASE + 6, 1), Some("zf"));
         assert_eq!(unique_x86_register_name(X86_EFLAGS_BASE + 0, 1), Some("cf"));
         assert_eq!(unique_x86_register_name(X86_EFLAGS_BASE + 7, 1), Some("sf"));
-        assert_eq!(unique_x86_register_name(X86_EFLAGS_BASE + 11, 1), Some("of"));
+        assert_eq!(
+            unique_x86_register_name(X86_EFLAGS_BASE + 11, 1),
+            Some("of")
+        );
     }
 
     #[test]
@@ -195,12 +198,21 @@ mod tests {
     #[test]
     fn rsp_is_reg_index_4() {
         // rsp = index 4, size 8 → X86_REG_BASE + 4*8 = 0xA860_0020
-        assert_eq!(unique_x86_register_name(X86_REG_BASE + 4 * 8, 8), Some("rsp"));
+        assert_eq!(
+            unique_x86_register_name(X86_REG_BASE + 4 * 8, 8),
+            Some("rsp")
+        );
     }
 
     #[test]
     fn seg_names() {
-        assert_eq!(unique_x86_register_name(X86_SEG_BASE + 4 * 8, 8), Some("fs"));
-        assert_eq!(unique_x86_register_name(X86_SEG_BASE + 5 * 8, 8), Some("gs"));
+        assert_eq!(
+            unique_x86_register_name(X86_SEG_BASE + 4 * 8, 8),
+            Some("fs")
+        );
+        assert_eq!(
+            unique_x86_register_name(X86_SEG_BASE + 5 * 8, 8),
+            Some("gs")
+        );
     }
 }

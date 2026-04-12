@@ -66,7 +66,9 @@ pub(super) fn emit_alu_ops(
     }
 
     match kind {
-        AluKind::Add => emit_arith_flags(&mut ops, address, size, lhs, rhs, result, false, temp, seq),
+        AluKind::Add => {
+            emit_arith_flags(&mut ops, address, size, lhs, rhs, result, false, temp, seq)
+        }
         AluKind::Sub | AluKind::Cmp => {
             emit_arith_flags(&mut ops, address, size, lhs, rhs, result, true, temp, seq)
         }
@@ -81,12 +83,9 @@ pub(super) fn emit_alu_ops(
         AluKind::And | AluKind::Or | AluKind::Xor | AluKind::Test => {
             emit_logic_flags(&mut ops, address, size, result, temp, seq)
         }
-        AluKind::Adc
-        | AluKind::Sbb
-        | AluKind::Neg
-        | AluKind::Shl
-        | AluKind::Shr
-        | AluKind::Sar => unreachable!("handled above"),
+        AluKind::Adc | AluKind::Sbb | AluKind::Neg | AluKind::Shl | AluKind::Shr | AluKind::Sar => {
+            unreachable!("handled above")
+        }
     }
 
     ops
@@ -646,10 +645,38 @@ fn emit_shift_ops(
     }
 
     if let Some(cond) = count_nonzero.as_ref() {
-        let (zf, sf, pf) = emit_zsp_flags_to_temps(&mut ops, address, size, shift_result, temp, seq);
-        emit_conditional_flag_write(&mut ops, address, x86_flag_zf(), zf, cond, temp, seq, "SHIFT_ZF");
-        emit_conditional_flag_write(&mut ops, address, x86_flag_sf(), sf, cond, temp, seq, "SHIFT_SF");
-        emit_conditional_flag_write(&mut ops, address, x86_flag_pf(), pf, cond, temp, seq, "SHIFT_PF");
+        let (zf, sf, pf) =
+            emit_zsp_flags_to_temps(&mut ops, address, size, shift_result, temp, seq);
+        emit_conditional_flag_write(
+            &mut ops,
+            address,
+            x86_flag_zf(),
+            zf,
+            cond,
+            temp,
+            seq,
+            "SHIFT_ZF",
+        );
+        emit_conditional_flag_write(
+            &mut ops,
+            address,
+            x86_flag_sf(),
+            sf,
+            cond,
+            temp,
+            seq,
+            "SHIFT_SF",
+        );
+        emit_conditional_flag_write(
+            &mut ops,
+            address,
+            x86_flag_pf(),
+            pf,
+            cond,
+            temp,
+            seq,
+            "SHIFT_PF",
+        );
     } else {
         emit_zsp_flags(&mut ops, address, size, result, temp, seq);
     }
@@ -765,7 +792,13 @@ fn emit_conditional_flag_write(
     });
 }
 
-fn store_if_memory(ops: &mut Vec<PcodeOp>, address: u64, dst: &Destination, result: Varnode, seq: &mut u32) {
+fn store_if_memory(
+    ops: &mut Vec<PcodeOp>,
+    address: u64,
+    dst: &Destination,
+    result: Varnode,
+    seq: &mut u32,
+) {
     if let Destination::Mem(addr) = dst {
         ops.push(PcodeOp {
             seq_num: next_seq(seq),
@@ -1017,4 +1050,3 @@ fn emit_zsp_flags_to_temps(
 
     (zf, sf, pf)
 }
-

@@ -233,7 +233,8 @@ fn decode_modrm_operand_addr32(
         disp = d;
     }
 
-    let addr = compose_effective_address_addr32(prefix, base, index, disp, address, temp, ops, seq)?;
+    let addr =
+        compose_effective_address_addr32(prefix, base, index, disp, address, temp, ops, seq)?;
 
     Some(DecodedModrm {
         reg_index,
@@ -333,7 +334,7 @@ fn compose_effective_address(
     if let Some(seg) = prefix.segment_override {
         use super::super::common::x86_seg;
         let seg_base = x86_seg(seg as u32);
-        
+
         let mut addr64 = ea;
         if addr64.size < 8 {
             let expanded = temp.alloc(8);
@@ -347,7 +348,7 @@ fn compose_effective_address(
             });
             addr64 = expanded;
         }
-        
+
         let out = temp.alloc(8);
         ops.push(PcodeOp {
             seq_num: next_seq(seq),
@@ -447,7 +448,7 @@ fn compose_effective_address_addr32(
     if let Some(seg) = prefix.segment_override {
         use super::super::common::x86_seg;
         let seg_base = x86_seg(seg as u32);
-        
+
         let out = temp.alloc(8);
         ops.push(PcodeOp {
             seq_num: next_seq(seq),
@@ -463,7 +464,13 @@ fn compose_effective_address_addr32(
     Some(ea)
 }
 
-pub(super) fn decode_immediate(insn: &[u8], idx: usize, width: usize, out_size: u32, sign_extend: bool) -> Option<Varnode> {
+pub(super) fn decode_immediate(
+    insn: &[u8],
+    idx: usize,
+    width: usize,
+    out_size: u32,
+    sign_extend: bool,
+) -> Option<Varnode> {
     let (val, _consumed) = match width {
         1 => {
             let raw = *insn.get(idx)?;
@@ -514,18 +521,6 @@ pub(super) fn decode_immediate(insn: &[u8], idx: usize, width: usize, out_size: 
 fn is_prefix(byte: u8) -> bool {
     matches!(
         byte,
-        0xF0
-            | 0xF2
-            | 0xF3
-            | 0x2E
-            | 0x36
-            | 0x3E
-            | 0x26
-            | 0x64
-            | 0x65
-            | 0x66
-            | 0x67
-            | 0x40..=0x4F
+        0xF0 | 0xF2 | 0xF3 | 0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 | 0x66 | 0x67 | 0x40..=0x4F
     )
 }
-

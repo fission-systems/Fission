@@ -6,8 +6,8 @@
 //! [`super::super::analysis::defuse::constant_folding_pass`] (single-statement fold) and VSA
 //! [`crate::nir::vsa::jump_resolver`] (intervals, not a constant lattice).
 
-use super::super::pipeline::is_large_hir_function;
 use super::super::analysis::defuse::{eval_hir_expr_with_const_env, fold_expr_hir};
+use super::super::pipeline::is_large_hir_function;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 

@@ -35,7 +35,7 @@
 /// - LLVM `MemorySSA.h`: `MemoryDef`/`MemoryUse`/`MemoryPhi` design
 /// - RetDec `reaching_definitions.h`: UD/DU chains
 /// - LLVM `BasicAliasAnalysis.cpp`: stack-slot no-alias rule
-use super::super::memory::{partition_key_for_pointer_expr, PartitionKey};
+use super::super::memory::{PartitionKey, partition_key_for_pointer_expr};
 use super::super::*;
 use std::collections::HashMap;
 
@@ -64,7 +64,8 @@ impl AliasKey {
         match (self, other) {
             (AliasKey::Partition(a), AliasKey::Partition(b)) if a.base_object == b.base_object => {
                 // Non-overlapping intervals.
-                a.offset_interval.1 <= b.offset_interval.0 || b.offset_interval.1 <= a.offset_interval.0
+                a.offset_interval.1 <= b.offset_interval.0
+                    || b.offset_interval.1 <= a.offset_interval.0
             }
             (AliasKey::Unknown, _) | (_, AliasKey::Unknown) => false,
             _ => false,
@@ -144,7 +145,12 @@ impl Builder {
         let id = self.alloc_id();
         let may_escape = matches!(key, AliasKey::Unknown);
         self.reaching.insert(key.clone(), id);
-        self.defs.push(MemDef { id, key, use_count: 0, may_escape });
+        self.defs.push(MemDef {
+            id,
+            key,
+            use_count: 0,
+            may_escape,
+        });
         id
     }
 
@@ -158,7 +164,11 @@ impl Builder {
                 phi.use_count += 1;
             }
         }
-        self.uses.push(MemUse { id, key, reaching_def });
+        self.uses.push(MemUse {
+            id,
+            key,
+            reaching_def,
+        });
     }
 
     fn scan_stmts(&mut self, stmts: &[HirStmt]) {
@@ -178,14 +188,22 @@ impl Builder {
                         let key = self.alias_key_for_ptr(ptr, nir_byte_size(ty));
                         self.add_def(key);
                     }
-                    HirLValue::Index { base, index: _, elem_ty } => {
+                    HirLValue::Index {
+                        base,
+                        index: _,
+                        elem_ty,
+                    } => {
                         let key = self.alias_key_for_ptr(base, nir_byte_size(elem_ty));
                         self.add_def(key);
                     }
                     HirLValue::Var(_) => {} // Not a memory write.
                 }
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 self.scan_expr_uses(cond);
                 // Fork reaching map.
                 let saved = self.reaching.clone();
@@ -203,16 +221,31 @@ impl Builder {
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            HirStmt::For { init, cond, update, body } => {
-                if let Some(s) = init { self.scan_stmt(s); }
-                if let Some(e) = cond { self.scan_expr_uses(e); }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(s) = init {
+                    self.scan_stmt(s);
+                }
+                if let Some(e) = cond {
+                    self.scan_expr_uses(e);
+                }
                 let saved = self.reaching.clone();
                 self.scan_stmts(body);
-                if let Some(s) = update { self.scan_stmt(s); }
+                if let Some(s) = update {
+                    self.scan_stmt(s);
+                }
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 self.scan_expr_uses(expr);
                 let saved = self.reaching.clone();
                 let mut arm_reachings = Vec::new();
@@ -315,7 +348,11 @@ impl Builder {
                 def.may_escape = !key.is_promotable_stack_like();
             }
         }
-        MemSsa { defs: self.defs, uses: self.uses, phis: self.phis }
+        MemSsa {
+            defs: self.defs,
+            uses: self.uses,
+            phis: self.phis,
+        }
     }
 }
 
@@ -337,7 +374,10 @@ pub(crate) fn nir_byte_size(ty: &NirType) -> u32 {
 /// comes from the canonical partition collector; everything else is conservatively
 /// collapsed to [`AliasKey::Unknown`].
 pub(crate) fn alias_key_for_pointer_expr(ptr: &HirExpr, size: u32) -> AliasKey {
-    let access_ty = NirType::Aggregate { size, fields: vec![] };
+    let access_ty = NirType::Aggregate {
+        size,
+        fields: vec![],
+    };
     partition_key_for_pointer_expr(ptr, &access_ty)
         .map(AliasKey::Partition)
         .unwrap_or(AliasKey::Unknown)

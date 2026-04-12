@@ -48,7 +48,9 @@ pub(super) fn decode_three_byte_escape_semantic(
             }
             // BLSR/BLSI/BLSMSK: dst(vvvv), src(r/m), reg_field selects variant
             (EscapeMandatoryPrefix::None, 0xF3) => {
-                return decode_bmi_blsr_family(insn, op_idx, prefix, size, address, temp, seq, vvvv_reg);
+                return decode_bmi_blsr_family(
+                    insn, op_idx, prefix, size, address, temp, seq, vvvv_reg,
+                );
             }
             // BEXTR: dst(ModRM.reg), src(r/m), ctrl(vvvv)
             (EscapeMandatoryPrefix::None, 0xF7) => {
@@ -60,15 +62,48 @@ pub(super) fn decode_three_byte_escape_semantic(
             }
             // SARX: dst(ModRM.reg), src(r/m), cnt(vvvv) — no flags
             (EscapeMandatoryPrefix::F3, 0xF7) => {
-                return decode_bmi2_shift(insn, op_idx, prefix, size, address, temp, seq, vvvv_reg, PcodeOpcode::IntSRight, "SARX");
+                return decode_bmi2_shift(
+                    insn,
+                    op_idx,
+                    prefix,
+                    size,
+                    address,
+                    temp,
+                    seq,
+                    vvvv_reg,
+                    PcodeOpcode::IntSRight,
+                    "SARX",
+                );
             }
             // SHLX: dst, src, cnt(vvvv) — no flags
             (EscapeMandatoryPrefix::P66, 0xF7) => {
-                return decode_bmi2_shift(insn, op_idx, prefix, size, address, temp, seq, vvvv_reg, PcodeOpcode::IntLeft, "SHLX");
+                return decode_bmi2_shift(
+                    insn,
+                    op_idx,
+                    prefix,
+                    size,
+                    address,
+                    temp,
+                    seq,
+                    vvvv_reg,
+                    PcodeOpcode::IntLeft,
+                    "SHLX",
+                );
             }
             // SHRX: dst, src, cnt(vvvv) — no flags
             (EscapeMandatoryPrefix::F2, 0xF7) => {
-                return decode_bmi2_shift(insn, op_idx, prefix, size, address, temp, seq, vvvv_reg, PcodeOpcode::IntRight, "SHRX");
+                return decode_bmi2_shift(
+                    insn,
+                    op_idx,
+                    prefix,
+                    size,
+                    address,
+                    temp,
+                    seq,
+                    vvvv_reg,
+                    PcodeOpcode::IntRight,
+                    "SHRX",
+                );
             }
             // MULX: hi(ModRM.reg), lo(vvvv) = (EDX/RDX) * src(r/m) — no flags
             (EscapeMandatoryPrefix::F2, 0xF6) => {
@@ -76,11 +111,31 @@ pub(super) fn decode_three_byte_escape_semantic(
             }
             // PEXT: dst(ModRM.reg), src(vvvv), mask(r/m) → CallOther
             (EscapeMandatoryPrefix::F3, 0xF5) => {
-                return decode_bmi2_pext_pdep(insn, op_idx, prefix, size, address, temp, seq, "PEXT", 0xF5_F3_u64);
+                return decode_bmi2_pext_pdep(
+                    insn,
+                    op_idx,
+                    prefix,
+                    size,
+                    address,
+                    temp,
+                    seq,
+                    "PEXT",
+                    0xF5_F3_u64,
+                );
             }
             // PDEP: dst(ModRM.reg), src(vvvv), mask(r/m) → CallOther
             (EscapeMandatoryPrefix::F2, 0xF5) => {
-                return decode_bmi2_pext_pdep(insn, op_idx, prefix, size, address, temp, seq, "PDEP", 0xF5_F2_u64);
+                return decode_bmi2_pext_pdep(
+                    insn,
+                    op_idx,
+                    prefix,
+                    size,
+                    address,
+                    temp,
+                    seq,
+                    "PDEP",
+                    0xF5_F2_u64,
+                );
             }
             _ => {}
         }
@@ -102,13 +157,25 @@ pub(super) fn decode_three_byte_escape_semantic(
 
     if map_0f3a {
         match ext3 {
-            0x16 => return decode_pextrd_pinsrd_family(insn, op_idx, prefix, size, address, temp, seq, true),
-            0x17 => return decode_extractps_semantic(insn, op_idx, prefix, size, address, temp, seq),
-            0x22 => {
-                return decode_pextrd_pinsrd_family(insn, op_idx, prefix, size, address, temp, seq, false)
+            0x16 => {
+                return decode_pextrd_pinsrd_family(
+                    insn, op_idx, prefix, size, address, temp, seq, true,
+                )
             }
-            0x61 => return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x61),
-            0x62 => return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x62),
+            0x17 => {
+                return decode_extractps_semantic(insn, op_idx, prefix, size, address, temp, seq)
+            }
+            0x22 => {
+                return decode_pextrd_pinsrd_family(
+                    insn, op_idx, prefix, size, address, temp, seq, false,
+                )
+            }
+            0x61 => {
+                return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x61)
+            }
+            0x62 => {
+                return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x62)
+            }
             0x63 => return decode_pcmpistri_semantic(insn, op_idx, prefix, address, temp, seq),
             // RORX: VEX.F2.0F3A.W0/1 F0 /r imm8 — rotate right without flags
             0xF0 if mandatory == EscapeMandatoryPrefix::F2 => {
@@ -197,7 +264,16 @@ fn decode_crc32_semantic(
     };
 
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, src_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 2,
+        prefix,
+        src_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -240,7 +316,16 @@ pub(super) fn decode_pextrd_pinsrd_family(
 ) -> Vec<PcodeOp> {
     let elem_size = if size == 8 { 8 } else { 4 };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, elem_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 2,
+        prefix,
+        elem_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -299,10 +384,11 @@ pub(super) fn decode_pcmpistri_semantic(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
         Some(v) => v,
         None => return Vec::new(),
@@ -320,7 +406,9 @@ pub(super) fn decode_pcmpistri_semantic(
         x86_xmm_reg(rm_index, 16)
     } else {
         match &decoded.rm {
-            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Mem(_) => {
+                materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq)
+            }
             RmOperand::Reg(_) => return Vec::new(),
         }
     };
@@ -331,7 +419,12 @@ pub(super) fn decode_pcmpistri_semantic(
         opcode: PcodeOpcode::CallOther,
         address,
         output: Some(out.clone()),
-        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x63, 8), lhs, rhs, imm8],
+        inputs: vec![
+            const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x63, 8),
+            lhs,
+            rhs,
+            imm8,
+        ],
         asm_mnemonic: Some("PCMPISTRI_INTRINSIC".to_string()),
     });
     ops.push(PcodeOp {
@@ -356,10 +449,11 @@ pub(super) fn decode_pcmpstrx_semantic(
     ext3: u8,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
         Some(v) => v,
         None => return Vec::new(),
@@ -377,7 +471,9 @@ pub(super) fn decode_pcmpstrx_semantic(
         x86_xmm_reg(rm_index, 16)
     } else {
         match &decoded.rm {
-            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Mem(_) => {
+                materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq)
+            }
             RmOperand::Reg(_) => return Vec::new(),
         }
     };
@@ -404,7 +500,12 @@ pub(super) fn decode_pcmpstrx_semantic(
         opcode: PcodeOpcode::CallOther,
         address,
         output: Some(out.clone()),
-        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + u64::from(ext3), 8), lhs, rhs, imm8],
+        inputs: vec![
+            const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + u64::from(ext3), 8),
+            lhs,
+            rhs,
+            imm8,
+        ],
         asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
     });
     ops.push(PcodeOp {
@@ -430,7 +531,16 @@ pub(super) fn decode_extractps_semantic(
 ) -> Vec<PcodeOp> {
     let rm_size = if size == 8 { 8 } else { 4 };
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, rm_size, address, temp, &mut ops, seq) {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 2,
+        prefix,
+        rm_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -446,7 +556,11 @@ pub(super) fn decode_extractps_semantic(
         opcode: PcodeOpcode::CallOther,
         address,
         output: Some(out.clone()),
-        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x17, 8), src_xmm, imm8],
+        inputs: vec![
+            const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x17, 8),
+            src_xmm,
+            imm8,
+        ],
         asm_mnemonic: Some("EXTRACTPS_INTRINSIC".to_string()),
     });
     write_rm_value(&decoded.rm, out, address, &mut ops, seq, "EXTRACTPS")
@@ -465,10 +579,11 @@ pub(super) fn decode_three_byte_xmm_intrinsic(
     has_imm8: bool,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
 
     let modrm = match insn.get(op_idx + 3) {
         Some(v) => *v,
@@ -482,7 +597,9 @@ pub(super) fn decode_three_byte_xmm_intrinsic(
         x86_xmm_reg(rm_index, 16)
     } else {
         match &decoded.rm {
-            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Mem(_) => {
+                materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq)
+            }
             RmOperand::Reg(_) => return Vec::new(),
         }
     };
@@ -524,13 +641,7 @@ pub(super) fn decode_three_byte_xmm_intrinsic(
 
 // ── BMI flag helper ───────────────────────────────────────────────────────────
 // All BMI1 logical instructions: CF=0, OF=0, ZF/SF from result, PF undefined.
-fn emit_bmi_flags(
-    ops: &mut Vec<PcodeOp>,
-    address: u64,
-    size: u32,
-    result: Varnode,
-    seq: &mut u32,
-) {
+fn emit_bmi_flags(ops: &mut Vec<PcodeOp>, address: u64, size: u32, result: Varnode, seq: &mut u32) {
     ops.push(PcodeOp {
         seq_num: next_seq(seq),
         opcode: PcodeOpcode::Copy,
@@ -577,10 +688,11 @@ fn decode_bmi_andn(
     vvvv_reg: u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     let src1 = x86_reg(vvvv_reg, size);
     let src2 = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
@@ -626,10 +738,11 @@ fn decode_bmi_blsr_family(
     vvvv_reg: u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let reg_field = decoded.reg_field;
     let dst = x86_reg(vvvv_reg, size);
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
@@ -722,10 +835,11 @@ fn decode_bmi_bextr(
     vvvv_reg: u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let ctrl = x86_reg(vvvv_reg, size);
@@ -735,7 +849,11 @@ fn decode_bmi_bextr(
         opcode: PcodeOpcode::CallOther,
         address,
         output: Some(out.clone()),
-        inputs: vec![const_u64(X86_3BYTE_0F38_POLICY_BASE_ID + 0xF7, 8), src, ctrl],
+        inputs: vec![
+            const_u64(X86_3BYTE_0F38_POLICY_BASE_ID + 0xF7, 8),
+            src,
+            ctrl,
+        ],
         asm_mnemonic: Some("BEXTR_INTRINSIC".to_string()),
     });
     ops.push(PcodeOp {
@@ -761,10 +879,11 @@ fn decode_bmi_bzhi(
     vvvv_reg: u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let idx = x86_reg(vvvv_reg, size);
@@ -823,10 +942,11 @@ fn decode_bmi2_shift(
     tag: &str,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let cnt_raw = x86_reg(vvvv_reg, size);
@@ -873,10 +993,11 @@ fn decode_bmi2_mulx(
     vvvv_reg: u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let hi_dst = x86_reg(decoded.reg_index, size);
     let lo_dst = x86_reg(vvvv_reg, size);
     // Implicit source: EDX (reg index 2) or RDX
@@ -933,10 +1054,11 @@ fn decode_rorx(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let imm8_vn = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
         Some(v) => v,
         None => return Vec::new(),
@@ -956,7 +1078,11 @@ fn decode_rorx(
             opcode: PcodeOpcode::CallOther,
             address,
             output: Some(out.clone()),
-            inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0xF0, 8), src, imm8_vn],
+            inputs: vec![
+                const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0xF0, 8),
+                src,
+                imm8_vn,
+            ],
             asm_mnemonic: Some("RORX_INTRINSIC".to_string()),
         });
         ops.push(PcodeOp {
@@ -1037,10 +1163,11 @@ fn decode_bmi2_pext_pdep(
     policy_id: u64,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
-        Some(v) => v,
-        None => return Vec::new(),
-    };
+    let decoded =
+        match decode_modrm_operand(insn, op_idx + 2, prefix, size, address, temp, &mut ops, seq) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
     let dst = x86_reg(decoded.reg_index, size);
     let mask = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
     let out = temp.alloc(size);

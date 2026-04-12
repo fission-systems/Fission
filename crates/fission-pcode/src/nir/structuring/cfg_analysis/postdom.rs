@@ -1,7 +1,7 @@
 //! Post-dominator sets and immediate postdominator tree (Cooper / reverse CFG).
 
 use super::util::{
-    compute_postdominator_sets_for_exit, cooper_intersect, compute_rpo, nearest_common_from_sets,
+    compute_postdominator_sets_for_exit, compute_rpo, cooper_intersect, nearest_common_from_sets,
     reverse_reachable_from,
 };
 use crate::fast_hash::FastMap as HashMap;
@@ -134,7 +134,11 @@ impl ImmPostDomTree {
         // no successors (reverse); on the *forward* CFG perspective the virtual node
         // succeeds all exits.
         let total_nodes = node_count + if exits.len() > 1 { 1 } else { 0 };
-        let super_exit = if exits.len() > 1 { Some(node_count) } else { None };
+        let super_exit = if exits.len() > 1 {
+            Some(node_count)
+        } else {
+            None
+        };
 
         // Build the reverse CFG (edges go from successor to predecessor in the original CFG).
         // In the reverse CFG: reverse_succs[v] = predecessors[v] (forward preds),
@@ -227,11 +231,7 @@ impl ImmPostDomTree {
     /// (i.e. `n` is an exit node or part of a disconnected loop).
     pub(crate) fn immediate_postdominator(&self, n: usize) -> Option<usize> {
         let ipdom = self.idom.get(n).copied()?;
-        if ipdom == n {
-            None
-        } else {
-            Some(ipdom)
-        }
+        if ipdom == n { None } else { Some(ipdom) }
     }
 
     /// Nearest common postdominator of a set of nodes (LCA in the idom tree).

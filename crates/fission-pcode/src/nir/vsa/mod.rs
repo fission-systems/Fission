@@ -19,4 +19,4 @@ pub(crate) mod jump_resolver;
 pub(crate) mod solver;
 pub(crate) mod transfer;
 
-pub(crate) use jump_resolver::apply_jump_resolver_pass;
+pub(crate) use jump_resolver::{apply_jump_resolver_pass, jump_resolver_candidate_count};

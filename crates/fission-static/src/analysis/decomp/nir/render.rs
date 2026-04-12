@@ -3,9 +3,10 @@ use super::nir_types::NirWorkerRequest;
 use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions,
-    NirTypeContext, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
-    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats,
+    NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode,
+    PcodeOptimizer, PcodeOptimizerConfig, pcode_has_indirect_control_flow,
+    render_nir_with_binary_and_context, render_nir_with_context, take_last_nir_build_stats,
+    take_last_nir_hint_stats,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
@@ -121,13 +122,13 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
-    let indirect = IndirectControlClassification::from_pcode(pcode);
+    let has_indirect_control = pcode_has_indirect_control_flow(pcode);
     if enforce_auto_gate
         && !(binary.is_64bit
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(pcode) <= 600
-            && !indirect.has_indirect_control
+            && !has_indirect_control
             && max_multiequal_fanin(pcode) <= 4)
     {
         return Ok(None);
@@ -138,9 +139,24 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
         region_linearize_structuring,
         force_linear_structuring,
     );
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = serde_json::to_string_pretty(pcode).map(|json| {
+            std::fs::write(
+                format!("/tmp/fission_preview_{address:x}_direct_pcode.json"),
+                json,
+            )
+        });
+    }
     let render_start = Instant::now();
     match catch_unwind(AssertUnwindSafe(|| {
-        render_nir_with_context(pcode, name, address, &options, Some(&type_context))
+        render_nir_with_binary_and_context(
+            pcode,
+            name,
+            address,
+            &options,
+            Some(binary),
+            Some(&type_context),
+        )
     })) {
         Ok(Ok(code)) => {
             let build_stats = take_last_nir_build_stats();
@@ -349,14 +365,14 @@ pub(crate) fn render_nir_from_json_with_type_context(
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
-    let indirect = IndirectControlClassification::from_pcode(&pcode);
+    let has_indirect_control = pcode_has_indirect_control_flow(&pcode);
     nir_diag_stage(address, "parse_pcode_done", parse_start);
     if enforce_auto_gate
         && !(binary.is_64bit
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !indirect.has_indirect_control
+            && !has_indirect_control
             && max_multiequal_fanin(&pcode) <= 4)
     {
         return Ok(None);
@@ -376,7 +392,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !indirect.has_indirect_control
+            && !has_indirect_control
             && max_multiequal_fanin(&pcode) <= 4);
 
     if should_use_worker {

@@ -43,13 +43,15 @@ pub(crate) fn build_nir_type_context(
         call_targets
             .entry(func.address)
             .or_insert_with(|| sanitized.clone());
-        call_target_refs.entry(func.address).or_insert(CallTargetRef {
-            address: Some(func.address),
-            symbol: sanitized,
-            provenance: CallTargetProvenance::Direct,
-            edge_kind: CallEdgeKind::Direct,
-            confidence: 224,
-        });
+        call_target_refs
+            .entry(func.address)
+            .or_insert(CallTargetRef {
+                address: Some(func.address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 224,
+            });
     }
 
     for (resolved_address, name) in &binary.inner().iat_symbols {
@@ -60,13 +62,15 @@ pub(crate) fn build_nir_type_context(
         call_targets
             .entry(*resolved_address)
             .or_insert_with(|| sanitized.clone());
-        call_target_refs.entry(*resolved_address).or_insert(CallTargetRef {
-            address: Some(*resolved_address),
-            symbol: sanitized,
-            provenance: CallTargetProvenance::Import,
-            edge_kind: CallEdgeKind::Import,
-            confidence: 255,
-        });
+        call_target_refs
+            .entry(*resolved_address)
+            .or_insert(CallTargetRef {
+                address: Some(*resolved_address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
+                confidence: 255,
+            });
     }
 
     for (resolved_address, name) in &binary.inner().global_symbols {
@@ -77,13 +81,15 @@ pub(crate) fn build_nir_type_context(
         call_targets
             .entry(*resolved_address)
             .or_insert_with(|| sanitized.clone());
-        call_target_refs.entry(*resolved_address).or_insert(CallTargetRef {
-            address: Some(*resolved_address),
-            symbol: sanitized,
-            provenance: CallTargetProvenance::Global,
-            edge_kind: CallEdgeKind::Reference,
-            confidence: 192,
-        });
+        call_target_refs
+            .entry(*resolved_address)
+            .or_insert(CallTargetRef {
+                address: Some(*resolved_address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Global,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 192,
+            });
     }
 
     NirTypeContext {
@@ -177,12 +183,15 @@ fn build_nir_call_param_rules(
 ) -> Vec<NirCallParamRule> {
     let structures = WindowsStructures::new();
     let mut call_param_rules = Vec::new();
-    let target_addresses_by_name = call_target_refs
-        .iter()
-        .fold(HashMap::<String, Vec<u64>>::new(), |mut acc, (addr, target_ref)| {
-            acc.entry(target_ref.symbol.clone()).or_default().push(*addr);
+    let target_addresses_by_name = call_target_refs.iter().fold(
+        HashMap::<String, Vec<u64>>::new(),
+        |mut acc, (addr, target_ref)| {
+            acc.entry(target_ref.symbol.clone())
+                .or_default()
+                .push(*addr);
             acc
-        });
+        },
+    );
     for sig in WIN_API_DB.iter() {
         for (arg_index, param) in sig.params.iter().enumerate() {
             let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {

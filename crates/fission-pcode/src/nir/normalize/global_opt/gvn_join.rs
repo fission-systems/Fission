@@ -6,8 +6,8 @@
 //! the first assignment in each arm to use the temp so
 //! [`super::phi_recovery::copy_propagation_pass`] can eliminate copies.
 
-use super::super::cleanup::expr_has_side_effects;
 use super::super::analysis::expr_key::pure_expr_key;
+use super::super::cleanup::expr_has_side_effects;
 use super::super::*;
 use crate::nir::support::expr_type;
 
@@ -82,14 +82,20 @@ fn hoist_stmt_deep(
 ) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             changed |= hoist_stmts(then_body, locals, params, ctr);
             changed |= hoist_stmts(else_body, locals, params, ctr);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= hoist_stmts(body, locals, params, ctr);
         }
-        HirStmt::For { init, body, update, .. } => {
+        HirStmt::For {
+            init, body, update, ..
+        } => {
             if let Some(i) = init {
                 changed |= hoist_stmt_deep(i, locals, params, ctr);
             }
@@ -112,7 +118,10 @@ fn hoist_stmt_deep(
     changed
 }
 
-fn try_join_pair(then_body: &[HirStmt], else_body: &[HirStmt]) -> Option<(HirExpr, String, String)> {
+fn try_join_pair(
+    then_body: &[HirStmt],
+    else_body: &[HirStmt],
+) -> Option<(HirExpr, String, String)> {
     if then_body.is_empty() || else_body.is_empty() {
         return None;
     }

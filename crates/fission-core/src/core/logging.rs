@@ -217,7 +217,9 @@ pub fn init_with_options(options: LoggingOptions) {
         let show_target = options.targets.enabled();
         let span_events = span_events(options.include_span_events);
 
-        let registry = Registry::default().with(env_filter).with(ErrorLayer::default());
+        let registry = Registry::default()
+            .with(env_filter)
+            .with(ErrorLayer::default());
         let _ = match (options.format, options.include_timestamp) {
             (LoggingFormat::Compact, true) => registry
                 .with(
@@ -290,9 +292,12 @@ pub fn init_from_global_config() {
 
 /// Configure a file sink before the shared subscriber is initialized.
 pub fn enable_file_logging(path: &str) -> io::Result<()> {
-    FILE_LOGGING_OVERRIDE
-        .set(PathBuf::from(path))
-        .map_err(|_| io::Error::new(io::ErrorKind::AlreadyExists, "file logging already configured"))
+    FILE_LOGGING_OVERRIDE.set(PathBuf::from(path)).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "file logging already configured",
+        )
+    })
 }
 
 /// Dynamic post-init file logging is intentionally unsupported.
@@ -337,7 +342,10 @@ mod tests {
     fn env_filter_falls_back_when_rust_log_empty() {
         unsafe { std::env::set_var("RUST_LOG", "") };
         let filter = env_filter_from_rust_log_or_default("warn");
-        assert_eq!(format!("{filter:?}"), format!("{:?}", EnvFilter::new("warn")));
+        assert_eq!(
+            format!("{filter:?}"),
+            format!("{:?}", EnvFilter::new("warn"))
+        );
         unsafe { std::env::remove_var("RUST_LOG") };
     }
 

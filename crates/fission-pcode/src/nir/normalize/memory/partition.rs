@@ -36,7 +36,10 @@ impl PartitionKey {
     pub(crate) fn is_promotable_stack_like(&self) -> bool {
         matches!(
             (self.effect_class, self.escape_class),
-            (MemoryAccessClass::Stack | MemoryAccessClass::Aggregate, MemoryEscapeClass::NonEscaping)
+            (
+                MemoryAccessClass::Stack | MemoryAccessClass::Aggregate,
+                MemoryEscapeClass::NonEscaping
+            )
         )
     }
 }
@@ -68,7 +71,10 @@ pub(crate) fn collect_partitioned_memory_accesses(
     accesses
 }
 
-pub(crate) fn partition_key_for_pointer_expr(ptr: &HirExpr, access_ty: &NirType) -> Option<PartitionKey> {
+pub(crate) fn partition_key_for_pointer_expr(
+    ptr: &HirExpr,
+    access_ty: &NirType,
+) -> Option<PartitionKey> {
     let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
     Some(access.partition_key())
 }
@@ -227,7 +233,9 @@ fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
                 MemoryAccessClass::Unknown
             }
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::Cast { expr: base, .. } => classify_base_object(base),
+        HirExpr::PtrOffset { base, .. } | HirExpr::Cast { expr: base, .. } => {
+            classify_base_object(base)
+        }
         _ => MemoryAccessClass::HeapLike,
     }
 }

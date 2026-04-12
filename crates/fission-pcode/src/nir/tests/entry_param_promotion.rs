@@ -1,11 +1,11 @@
 //! Tests for entry-block `tmp = <param reg>` → `param_k` promotion.
 
 use super::*;
+use crate::nir::CallingConvention;
 use crate::nir::normalize::normalize_hir_function;
 use crate::nir::types::{
     HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
 };
-use crate::nir::CallingConvention;
 
 fn binding_temp(name: &str) -> NirBinding {
     NirBinding {

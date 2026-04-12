@@ -29,8 +29,9 @@
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
 use super::typed_facts::{
-    collect_typed_fact_inventory, inferred_aggregate_size as inferred_size_from_facts,
-    should_infer_aggregate as should_infer_aggregate_from_facts, TypedAccessFacts,
+    TypedAccessFacts, collect_typed_fact_inventory,
+    inferred_aggregate_size as inferred_size_from_facts,
+    should_infer_aggregate as should_infer_aggregate_from_facts,
 };
 use crate::nir::normalize::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
@@ -138,8 +139,12 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
             return false;
         }
         {
-            let NirType::Ptr(inner) = &mut binding.ty else { return false; };
-            let NirType::Aggregate { fields, .. } = inner.as_mut() else { return false; };
+            let NirType::Ptr(inner) = &mut binding.ty else {
+                return false;
+            };
+            let NirType::Aggregate { fields, .. } = inner.as_mut() else {
+                return false;
+            };
             if !fields.is_empty() {
                 return false; // already populated
             }
@@ -366,7 +371,10 @@ mod tests {
         let NirType::Aggregate { fields, .. } = inner.as_ref() else {
             panic!("expected inferred aggregate");
         };
-        let names = fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
+        let names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(names, vec!["left", "top", "right", "bottom"]);
     }
 

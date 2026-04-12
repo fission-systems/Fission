@@ -5,7 +5,6 @@ pub(crate) fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
     canonicalize_flag_intrinsic_call(expr).or_else(|| canonicalize_sborrow_compare(expr))
 }
 
-
 pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {

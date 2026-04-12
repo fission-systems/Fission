@@ -1,4 +1,5 @@
 use super::*;
+use crate::nir::normalize::wave_stats;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn try_lower_switch(
@@ -54,6 +55,7 @@ impl<'a> PreviewBuilder<'a> {
             LinearExit::Join(join_idx) => join_idx,
             LinearExit::Return | LinearExit::End => max_skip,
         };
+        wave_stats::add_dispatcher_shape_recoveries(1);
         Ok(Some((
             HirStmt::Switch {
                 expr: parsed.selector,
@@ -72,6 +74,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut current_term = self.lower_block_terminator(current_idx)?;
         let mut selector: Option<HirExpr> = None;
         let mut cases = Vec::new();
+        let mut guarded_default_idx: Option<usize> = None;
+        let mut saw_range_guard = false;
         let mut visited = HashSet::new();
         let max_chain_steps = self
             .successors
@@ -106,22 +110,39 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 return Ok(None);
             };
-            let Some(case_idx) = self.find_block_index_by_address(case_target) else {
-                return Ok(None);
-            };
-            let case_idx = self.canonicalize_switch_target(case_idx);
-            let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true)
-            else {
-                return Ok(None);
-            };
-            if let Some(existing) = &selector {
-                if strip_casts(existing) != strip_casts(&case_selector) {
+            if let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true) {
+                let Some(case_idx) = self.find_block_index_by_address(case_target) else {
                     return Ok(None);
+                };
+                let case_idx = self.canonicalize_switch_target(case_idx);
+                if let Some(existing) = &selector {
+                    if strip_casts(existing) != strip_casts(&case_selector) {
+                        return Ok(None);
+                    }
+                } else {
+                    selector = Some(case_selector);
                 }
+                cases.push((value, case_idx));
+            } else if cases.is_empty() && !saw_range_guard {
+                let Some(range_selector) = extract_range_guard_for_chain(&cond, !case_on_true)
+                else {
+                    return Ok(None);
+                };
+                if let Some(existing) = &selector {
+                    if strip_casts(existing) != strip_casts(&range_selector) {
+                        return Ok(None);
+                    }
+                } else {
+                    selector = Some(range_selector);
+                }
+                let Some(default_idx) = self.find_block_index_by_address(case_target) else {
+                    return Ok(None);
+                };
+                guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
+                saw_range_guard = true;
             } else {
-                selector = Some(case_selector);
+                return Ok(None);
             }
-            cases.push((value, case_idx));
 
             let next_term = self.lower_block_terminator(next_idx)?;
             match next_term {
@@ -135,10 +156,15 @@ impl<'a> PreviewBuilder<'a> {
                         return Ok(None);
                     };
                     let default_idx = self.canonicalize_switch_target(next_idx);
+                    if let Some(guarded_default_idx) = guarded_default_idx
+                        && guarded_default_idx != default_idx
+                    {
+                        return Ok(None);
+                    }
                     return Ok(Some(ParsedSwitch {
                         selector,
                         cases,
-                        default_idx,
+                        default_idx: guarded_default_idx.unwrap_or(default_idx),
                     }));
                 }
             }
@@ -147,7 +173,7 @@ impl<'a> PreviewBuilder<'a> {
         Ok(None)
     }
 
-    fn canonicalize_switch_target(&self, start_idx: usize) -> usize {
+    pub(super) fn canonicalize_switch_target(&self, start_idx: usize) -> usize {
         const MAX_SWITCH_TARGET_CANON_STEPS: usize = 32;
         let mut current = start_idx;
         let mut visited = HashSet::new();
@@ -201,13 +227,92 @@ fn extract_eq_const_for_case(expr: &HirExpr, case_on_true: bool) -> Option<(HirE
 
 fn extract_eq_const_operands(lhs: &HirExpr, rhs: &HirExpr) -> Option<(HirExpr, i64)> {
     match (strip_casts(lhs), strip_casts(rhs)) {
-        (HirExpr::Const(value, _), other) => Some((other, value)),
-        (other, HirExpr::Const(value, _)) => Some((other, value)),
+        (HirExpr::Const(value, _), other) => normalize_affine_case_expr(&other, value),
+        (other, HirExpr::Const(value, _)) => normalize_affine_case_expr(&other, value),
         _ => None,
     }
 }
 
-fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
+fn extract_range_guard_for_chain(expr: &HirExpr, chain_on_true: bool) -> Option<HirExpr> {
+    let expr = strip_casts(expr);
+    match expr {
+        HirExpr::Binary {
+            op:
+                HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe,
+            lhs,
+            rhs,
+            ..
+        } => match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
+            (other, HirExpr::Const(_, _)) if chain_on_true => {
+                normalize_affine_bound_expr(&other)
+            }
+            (HirExpr::Const(_, _), other) if !chain_on_true => {
+                normalize_affine_bound_expr(&other)
+            }
+            _ => None,
+        },
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } => extract_range_guard_for_chain(expr.as_ref(), !chain_on_true),
+        _ => None,
+    }
+}
+
+fn normalize_affine_bound_expr(expr: &HirExpr) -> Option<HirExpr> {
+    let expr = strip_casts(expr);
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        }
+        | HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } if matches!(strip_casts(rhs.as_ref()), HirExpr::Const(_, _)) => Some(*lhs.clone()),
+        _ => Some(expr.clone()),
+    }
+}
+
+fn normalize_affine_case_expr(expr: &HirExpr, value: i64) -> Option<(HirExpr, i64)> {
+    let expr = strip_casts(expr);
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            ref lhs,
+            ref rhs,
+            ..
+        } => {
+            let HirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+                return Some((expr.clone(), value));
+            };
+            value
+                .checked_add(offset)
+                .map(|normalized| ((*lhs.clone()), normalized))
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            ref lhs,
+            ref rhs,
+            ..
+        } => {
+            let HirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+                return Some((expr.clone(), value));
+            };
+            value
+                .checked_sub(offset)
+                .map(|normalized| ((*lhs.clone()), normalized))
+        }
+        _ => Some((expr.clone(), value)),
+    }
+}
+
+pub(super) fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
     let mut merged: Vec<HirSwitchCase> = Vec::with_capacity(cases.len());
     for case in cases.drain(..) {
         if let Some(existing) = merged
@@ -266,5 +371,74 @@ mod tests {
         assert_eq!(cases.len(), 2);
         assert_eq!(cases[0].values, vec![1, 3]);
         assert_eq!(cases[1].values, vec![2]);
+    }
+
+    #[test]
+    fn extract_eq_const_operands_normalizes_subtracted_selector() {
+        let selector = HirExpr::Var("msg".to_string());
+        let shifted = HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(selector.clone()),
+            rhs: Box::new(HirExpr::Const(
+                160,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        };
+        let recovered = extract_eq_const_operands(
+            &shifted,
+            &HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        )
+        .expect("normalized selector");
+        assert_eq!(recovered.0, selector);
+        assert_eq!(recovered.1, 160);
+    }
+
+    #[test]
+    fn extract_range_guard_for_chain_normalizes_affine_selector() {
+        let selector = HirExpr::Var("msg".to_string());
+        let shifted = HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(selector.clone()),
+            rhs: Box::new(HirExpr::Const(
+                160,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        };
+        let cond = HirExpr::Binary {
+            op: HirBinaryOp::Le,
+            lhs: Box::new(shifted),
+            rhs: Box::new(HirExpr::Const(
+                95,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Bool,
+        };
+
+        let recovered =
+            extract_range_guard_for_chain(&cond, true).expect("normalized range guard selector");
+        assert_eq!(recovered, selector);
     }
 }

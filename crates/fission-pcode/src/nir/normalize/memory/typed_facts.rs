@@ -1,7 +1,7 @@
-use super::partition::{
-    collect_partitioned_memory_accesses, type_byte_size, MemoryAccessKind, MemoryEscapeClass,
-};
 use super::super::*;
+use super::partition::{
+    MemoryAccessKind, MemoryEscapeClass, collect_partitioned_memory_accesses, type_byte_size,
+};
 use crate::nir::normalize::wave_stats::{
     add_object_root_fact_promotions, add_surface_fact_promotions, add_typed_fact_conflicts,
     add_typed_fact_evidences,
@@ -237,7 +237,10 @@ pub(super) fn collect_typed_fact_inventory(
                 },
                 resolved_struct_name: None,
             });
-        let facts = entry.accesses.entry(access.const_offset as u32).or_default();
+        let facts = entry
+            .accesses
+            .entry(access.const_offset as u32)
+            .or_default();
         facts.ty = merge_field_ty(&facts.ty, &access.access_ty);
         match access.kind {
             MemoryAccessKind::Load => facts.loads += 1,
@@ -274,11 +277,17 @@ pub(super) fn collect_typed_fact_inventory(
         }
 
         let inferred_size = inferred_aggregate_size(&facts.accesses).unwrap_or_default();
-        let resolved_struct_name = candidate_struct_name(facts.object.type_hint.as_deref(), &structures)
-            .map(|name| (Some(name), 0usize))
-            .unwrap_or_else(|| {
-                infer_struct_name_from_offsets(&facts.accesses, inferred_size, func.is_64bit, &structures)
-            });
+        let resolved_struct_name =
+            candidate_struct_name(facts.object.type_hint.as_deref(), &structures)
+                .map(|name| (Some(name), 0usize))
+                .unwrap_or_else(|| {
+                    infer_struct_name_from_offsets(
+                        &facts.accesses,
+                        inferred_size,
+                        func.is_64bit,
+                        &structures,
+                    )
+                });
         facts.resolved_struct_name = resolved_struct_name.0;
         typed_fact_conflicts += resolved_struct_name.1;
 
@@ -331,7 +340,10 @@ pub(super) fn collect_typed_fact_inventory(
             facts.shape.opaque_ranges.push((0, inferred_size));
         }
 
-        inventory.store.object_facts.insert(binding_name.clone(), facts.object.clone());
+        inventory
+            .store
+            .object_facts
+            .insert(binding_name.clone(), facts.object.clone());
 
         if facts.object.type_hint.is_some() || facts.resolved_struct_name.is_some() {
             let preferred_type = if inferred_size > 0 && should_infer_aggregate(&facts.accesses) {
@@ -349,7 +361,13 @@ pub(super) fn collect_typed_fact_inventory(
                 .resolved_struct_name
                 .as_ref()
                 .map(|name| format!("struct:{name}"))
-                .or_else(|| facts.object.type_hint.as_ref().map(|hint| format!("surface:{hint}")))
+                .or_else(|| {
+                    facts
+                        .object
+                        .type_hint
+                        .as_ref()
+                        .map(|hint| format!("surface:{hint}"))
+                })
                 .unwrap_or_else(|| "fact".to_string());
             inventory.store.surface_facts.insert(
                 binding_name.clone(),

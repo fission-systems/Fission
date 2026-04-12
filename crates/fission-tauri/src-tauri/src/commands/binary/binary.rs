@@ -46,8 +46,9 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
         )
         .await
         {
-            Ok(joined) => joined
-                .map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?,
+            Ok(joined) => {
+                joined.map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?
+            }
             Err(_) => {
                 warn!("cross-image propagation timed out during open_file; skipping for responsiveness");
                 Default::default()

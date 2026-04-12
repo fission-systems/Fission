@@ -28,9 +28,13 @@ impl<'a> PrintCtx<'a> {
     /// If `base_name` is a known Ptr(Aggregate{fields}) and `offset` matches a
     /// field, return the field name; otherwise return None.
     fn field_name(&self, base_name: &str, offset: i64) -> Option<&str> {
-        if offset < 0 { return None; }
+        if offset < 0 {
+            return None;
+        }
         let agg = self.agg_ptr.get(base_name)?;
-        let NirType::Aggregate { fields, .. } = agg else { return None; };
+        let NirType::Aggregate { fields, .. } = agg else {
+            return None;
+        };
         let f = fields.iter().find(|f| f.offset as i64 == offset)?;
         Some(f.name.as_str())
     }
@@ -341,7 +345,10 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             } else {
                 let lhs_str = print_expr_prec(lhs, prec, depth + 1);
                 let rhs_str = print_expr_prec(rhs, prec + 1, depth + 1);
-                (format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)), prec)
+                (
+                    format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                    prec,
+                )
             }
         }
         HirExpr::Call { target, args, .. } => {
@@ -482,7 +489,12 @@ fn print_expr_with_ctx(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
     print_expr_prec_ctx(expr, 0, 0, ctx)
 }
 
-fn print_expr_prec_ctx(expr: &HirExpr, parent_prec: u8, depth: usize, ctx: &PrintCtx<'_>) -> String {
+fn print_expr_prec_ctx(
+    expr: &HirExpr,
+    parent_prec: u8,
+    depth: usize,
+    ctx: &PrintCtx<'_>,
+) -> String {
     if depth > MAX_PRINT_EXPR_DEPTH {
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
@@ -551,7 +563,11 @@ fn print_expr_prec_ctx(expr: &HirExpr, parent_prec: u8, depth: usize, ctx: &Prin
                 (format!("*({} *)({inner})", print_type(ty)), 95)
             }
         }
-        HirExpr::Index { base, index, elem_ty } => {
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
             let text = match base.as_ref() {
@@ -597,7 +613,11 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
                 )
             }
         }
-        HirLValue::Index { base, index, elem_ty } => {
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
             match base.as_ref() {
@@ -674,7 +694,11 @@ fn print_stmt_with_indent_ctx(
             out.push_str(&pad);
             out.push_str("}\n");
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             out.push_str(&pad);
             out.push_str(&format!("switch ({}) {{\n", print_expr_with_ctx(expr, ctx)));
             for case in cases {
@@ -711,9 +735,16 @@ fn print_stmt_with_indent_ctx(
             out.push_str(&pad);
             out.push_str("}\n");
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             out.push_str(&pad);
-            out.push_str(&format!("if ({}) {{\n", print_expr_prec_ctx(cond, 0, 0, ctx)));
+            out.push_str(&format!(
+                "if ({}) {{\n",
+                print_expr_prec_ctx(cond, 0, 0, ctx)
+            ));
             for s in then_body {
                 print_stmt_with_indent_ctx(s, indent + 1, depth + 1, ctx, out);
             }
@@ -732,7 +763,10 @@ fn print_stmt_with_indent_ctx(
         }
         HirStmt::While { cond, body } => {
             out.push_str(&pad);
-            out.push_str(&format!("while ({}) {{\n", print_expr_prec_ctx(cond, 0, 0, ctx)));
+            out.push_str(&format!(
+                "while ({}) {{\n",
+                print_expr_prec_ctx(cond, 0, 0, ctx)
+            ));
             for s in body {
                 print_stmt_with_indent_ctx(s, indent + 1, depth + 1, ctx, out);
             }
@@ -746,9 +780,17 @@ fn print_stmt_with_indent_ctx(
                 print_stmt_with_indent_ctx(s, indent + 1, depth + 1, ctx, out);
             }
             out.push_str(&pad);
-            out.push_str(&format!("}} while ({});\n", print_expr_prec_ctx(cond, 0, 0, ctx)));
+            out.push_str(&format!(
+                "}} while ({});\n",
+                print_expr_prec_ctx(cond, 0, 0, ctx)
+            ));
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             out.push_str(&pad);
             out.push_str("for (");
             if let Some(i) = init {

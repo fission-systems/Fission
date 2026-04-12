@@ -11,16 +11,16 @@ use super::nir_types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{IndirectControlClassification, NirRenderOptions, PcodeFunction};
+use fission_pcode::{NirRenderOptions, PcodeFunction, pcode_has_indirect_control_flow};
 use std::time::Instant;
 
 pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
-    let indirect = IndirectControlClassification::from_pcode(pcode);
+    let has_indirect_control = pcode_has_indirect_control_flow(pcode);
     binary.is_64bit
         && binary.format.to_ascii_uppercase().starts_with("PE")
         && pcode.blocks.len() <= 12
         && pcode_total_ops(pcode) <= 600
-        && !indirect.has_indirect_control
+        && !has_indirect_control
         && max_multiequal_fanin(pcode) <= 4
 }
 

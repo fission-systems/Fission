@@ -69,9 +69,7 @@ fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
             scan_def_types(then_body, defs);
             scan_def_types(else_body, defs);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            scan_def_types(body, defs)
-        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => scan_def_types(body, defs),
         HirStmt::For {
             init, update, body, ..
         } => {
@@ -252,7 +250,10 @@ fn infer_return_type_from_body(
 ) -> NirType {
     let mut candidates = Vec::new();
     collect_return_types(stmts, defs, known_binding_types, &mut candidates);
-    candidates.into_iter().find(|t| *t != NirType::Unknown).unwrap_or(NirType::Unknown)
+    candidates
+        .into_iter()
+        .find(|t| *t != NirType::Unknown)
+        .unwrap_or(NirType::Unknown)
 }
 
 fn infer_return_type_stmt(
@@ -298,7 +299,8 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
             continue;
         }
         let mut visited = HashSet::new();
-        let inferred = infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
+        let inferred =
+            infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
         if inferred != NirType::Unknown && binding.ty != inferred {
             binding.ty = inferred;
             known_binding_types.insert(binding.name.clone(), binding.ty.clone());
@@ -313,7 +315,8 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
             continue;
         }
         let mut visited = HashSet::new();
-        let inferred = infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
+        let inferred =
+            infer_type_for_binding(&binding.name, &defs, &known_binding_types, &mut visited);
         if inferred != NirType::Unknown && binding.ty != inferred {
             binding.ty = inferred;
             known_binding_types.insert(binding.name.clone(), binding.ty.clone());
@@ -356,11 +359,7 @@ mod tests {
         }
     }
 
-    fn make_func(
-        locals: Vec<NirBinding>,
-        body: Vec<HirStmt>,
-        return_type: NirType,
-    ) -> HirFunction {
+    fn make_func(locals: Vec<NirBinding>, body: Vec<HirStmt>, return_type: NirType) -> HirFunction {
         HirFunction {
             name: "test".to_owned(),
             params: vec![],
@@ -377,13 +376,22 @@ mod tests {
     fn infers_type_from_const_assign() {
         let body = vec![make_assign(
             "x",
-            HirExpr::Const(42, NirType::Int { bits: 32, signed: false }),
+            HirExpr::Const(
+                42,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
         )];
         let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
         super::apply_type_inference_pass(&mut func);
         assert_eq!(
             func.locals[0].ty,
-            NirType::Int { bits: 32, signed: false }
+            NirType::Int {
+                bits: 32,
+                signed: false
+            }
         );
     }
 
@@ -391,7 +399,13 @@ mod tests {
     fn reports_change_and_reaches_fixpoint() {
         let body = vec![make_assign(
             "x",
-            HirExpr::Const(42, NirType::Int { bits: 32, signed: false }),
+            HirExpr::Const(
+                42,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
         )];
         let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
         assert!(super::apply_type_inference_pass(&mut func));
@@ -435,12 +449,27 @@ mod tests {
     #[test]
     fn rederives_return_type_from_var() {
         let body = vec![
-            make_assign("x", HirExpr::Const(0, NirType::Int { bits: 32, signed: true })),
+            make_assign(
+                "x",
+                HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
+            ),
             HirStmt::Return(Some(HirExpr::Var("x".to_owned()))),
         ];
         let mut func = make_func(vec![make_binding("x")], body, NirType::Unknown);
         super::apply_type_inference_pass(&mut func);
-        assert_eq!(func.return_type, NirType::Int { bits: 32, signed: true });
+        assert_eq!(
+            func.return_type,
+            NirType::Int {
+                bits: 32,
+                signed: true
+            }
+        );
     }
 
     /// If return_type is already known, do not overwrite it.
@@ -448,9 +477,15 @@ mod tests {
     fn does_not_overwrite_known_return_type() {
         let body = vec![HirStmt::Return(Some(HirExpr::Const(
             1,
-            NirType::Int { bits: 64, signed: false },
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         )))];
-        let existing_type = NirType::Int { bits: 32, signed: false };
+        let existing_type = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
         let mut func = make_func(vec![], body, existing_type.clone());
         super::apply_type_inference_pass(&mut func);
         // return_type was non-Unknown going in — should NOT be changed by the pass
@@ -464,7 +499,10 @@ mod tests {
         let body = vec![make_assign(
             "x",
             HirExpr::Cast {
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
                 expr: Box::new(HirExpr::Var("y".to_owned())),
             },
         )];
@@ -472,7 +510,10 @@ mod tests {
         super::apply_type_inference_pass(&mut func);
         assert_eq!(
             func.locals[0].ty,
-            NirType::Int { bits: 64, signed: false }
+            NirType::Int {
+                bits: 64,
+                signed: false
+            }
         );
     }
 
@@ -481,7 +522,13 @@ mod tests {
     fn respects_surface_type_name_override() {
         let body = vec![make_assign(
             "x",
-            HirExpr::Const(0, NirType::Int { bits: 32, signed: false }),
+            HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
         )];
         let mut binding = make_binding("x");
         binding.surface_type_name = Some("DWORD".to_owned());

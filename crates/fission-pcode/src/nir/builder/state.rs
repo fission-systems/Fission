@@ -1,4 +1,5 @@
 use super::*;
+use fission_loader::loader::LoadedBinary;
 use std::cell::RefCell;
 
 pub(super) type BuilderCacheMap<K, V> = rustc_hash::FxHashMap<K, V>;
@@ -8,8 +9,10 @@ pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
     pub(crate) options: &'a MlilPreviewOptions,
+    pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
+    pub(crate) def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     pub(crate) lookup_site_cache:
         RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
@@ -137,4 +140,5 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) indirect_surface_preserved_count: usize,
     pub(crate) indirect_target_set_refined_count: usize,
     pub(crate) dispatcher_shape_recovered_count: usize,
+    pub(crate) proof_payload_direct_emit_count: usize,
 }

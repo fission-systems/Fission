@@ -94,7 +94,10 @@ fn unique_rax_is_named_rax_in_output() {
     let code = render_mlil_preview(&func, "test_rax", 0x140002000, &preview_options())
         .expect("preview render");
     assert!(code.contains("rax"), "expected 'rax'; got:\n{code}");
-    assert!(!code.contains("tmp_a860"), "should not see tmp_a860xxxx; got:\n{code}");
+    assert!(
+        !code.contains("tmp_a860"),
+        "should not see tmp_a860xxxx; got:\n{code}"
+    );
 }
 
 #[test]
@@ -208,7 +211,10 @@ fn unique_rsp_cross_block_is_named() {
 
     let code = render_mlil_preview(&func, "test_rsp_cross", 0x140003000, &preview_options())
         .expect("preview render");
-    assert!(code.contains("rsp"), "expected 'rsp' in cross-block output; got:\n{code}");
+    assert!(
+        code.contains("rsp"),
+        "expected 'rsp' in cross-block output; got:\n{code}"
+    );
     assert!(
         !code.contains("tmp_a860"),
         "cross-block rsp must not appear as tmp_a860xxxx; got:\n{code}"
@@ -257,5 +263,8 @@ fn unique_xmm0_is_named_xmm0() {
     let code = render_mlil_preview(&func, "test_xmm0", 0x140004000, &preview_options())
         .expect("preview render");
     assert!(code.contains("xmm0"), "expected 'xmm0'; got:\n{code}");
-    assert!(!code.contains("tmp_a868"), "should not see tmp_a868xxxx; got:\n{code}");
+    assert!(
+        !code.contains("tmp_a868"),
+        "should not see tmp_a868xxxx; got:\n{code}"
+    );
 }

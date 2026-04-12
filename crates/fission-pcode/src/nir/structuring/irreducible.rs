@@ -227,7 +227,9 @@ fn tarjan_dfs(v: usize, succs: &[Vec<usize>], s: &mut TarjanState) {
             let w = s.stack.pop().unwrap();
             s.on_stack[w] = false;
             component.push(w);
-            if w == v { break; }
+            if w == v {
+                break;
+            }
         }
         s.components.push(component);
     }

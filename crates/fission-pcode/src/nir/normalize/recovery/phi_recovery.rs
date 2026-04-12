@@ -1,3 +1,4 @@
+use super::super::analysis::defuse::DefUseMap;
 /// HIR-level copy propagation and join-variable coalescing.
 ///
 /// These passes improve the HIR after structuring by eliminating unnecessary
@@ -23,7 +24,6 @@
 /// *same* set of variables and renames join-point uses to the shared variable.
 /// This models the classical SSA out-of-SSA transformation for 2-way joins.
 use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
-use super::super::analysis::defuse::DefUseMap;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 
@@ -95,11 +95,7 @@ fn count_definitions_in_stmts(
     counts
 }
 
-fn count_defs_stmt(
-    stmt: &HirStmt,
-    temps: &HashSet<String>,
-    counts: &mut HashMap<String, usize>,
-) {
+fn count_defs_stmt(stmt: &HirStmt, temps: &HashSet<String>, counts: &mut HashMap<String, usize>) {
     match stmt {
         HirStmt::Assign {
             lhs: HirLValue::Var(name),
@@ -131,7 +127,9 @@ fn count_defs_stmt(
                 count_defs_stmt(s, temps, counts);
             }
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 count_defs_stmt(i, temps, counts);
             }
@@ -197,7 +195,9 @@ fn collect_copies_stmt(
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             collect_copies(body, temp_names, def_count, copy_map);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 collect_copies_stmt(i, temp_names, def_count, copy_map);
             }
@@ -258,7 +258,9 @@ fn remove_copy_assigns_nested(
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             remove_copy_assigns(body, copy_map, changed);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(i) = init {
                 remove_copy_assigns_nested(i, copy_map, changed);
             }
@@ -502,8 +504,7 @@ fn collect_join_renames(
                         // else-branch itself), they can be replaced by
                         // then_var.  The else-branch use is the definition
                         // site (assignment), which is not counted in use_count.
-                        let else_uses_in_branch =
-                            else_uses_total.saturating_sub(else_uses_after);
+                        let else_uses_in_branch = else_uses_total.saturating_sub(else_uses_after);
                         if else_uses_in_branch == 0 {
                             rename_map.insert(else_var.clone(), then_var.clone());
                         }
@@ -587,12 +588,21 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
             else_body,
         } => {
             count_var_in_expr(cond, name)
-                + then_body.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum::<usize>()
-                + else_body.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum::<usize>()
+                + then_body
+                    .iter()
+                    .map(|s| count_uses_in_stmt_flat(s, name))
+                    .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|s| count_uses_in_stmt_flat(s, name))
+                    .sum::<usize>()
         }
         HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
             count_var_in_expr(cond, name)
-                + body.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum::<usize>()
+                + body
+                    .iter()
+                    .map(|s| count_uses_in_stmt_flat(s, name))
+                    .sum::<usize>()
         }
         HirStmt::For {
             init,
@@ -600,10 +610,16 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
             update,
             body,
         } => {
-            init.as_deref().map_or(0, |s| count_uses_in_stmt_flat(s, name))
+            init.as_deref()
+                .map_or(0, |s| count_uses_in_stmt_flat(s, name))
                 + cond.as_ref().map_or(0, |e| count_var_in_expr(e, name))
-                + update.as_deref().map_or(0, |s| count_uses_in_stmt_flat(s, name))
-                + body.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum::<usize>()
+                + update
+                    .as_deref()
+                    .map_or(0, |s| count_uses_in_stmt_flat(s, name))
+                + body
+                    .iter()
+                    .map(|s| count_uses_in_stmt_flat(s, name))
+                    .sum::<usize>()
         }
         HirStmt::Switch {
             expr,
@@ -616,7 +632,10 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
                     .flat_map(|c| &c.body)
                     .map(|s| count_uses_in_stmt_flat(s, name))
                     .sum::<usize>()
-                + default.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum::<usize>()
+                + default
+                    .iter()
+                    .map(|s| count_uses_in_stmt_flat(s, name))
+                    .sum::<usize>()
         }
         _ => 0,
     }

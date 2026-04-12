@@ -5,7 +5,6 @@ pub(crate) fn canonicalize_integer_expr(expr: &HirExpr) -> Option<HirExpr> {
     canonicalize_cast_expr(expr)
 }
 
-
 pub(crate) fn recognize_hi_lo_extract(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Cast { ty, expr: inner } if is_integer_type(ty) => match inner.as_ref() {
@@ -189,7 +188,10 @@ fn extract_low_part(expr: &HirExpr, shift_amount: i64) -> Option<WidePart> {
             // width as the true data width, since the outer cast is just for the
             // Piece output type.
             let (width_bits, real_inner) = match inner.as_ref() {
-                HirExpr::Cast { ty: inner_ty, expr: inner_inner } => {
+                HirExpr::Cast {
+                    ty: inner_ty,
+                    expr: inner_inner,
+                } => {
                     let outer_bits = int_type_bits(ty).unwrap_or(0);
                     let mid_bits = int_type_bits(inner_ty).unwrap_or(0);
                     if outer_bits >= mid_bits && mid_bits > 0 {

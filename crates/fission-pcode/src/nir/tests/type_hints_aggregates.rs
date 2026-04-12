@@ -16,7 +16,10 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -24,7 +27,10 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
         ],
         locals: vec![NirBinding {
             name: "local_3c".to_string(),
-            ty: NirType::Aggregate { size: 16, fields: vec![] },
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
             surface_type_name: None,
             origin: None,
             initializer: None,
@@ -46,7 +52,10 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
             HirStmt::Assign {
                 lhs: HirLValue::Deref {
                     ptr: Box::new(HirExpr::Var("param_2".to_string())),
-                    ty: NirType::Aggregate { size: 16, fields: vec![] },
+                    ty: NirType::Aggregate {
+                        size: 16,
+                        fields: vec![],
+                    },
                 },
                 rhs: HirExpr::Var("local_3c".to_string()),
             },
@@ -107,7 +116,10 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                })),
                 surface_type_name: Some("LPRECT".to_string()),
                 origin: None,
                 initializer: None,
@@ -115,7 +127,10 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
         ],
         locals: vec![NirBinding {
             name: "local_3c".to_string(),
-            ty: NirType::Aggregate { size: 16, fields: vec![] },
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
             surface_type_name: None,
             origin: None,
             initializer: None,
@@ -125,13 +140,19 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
         body: vec![HirStmt::Assign {
             lhs: HirLValue::Deref {
                 ptr: Box::new(HirExpr::Cast {
-                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                        size: 16,
+                        fields: vec![],
+                    })),
                     expr: Box::new(HirExpr::PtrOffset {
                         base: Box::new(HirExpr::Var("param_2".to_string())),
                         offset: 0,
                     }),
                 }),
-                ty: NirType::Aggregate { size: 16, fields: vec![] },
+                ty: NirType::Aggregate {
+                    size: 16,
+                    fields: vec![],
+                },
             },
             rhs: HirExpr::AggregateCopy {
                 src: Box::new(HirExpr::Var("local_3c".to_string())),
@@ -168,14 +189,20 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
         name: "FUN_0x140006260".to_string(),
         params: vec![NirBinding {
             name: "param_2".to_string(),
-            ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
+            ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            })),
             surface_type_name: Some("LPRECT".to_string()),
             origin: None,
             initializer: None,
         }],
         locals: vec![NirBinding {
             name: "local_3c".to_string(),
-            ty: NirType::Aggregate { size: 16, fields: vec![] },
+            ty: NirType::Aggregate {
+                size: 16,
+                fields: vec![],
+            },
             surface_type_name: Some("RECT".to_string()),
             origin: None,
             initializer: None,
@@ -192,7 +219,10 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
                 HirStmt::Assign {
                     lhs: HirLValue::Deref {
                         ptr: Box::new(HirExpr::Var("param_2".to_string())),
-                        ty: NirType::Aggregate { size: 16, fields: vec![] },
+                        ty: NirType::Aggregate {
+                            size: 16,
+                            fields: vec![],
+                        },
                     },
                     rhs: HirExpr::Var("local_3c".to_string()),
                 },

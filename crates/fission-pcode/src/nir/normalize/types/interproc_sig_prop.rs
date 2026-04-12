@@ -9,9 +9,9 @@
 //! monotone lower bound per function.
 
 use crate::nir::types::{
-    parse_call_target_address, CallEdgeKind, CallEffectSummary, CallSummary,
-    CallTargetProvenance, CallTargetRef, HirExpr, HirFunction, HirLValue, HirStmt,
-    MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness, WrapperClass,
+    CallEdgeKind, CallEffectSummary, CallSummary, CallTargetProvenance, CallTargetRef, HirExpr,
+    HirFunction, HirLValue, HirStmt, MemoryEffectRegion, NirType, PrototypeSummary,
+    SummarySoundness, WrapperClass, parse_call_target_address,
 };
 use indexmap::IndexMap;
 
@@ -61,7 +61,9 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
         .and_modify(|summary| {
             summary.prototype.min_arity = summary.prototype.min_arity.min(arity);
             summary.prototype.max_arity = summary.prototype.max_arity.max(arity);
-            if let Some(locked) = summary.prototype.locked_exact_arity && locked != arity {
+            if let Some(locked) = summary.prototype.locked_exact_arity
+                && locked != arity
+            {
                 summary.prototype.locked_exact_arity = None;
             }
             if summary.prototype.param_lattices.len() < arity {
@@ -122,7 +124,8 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
         let Some(param_ty) = win_type_name_to_nir(&param.type_name) else {
             continue;
         };
-        if summary.prototype.param_lattices[idx] == NirType::Unknown && param_ty != NirType::Unknown {
+        if summary.prototype.param_lattices[idx] == NirType::Unknown && param_ty != NirType::Unknown
+        {
             summary.prototype.param_lattices[idx] = param_ty;
             refinements += 1;
         }
@@ -268,11 +271,16 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
         func.callee_summaries
             .entry(key)
             .and_modify(|existing| {
-                existing.prototype.min_arity =
-                    existing.prototype.min_arity.min(summary.prototype.min_arity);
-                existing.prototype.max_arity =
-                    existing.prototype.max_arity.max(summary.prototype.max_arity);
-                if existing.prototype.param_lattices.len() < summary.prototype.param_lattices.len() {
+                existing.prototype.min_arity = existing
+                    .prototype
+                    .min_arity
+                    .min(summary.prototype.min_arity);
+                existing.prototype.max_arity = existing
+                    .prototype
+                    .max_arity
+                    .max(summary.prototype.max_arity);
+                if existing.prototype.param_lattices.len() < summary.prototype.param_lattices.len()
+                {
                     existing
                         .prototype
                         .param_lattices
@@ -288,8 +296,10 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                     && summary.effect_summary.escapes_args.is_some()
                 {
                     existing.effect_summary.escapes_args = summary.effect_summary.escapes_args;
-                    existing.effect_summary.confidence =
-                        existing.effect_summary.confidence.max(summary.effect_summary.confidence);
+                    existing.effect_summary.confidence = existing
+                        .effect_summary
+                        .confidence
+                        .max(summary.effect_summary.confidence);
                     effect_refinements += 1;
                 }
                 for region in &summary.effect_summary.regions {
@@ -396,7 +406,10 @@ mod tests {
         };
         assert!(apply_interproc_callsite_arity_pass(&mut func));
         let summary = func.callee_summaries.get("sub_140010000").unwrap();
-        assert_eq!(summary.effect_summary.wrapper_class, WrapperClass::TailForwarder);
+        assert_eq!(
+            summary.effect_summary.wrapper_class,
+            WrapperClass::TailForwarder
+        );
         assert_eq!(
             summary
                 .effect_summary

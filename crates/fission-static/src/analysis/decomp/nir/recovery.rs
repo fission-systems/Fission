@@ -5,8 +5,8 @@ use super::nir_taxonomy::{classify_nir_failure_refined, structuring_failure_sign
 use super::nir_types::{NirRoutingResolver, NirSelection};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    structuring_outcome_for_signature, take_last_nir_build_stats, NirBuildStats, NirRenderOptions,
-    NirTypeContext, PcodeFunction, RecoveryMode,
+    NirBuildStats, NirRenderOptions, NirTypeContext, PcodeFunction, RecoveryMode,
+    structuring_outcome_for_signature, take_last_nir_build_stats,
 };
 
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";

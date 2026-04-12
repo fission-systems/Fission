@@ -39,8 +39,12 @@ const X64_AGGRESSIVE_PROLOGUES: &[&[u8]] = &[
     &[0x48, 0x55],
 ];
 
-const X86_CONSERVATIVE_PROLOGUES: &[&[u8]] =
-    &[&[0x55, 0x89, 0xe5], &[0x55, 0x8b, 0xec], &[0x83, 0xec], &[0x81, 0xec]];
+const X86_CONSERVATIVE_PROLOGUES: &[&[u8]] = &[
+    &[0x55, 0x89, 0xe5],
+    &[0x55, 0x8b, 0xec],
+    &[0x83, 0xec],
+    &[0x81, 0xec],
+];
 
 const X86_BALANCED_PROLOGUES: &[&[u8]] = &[
     &[0x55, 0x57, 0x8B, 0xEC],
@@ -68,7 +72,10 @@ const X86_AGGRESSIVE_PROLOGUES: &[&[u8]] = &[
     &[0x81, 0xec],
 ];
 
-fn prologue_patterns(profile: FunctionDiscoveryProfile, is_64bit: bool) -> &'static [&'static [u8]] {
+fn prologue_patterns(
+    profile: FunctionDiscoveryProfile,
+    is_64bit: bool,
+) -> &'static [&'static [u8]] {
     if is_64bit {
         match profile {
             FunctionDiscoveryProfile::Conservative => X64_CONSERVATIVE_PROLOGUES,
@@ -92,11 +99,7 @@ fn max_prologue_scan_bytes(profile: FunctionDiscoveryProfile) -> usize {
     }
 }
 
-fn collect_rel_jmp_targets(
-    data: &[u8],
-    section_base: u64,
-    targets: &mut HashSet<u64>,
-) {
+fn collect_rel_jmp_targets(data: &[u8], section_base: u64, targets: &mut HashSet<u64>) {
     let mut i = 0usize;
     while i + 5 <= data.len() {
         if data[i] == 0xE9 {
@@ -130,9 +133,9 @@ fn has_entry_prefix_at(binary: &LoadedBinary, address: u64, patterns: &[&[u8]]) 
             return false;
         }
 
-        return patterns
-            .iter()
-            .any(|pat| file_off + pat.len() <= bytes.len() && bytes[file_off..file_off + pat.len()] == **pat);
+        return patterns.iter().any(|pat| {
+            file_off + pat.len() <= bytes.len() && bytes[file_off..file_off + pat.len()] == **pat
+        });
     }
 
     false
@@ -185,7 +188,12 @@ fn collect_executable_ranges(binary: &LoadedBinary) -> Vec<(u64, u64)> {
         .sections
         .iter()
         .filter(|s| s.is_executable)
-        .map(|s| (s.virtual_address, s.virtual_address.saturating_add(s.virtual_size)))
+        .map(|s| {
+            (
+                s.virtual_address,
+                s.virtual_address.saturating_add(s.virtual_size),
+            )
+        })
         .collect()
 }
 
@@ -239,7 +247,8 @@ impl LoadedBinary {
         let total_code_size: u64 = executable_ranges.iter().map(|(s, e)| e - s).sum();
         let estimated_functions = (total_code_size / 100) as usize;
         let mut discovered: HashSet<u64> = HashSet::with_capacity(estimated_functions.max(64));
-        let entry_gate_patterns = prologue_patterns(FunctionDiscoveryProfile::Balanced, self.is_64bit);
+        let entry_gate_patterns =
+            prologue_patterns(FunctionDiscoveryProfile::Balanced, self.is_64bit);
 
         for section in &self.sections {
             if !section.is_executable {
@@ -320,7 +329,8 @@ impl LoadedBinary {
         let mut candidates = HashSet::new();
 
         let patterns = prologue_patterns(profile, self.is_64bit);
-        let entry_gate_patterns = prologue_patterns(FunctionDiscoveryProfile::Balanced, self.is_64bit);
+        let entry_gate_patterns =
+            prologue_patterns(FunctionDiscoveryProfile::Balanced, self.is_64bit);
 
         let exec_ranges = collect_executable_ranges(self);
 
@@ -349,7 +359,11 @@ impl LoadedBinary {
                             if !self.function_addr_index.contains_key(&potential_addr) {
                                 if pat.len() <= 3
                                     && !matches!(profile, FunctionDiscoveryProfile::Conservative)
-                                    && !passes_short_prologue_gate(self, potential_addr, self.is_64bit)
+                                    && !passes_short_prologue_gate(
+                                        self,
+                                        potential_addr,
+                                        self.is_64bit,
+                                    )
                                 {
                                     break;
                                 }

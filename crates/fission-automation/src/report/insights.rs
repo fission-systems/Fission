@@ -108,7 +108,10 @@ fn structuring_family_counts_from_stats(stats: &NirBuildStats) -> BTreeMap<Strin
             "irreducible".to_string(),
             stats.structuring_reason_irreducible_count,
         ),
-        ("loop_exit".to_string(), stats.structuring_reason_loop_exit_count),
+        (
+            "loop_exit".to_string(),
+            stats.structuring_reason_loop_exit_count,
+        ),
         (
             "switch_shape".to_string(),
             stats.structuring_reason_switch_shape_count,
@@ -225,21 +228,18 @@ pub fn build_decision_insights(
         };
         let baseline_families = family_map(&baseline.aggregate.nir_build_stats_totals);
         let current_families = family_map(&summary.aggregate.nir_build_stats_totals);
-        let structuring_delta = current_families
-            .get("structuring")
-            .copied()
-            .unwrap_or(0) as isize
+        let structuring_delta = current_families.get("structuring").copied().unwrap_or(0) as isize
             - baseline_families.get("structuring").copied().unwrap_or(0) as isize;
         let abi_delta = current_families.get("abi").copied().unwrap_or(0) as isize
             - baseline_families.get("abi").copied().unwrap_or(0) as isize;
         let variadic_delta = current_families.get("variadic").copied().unwrap_or(0) as isize
             - baseline_families.get("variadic").copied().unwrap_or(0) as isize;
-        let call_signature_delta =
-            current_families.get("call_signature").copied().unwrap_or(0) as isize
-                - baseline_families
-                    .get("call_signature")
-                    .copied()
-                    .unwrap_or(0) as isize;
+        let call_signature_delta = current_families.get("call_signature").copied().unwrap_or(0)
+            as isize
+            - baseline_families
+                .get("call_signature")
+                .copied()
+                .unwrap_or(0) as isize;
         let security_delta = current_families.get("security").copied().unwrap_or(0) as isize
             - baseline_families.get("security").copied().unwrap_or(0) as isize;
         let has_material_improvement = structuring_delta < 0
@@ -247,10 +247,11 @@ pub fn build_decision_insights(
             || variadic_delta > 0
             || call_signature_delta > 0
             || security_delta > 0;
-        let family_ranking = structuring_family_counts_from_stats(&summary.aggregate.nir_build_stats_totals)
-            .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .collect::<Vec<_>>();
+        let family_ranking =
+            structuring_family_counts_from_stats(&summary.aggregate.nir_build_stats_totals)
+                .into_iter()
+                .filter(|(_, count)| *count > 0)
+                .collect::<Vec<_>>();
         let dominant_family = family_ranking
             .iter()
             .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))

@@ -1,8 +1,6 @@
 use fission_pcode::Varnode;
 
-pub(super) use super::super::backend::common::{
-    const_u64, RAM_SPACE_ID, UNIQUE_SPACE_ID,
-};
+pub(super) use super::super::backend::common::{const_u64, RAM_SPACE_ID, UNIQUE_SPACE_ID};
 
 // Canonical layout constants live in fission-pcode so both the lifter and the
 // decompiler share a single definition.

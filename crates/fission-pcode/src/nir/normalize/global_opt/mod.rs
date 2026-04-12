@@ -1,10 +1,10 @@
 //! Function-wide dataflow optimizations (SCCP, LICM, CSE, memory SSA helpers, etc.).
 
 mod cse;
+mod dead_store;
 mod gvn_join;
 mod licm;
 mod mem_ssa;
-mod dead_store;
 mod redundant_load;
 mod sccp;
 

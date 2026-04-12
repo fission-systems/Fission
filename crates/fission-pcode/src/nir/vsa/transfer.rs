@@ -17,15 +17,20 @@ pub(crate) fn eval_expr(expr: &HirExpr, env: &RangeEnv) -> CircleRange {
             let bits = nir_bits(ty).unwrap_or(64);
             CircleRange::singleton(*value as u64, bits)
         }
-        HirExpr::Var(name) => {
-            env.get(name.as_str()).copied().unwrap_or_else(|| CircleRange::top(64))
-        }
+        HirExpr::Var(name) => env
+            .get(name.as_str())
+            .copied()
+            .unwrap_or_else(|| CircleRange::top(64)),
         HirExpr::Cast { expr: inner, ty } => {
             let bits = nir_bits(ty).unwrap_or(64);
             let src = eval_expr(inner, env);
             src.cast_unsigned(bits)
         }
-        HirExpr::Unary { op, expr: inner, ty } => {
+        HirExpr::Unary {
+            op,
+            expr: inner,
+            ty,
+        } => {
             let bits = nir_bits(ty).unwrap_or(64);
             let src = eval_expr(inner, env);
             eval_unary(*op, src, bits)
@@ -56,7 +61,11 @@ fn eval_unary(op: HirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
         // Bitwise NOT.
         BitNot => {
             if let Some(v) = src.singleton_value() {
-                let mask = if src.bits() >= 64 { u64::MAX } else { (1u64 << src.bits()) - 1 };
+                let mask = if src.bits() >= 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << src.bits()) - 1
+                };
                 CircleRange::singleton(!v & mask, bits)
             } else {
                 CircleRange::top(bits)
@@ -65,7 +74,11 @@ fn eval_unary(op: HirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
         // Integer negation (two's complement).
         Neg => {
             if let Some(v) = src.singleton_value() {
-                let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+                let mask = if bits >= 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << bits) - 1
+                };
                 CircleRange::singleton(v.wrapping_neg() & mask, bits)
             } else {
                 CircleRange::top(bits)
@@ -83,7 +96,11 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
         Sub => a.sub(&b),
         Mul => {
             if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
-                let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+                let mask = if bits >= 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << bits) - 1
+                };
                 CircleRange::singleton(av.wrapping_mul(bv) & mask, bits)
             } else {
                 CircleRange::top(bits)
@@ -91,7 +108,9 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
         }
         Div => {
             if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
-                if bv == 0 { return CircleRange::top(bits); }
+                if bv == 0 {
+                    return CircleRange::top(bits);
+                }
                 CircleRange::singleton(av.wrapping_div(bv), bits)
             } else {
                 CircleRange::top(bits)
@@ -99,7 +118,9 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
         }
         Mod => {
             if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
-                if bv == 0 { return CircleRange::top(bits); }
+                if bv == 0 {
+                    return CircleRange::top(bits);
+                }
                 CircleRange::singleton(av.wrapping_rem(bv), bits)
             } else {
                 CircleRange::top(bits)
@@ -107,9 +128,15 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
         }
         Shl => {
             if let Some(bv) = b.singleton_value() {
-                if bv >= bits as u64 { return CircleRange::singleton(0, bits); }
+                if bv >= bits as u64 {
+                    return CircleRange::singleton(0, bits);
+                }
                 if let Some(av) = a.singleton_value() {
-                    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+                    let mask = if bits >= 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << bits) - 1
+                    };
                     CircleRange::singleton((av << bv) & mask, bits)
                 } else {
                     CircleRange::top(bits)
@@ -129,7 +156,11 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
             if let Some(bv) = b.singleton_value() {
                 if let Some(av) = a.singleton_value() {
                     let shift = (bv as u32).min(bits.saturating_sub(1));
-                    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+                    let mask = if bits >= 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << bits) - 1
+                    };
                     let signed = sign_extend(av, bits);
                     CircleRange::singleton((signed >> shift) as u64 & mask, bits)
                 } else {
@@ -202,8 +233,12 @@ fn eval_cmp(op: HirBinaryOp, a: u64, b: u64, bits: u32) -> u64 {
 }
 
 fn sign_extend(v: u64, bits: u32) -> i64 {
-    if bits == 0 { return 0; }
-    if bits >= 64 { return v as i64; }
+    if bits == 0 {
+        return 0;
+    }
+    if bits >= 64 {
+        return v as i64;
+    }
     let shift = 64 - bits;
     ((v as i64) << shift) >> shift
 }

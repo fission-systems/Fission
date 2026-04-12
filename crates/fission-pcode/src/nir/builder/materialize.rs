@@ -25,17 +25,18 @@ impl<'a> PreviewBuilder<'a> {
         if op.inputs.len() < 3 || !op.inputs[2].is_constant {
             return false;
         }
-        let Some((next_idx, next_call)) = block
-            .ops
-            .iter()
-            .enumerate()
-            .skip(op_idx + 1)
-            .find(|(_, candidate)| {
-                matches!(
-                    candidate.opcode,
-                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-                )
-            })
+        let Some((next_idx, next_call)) =
+            block
+                .ops
+                .iter()
+                .enumerate()
+                .skip(op_idx + 1)
+                .find(|(_, candidate)| {
+                    matches!(
+                        candidate.opcode,
+                        PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                    )
+                })
         else {
             return false;
         };
@@ -101,17 +102,18 @@ impl<'a> PreviewBuilder<'a> {
         }
         let ret_regs = self.call_result_registers();
         let Some(ret_reg) = ret_regs.first() else {
-            return self.ensure_temp_binding_for_output(
-                op,
-                &Varnode {
-                    space_id: UNIQUE_SPACE_ID,
-                    offset: u64::from(op.seq_num),
-                    size: self.options.pointer_size,
-                    is_constant: false,
-                    constant_val: 0,
-                },
-            )
-            .name;
+            return self
+                .ensure_temp_binding_for_output(
+                    op,
+                    &Varnode {
+                        space_id: UNIQUE_SPACE_ID,
+                        offset: u64::from(op.seq_num),
+                        size: self.options.pointer_size,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                )
+                .name;
         };
         let name = next_temp_name(&type_from_size(ret_reg.size, false), &mut self.temp_next_id);
         self.temps.insert(
@@ -231,7 +233,8 @@ impl<'a> PreviewBuilder<'a> {
                                         err
                                     })?;
                                 if this.call_result_is_observed(block, op_idx) {
-                                    let lhs = HirLValue::Var(this.ensure_call_result_binding(site, op));
+                                    let lhs =
+                                        HirLValue::Var(this.ensure_call_result_binding(site, op));
                                     Ok(Some(HirStmt::Assign { lhs, rhs: expr }))
                                 } else {
                                     Ok(Some(HirStmt::Expr(expr)))

@@ -121,7 +121,11 @@ impl FidbfDatabase {
     /// - Cap: 100
     pub fn score_match(&self, func: &FidbfFunction, specific_hash: u64) -> f32 {
         let base = func.code_unit_size as f32;
-        let bonus = if func.specific_hash == specific_hash { 10.0 } else { 0.0 };
+        let bonus = if func.specific_hash == specific_hash {
+            10.0
+        } else {
+            0.0
+        };
         (base + bonus).min(100.0)
     }
 
@@ -129,11 +133,7 @@ impl FidbfDatabase {
     /// function names.  Only returns matches with a score above `FID_ACCEPT_THRESHOLD`.
     ///
     /// Results are sorted by score descending.
-    pub fn identify_by_hashes(
-        &self,
-        full_hash: u64,
-        specific_hash: u64,
-    ) -> Vec<FidbfMatch> {
+    pub fn identify_by_hashes(&self, full_hash: u64, specific_hash: u64) -> Vec<FidbfMatch> {
         let mut results: Vec<FidbfMatch> = self
             .find_by_full_hash(full_hash)
             .into_iter()
@@ -143,9 +143,7 @@ impl FidbfDatabase {
                     let library = self.library_by_id(func.library_id);
                     Some(FidbfMatch {
                         name: func.name.clone(),
-                        library_family: library
-                            .map(|l| l.family_name.clone())
-                            .unwrap_or_default(),
+                        library_family: library.map(|l| l.family_name.clone()).unwrap_or_default(),
                         score,
                         specific_matched: func.specific_hash == specific_hash,
                     })
@@ -154,7 +152,11 @@ impl FidbfDatabase {
                 }
             })
             .collect();
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results
     }
 }

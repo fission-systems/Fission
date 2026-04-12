@@ -140,13 +140,8 @@ fn preview_supports_instruction_local_unconditional_branch_targets_over_8() {
         ],
     };
 
-    let code = render_mlil_preview(
-        &func,
-        "rel_branch_over_8",
-        0x6100,
-        &preview_options(),
-    )
-    .expect("preview render");
+    let code = render_mlil_preview(&func, "rel_branch_over_8", 0x6100, &preview_options())
+        .expect("preview render");
     // Depending on CFG normalization, the explicit goto may collapse into a direct return block.
     assert!(
         code.contains("goto block_6100_dup12;") || code.contains("return 2;"),
@@ -201,13 +196,8 @@ fn preview_supports_instruction_local_conditional_branch_targets_over_8() {
         ],
     };
 
-    let code = render_mlil_preview(
-        &func,
-        "rel_cbranch_over_8",
-        0x6200,
-        &preview_options(),
-    )
-    .expect("preview render");
+    let code = render_mlil_preview(&func, "rel_cbranch_over_8", 0x6200, &preview_options())
+        .expect("preview render");
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 3;"), "{code}");
 }
@@ -245,13 +235,8 @@ fn preview_supports_instruction_local_unconditional_branch_targets_backward() {
         ],
     };
 
-    let code = render_mlil_preview(
-        &func,
-        "rel_branch_backward",
-        0x6300,
-        &preview_options(),
-    )
-    .expect("preview render");
+    let code = render_mlil_preview(&func, "rel_branch_backward", 0x6300, &preview_options())
+        .expect("preview render");
     // Backward local branches may surface as an explicit goto or a structured infinite loop.
     assert!(
         code.contains("goto block_6300;") || code.contains("while (1)"),

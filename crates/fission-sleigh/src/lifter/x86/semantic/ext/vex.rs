@@ -74,7 +74,9 @@ pub(in super::super) fn decode_vex_semantic(
         // insn[op_idx+3] as ModRM.
         let new_op_idx = op_idx + 1;
         if vex_l {
-            simd::decode_simd_semantic_avx(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+            simd::decode_simd_semantic_avx(
+                insn, new_op_idx, &synth, size, address, temp, seq, opcode,
+            )
         } else {
             simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
         }
@@ -116,9 +118,13 @@ pub(in super::super) fn decode_vex_semantic(
                 // new_op_idx+2 = (op_idx+2)+2 = op_idx+4 = ModRM ✓
                 let new_op_idx = op_idx + 2;
                 if vex_l {
-                    simd::decode_simd_semantic_avx(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+                    simd::decode_simd_semantic_avx(
+                        insn, new_op_idx, &synth, size, address, temp, seq, opcode,
+                    )
                 } else {
-                    simd::decode_simd_semantic(insn, new_op_idx, &synth, size, address, temp, seq, opcode)
+                    simd::decode_simd_semantic(
+                        insn, new_op_idx, &synth, size, address, temp, seq, opcode,
+                    )
                 }
             }
             2 => {

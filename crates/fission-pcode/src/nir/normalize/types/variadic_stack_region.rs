@@ -91,9 +91,7 @@ fn recover_in_stmt(
         | HirStmt::For { body: stmts, .. } => {
             recover_in_stmts(stmts, home_slots, last_named_param, folds, va_starts)
         }
-        HirStmt::Switch {
-            cases, default, ..
-        } => {
+        HirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |= recover_in_stmts(

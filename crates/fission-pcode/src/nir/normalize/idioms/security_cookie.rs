@@ -15,7 +15,9 @@ fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
         HirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
         HirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
         HirExpr::PtrOffset { base, .. } => expr_uses_var(base, name),
-        HirExpr::Index { base, index, .. } => expr_uses_var(base, name) || expr_uses_var(index, name),
+        HirExpr::Index { base, index, .. } => {
+            expr_uses_var(base, name) || expr_uses_var(index, name)
+        }
         HirExpr::Const(_, _) => false,
     }
 }
@@ -27,13 +29,20 @@ fn is_cookie_seed_expr(expr: &HirExpr) -> bool {
             lhs,
             rhs,
             ..
-        } => matches!(lhs.as_ref(), HirExpr::Var(name) if is_stack_pointer_name(name))
-            || matches!(rhs.as_ref(), HirExpr::Var(name) if is_stack_pointer_name(name)),
+        } => {
+            matches!(lhs.as_ref(), HirExpr::Var(name) if is_stack_pointer_name(name))
+                || matches!(rhs.as_ref(), HirExpr::Var(name) if is_stack_pointer_name(name))
+        }
         _ => false,
     }
 }
 
-fn refine_cookie_calls(stmts: &mut [HirStmt], cookie_vars: &[String], folds: &mut usize, renamed: &mut usize) {
+fn refine_cookie_calls(
+    stmts: &mut [HirStmt],
+    cookie_vars: &[String],
+    folds: &mut usize,
+    renamed: &mut usize,
+) {
     for stmt in stmts {
         match stmt {
             HirStmt::Expr(HirExpr::Call { target, args, .. })

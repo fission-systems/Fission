@@ -1,5 +1,5 @@
-use super::support::{register_name_with_param, x64_ghidra_reg_name, StackBase};
-use super::{CallingConvention, NirBindingOrigin, Varnode, REGISTER_SPACE_ID, UNIQUE_SPACE_ID};
+use super::support::{StackBase, register_name_with_param, x64_ghidra_reg_name};
+use super::{CallingConvention, NirBindingOrigin, REGISTER_SPACE_ID, UNIQUE_SPACE_ID, Varnode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CarrierResource {
@@ -100,7 +100,8 @@ impl AbiState {
         if !self.is_64bit {
             return None;
         }
-        self.provider().stack_argument_index(self.pointer_size, offset)
+        self.provider()
+            .stack_argument_index(self.pointer_size, offset)
     }
 
     pub(crate) fn classify_stack_slot_origin(
@@ -108,8 +109,12 @@ impl AbiState {
         base: StackBase,
         offset: i64,
     ) -> NirBindingOrigin {
-        self.provider()
-            .classify_stack_slot_origin(self.is_64bit, self.stack_frame_size, base, offset)
+        self.provider().classify_stack_slot_origin(
+            self.is_64bit,
+            self.stack_frame_size,
+            base,
+            offset,
+        )
     }
 
     pub(crate) fn assign_carriers<'a, I>(&self, carriers: I) -> Vec<CarrierAssignment>
@@ -126,11 +131,12 @@ impl AbiState {
             let duplication_penalty = usize::from(!seen_slots.insert(slot));
             let hole_penalty = slot.saturating_sub(expected_next);
             expected_next = expected_next.max(slot.saturating_add(1));
-            let class = if carrier.space_id == REGISTER_SPACE_ID || carrier.space_id == UNIQUE_SPACE_ID {
-                super::CarrierClass::Gpr
-            } else {
-                super::CarrierClass::LocalSlot
-            };
+            let class =
+                if carrier.space_id == REGISTER_SPACE_ID || carrier.space_id == UNIQUE_SPACE_ID {
+                    super::CarrierClass::Gpr
+                } else {
+                    super::CarrierClass::LocalSlot
+                };
             assignments.push(CarrierAssignment {
                 resource: CarrierResource { class, slot },
                 coverage_penalty: 0,
@@ -241,9 +247,12 @@ impl AbiProvider for WindowsX64AbiProvider {
     }
 
     fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        CallingConvention::WindowsX64.param_offsets().iter().position(|&off| {
-            x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name))
-        })
+        CallingConvention::WindowsX64
+            .param_offsets()
+            .iter()
+            .position(|&off| {
+                x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name))
+            })
     }
 
     fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
@@ -269,7 +278,9 @@ impl AbiProvider for WindowsX64AbiProvider {
         offset: i64,
     ) -> NirBindingOrigin {
         match base {
-            StackBase::Rsp if is_64bit && offset >= stack_frame_size => NirBindingOrigin::HomeSlot(offset),
+            StackBase::Rsp if is_64bit && offset >= stack_frame_size => {
+                NirBindingOrigin::HomeSlot(offset)
+            }
             _ => NirBindingOrigin::StackOffset(offset),
         }
     }
@@ -299,7 +310,11 @@ impl AbiProvider for GenericAbiProvider {
     }
 
     fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        self.abi.param_offsets().get(slot).copied().and_then(x64_ghidra_reg_name)
+        self.abi
+            .param_offsets()
+            .get(slot)
+            .copied()
+            .and_then(x64_ghidra_reg_name)
     }
 
     fn stack_argument_index(&self, _pointer_size: u32, _offset: i64) -> Option<usize> {

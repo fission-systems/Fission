@@ -78,10 +78,10 @@ fn crt_pattern_to_vec(pattern: &str, mask: &str) -> Vec<Option<u8>> {
 pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     // Legacy source (kept for backwards compatibility; currently empty).
     let legacy_json = include_str!("../data/signatures/msvc.json");
-    let legacy_items: Vec<JsonMsvcSignature> = serde_json::from_str(legacy_json)
-        .unwrap_or_else(|e| panic!(
-            "Failed to parse msvc.json — check data/signatures/msvc.json syntax: {e}"
-        ));
+    let legacy_items: Vec<JsonMsvcSignature> =
+        serde_json::from_str(legacy_json).unwrap_or_else(|e| {
+            panic!("Failed to parse msvc.json — check data/signatures/msvc.json syntax: {e}")
+        });
     for item in legacy_items {
         signatures.push(FunctionSignature::from_hex(&item.name, &item.pattern));
     }
@@ -149,7 +149,11 @@ mod tests {
         let mut sigs = Vec::new();
         load_msvc_signatures(&mut sigs);
         // CRT JSON has 10 entries; there should be at least that many.
-        assert!(sigs.len() >= 10, "expected at least 10 CRT signatures, got {}", sigs.len());
+        assert!(
+            sigs.len() >= 10,
+            "expected at least 10 CRT signatures, got {}",
+            sigs.len()
+        );
         let names: Vec<&str> = sigs.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"memcpy"), "memcpy should be present");
         assert!(names.contains(&"malloc"), "malloc should be present");
@@ -160,16 +164,25 @@ mod tests {
     fn memcpy_matches_known_prologue() {
         let mut sigs = Vec::new();
         load_msvc_signatures(&mut sigs);
-        let memcpy_sig = sigs.iter().find(|s| s.name == "memcpy").expect("memcpy missing");
+        let memcpy_sig = sigs
+            .iter()
+            .find(|s| s.name == "memcpy")
+            .expect("memcpy missing");
         // UCRT memcpy x64 prologue: 4C 8B DC 48 83 EC ...
         let bytes: &[u8] = &[0x4C, 0x8B, 0xDC, 0x48, 0x83, 0xEC, 0x48, 0x00];
-        assert!(memcpy_sig.matches(bytes), "memcpy pattern should match known bytes");
+        assert!(
+            memcpy_sig.matches(bytes),
+            "memcpy pattern should match known bytes"
+        );
     }
 
     #[test]
     fn database_contains_crt_entries() {
         use crate::SignatureDatabase;
         let db = SignatureDatabase::new();
-        assert!(db.signatures().len() >= 10, "SignatureDatabase should have CRT patterns");
+        assert!(
+            db.signatures().len() >= 10,
+            "SignatureDatabase should have CRT patterns"
+        );
     }
 }

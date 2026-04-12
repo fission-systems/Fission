@@ -16,7 +16,10 @@ fn count_mentions_in_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Binary { lhs, rhs, .. } => {
             count_mentions_in_expr(lhs, name) + count_mentions_in_expr(rhs, name)
         }
-        HirExpr::Call { args, .. } => args.iter().map(|arg| count_mentions_in_expr(arg, name)).sum(),
+        HirExpr::Call { args, .. } => args
+            .iter()
+            .map(|arg| count_mentions_in_expr(arg, name))
+            .sum(),
         HirExpr::PtrOffset { base, .. } => count_mentions_in_expr(base, name),
         HirExpr::Index { base, index, .. } => {
             count_mentions_in_expr(base, name) + count_mentions_in_expr(index, name)
@@ -42,15 +45,24 @@ fn count_mentions_in_stmt(stmt: &HirStmt, name: &str) -> usize {
         HirStmt::Block(body)
         | HirStmt::While { body, .. }
         | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => body.iter().map(|stmt| count_mentions_in_stmt(stmt, name)).sum(),
+        | HirStmt::For { body, .. } => body
+            .iter()
+            .map(|stmt| count_mentions_in_stmt(stmt, name))
+            .sum(),
         HirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             count_mentions_in_expr(cond, name)
-                + then_body.iter().map(|stmt| count_mentions_in_stmt(stmt, name)).sum::<usize>()
-                + else_body.iter().map(|stmt| count_mentions_in_stmt(stmt, name)).sum::<usize>()
+                + then_body
+                    .iter()
+                    .map(|stmt| count_mentions_in_stmt(stmt, name))
+                    .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|stmt| count_mentions_in_stmt(stmt, name))
+                    .sum::<usize>()
         }
         HirStmt::Switch {
             expr,
@@ -60,9 +72,17 @@ fn count_mentions_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             count_mentions_in_expr(expr, name)
                 + cases
                     .iter()
-                    .map(|case| case.body.iter().map(|stmt| count_mentions_in_stmt(stmt, name)).sum::<usize>())
+                    .map(|case| {
+                        case.body
+                            .iter()
+                            .map(|stmt| count_mentions_in_stmt(stmt, name))
+                            .sum::<usize>()
+                    })
                     .sum::<usize>()
-                + default.iter().map(|stmt| count_mentions_in_stmt(stmt, name)).sum::<usize>()
+                + default
+                    .iter()
+                    .map(|stmt| count_mentions_in_stmt(stmt, name))
+                    .sum::<usize>()
         }
         HirStmt::Label(_)
         | HirStmt::Goto(_)
@@ -81,7 +101,9 @@ fn substitute_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr)
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => substitute_var_in_expr(expr, name, replacement),
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            substitute_var_in_expr(expr, name, replacement)
+        }
         HirExpr::Binary { lhs, rhs, .. } => {
             substitute_var_in_expr(lhs, name, replacement)
                 | substitute_var_in_expr(rhs, name, replacement)
@@ -109,7 +131,10 @@ fn substitute_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr)
     }
 }
 
-fn remove_inlineable_call_artifacts(stmts: &mut Vec<HirStmt>, temp_names: &HashSet<String>) -> usize {
+fn remove_inlineable_call_artifacts(
+    stmts: &mut Vec<HirStmt>,
+    temp_names: &HashSet<String>,
+) -> usize {
     let mut removed = 0usize;
     let mut idx = 0usize;
     while idx + 1 < stmts.len() {
@@ -117,10 +142,13 @@ fn remove_inlineable_call_artifacts(stmts: &mut Vec<HirStmt>, temp_names: &HashS
             HirStmt::Assign {
                 lhs: HirLValue::Var(name),
                 rhs: HirExpr::Call { target, .. },
-            } if is_weak_call_target(target) && temp_names.contains(name) => Some((name.clone(), match &stmts[idx] {
-                HirStmt::Assign { rhs, .. } => rhs.clone(),
-                _ => unreachable!(),
-            })),
+            } if is_weak_call_target(target) && temp_names.contains(name) => Some((
+                name.clone(),
+                match &stmts[idx] {
+                    HirStmt::Assign { rhs, .. } => rhs.clone(),
+                    _ => unreachable!(),
+                },
+            )),
             _ => None,
         }) else {
             idx += 1;
@@ -143,10 +171,13 @@ fn remove_inlineable_call_artifacts(stmts: &mut Vec<HirStmt>, temp_names: &HashS
             HirStmt::Assign {
                 lhs: HirLValue::Var(name),
                 rhs: HirExpr::Call { target, .. },
-            } if is_weak_call_target(target) && temp_names.contains(name) => Some((name.clone(), match &stmts[idx] {
-                HirStmt::Assign { rhs, .. } => rhs.clone(),
-                _ => unreachable!(),
-            })),
+            } if is_weak_call_target(target) && temp_names.contains(name) => Some((
+                name.clone(),
+                match &stmts[idx] {
+                    HirStmt::Assign { rhs, .. } => rhs.clone(),
+                    _ => unreachable!(),
+                },
+            )),
             _ => None,
         }) else {
             idx += 1;

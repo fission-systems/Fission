@@ -106,7 +106,11 @@ fn collect_constraints_stmt(
             }
             collect_constraints(body, return_type, out);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             collect_constraints_expr(expr, return_type, out);
             for case in cases {
                 collect_constraints(&case.body, return_type, out);
@@ -153,10 +157,7 @@ fn collect_constraints_lvalue(lhs: &HirLValue, out: &mut HashMap<String, Vec<Use
 }
 
 /// Collect `Cast(T, Var(x))` → x: T constraints.
-fn collect_constraints_cast_source(
-    expr: &HirExpr,
-    out: &mut HashMap<String, Vec<UseConstraint>>,
-) {
+fn collect_constraints_cast_source(expr: &HirExpr, out: &mut HashMap<String, Vec<UseConstraint>>) {
     if let HirExpr::Cast { ty, expr: inner } = expr {
         if let HirExpr::Var(name) = inner.as_ref() {
             // The variable is being cast; constrain it to the source type of the
@@ -250,7 +251,11 @@ fn collect_constraints_expr(
         HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
             collect_constraints_expr(base, return_type, out);
         }
-        HirExpr::Index { base, index, elem_ty } => {
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
             // base[index] → base is Ptr(elem_ty).
             if let HirExpr::Var(name) = base.as_ref() {
                 out.entry(name.clone())
@@ -305,11 +310,24 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
             binding.ty = ty.clone();
             true
         }
-        (NirType::Int { .. }, UseConstraint::Exact(NirType::Int { bits: new_bits, signed: new_signed })) => {
+        (
+            NirType::Int { .. },
+            UseConstraint::Exact(NirType::Int {
+                bits: new_bits,
+                signed: new_signed,
+            }),
+        ) => {
             // Only change signedness if currently unsigned → promote to signed.
-            if let NirType::Int { signed: cur_signed, bits: cur_bits } = &binding.ty {
+            if let NirType::Int {
+                signed: cur_signed,
+                bits: cur_bits,
+            } = &binding.ty
+            {
                 if !*cur_signed && *new_signed && cur_bits == new_bits {
-                    binding.ty = NirType::Int { bits: *new_bits, signed: true };
+                    binding.ty = NirType::Int {
+                        bits: *new_bits,
+                        signed: true,
+                    };
                     return true;
                 }
             }
@@ -319,18 +337,31 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
 
         // Signed/unsigned constraint — apply if Unknown or conflicting.
         (NirType::Unknown, UseConstraint::Signed { bits }) => {
-            binding.ty = NirType::Int { bits: *bits, signed: true };
+            binding.ty = NirType::Int {
+                bits: *bits,
+                signed: true,
+            };
             true
         }
         (NirType::Unknown, UseConstraint::Unsigned { bits }) => {
-            binding.ty = NirType::Int { bits: *bits, signed: false };
+            binding.ty = NirType::Int {
+                bits: *bits,
+                signed: false,
+            };
             true
         }
-        (NirType::Int { signed: false, bits: cur_bits }, UseConstraint::Signed { bits: new_bits })
-            if cur_bits == new_bits =>
-        {
+        (
+            NirType::Int {
+                signed: false,
+                bits: cur_bits,
+            },
+            UseConstraint::Signed { bits: new_bits },
+        ) if cur_bits == new_bits => {
             // Promote from unsigned to signed.
-            binding.ty = NirType::Int { bits: *new_bits, signed: true };
+            binding.ty = NirType::Int {
+                bits: *new_bits,
+                signed: true,
+            };
             true
         }
         _ => false,
@@ -349,11 +380,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         collect_constraints(&func.body, &func.return_type, &mut constraints);
 
         let mut round_changed = false;
-        for binding in func
-            .locals
-            .iter_mut()
-            .chain(func.params.iter_mut())
-        {
+        for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
             if let Some(constraints_for) = constraints.get(&binding.name) {
                 for constraint in constraints_for {
                     round_changed |= merge_constraint(binding, constraint);
@@ -382,11 +409,7 @@ mod tests {
         }
     }
 
-    fn make_func(
-        locals: Vec<NirBinding>,
-        body: Vec<HirStmt>,
-        return_type: NirType,
-    ) -> HirFunction {
+    fn make_func(locals: Vec<NirBinding>, body: Vec<HirStmt>, return_type: NirType) -> HirFunction {
         HirFunction {
             name: "test".to_owned(),
             params: vec![],
@@ -405,7 +428,10 @@ mod tests {
             lhs: HirLValue::Var("x".to_owned()),
             rhs: HirExpr::Load {
                 ptr: Box::new(HirExpr::Var("p".to_owned())),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             },
         }];
         let mut func = make_func(
@@ -417,7 +443,10 @@ mod tests {
         assert!(changed);
         assert_eq!(
             func.locals[0].ty,
-            NirType::Ptr(Box::new(NirType::Int { bits: 32, signed: false }))
+            NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false
+            }))
         );
     }
 
@@ -427,15 +456,27 @@ mod tests {
         let body = vec![HirStmt::Assign {
             lhs: HirLValue::Deref {
                 ptr: Box::new(HirExpr::Var("p".to_owned())),
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             },
-            rhs: HirExpr::Const(0, NirType::Int { bits: 64, signed: false }),
+            rhs: HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
         }];
         let mut func = make_func(vec![make_binding("p")], body, NirType::Unknown);
         super::apply_use_driven_type_infer_pass(&mut func);
         assert_eq!(
             func.locals[0].ty,
-            NirType::Ptr(Box::new(NirType::Int { bits: 64, signed: false }))
+            NirType::Ptr(Box::new(NirType::Int {
+                bits: 64,
+                signed: false
+            }))
         );
     }
 
@@ -446,7 +487,13 @@ mod tests {
             cond: HirExpr::Binary {
                 op: HirBinaryOp::SLt,
                 lhs: Box::new(HirExpr::Var("a".to_owned())),
-                rhs: Box::new(HirExpr::Const(0, NirType::Int { bits: 32, signed: true })),
+                rhs: Box::new(HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                )),
                 ty: NirType::Bool,
             },
             then_body: vec![],
@@ -465,7 +512,10 @@ mod tests {
     #[test]
     fn infers_type_from_return_context() {
         let body = vec![HirStmt::Return(Some(HirExpr::Var("r".to_owned())))];
-        let ret_ty = NirType::Int { bits: 32, signed: true };
+        let ret_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
         let mut func = make_func(vec![make_binding("r")], body, ret_ty.clone());
         super::apply_use_driven_type_infer_pass(&mut func);
         assert_eq!(func.locals[0].ty, ret_ty);

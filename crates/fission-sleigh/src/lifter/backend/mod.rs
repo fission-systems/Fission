@@ -3,7 +3,7 @@ pub(super) mod common;
 use anyhow::{anyhow, bail, Context, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode};
 
-use super::{LiftDecodeContract, LiftStopReason, aarch64, x86};
+use super::{aarch64, x86, LiftDecodeContract, LiftStopReason};
 
 #[derive(Debug, Clone)]
 pub(super) struct LiftedOps {

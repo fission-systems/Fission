@@ -858,15 +858,20 @@ impl<'a> PreviewBuilder<'a> {
                     targets,
                     default_target,
                     min_val,
+                    proof,
                 } => {
                     // Switch inside loop body: emit as switch with gotos, rewrite pass will clean
-                    let cases = targets
+                    let (case_values, _used_proof_payload) = recovered_switch_case_values(
+                        &targets,
+                        default_target,
+                        min_val,
+                        proof.as_ref(),
+                    );
+                    let cases = case_values
                         .into_iter()
-                        .filter(|t| Some(*t) != default_target)
-                        .enumerate()
-                        .map(|(i, t)| HirSwitchCase {
-                            values: vec![min_val + i as i64],
-                            body: vec![HirStmt::Goto(block_label(t))],
+                        .map(|(value, target)| HirSwitchCase {
+                            values: vec![value],
+                            body: vec![HirStmt::Goto(block_label(target))],
                         })
                         .collect();
                     result_stmts.push(HirStmt::Switch {

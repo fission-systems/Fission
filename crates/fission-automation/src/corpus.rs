@@ -3,7 +3,7 @@ use crate::model::{
     ExplicitBreakdownTotals, FactSourcesPresent, InventoryRow, InventorySummary, SourceMeta,
     SourcePresenceCounts,
 };
-use fission_pcode::IndirectControlClassification;
+use fission_pcode::{IndirectControlClassification, NirBuildStats};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -76,6 +76,24 @@ fn normalize_address(value: &str) -> String {
     }
 }
 
+fn indirect_classification_from_parts(
+    stats: Option<&NirBuildStats>,
+    has_indirect_control_flow: bool,
+    _has_preserved_indirect_surface: bool,
+    _has_unresolved_unsupported_indirect: bool,
+    _has_dispatcher_recovery: bool,
+) -> IndirectControlClassification {
+    stats.map_or_else(
+        IndirectControlClassification::default,
+        |stats| {
+            IndirectControlClassification::from_stats_or_observation(
+                Some(stats),
+                has_indirect_control_flow,
+            )
+        },
+    )
+}
+
 pub fn source_is_nir_aligned(source_meta: Option<&SourceMeta>) -> bool {
     let Some(source_meta) = source_meta else {
         return true;
@@ -101,7 +119,8 @@ pub fn candidate_passes_explicit_quality_prefilter(
     entry: &InventoryRow,
     source_meta: Option<&SourceMeta>,
 ) -> bool {
-    let indirect = IndirectControlClassification::from_flags(
+    let indirect = indirect_classification_from_parts(
+        entry.nir_build_stats.as_ref(),
         entry.has_indirect_control_flow,
         entry.has_preserved_indirect_surface,
         entry.has_unresolved_unsupported_indirect,
@@ -376,6 +395,38 @@ pub fn build_corpus_artifacts(
         inventory_summary_totals: totals,
         block_reason_counts,
         timeout_rescue: load_timeout_rescue(root),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stats_prefer_over_raw_flags_for_explicit_quality_prefilter() {
+        let classification = indirect_classification_from_parts(
+            Some(&NirBuildStats {
+                dispatcher_shape_recovered_count: 1,
+                ..Default::default()
+            }),
+            false,
+            true,
+            true,
+            false,
+        );
+
+        assert!(classification.has_indirect_control);
+        assert!(classification.has_dispatcher_recovery);
+        assert!(!classification.has_unresolved_unsupported_indirect);
+    }
+
+    #[test]
+    fn missing_stats_fail_closed_for_indirect_classification() {
+        let classification = indirect_classification_from_parts(None, true, true, false, false);
+
+        assert!(!classification.has_indirect_control);
+        assert!(!classification.has_preserved_indirect_surface);
+        assert!(!classification.has_unresolved_unsupported_indirect);
     }
 }
 

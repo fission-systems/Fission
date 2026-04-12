@@ -55,29 +55,50 @@ fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     // We do this before extracting loop-level info from *this* level.
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 if hoist_in_stmts(body) {
                     changed = true;
                 }
             }
-            HirStmt::For { init, body, update, .. } => {
-                if let Some(s) = init { hoist_single(s); }
-                if hoist_in_stmts(body) { changed = true; }
-                if let Some(s) = update { hoist_single(s); }
+            HirStmt::For {
+                init, body, update, ..
+            } => {
+                if let Some(s) = init {
+                    hoist_single(s);
+                }
+                if hoist_in_stmts(body) {
+                    changed = true;
+                }
+                if let Some(s) = update {
+                    hoist_single(s);
+                }
             }
-            HirStmt::If { then_body, else_body, .. } => {
-                if hoist_in_stmts(then_body) { changed = true; }
-                if hoist_in_stmts(else_body) { changed = true; }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if hoist_in_stmts(then_body) {
+                    changed = true;
+                }
+                if hoist_in_stmts(else_body) {
+                    changed = true;
+                }
             }
             HirStmt::Block(body) => {
-                if hoist_in_stmts(body) { changed = true; }
+                if hoist_in_stmts(body) {
+                    changed = true;
+                }
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    if hoist_in_stmts(&mut case.body) { changed = true; }
+                    if hoist_in_stmts(&mut case.body) {
+                        changed = true;
+                    }
                 }
-                if hoist_in_stmts(default) { changed = true; }
+                if hoist_in_stmts(default) {
+                    changed = true;
+                }
             }
             _ => {}
         }
@@ -165,20 +186,32 @@ fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             // (We only hoist pure non-Load expressions anyway, so this is a no-op
             // but makes the invariant check explicit.)
         }
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             collect_all_defs(then_body, out);
             collect_all_defs(else_body, out);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             collect_all_defs(body, out);
         }
-        HirStmt::For { init, body, update, .. } => {
-            if let Some(s) = init { collect_defs_in_stmt(s, out); }
+        HirStmt::For {
+            init, body, update, ..
+        } => {
+            if let Some(s) = init {
+                collect_defs_in_stmt(s, out);
+            }
             collect_all_defs(body, out);
-            if let Some(s) = update { collect_defs_in_stmt(s, out); }
+            if let Some(s) = update {
+                collect_defs_in_stmt(s, out);
+            }
         }
         HirStmt::Switch { cases, default, .. } => {
-            for case in cases { collect_all_defs(&case.body, out); }
+            for case in cases {
+                collect_all_defs(&case.body, out);
+            }
             collect_all_defs(default, out);
         }
         HirStmt::Block(body) => collect_all_defs(body, out),
@@ -189,7 +222,11 @@ fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
 /// Return `true` if `stmt` is an assignment that is safe to hoist out of a
 /// loop whose definitions are `loop_defs`.
 fn is_invariant_stmt(stmt: &HirStmt, loop_defs: &HashSet<String>) -> bool {
-    let HirStmt::Assign { lhs: HirLValue::Var(target), rhs } = stmt else {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(target),
+        rhs,
+    } = stmt
+    else {
         return false; // Only Var-lhs assigns are hoistable.
     };
     // The target must not be re-defined elsewhere in the loop.

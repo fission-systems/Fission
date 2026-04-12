@@ -2,10 +2,8 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use super::common::{
     const_u64, x86_flag_af, x86_flag_cf, x86_flag_df, x86_flag_if, x86_flag_of, x86_flag_pf,
-    x86_flag_sf, x86_flag_zf,
-    x86_reg, x86_xmm_reg, x86_ymm_reg, x86_mxcsr, x86_seg,
-    RAM_SPACE_ID,
-    X86TempFactory,
+    x86_flag_sf, x86_flag_zf, x86_mxcsr, x86_reg, x86_seg, x86_xmm_reg, x86_ymm_reg,
+    X86TempFactory, RAM_SPACE_ID,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -120,9 +118,15 @@ pub(crate) fn decode_semantic_with_state(
     }
 
     match op {
-        0xD8..=0xDF => {
-            self::ext::decode_x87_policy(insn, op_idx, &prefix, address, &mut temp, &mut seq, op - 0xD8)
-        }
+        0xD8..=0xDF => self::ext::decode_x87_policy(
+            insn,
+            op_idx,
+            &prefix,
+            address,
+            &mut temp,
+            &mut seq,
+            op - 0xD8,
+        ),
         0xCC => {
             vec![PcodeOp {
                 seq_num: next_seq(&mut seq),
@@ -169,13 +173,7 @@ pub(crate) fn decode_semantic_with_state(
             let src = x86_reg(reg, slot_size);
             let mut ops = Vec::new();
             emit_stack_push(
-                address,
-                src,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "PUSH_REG",
+                address, src, slot_size, &mut ops, &mut temp, &mut seq, "PUSH_REG",
             );
             ops
         }
@@ -183,14 +181,8 @@ pub(crate) fn decode_semantic_with_state(
             let slot_size = stack_operand_size(&prefix);
             let reg = u32::from(op - 0x58) + rex_b(&prefix);
             let mut ops = Vec::new();
-            let popped = emit_stack_pop(
-                address,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "POP_REG",
-            );
+            let popped =
+                emit_stack_pop(address, slot_size, &mut ops, &mut temp, &mut seq, "POP_REG");
             ops.push(PcodeOp {
                 seq_num: next_seq(&mut seq),
                 opcode: PcodeOpcode::Copy,
@@ -210,19 +202,14 @@ pub(crate) fn decode_semantic_with_state(
             } else {
                 (4usize, true)
             };
-            let imm = match decode_immediate(insn, op_idx + 1, imm_bytes, slot_size, imm_sign_extend) {
-                Some(v) => v,
-                None => return Vec::new(),
-            };
+            let imm =
+                match decode_immediate(insn, op_idx + 1, imm_bytes, slot_size, imm_sign_extend) {
+                    Some(v) => v,
+                    None => return Vec::new(),
+                };
             let mut ops = Vec::new();
             emit_stack_push(
-                address,
-                imm,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "PUSH_IMM",
+                address, imm, slot_size, &mut ops, &mut temp, &mut seq, "PUSH_IMM",
             );
             ops
         }
@@ -246,14 +233,8 @@ pub(crate) fn decode_semantic_with_state(
                 return Vec::new();
             }
             let mut ops = pre_ops;
-            let popped = emit_stack_pop(
-                address,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "POP_RM",
-            );
+            let popped =
+                emit_stack_pop(address, slot_size, &mut ops, &mut temp, &mut seq, "POP_RM");
             write_rm_value(&decoded.rm, popped, address, &mut ops, &mut seq, "POP")
         }
         0xE8 => {
@@ -261,27 +242,15 @@ pub(crate) fn decode_semantic_with_state(
             let ret_addr = const_u64(address.wrapping_add(insn.len() as u64), slot_size);
             let mut ops = Vec::new();
             emit_stack_push(
-                address,
-                ret_addr,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "CALL",
+                address, ret_addr, slot_size, &mut ops, &mut temp, &mut seq, "CALL",
             );
             ops
         }
         0xC3 | 0xCB | 0xC2 | 0xCA => {
             let slot_size = stack_operand_size(&prefix);
             let mut ops = Vec::new();
-            let _ret_addr = emit_stack_pop(
-                address,
-                slot_size,
-                &mut ops,
-                &mut temp,
-                &mut seq,
-                "RET",
-            );
+            let _ret_addr =
+                emit_stack_pop(address, slot_size, &mut ops, &mut temp, &mut seq, "RET");
 
             if matches!(op, 0xC2 | 0xCA) {
                 let pop_imm = match decode_immediate(insn, op_idx + 1, 2, 8, false) {
@@ -311,7 +280,13 @@ pub(crate) fn decode_semantic_with_state(
             ops
         }
         0xA9 => {
-            let imm = match decode_immediate(insn, op_idx + 1, immediate_bytes_for_operand(size), size, size == 8) {
+            let imm = match decode_immediate(
+                insn,
+                op_idx + 1,
+                immediate_bytes_for_operand(size),
+                size,
+                size == 8,
+            ) {
                 Some(v) => v,
                 None => return Vec::new(),
             };
@@ -349,15 +324,16 @@ pub(crate) fn decode_semantic_with_state(
         0x99 => decode_op_99_sign_extend_high_half(size, address, &mut temp, &mut seq),
         0x04 | 0x05 | 0x0C | 0x0D | 0x14 | 0x15 | 0x1C | 0x1D | 0x24 | 0x25 | 0x2C | 0x2D
         | 0x34 | 0x35 | 0x3C | 0x3D => {
-            let is_byte = matches!(
-                op,
-                0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C
-            );
+            let is_byte = matches!(op, 0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C);
             let op_size = if is_byte { 1 } else { size };
             let imm = match decode_immediate(
                 insn,
                 op_idx + 1,
-                if is_byte { 1 } else { immediate_bytes_for_operand(op_size) },
+                if is_byte {
+                    1
+                } else {
+                    immediate_bytes_for_operand(op_size)
+                },
                 op_size,
                 !is_byte && op_size == 8,
             ) {
@@ -419,8 +395,14 @@ pub(crate) fn decode_semantic_with_state(
             match op {
                 0x86 | 0x87 => {
                     let reg = x86_reg(decoded.reg_index, modrm_size);
-                    let rm_value =
-                        materialize_rm_value(&decoded.rm, modrm_size, address, &mut ops, &mut temp, &mut seq);
+                    let rm_value = materialize_rm_value(
+                        &decoded.rm,
+                        modrm_size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let reg_saved = temp.alloc(modrm_size);
                     ops.push(PcodeOp {
                         seq_num: next_seq(&mut seq),
@@ -564,21 +546,39 @@ pub(crate) fn decode_semantic_with_state(
         ),
         // Byte-form ALU + 0x80/0x84/0xFE are merged into the same ModRM-parsing block.
         0x00 | 0x02 | 0x08 | 0x0A | 0x10 | 0x12 | 0x18 | 0x1A | 0x20 | 0x22 | 0x28 | 0x2A
-        | 0x30 | 0x32 | 0x38 | 0x3A | 0x80 | 0x84 | 0xFE
-        | 0x01 | 0x03 | 0x09 | 0x0B | 0x11 | 0x13 | 0x19 | 0x1B | 0x21 | 0x23 | 0x29 | 0x2B
-        | 0x31 | 0x33 | 0x39 | 0x3B | 0x81 | 0x83 | 0x85 | 0xF6 | 0xF7 | 0xFF | 0xC0 | 0xD0 | 0xD1
-        | 0xD2 | 0xC1 | 0xD3 => {
+        | 0x30 | 0x32 | 0x38 | 0x3A | 0x80 | 0x84 | 0xFE | 0x01 | 0x03 | 0x09 | 0x0B | 0x11
+        | 0x13 | 0x19 | 0x1B | 0x21 | 0x23 | 0x29 | 0x2B | 0x31 | 0x33 | 0x39 | 0x3B | 0x81
+        | 0x83 | 0x85 | 0xF6 | 0xF7 | 0xFF | 0xC0 | 0xD0 | 0xD1 | 0xD2 | 0xC1 | 0xD3 => {
             let mut pre_ops = Vec::new();
             let ff_group = if op == 0xFF {
                 insn.get(op_idx + 1).map(|b| (b >> 3) & 0x7)
             } else {
                 None
             };
-            let modrm_size = if matches!(op,
-                0xC0 | 0xD0 | 0xD2 | 0xF6
-                | 0x00 | 0x02 | 0x08 | 0x0A | 0x10 | 0x12
-                | 0x18 | 0x1A | 0x20 | 0x22 | 0x28 | 0x2A
-                | 0x30 | 0x32 | 0x38 | 0x3A | 0x80 | 0x84 | 0xFE
+            let modrm_size = if matches!(
+                op,
+                0xC0 | 0xD0
+                    | 0xD2
+                    | 0xF6
+                    | 0x00
+                    | 0x02
+                    | 0x08
+                    | 0x0A
+                    | 0x10
+                    | 0x12
+                    | 0x18
+                    | 0x1A
+                    | 0x20
+                    | 0x22
+                    | 0x28
+                    | 0x2A
+                    | 0x30
+                    | 0x32
+                    | 0x38
+                    | 0x3A
+                    | 0x80
+                    | 0x84
+                    | 0xFE
             ) {
                 1
             } else if ff_group == Some(6) {
@@ -610,7 +610,14 @@ pub(crate) fn decode_semantic_with_state(
                         0x29 => AluKind::Sub,
                         _ => AluKind::Xor,
                     };
-                    let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, size);
                     ops.extend(emit_alu_ops(
                         address,
@@ -625,8 +632,19 @@ pub(crate) fn decode_semantic_with_state(
                     ops
                 }
                 0x11 | 0x19 => {
-                    let kind = if op == 0x11 { AluKind::Adc } else { AluKind::Sbb };
-                    let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let kind = if op == 0x11 {
+                        AluKind::Adc
+                    } else {
+                        AluKind::Sbb
+                    };
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, size);
                     ops.extend(emit_alu_ops(
                         address,
@@ -649,7 +667,14 @@ pub(crate) fn decode_semantic_with_state(
                         _ => AluKind::Xor,
                     };
                     let lhs = x86_reg(decoded.reg_index, size);
-                    let rhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let rhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     ops.extend(emit_alu_ops(
                         address,
                         size,
@@ -663,9 +688,20 @@ pub(crate) fn decode_semantic_with_state(
                     ops
                 }
                 0x13 | 0x1B => {
-                    let kind = if op == 0x13 { AluKind::Adc } else { AluKind::Sbb };
+                    let kind = if op == 0x13 {
+                        AluKind::Adc
+                    } else {
+                        AluKind::Sbb
+                    };
                     let lhs = x86_reg(decoded.reg_index, size);
-                    let rhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let rhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     ops.extend(emit_alu_ops(
                         address,
                         size,
@@ -679,7 +715,14 @@ pub(crate) fn decode_semantic_with_state(
                     ops
                 }
                 0x39 => {
-                    let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, size);
                     ops.extend(emit_alu_ops(
                         address,
@@ -695,7 +738,14 @@ pub(crate) fn decode_semantic_with_state(
                 }
                 0x3B => {
                     let lhs = x86_reg(decoded.reg_index, size);
-                    let rhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let rhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     ops.extend(emit_alu_ops(
                         address,
                         size,
@@ -709,7 +759,14 @@ pub(crate) fn decode_semantic_with_state(
                     ops
                 }
                 0x85 => {
-                    let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, size);
                     ops.extend(emit_alu_ops(
                         address,
@@ -750,21 +807,21 @@ pub(crate) fn decode_semantic_with_state(
                         Some(v) => v,
                         None => return Vec::new(),
                     };
-                    let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        size,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let dst = if kind == AluKind::Cmp {
                         Destination::None
                     } else {
                         destination_from_rm(&decoded.rm)
                     };
                     ops.extend(emit_alu_ops(
-                        address,
-                        size,
-                        lhs,
-                        rhs,
-                        dst,
-                        kind,
-                        &mut temp,
-                        &mut seq,
+                        address, size, lhs, rhs, dst, kind, &mut temp, &mut seq,
                     ));
                     ops
                 }
@@ -822,7 +879,8 @@ pub(crate) fn decode_semantic_with_state(
                             inputs: vec![lhs],
                             asm_mnemonic: Some("NOT_RM".to_string()),
                         });
-                        ops = write_rm_value(&decoded.rm, result, address, &mut ops, &mut seq, "NOT");
+                        ops =
+                            write_rm_value(&decoded.rm, result, address, &mut ops, &mut seq, "NOT");
                     } else if decoded.reg_field == 3 {
                         let lhs = materialize_rm_value(
                             &decoded.rm,
@@ -900,15 +958,13 @@ pub(crate) fn decode_semantic_with_state(
                             &mut seq,
                         );
                         emit_stack_push(
-                            address,
-                            src,
-                            slot_size,
-                            &mut ops,
-                            &mut temp,
-                            &mut seq,
-                            "PUSH_RM",
+                            address, src, slot_size, &mut ops, &mut temp, &mut seq, "PUSH_RM",
                         );
-                    } else if decoded.reg_field == 2 || decoded.reg_field == 4 || decoded.reg_field == 3 || decoded.reg_field == 5 {
+                    } else if decoded.reg_field == 2
+                        || decoded.reg_field == 4
+                        || decoded.reg_field == 3
+                        || decoded.reg_field == 5
+                    {
                         // CALL/JMP indirect (near/far)
                         let target = materialize_rm_value(
                             &decoded.rm,
@@ -923,12 +979,7 @@ pub(crate) fn decode_semantic_with_state(
                             let slot_size = stack_operand_size(&prefix);
                             let ret_addr = const_u64(address + insn.len() as u64, slot_size);
                             emit_stack_push(
-                                address,
-                                ret_addr,
-                                slot_size,
-                                &mut ops,
-                                &mut temp,
-                                &mut seq,
+                                address, ret_addr, slot_size, &mut ops, &mut temp, &mut seq,
                                 "CALL_RET",
                             );
                             ops.push(PcodeOp {
@@ -956,7 +1007,14 @@ pub(crate) fn decode_semantic_with_state(
                             1 => AluKind::Dec,
                             _ => return Vec::new(),
                         };
-                        let lhs = materialize_rm_value(&decoded.rm, group_size, address, &mut ops, &mut temp, &mut seq);
+                        let lhs = materialize_rm_value(
+                            &decoded.rm,
+                            group_size,
+                            address,
+                            &mut ops,
+                            &mut temp,
+                            &mut seq,
+                        );
                         ops.extend(emit_alu_ops(
                             address,
                             group_size,
@@ -1042,14 +1100,23 @@ pub(crate) fn decode_semantic_with_state(
                         0x30 => AluKind::Xor,
                         _ => AluKind::Cmp, // 0x38
                     };
-                    let lhs = materialize_rm_value(&decoded.rm, 1, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        1,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, 1);
                     let dst = if kind == AluKind::Cmp {
                         Destination::None
                     } else {
                         destination_from_rm(&decoded.rm)
                     };
-                    ops.extend(emit_alu_ops(address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq));
+                    ops.extend(emit_alu_ops(
+                        address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq,
+                    ));
                     ops
                 }
                 // A2: Odd byte-form opcodes — r8 is destination, r/m8 is source
@@ -1065,13 +1132,22 @@ pub(crate) fn decode_semantic_with_state(
                         _ => AluKind::Cmp, // 0x3A
                     };
                     let lhs = x86_reg(decoded.reg_index, 1);
-                    let rhs = materialize_rm_value(&decoded.rm, 1, address, &mut ops, &mut temp, &mut seq);
+                    let rhs = materialize_rm_value(
+                        &decoded.rm,
+                        1,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let dst = if kind == AluKind::Cmp {
                         Destination::None
                     } else {
                         Destination::Reg(x86_reg(decoded.reg_index, 1))
                     };
-                    ops.extend(emit_alu_ops(address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq));
+                    ops.extend(emit_alu_ops(
+                        address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq,
+                    ));
                     ops
                 }
                 // A3: 0x80 — ALU r/m8, imm8 (/0–/7)
@@ -1091,18 +1167,34 @@ pub(crate) fn decode_semantic_with_state(
                         Some(v) => v,
                         None => return Vec::new(),
                     };
-                    let lhs = materialize_rm_value(&decoded.rm, 1, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        1,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let dst = if kind == AluKind::Cmp {
                         Destination::None
                     } else {
                         destination_from_rm(&decoded.rm)
                     };
-                    ops.extend(emit_alu_ops(address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq));
+                    ops.extend(emit_alu_ops(
+                        address, 1, lhs, rhs, dst, kind, &mut temp, &mut seq,
+                    ));
                     ops
                 }
                 // A4a: 0x84 — TEST r/m8, r8
                 0x84 => {
-                    let lhs = materialize_rm_value(&decoded.rm, 1, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        1,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     let rhs = x86_reg(decoded.reg_index, 1);
                     ops.extend(emit_alu_ops(
                         address,
@@ -1123,7 +1215,14 @@ pub(crate) fn decode_semantic_with_state(
                         1 => AluKind::Dec,
                         _ => return Vec::new(),
                     };
-                    let lhs = materialize_rm_value(&decoded.rm, 1, address, &mut ops, &mut temp, &mut seq);
+                    let lhs = materialize_rm_value(
+                        &decoded.rm,
+                        1,
+                        address,
+                        &mut ops,
+                        &mut temp,
+                        &mut seq,
+                    );
                     ops.extend(emit_alu_ops(
                         address,
                         1,
@@ -1630,7 +1729,11 @@ pub(crate) fn decode_semantic_with_state(
                 opcode: PcodeOpcode::CallOther,
                 address,
                 output: None,
-                inputs: vec![const_u64(X86_OUT_POLICY_ID, 8), x86_reg(2, 2), x86_reg(0, 1)],
+                inputs: vec![
+                    const_u64(X86_OUT_POLICY_ID, 8),
+                    x86_reg(2, 2),
+                    x86_reg(0, 1),
+                ],
                 asm_mnemonic: Some("OUT_DX_AL".to_string()),
             }]
         }
@@ -1641,7 +1744,11 @@ pub(crate) fn decode_semantic_with_state(
                 opcode: PcodeOpcode::CallOther,
                 address,
                 output: None,
-                inputs: vec![const_u64(X86_OUT_POLICY_ID, 8), x86_reg(2, 2), x86_reg(0, size)],
+                inputs: vec![
+                    const_u64(X86_OUT_POLICY_ID, 8),
+                    x86_reg(2, 2),
+                    x86_reg(0, size),
+                ],
                 asm_mnemonic: Some("OUT_DX_EAX".to_string()),
             }]
         }
@@ -1661,8 +1768,15 @@ pub(crate) fn decode_semantic_with_state(
                 asm_mnemonic: Some("PUSHA_SAVE_ESP".to_string()),
             });
             for reg_idx in [0u32, 1, 2, 3] {
-                emit_stack_push(address, x86_reg(reg_idx, slot_size), slot_size,
-                    &mut ops, &mut temp, &mut seq, "PUSHA");
+                emit_stack_push(
+                    address,
+                    x86_reg(reg_idx, slot_size),
+                    slot_size,
+                    &mut ops,
+                    &mut temp,
+                    &mut seq,
+                    "PUSHA",
+                );
             }
             // Push original ESP
             let esp_trunc = temp.alloc(slot_size);
@@ -1674,10 +1788,25 @@ pub(crate) fn decode_semantic_with_state(
                 inputs: vec![orig_esp, const_u64(0, 4)],
                 asm_mnemonic: Some("PUSHA_ESP_TRUNC".to_string()),
             });
-            emit_stack_push(address, esp_trunc, slot_size, &mut ops, &mut temp, &mut seq, "PUSHA_ESP");
+            emit_stack_push(
+                address,
+                esp_trunc,
+                slot_size,
+                &mut ops,
+                &mut temp,
+                &mut seq,
+                "PUSHA_ESP",
+            );
             for reg_idx in [5u32, 6, 7] {
-                emit_stack_push(address, x86_reg(reg_idx, slot_size), slot_size,
-                    &mut ops, &mut temp, &mut seq, "PUSHA");
+                emit_stack_push(
+                    address,
+                    x86_reg(reg_idx, slot_size),
+                    slot_size,
+                    &mut ops,
+                    &mut temp,
+                    &mut seq,
+                    "PUSHA",
+                );
             }
             ops
         }
@@ -1862,12 +1991,20 @@ pub(crate) fn decode_semantic_with_state(
 
         // C1: 0xA0–0xA3 MOV moffs (absolute address, no ModRM)
         0xA0 | 0xA1 | 0xA2 | 0xA3 => {
-            let addr_width = if prefix.address_size_override { 4usize } else { 8 };
+            let addr_width = if prefix.address_size_override {
+                4usize
+            } else {
+                8
+            };
             let abs_addr = match decode_immediate(insn, op_idx + 1, addr_width, 8, false) {
                 Some(v) => v,
                 None => return Vec::new(),
             };
-            let data_size = if matches!(op, 0xA0 | 0xA2) { 1u32 } else { size };
+            let data_size = if matches!(op, 0xA0 | 0xA2) {
+                1u32
+            } else {
+                size
+            };
             let mut ops = Vec::new();
             match op {
                 0xA0 | 0xA1 => {
@@ -2093,7 +2230,9 @@ pub(crate) fn decode_semantic_with_state(
                 inputs: vec![t5, of_sh],
                 asm_mnemonic: Some("PUSHF_OR6".to_string()),
             });
-            emit_stack_push(address, flags_val, slot, &mut ops, &mut temp, &mut seq, "PUSHF");
+            emit_stack_push(
+                address, flags_val, slot, &mut ops, &mut temp, &mut seq, "PUSHF",
+            );
             ops
         }
 
@@ -2142,13 +2281,55 @@ pub(crate) fn decode_semantic_with_state(
                     });
                 }};
             }
-            extract_flag!(0u64,  x86_flag_cf(), "POPF_CF_SH",  "POPF_CF_AND",  "POPF_CF_WR");
-            extract_flag!(2u64,  x86_flag_pf(), "POPF_PF_SH",  "POPF_PF_AND",  "POPF_PF_WR");
-            extract_flag!(4u64,  x86_flag_af(), "POPF_AF_SH",  "POPF_AF_AND",  "POPF_AF_WR");
-            extract_flag!(6u64,  x86_flag_zf(), "POPF_ZF_SH",  "POPF_ZF_AND",  "POPF_ZF_WR");
-            extract_flag!(7u64,  x86_flag_sf(), "POPF_SF_SH",  "POPF_SF_AND",  "POPF_SF_WR");
-            extract_flag!(10u64, x86_flag_df(), "POPF_DF_SH",  "POPF_DF_AND",  "POPF_DF_WR");
-            extract_flag!(11u64, x86_flag_of(), "POPF_OF_SH",  "POPF_OF_AND",  "POPF_OF_WR");
+            extract_flag!(
+                0u64,
+                x86_flag_cf(),
+                "POPF_CF_SH",
+                "POPF_CF_AND",
+                "POPF_CF_WR"
+            );
+            extract_flag!(
+                2u64,
+                x86_flag_pf(),
+                "POPF_PF_SH",
+                "POPF_PF_AND",
+                "POPF_PF_WR"
+            );
+            extract_flag!(
+                4u64,
+                x86_flag_af(),
+                "POPF_AF_SH",
+                "POPF_AF_AND",
+                "POPF_AF_WR"
+            );
+            extract_flag!(
+                6u64,
+                x86_flag_zf(),
+                "POPF_ZF_SH",
+                "POPF_ZF_AND",
+                "POPF_ZF_WR"
+            );
+            extract_flag!(
+                7u64,
+                x86_flag_sf(),
+                "POPF_SF_SH",
+                "POPF_SF_AND",
+                "POPF_SF_WR"
+            );
+            extract_flag!(
+                10u64,
+                x86_flag_df(),
+                "POPF_DF_SH",
+                "POPF_DF_AND",
+                "POPF_DF_WR"
+            );
+            extract_flag!(
+                11u64,
+                x86_flag_of(),
+                "POPF_OF_SH",
+                "POPF_OF_AND",
+                "POPF_OF_WR"
+            );
             ops
         }
 
@@ -2166,7 +2347,15 @@ pub(crate) fn decode_semantic_with_state(
             let rsp = stack_pointer_reg();
             let mut ops = Vec::new();
             // PUSH RBP
-            emit_stack_push(address, rbp.clone(), slot, &mut ops, &mut temp, &mut seq, "ENTER_PUSH_RBP");
+            emit_stack_push(
+                address,
+                rbp.clone(),
+                slot,
+                &mut ops,
+                &mut temp,
+                &mut seq,
+                "ENTER_PUSH_RBP",
+            );
             // MOV RBP, RSP
             ops.push(PcodeOp {
                 seq_num: next_seq(&mut seq),
@@ -2226,7 +2415,9 @@ pub(crate) fn decode_semantic_with_state(
         // MOV Sreg, r/m16 — segment register write
         0x8E => {
             let mut ops = Vec::new();
-            let decoded = match decode_modrm_operand(insn, op_idx, &prefix, 2, address, &mut temp, &mut ops, &mut seq) {
+            let decoded = match decode_modrm_operand(
+                insn, op_idx, &prefix, 2, address, &mut temp, &mut ops, &mut seq,
+            ) {
                 Some(d) => d,
                 None => return Vec::new(),
             };
@@ -2340,7 +2531,9 @@ pub(crate) fn decode_semantic_with_state(
         // MOV r/m16, Sreg — segment register read (reverse of 0x8E)
         0x8C => {
             let mut ops = Vec::new();
-            let decoded = match decode_modrm_operand(insn, op_idx, &prefix, 2, address, &mut temp, &mut ops, &mut seq) {
+            let decoded = match decode_modrm_operand(
+                insn, op_idx, &prefix, 2, address, &mut temp, &mut ops, &mut seq,
+            ) {
                 Some(d) => d,
                 None => return Vec::new(),
             };
@@ -2353,18 +2546,21 @@ pub(crate) fn decode_semantic_with_state(
     }
 }
 
-
-mod alu;
 mod addressing;
+mod alu;
 mod ext;
 #[cfg(test)]
 mod tests;
 
-use self::alu::emit_alu_ops;
 use self::addressing::{
-    decode_immediate, decode_modrm_operand, immediate_bytes_for_operand, operand_size, parse_prefixes,
+    decode_immediate, decode_modrm_operand, immediate_bytes_for_operand, operand_size,
+    parse_prefixes,
 };
-use self::ext::{decode_extended_semantic, decode_imul_r_rm_imm, decode_vex_semantic, emit_div_one_operand, emit_mul_one_operand};
+use self::alu::emit_alu_ops;
+use self::ext::{
+    decode_extended_semantic, decode_imul_r_rm_imm, decode_vex_semantic, emit_div_one_operand,
+    emit_mul_one_operand,
+};
 
 fn next_seq(seq: &mut u32) -> u32 {
     let cur = *seq;
@@ -2581,7 +2777,9 @@ fn emit_rotate_ops(
         masked
     };
 
-    emit_rotate_ops_inner(address, size, size_bits, lhs, count_norm, ops, dst, kind, temp, seq)
+    emit_rotate_ops_inner(
+        address, size, size_bits, lhs, count_norm, ops, dst, kind, temp, seq,
+    )
 }
 
 fn emit_rotate_ops_inner(
@@ -3067,8 +3265,10 @@ fn decode_string_semantic(
         0xA4 | 0xA5 => {
             let src_idx = x86_reg(6, index_size);
             let dst_idx = x86_reg(7, index_size);
-            let src_addr = widen_index_to_address(src_idx, address, &mut ops, temp, seq, "MOVS_SRC");
-            let dst_addr = widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "MOVS_DST");
+            let src_addr =
+                widen_index_to_address(src_idx, address, &mut ops, temp, seq, "MOVS_SRC");
+            let dst_addr =
+                widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "MOVS_DST");
             let loaded = temp.alloc(data_size);
             ops.push(PcodeOp {
                 seq_num: next_seq(seq),
@@ -3086,14 +3286,20 @@ fn decode_string_semantic(
                 inputs: vec![const_u64(RAM_SPACE_ID, 8), dst_addr, loaded],
                 asm_mnemonic: Some("MOVS_STORE".to_string()),
             });
-            emit_df_index_update(6, index_size, step, address, &mut ops, temp, seq, "MOVS_SRC");
-            emit_df_index_update(7, index_size, step, address, &mut ops, temp, seq, "MOVS_DST");
+            emit_df_index_update(
+                6, index_size, step, address, &mut ops, temp, seq, "MOVS_SRC",
+            );
+            emit_df_index_update(
+                7, index_size, step, address, &mut ops, temp, seq, "MOVS_DST",
+            );
         }
         0xA6 | 0xA7 => {
             let src_idx = x86_reg(6, index_size);
             let dst_idx = x86_reg(7, index_size);
-            let src_addr = widen_index_to_address(src_idx, address, &mut ops, temp, seq, "CMPS_SRC");
-            let dst_addr = widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "CMPS_DST");
+            let src_addr =
+                widen_index_to_address(src_idx, address, &mut ops, temp, seq, "CMPS_SRC");
+            let dst_addr =
+                widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "CMPS_DST");
             let lhs = temp.alloc(data_size);
             ops.push(PcodeOp {
                 seq_num: next_seq(seq),
@@ -3122,12 +3328,17 @@ fn decode_string_semantic(
                 temp,
                 seq,
             ));
-            emit_df_index_update(6, index_size, step, address, &mut ops, temp, seq, "CMPS_SRC");
-            emit_df_index_update(7, index_size, step, address, &mut ops, temp, seq, "CMPS_DST");
+            emit_df_index_update(
+                6, index_size, step, address, &mut ops, temp, seq, "CMPS_SRC",
+            );
+            emit_df_index_update(
+                7, index_size, step, address, &mut ops, temp, seq, "CMPS_DST",
+            );
         }
         0xAA | 0xAB => {
             let dst_idx = x86_reg(7, index_size);
-            let dst_addr = widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "STOS_DST");
+            let dst_addr =
+                widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "STOS_DST");
             ops.push(PcodeOp {
                 seq_num: next_seq(seq),
                 opcode: PcodeOpcode::Store,
@@ -3136,11 +3347,14 @@ fn decode_string_semantic(
                 inputs: vec![const_u64(RAM_SPACE_ID, 8), dst_addr, x86_reg(0, data_size)],
                 asm_mnemonic: Some("STOS_STORE".to_string()),
             });
-            emit_df_index_update(7, index_size, step, address, &mut ops, temp, seq, "STOS_DST");
+            emit_df_index_update(
+                7, index_size, step, address, &mut ops, temp, seq, "STOS_DST",
+            );
         }
         0xAC | 0xAD => {
             let src_idx = x86_reg(6, index_size);
-            let src_addr = widen_index_to_address(src_idx, address, &mut ops, temp, seq, "LODS_SRC");
+            let src_addr =
+                widen_index_to_address(src_idx, address, &mut ops, temp, seq, "LODS_SRC");
             let loaded = temp.alloc(data_size);
             ops.push(PcodeOp {
                 seq_num: next_seq(seq),
@@ -3158,11 +3372,14 @@ fn decode_string_semantic(
                 inputs: vec![loaded],
                 asm_mnemonic: Some("LODS_WRITE".to_string()),
             });
-            emit_df_index_update(6, index_size, step, address, &mut ops, temp, seq, "LODS_SRC");
+            emit_df_index_update(
+                6, index_size, step, address, &mut ops, temp, seq, "LODS_SRC",
+            );
         }
         0xAE | 0xAF => {
             let dst_idx = x86_reg(7, index_size);
-            let dst_addr = widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "SCAS_DST");
+            let dst_addr =
+                widen_index_to_address(dst_idx, address, &mut ops, temp, seq, "SCAS_DST");
             let rhs = temp.alloc(data_size);
             ops.push(PcodeOp {
                 seq_num: next_seq(seq),
@@ -3182,7 +3399,9 @@ fn decode_string_semantic(
                 temp,
                 seq,
             ));
-            emit_df_index_update(7, index_size, step, address, &mut ops, temp, seq, "SCAS_DST");
+            emit_df_index_update(
+                7, index_size, step, address, &mut ops, temp, seq, "SCAS_DST",
+            );
         }
         _ => return Vec::new(),
     }
@@ -3391,4 +3610,3 @@ fn emit_rep_count_step(
         asm_mnemonic: Some(format!("{mnemonic_base}_WRITE")),
     });
 }
-

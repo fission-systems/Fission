@@ -1,3 +1,6 @@
+use super::super::wave_stats::{
+    add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
+};
 /// Call-site inter-procedural type propagation pass.
 ///
 /// All type inference so far has been intra-procedural: it only sees the types
@@ -41,9 +44,6 @@
 /// Constraints are injected using the same `merge_constraint` / fixed-point
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
-use super::super::wave_stats::{
-    add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
-};
 use crate::nir::var_rename::rename_vars_in_stmts;
 use fission_signatures::win_api::WIN_API_DB;
 use std::collections::{HashMap, HashSet};
@@ -59,9 +59,18 @@ pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
         let inner_name = name.trim_end_matches('*').trim();
         let inner = match inner_name {
             "VOID" | "void" | "" => NirType::Unknown,
-            "CHAR" | "char" => NirType::Int { bits: 8, signed: true },
-            "WCHAR" | "wchar_t" | "TCHAR" => NirType::Int { bits: 16, signed: false },
-            "BYTE" | "UCHAR" => NirType::Int { bits: 8, signed: false },
+            "CHAR" | "char" => NirType::Int {
+                bits: 8,
+                signed: true,
+            },
+            "WCHAR" | "wchar_t" | "TCHAR" => NirType::Int {
+                bits: 16,
+                signed: false,
+            },
+            "BYTE" | "UCHAR" => NirType::Int {
+                bits: 8,
+                signed: false,
+            },
             _ => NirType::Unknown,
         };
         return Some(NirType::Ptr(Box::new(inner)));
@@ -71,49 +80,103 @@ pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
         // Void — no constraint.
         "void" | "VOID" => return None,
         // 32-bit unsigned integers.
-        "DWORD" | "UINT" | "ULONG" | "UINT32" | "ULONG32" | "DWORD32" => {
-            NirType::Int { bits: 32, signed: false }
-        }
+        "DWORD" | "UINT" | "ULONG" | "UINT32" | "ULONG32" | "DWORD32" => NirType::Int {
+            bits: 32,
+            signed: false,
+        },
         // 32-bit signed integers.
-        "INT" | "LONG" | "INT32" | "LONG32" => {
-            NirType::Int { bits: 32, signed: true }
-        }
+        "INT" | "LONG" | "INT32" | "LONG32" => NirType::Int {
+            bits: 32,
+            signed: true,
+        },
         // BOOL is signed int32 in Windows ABI.
-        "BOOL" => NirType::Int { bits: 32, signed: true },
+        "BOOL" => NirType::Int {
+            bits: 32,
+            signed: true,
+        },
         // 16-bit.
-        "WORD" | "USHORT" | "UINT16" => NirType::Int { bits: 16, signed: false },
-        "SHORT" | "INT16" => NirType::Int { bits: 16, signed: true },
+        "WORD" | "USHORT" | "UINT16" => NirType::Int {
+            bits: 16,
+            signed: false,
+        },
+        "SHORT" | "INT16" => NirType::Int {
+            bits: 16,
+            signed: true,
+        },
         // 8-bit.
-        "BYTE" | "UCHAR" | "UINT8" | "BOOLEAN" => NirType::Int { bits: 8, signed: false },
-        "CHAR" | "INT8" => NirType::Int { bits: 8, signed: true },
+        "BYTE" | "UCHAR" | "UINT8" | "BOOLEAN" => NirType::Int {
+            bits: 8,
+            signed: false,
+        },
+        "CHAR" | "INT8" => NirType::Int {
+            bits: 8,
+            signed: true,
+        },
         // 64-bit unsigned.
         "QWORD" | "UINT64" | "ULONG64" | "DWORD64" | "ULONGLONG" | "ULONG_PTR" | "SIZE_T"
-        | "UINT_PTR" => NirType::Int { bits: 64, signed: false },
+        | "UINT_PTR" => NirType::Int {
+            bits: 64,
+            signed: false,
+        },
         // 64-bit signed.
-        "LONGLONG" | "INT64" | "LONG64" | "LONG_PTR" | "SSIZE_T" | "INT_PTR" => {
-            NirType::Int { bits: 64, signed: true }
-        }
+        "LONGLONG" | "INT64" | "LONG64" | "LONG_PTR" | "SSIZE_T" | "INT_PTR" => NirType::Int {
+            bits: 64,
+            signed: true,
+        },
         // Generic pointer to void.
         "LPVOID" | "PVOID" | "HANDLE" => NirType::Ptr(Box::new(NirType::Unknown)),
         // Typed string pointers.
-        "LPSTR" | "LPCSTR" | "PSTR" | "PCSTR" => {
-            NirType::Ptr(Box::new(NirType::Int { bits: 8, signed: false }))
-        }
-        "LPWSTR" | "LPCWSTR" | "PWSTR" | "PCWSTR" => {
-            NirType::Ptr(Box::new(NirType::Int { bits: 16, signed: false }))
-        }
+        "LPSTR" | "LPCSTR" | "PSTR" | "PCSTR" => NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        })),
+        "LPWSTR" | "LPCWSTR" | "PWSTR" | "PCWSTR" => NirType::Ptr(Box::new(NirType::Int {
+            bits: 16,
+            signed: false,
+        })),
         // Opaque Windows handle types — typed as Ptr to empty Aggregate.
-        "HWND" | "HMODULE" | "HINSTANCE" | "HKEY" | "HFILE" | "HBITMAP"
-        | "HBRUSH" | "HFONT" | "HPEN" | "HICON" | "HCURSOR" | "HMENU"
-        | "HRGN" | "HDC" | "HGLOBAL" | "HLOCAL" | "HRSRC" | "HWINSTA"
-        | "HDESK" | "HPALETTE" | "HENHMETAFILE" | "HMETAFILE"
-        | "HCOLORSPACE" | "HCONV" | "HCONVLIST" | "HDDEDATA" | "HDDERESERVATION"
-        | "HSZ" | "HHOOK" | "HMONITOR" | "HWINEVENTHOOK" | "HPOWERNOTIFY"
-        | "SC_HANDLE" | "SERVICE_STATUS_HANDLE" => {
-            NirType::Ptr(Box::new(NirType::Aggregate { size: 0, fields: vec![] }))
-        }
+        "HWND"
+        | "HMODULE"
+        | "HINSTANCE"
+        | "HKEY"
+        | "HFILE"
+        | "HBITMAP"
+        | "HBRUSH"
+        | "HFONT"
+        | "HPEN"
+        | "HICON"
+        | "HCURSOR"
+        | "HMENU"
+        | "HRGN"
+        | "HDC"
+        | "HGLOBAL"
+        | "HLOCAL"
+        | "HRSRC"
+        | "HWINSTA"
+        | "HDESK"
+        | "HPALETTE"
+        | "HENHMETAFILE"
+        | "HMETAFILE"
+        | "HCOLORSPACE"
+        | "HCONV"
+        | "HCONVLIST"
+        | "HDDEDATA"
+        | "HDDERESERVATION"
+        | "HSZ"
+        | "HHOOK"
+        | "HMONITOR"
+        | "HWINEVENTHOOK"
+        | "HPOWERNOTIFY"
+        | "SC_HANDLE"
+        | "SERVICE_STATUS_HANDLE" => NirType::Ptr(Box::new(NirType::Aggregate {
+            size: 0,
+            fields: vec![],
+        })),
         // NTSTATUS / HRESULT: signed 32-bit.
-        "NTSTATUS" | "HRESULT" => NirType::Int { bits: 32, signed: true },
+        "NTSTATUS" | "HRESULT" => NirType::Int {
+            bits: 32,
+            signed: true,
+        },
         // MSVC va_list (opaque; model as generic pointer).
         "va_list" => NirType::Ptr(Box::new(NirType::Unknown)),
         // Unknown / not yet mapped → no constraint.
@@ -133,11 +196,19 @@ fn resolve_return_ty(ret_type_str: &str) -> Option<NirType> {
 /// Unknown can be replaced by anything; a concrete type is only replaced if the
 /// candidate is strictly more informative (pointer vs. integer, or known vs. unknown).
 fn tighten_binding_ty(binding: &mut NirBinding, candidate: &NirType) -> bool {
-    if binding.ty == *candidate { return false; }
+    if binding.ty == *candidate {
+        return false;
+    }
     match (&binding.ty, candidate) {
-        (NirType::Unknown, _) => { binding.ty = candidate.clone(); true }
-        (NirType::Ptr(a), NirType::Ptr(b)) if **a == NirType::Unknown && **b != NirType::Unknown => {
-            binding.ty = candidate.clone(); true
+        (NirType::Unknown, _) => {
+            binding.ty = candidate.clone();
+            true
+        }
+        (NirType::Ptr(a), NirType::Ptr(b))
+            if **a == NirType::Unknown && **b != NirType::Unknown =>
+        {
+            binding.ty = candidate.clone();
+            true
         }
         _ => false,
     }
@@ -286,21 +357,31 @@ fn rewrite_call_targets_stmts(stmts: &mut [HirStmt], rewrites: &HashMap<String, 
             HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
                 changed |= rewrite_call_targets_expr(rhs, rewrites);
             }
-            HirStmt::VaStart { va_list, .. } => changed |= rewrite_call_targets_expr(va_list, rewrites),
+            HirStmt::VaStart { va_list, .. } => {
+                changed |= rewrite_call_targets_expr(va_list, rewrites)
+            }
             HirStmt::Block(body)
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
                 changed |= rewrite_call_targets_stmts(body, rewrites);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 changed |= rewrite_call_targets_expr(expr, rewrites);
                 for case in cases {
                     changed |= rewrite_call_targets_stmts(&mut case.body, rewrites);
                 }
                 changed |= rewrite_call_targets_stmts(default, rewrites);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 changed |= rewrite_call_targets_expr(cond, rewrites);
                 changed |= rewrite_call_targets_stmts(then_body, rewrites);
                 changed |= rewrite_call_targets_stmts(else_body, rewrites);
@@ -386,8 +467,12 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
                     refined_here |= tightened;
                 }
                 for (i, arg_var_opt) in arg_vars.iter().enumerate() {
-                    let Some(arg_var) = arg_var_opt else { continue; };
-                    let Some(param_ty) = summary.prototype.param_lattices.get(i) else { break; };
+                    let Some(arg_var) = arg_var_opt else {
+                        continue;
+                    };
+                    let Some(param_ty) = summary.prototype.param_lattices.get(i) else {
+                        break;
+                    };
                     if *param_ty == NirType::Unknown {
                         continue;
                     }
@@ -422,8 +507,12 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
 
         // Resolve each parameter type and update argument bindings.
         for (i, arg_var_opt) in arg_vars.iter().enumerate() {
-            let Some(arg_var) = arg_var_opt else { continue; };
-            let Some(param) = sig.params.get(i) else { break; };
+            let Some(arg_var) = arg_var_opt else {
+                continue;
+            };
+            let Some(param) = sig.params.get(i) else {
+                break;
+            };
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
@@ -462,14 +551,19 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     if !rename_conflicts.is_empty() {
         add_typed_fact_conflicts(rename_conflicts.len());
     }
-    if !call_target_rewrites.is_empty() && rewrite_call_targets_stmts(&mut func.body, &call_target_rewrites) {
+    if !call_target_rewrites.is_empty()
+        && rewrite_call_targets_stmts(&mut func.body, &call_target_rewrites)
+    {
         changed = true;
     }
 
     changed
 }
 
-fn binding_by_name_mut<'a>(bindings: &'a mut Vec<NirBinding>, name: &str) -> Option<&'a mut NirBinding> {
+fn binding_by_name_mut<'a>(
+    bindings: &'a mut Vec<NirBinding>,
+    name: &str,
+) -> Option<&'a mut NirBinding> {
     bindings.iter_mut().find(|b| b.name == name)
 }
 
@@ -517,7 +611,11 @@ fn collect_callsites_stmt(
         }
         HirStmt::Return(Some(expr)) => collect_callsites_expr(expr, out),
         HirStmt::Block(body) => collect_callsites_stmts(body, out),
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             collect_callsites_expr(cond, out);
             collect_callsites_stmts(then_body, out);
             collect_callsites_stmts(else_body, out);
@@ -526,15 +624,32 @@ fn collect_callsites_stmt(
             collect_callsites_expr(cond, out);
             collect_callsites_stmts(body, out);
         }
-        HirStmt::For { init, cond, update, body } => {
-            if let Some(i) = init { collect_callsites_stmt(i, out); }
-            if let Some(c) = cond { collect_callsites_expr(c, out); }
-            if let Some(u) = update { collect_callsites_stmt(u, out); }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                collect_callsites_stmt(i, out);
+            }
+            if let Some(c) = cond {
+                collect_callsites_expr(c, out);
+            }
+            if let Some(u) = update {
+                collect_callsites_stmt(u, out);
+            }
             collect_callsites_stmts(body, out);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             collect_callsites_expr(expr, out);
-            for case in cases { collect_callsites_stmts(&case.body, out); }
+            for case in cases {
+                collect_callsites_stmts(&case.body, out);
+            }
             collect_callsites_stmts(default, out);
         }
         _ => {}
@@ -587,9 +702,10 @@ mod tests {
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
         let mut func = HirFunction {
             name: "caller".to_string(),
-            params: vec![
-                unknown_binding("param_1", Some(NirBindingOrigin::ParamIndex(0))),
-            ],
+            params: vec![unknown_binding(
+                "param_1",
+                Some(NirBindingOrigin::ParamIndex(0)),
+            )],
             locals: vec![unknown_binding(
                 "local_2",
                 Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),

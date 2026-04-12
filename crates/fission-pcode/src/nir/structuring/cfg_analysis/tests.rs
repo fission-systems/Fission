@@ -98,9 +98,7 @@ fn imm_dom_matches_petgraph_diamond() {
 
     let doms = simple_fast(&g, nodes[0]);
     for i in 0..4 {
-        let pg = doms
-            .immediate_dominator(nodes[i])
-            .map(|ix| ix.index());
+        let pg = doms.immediate_dominator(nodes[i]).map(|ix| ix.index());
         assert_eq!(
             imm_dom.immediate_dominator(i),
             pg,

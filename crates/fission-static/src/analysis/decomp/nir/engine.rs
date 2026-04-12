@@ -73,14 +73,7 @@ pub fn select_preview_output_from_pcode_with_facts(
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
     select_nir_output_from_pcode_with_facts(
-        pcode,
-        binary,
-        fact_store,
-        address,
-        name,
-        mode,
-        timeout_ms,
-        options,
+        pcode, binary, fact_store, address, name, mode, timeout_ms, options,
     )
 }
 

@@ -12,8 +12,16 @@ pub(super) fn decode_movx(
     seq: &mut u32,
 ) -> Vec<PcodeOp> {
     let mut ops = Vec::new();
-    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, src_size, address, temp, &mut ops, seq)
-    {
+    let decoded = match decode_modrm_operand(
+        insn,
+        op_idx + 1,
+        prefix,
+        src_size,
+        address,
+        temp,
+        &mut ops,
+        seq,
+    ) {
         Some(v) => v,
         None => return Vec::new(),
     };
@@ -21,7 +29,14 @@ pub(super) fn decode_movx(
     let src = materialize_rm_value(&decoded.rm, src_size, address, &mut ops, temp, seq);
     let dst = x86_reg(decoded.reg_index, dst_size);
     let (opcode, mnemonic) = if dst_size == src_size {
-        (PcodeOpcode::Copy, if is_sign_extend { "MOVSX_WRITE" } else { "MOVZX_WRITE" })
+        (
+            PcodeOpcode::Copy,
+            if is_sign_extend {
+                "MOVSX_WRITE"
+            } else {
+                "MOVZX_WRITE"
+            },
+        )
     } else if is_sign_extend {
         (PcodeOpcode::IntSExt, "MOVSX_WRITE")
     } else {
@@ -222,12 +237,14 @@ pub(super) fn emit_div_one_operand(
         address,
         output: Some(dividend.clone()),
         inputs: vec![dividend_hi, dividend_lo],
-        asm_mnemonic: Some(if is_signed {
-            "IDIV_DIVIDEND"
-        } else {
-            "DIV_DIVIDEND"
-        }
-        .to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_DIVIDEND"
+            } else {
+                "DIV_DIVIDEND"
+            }
+            .to_string(),
+        ),
     });
 
     let divisor_ext = temp.alloc(full_size);
@@ -241,12 +258,14 @@ pub(super) fn emit_div_one_operand(
         address,
         output: Some(divisor_ext.clone()),
         inputs: vec![divisor],
-        asm_mnemonic: Some(if is_signed {
-            "IDIV_DIVISOR_EXT"
-        } else {
-            "DIV_DIVISOR_EXT"
-        }
-        .to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_DIVISOR_EXT"
+            } else {
+                "DIV_DIVISOR_EXT"
+            }
+            .to_string(),
+        ),
     });
 
     let quotient_full = temp.alloc(full_size);
@@ -284,7 +303,14 @@ pub(super) fn emit_div_one_operand(
         address,
         output: Some(quotient.clone()),
         inputs: vec![quotient_full, const_u64(0, 4)],
-        asm_mnemonic: Some(if is_signed { "IDIV_QUOT_LO" } else { "DIV_QUOT_LO" }.to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_QUOT_LO"
+            } else {
+                "DIV_QUOT_LO"
+            }
+            .to_string(),
+        ),
     });
     let remainder = temp.alloc(size);
     ops.push(PcodeOp {
@@ -293,7 +319,14 @@ pub(super) fn emit_div_one_operand(
         address,
         output: Some(remainder.clone()),
         inputs: vec![remainder_full, const_u64(0, 4)],
-        asm_mnemonic: Some(if is_signed { "IDIV_REM_LO" } else { "DIV_REM_LO" }.to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_REM_LO"
+            } else {
+                "DIV_REM_LO"
+            }
+            .to_string(),
+        ),
     });
 
     ops.push(PcodeOp {
@@ -302,14 +335,32 @@ pub(super) fn emit_div_one_operand(
         address,
         output: Some(x86_reg(0, size)),
         inputs: vec![quotient],
-        asm_mnemonic: Some(if is_signed { "IDIV_QUOT_WRITE" } else { "DIV_QUOT_WRITE" }.to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_QUOT_WRITE"
+            } else {
+                "DIV_QUOT_WRITE"
+            }
+            .to_string(),
+        ),
     });
     ops.push(PcodeOp {
         seq_num: next_seq(seq),
         opcode: PcodeOpcode::Copy,
         address,
-        output: Some(if size == 1 { x86_reg(4, 1) } else { x86_reg(2, size) }),
+        output: Some(if size == 1 {
+            x86_reg(4, 1)
+        } else {
+            x86_reg(2, size)
+        }),
         inputs: vec![remainder],
-        asm_mnemonic: Some(if is_signed { "IDIV_REM_WRITE" } else { "DIV_REM_WRITE" }.to_string()),
+        asm_mnemonic: Some(
+            if is_signed {
+                "IDIV_REM_WRITE"
+            } else {
+                "DIV_REM_WRITE"
+            }
+            .to_string(),
+        ),
     });
 }

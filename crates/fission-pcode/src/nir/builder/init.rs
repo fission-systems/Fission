@@ -1,5 +1,6 @@
 use super::state::{BuilderCacheMap, BuilderCacheSet};
 use super::*;
+use fission_loader::loader::LoadedBinary;
 
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn new(
@@ -7,24 +8,34 @@ impl<'a> PreviewBuilder<'a> {
         options: &'a MlilPreviewOptions,
         type_context: Option<&'a PreviewTypeContext>,
     ) -> Self {
+        Self::new_with_binary(pcode, options, None, type_context)
+    }
+
+    pub(crate) fn new_with_binary(
+        pcode: &'a PcodeFunction,
+        options: &'a MlilPreviewOptions,
+        binary: Option<&'a LoadedBinary>,
+        type_context: Option<&'a PreviewTypeContext>,
+    ) -> Self {
         let mut defs = HashMap::new();
+        let mut def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>> = HashMap::new();
         let mut block_defs = Vec::with_capacity(pcode.blocks.len());
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
             let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::new();
             for (op_idx, op) in block.ops.iter().enumerate() {
                 if let Some(output) = &op.output {
+                    let key = VarnodeKey::from(output);
+                    let site = DefSite {
+                        block_idx,
+                        op_idx,
+                        _marker: std::marker::PhantomData,
+                    };
                     block_def_map
-                        .entry(VarnodeKey::from(output))
+                        .entry(key.clone())
                         .or_default()
                         .push(op_idx);
-                    defs.insert(
-                        VarnodeKey::from(output),
-                        DefSite {
-                            block_idx,
-                            op_idx,
-                            _marker: std::marker::PhantomData,
-                        },
-                    );
+                    def_sites.entry(key.clone()).or_default().push(site);
+                    defs.insert(key, site);
                 }
             }
             block_defs.push(block_def_map);
@@ -83,8 +94,10 @@ impl<'a> PreviewBuilder<'a> {
         Self {
             pcode,
             options,
+            binary,
             type_context,
             defs,
+            def_sites,
             block_defs,
             lookup_site_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
@@ -206,6 +219,7 @@ impl<'a> PreviewBuilder<'a> {
             indirect_surface_preserved_count: 0,
             indirect_target_set_refined_count: 0,
             dispatcher_shape_recovered_count: 0,
+            proof_payload_direct_emit_count: 0,
         }
     }
 }

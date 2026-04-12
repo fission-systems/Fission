@@ -113,13 +113,38 @@ impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCa
     }
 }
 
-pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {
-    let indirect = IndirectControlClassification::from_flags(
+fn canonical_indirect_classification(
+    entry: &InventoryCandidateEntry,
+) -> IndirectControlClassification {
+    indirect_classification_from_parts(
+        entry.nir_build_stats.as_ref(),
         entry.has_indirect_control_flow,
         entry.has_preserved_indirect_surface,
         entry.has_unresolved_unsupported_indirect,
         entry.has_dispatcher_recovery,
-    );
+    )
+}
+
+fn indirect_classification_from_parts(
+    stats: Option<&NirBuildStats>,
+    has_indirect_control_flow: bool,
+    _has_preserved_indirect_surface: bool,
+    _has_unresolved_unsupported_indirect: bool,
+    _has_dispatcher_recovery: bool,
+) -> IndirectControlClassification {
+    stats.map_or_else(
+        IndirectControlClassification::default,
+        |stats| {
+            IndirectControlClassification::from_stats_or_observation(
+                Some(stats),
+                has_indirect_control_flow,
+            )
+        },
+    )
+}
+
+pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {
+    let indirect = canonical_indirect_classification(entry);
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
         stats.pointer_alias_hits > 0
@@ -196,12 +221,7 @@ fn strict_explicit_candidate_row(
     entry: &InventoryCandidateEntry,
     explicit_fact_total: usize,
 ) -> bool {
-    let indirect = IndirectControlClassification::from_flags(
-        entry.has_indirect_control_flow,
-        entry.has_preserved_indirect_surface,
-        entry.has_unresolved_unsupported_indirect,
-        entry.has_dispatcher_recovery,
-    );
+    let indirect = canonical_indirect_classification(entry);
     explicit_fact_total >= 2
         && entry.preview_direct_success
         && indirect.allows_strict_explicit_candidate(entry.pcode_op_count)
@@ -441,5 +461,37 @@ pub(super) fn update_inventory_summary(
             .entry("preview_timeout".to_string())
             .and_modify(|count| *count += 0)
             .or_insert(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stats_prefer_over_raw_flags_for_heuristic_surface_classification() {
+        let classification = indirect_classification_from_parts(
+            Some(&NirBuildStats {
+                indirect_surface_preserved_count: 1,
+                ..Default::default()
+            }),
+            false,
+            false,
+            true,
+            false,
+        );
+
+        assert!(classification.has_indirect_control);
+        assert!(classification.has_preserved_indirect_surface);
+        assert!(!classification.has_unresolved_unsupported_indirect);
+    }
+
+    #[test]
+    fn missing_stats_fail_closed_for_indirect_classification() {
+        let classification = indirect_classification_from_parts(None, true, true, false, false);
+
+        assert!(!classification.has_indirect_control);
+        assert!(!classification.has_preserved_indirect_surface);
+        assert!(!classification.has_unresolved_unsupported_indirect);
     }
 }

@@ -216,25 +216,19 @@ fn bool_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
 
 /// Substitute any raw flag `Var` references in `expr` with their definitions.
 /// Returns `Some(new_expr)` if any substitution occurred, `None` otherwise.
-fn substitute_single_flags(
-    expr: &HirExpr,
-    defs: &HashMap<String, HirExpr>,
-) -> Option<HirExpr> {
+fn substitute_single_flags(expr: &HirExpr, defs: &HashMap<String, HirExpr>) -> Option<HirExpr> {
     match expr {
         HirExpr::Var(name) if is_flag_var(name) => defs.get(name).cloned(),
-        HirExpr::Unary { op, expr: inner, ty } => {
-            substitute_single_flags(inner, defs).map(|new_inner| HirExpr::Unary {
-                op: *op,
-                expr: Box::new(new_inner),
-                ty: ty.clone(),
-            })
-        }
-        HirExpr::Binary {
+        HirExpr::Unary {
             op,
-            lhs,
-            rhs,
+            expr: inner,
             ty,
-        } => {
+        } => substitute_single_flags(inner, defs).map(|new_inner| HirExpr::Unary {
+            op: *op,
+            expr: Box::new(new_inner),
+            ty: ty.clone(),
+        }),
+        HirExpr::Binary { op, lhs, rhs, ty } => {
             let new_lhs = substitute_single_flags(lhs, defs);
             let new_rhs = substitute_single_flags(rhs, defs);
             if new_lhs.is_some() || new_rhs.is_some() {
@@ -362,7 +356,11 @@ fn recover_in_cond(cond: &mut HirExpr, defs: &HashMap<String, HirExpr>, changed:
     }
 }
 
-fn recover_in_stmts_box(stmt: &mut Box<HirStmt>, defs: &HashMap<String, HirExpr>, changed: &mut bool) {
+fn recover_in_stmts_box(
+    stmt: &mut Box<HirStmt>,
+    defs: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
     let mut tmp = vec![*stmt.clone()];
     recover_in_stmts(&mut tmp, defs, changed);
     if let Some(s) = tmp.into_iter().next() {
@@ -391,7 +389,11 @@ fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, c
                 recover_in_cond(cond, defs, changed);
             }
             HirStmt::For {
-                cond, body, init, update, ..
+                cond,
+                body,
+                init,
+                update,
+                ..
             } => {
                 if let Some(c) = cond {
                     recover_in_cond(c, defs, changed);
@@ -491,7 +493,11 @@ fn count_uses_in_stmt(stmt: &HirStmt, uses: &mut HashMap<String, usize>) {
             count_uses_in_stmts(body, uses);
         }
         HirStmt::Block(body) => count_uses_in_stmts(body, uses),
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             count_uses_in_expr(expr, uses);
             for case in cases {
                 count_uses_in_stmts(&case.body, uses);
@@ -602,13 +608,17 @@ fn remove_dead_flags_in_nested(
 fn expr_has_flag_side_effects(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Var(_) | HirExpr::Const(_, _) => false,
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. } => expr_has_flag_side_effects(inner),
+        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+            expr_has_flag_side_effects(inner)
+        }
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_has_flag_side_effects(lhs) || expr_has_flag_side_effects(rhs)
         }
         HirExpr::Call { target, args, .. } => {
-            if matches!(target.as_str(), "__sborrow" | "__scarry" | "__carry" | "__popcount") {
+            if matches!(
+                target.as_str(),
+                "__sborrow" | "__scarry" | "__carry" | "__popcount"
+            ) {
                 args.iter().any(expr_has_flag_side_effects)
             } else {
                 true // unknown calls have side effects

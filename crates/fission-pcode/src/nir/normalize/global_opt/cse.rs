@@ -35,7 +35,7 @@
 /// - Ghidra `ActionMultiCse` (coreaction.cc): local CSE concept
 /// - LLVM `GVN.cpp`: global value numbering (superset of this)
 /// - Cooper & Torczon "Engineering a Compiler" §8.4
-use super::super::analysis::expr_key::{invalidate_pure_map, pure_expr_key, PureExprMap};
+use super::super::analysis::expr_key::{PureExprMap, invalidate_pure_map, pure_expr_key};
 use super::super::*;
 use std::collections::HashMap;
 
@@ -86,11 +86,17 @@ fn cse_stmt(stmt: &mut HirStmt, map: &mut PureExprMap) -> bool {
             changed
         }
         // For branches: recurse with a fresh map clone (no propagation across arms).
-        HirStmt::If { cond: _, then_body, else_body } => {
+        HirStmt::If {
+            cond: _,
+            then_body,
+            else_body,
+        } => {
             let mut then_map = map.clone();
             let mut else_map = map.clone();
             let mut changed = cse_stmts(then_body, &mut then_map);
-            if cse_stmts(else_body, &mut else_map) { changed = true; }
+            if cse_stmts(else_body, &mut else_map) {
+                changed = true;
+            }
             // After the if, the map is cleared (join point — values may differ).
             map.clear();
             changed
@@ -102,14 +108,24 @@ fn cse_stmt(stmt: &mut HirStmt, map: &mut PureExprMap) -> bool {
             // After the loop, the outer map is unchanged (loop didn't run = no defs).
             changed
         }
-        HirStmt::For { init, body, update, .. } => {
+        HirStmt::For {
+            init, body, update, ..
+        } => {
             let mut changed = false;
-            if let Some(s) = init { if cse_stmt(s, map) { changed = true; } }
+            if let Some(s) = init {
+                if cse_stmt(s, map) {
+                    changed = true;
+                }
+            }
             let mut loop_map = HashMap::new();
-            if cse_stmts(body, &mut loop_map) { changed = true; }
+            if cse_stmts(body, &mut loop_map) {
+                changed = true;
+            }
             if let Some(s) = update {
                 let mut u_map = HashMap::new();
-                if cse_stmt(s, &mut u_map) { changed = true; }
+                if cse_stmt(s, &mut u_map) {
+                    changed = true;
+                }
             }
             changed
         }
@@ -117,10 +133,14 @@ fn cse_stmt(stmt: &mut HirStmt, map: &mut PureExprMap) -> bool {
             let mut changed = false;
             for case in cases.iter_mut() {
                 let mut arm_map = map.clone();
-                if cse_stmts(&mut case.body, &mut arm_map) { changed = true; }
+                if cse_stmts(&mut case.body, &mut arm_map) {
+                    changed = true;
+                }
             }
             let mut def_map = map.clone();
-            if cse_stmts(default, &mut def_map) { changed = true; }
+            if cse_stmts(default, &mut def_map) {
+                changed = true;
+            }
             map.clear();
             changed
         }

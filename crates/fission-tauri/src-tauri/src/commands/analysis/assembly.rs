@@ -31,15 +31,8 @@ fn decompile_rust_only(
     let mut config = RustSleighDecompileConfig::cli_defaults();
     config.nir_mode = fission_decompiler_core::NirEngineMode::Nir;
 
-    let result = decompile_with_rust_sleigh(
-        binary,
-        address,
-        name,
-        &config,
-        None,
-        None,
-    )
-    .map_err(CmdError::other)?;
+    let result = decompile_with_rust_sleigh(binary, address, name, &config, None, None)
+        .map_err(CmdError::other)?;
 
     Ok(DecompileOutcome {
         code: result.code,
@@ -88,7 +81,12 @@ pub async fn decompile_function(
     let options_for_job = decompiler_options.clone();
 
     let job = tokio::task::spawn_blocking(move || {
-        decompile_rust_only(binary_for_job.as_ref(), address, &func_name_for_job, options_for_job)
+        decompile_rust_only(
+            binary_for_job.as_ref(),
+            address,
+            &func_name_for_job,
+            options_for_job,
+        )
     });
 
     let decomp_result = match tokio::time::timeout(Duration::from_millis(timeout_ms), job).await {
@@ -132,7 +130,10 @@ pub async fn decompile_function(
             address: format!("0x{:x}", address),
             engine_used: DecompilerEngineMode::Nir,
             fell_back: true,
-            fallback_reason: Some(fallback_reason_with_kind("rust_decomp_failure", e.to_string())),
+            fallback_reason: Some(fallback_reason_with_kind(
+                "rust_decomp_failure",
+                e.to_string(),
+            )),
         }),
     }
 }

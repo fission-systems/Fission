@@ -93,6 +93,7 @@ pub(crate) enum LoweredTerminator {
         /// adjusted by the compiler (e.g. `sel = orig - min_val`).
         /// case value = `min_val + ordinal_index`.  Zero when unknown/unrecovered.
         min_val: i64,
+        proof: Option<DispatcherProofUnit>,
     },
     Return(Option<HirExpr>),
     Unsupported {
@@ -259,6 +260,40 @@ pub(crate) fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
     let name = format!("{prefix}{}", *next_id);
     *next_id += 1;
     name
+}
+
+pub(crate) fn recovered_switch_case_values(
+    targets: &[u64],
+    default_target: Option<u64>,
+    min_val: i64,
+    proof: Option<&DispatcherProofUnit>,
+) -> (Vec<(i64, u64)>, bool) {
+    if let Some(proof) = proof
+        && proof.failure_family.is_none()
+        && !proof.recovered_cases.is_empty()
+    {
+        let recovered = proof
+            .recovered_cases
+            .iter()
+            .copied()
+            .filter(|(_, target)| Some(*target) != default_target)
+            .collect::<Vec<_>>();
+        if !recovered.is_empty() {
+            return (recovered, true);
+        }
+    }
+
+    (
+        targets
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(ordinal, target)| {
+                (Some(target) != default_target).then_some((min_val + ordinal as i64, target))
+            })
+            .collect(),
+        false,
+    )
 }
 
 /// x64 calling convention used when identifying parameter registers.

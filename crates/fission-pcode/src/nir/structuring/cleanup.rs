@@ -85,7 +85,12 @@ fn cond_goto_inversion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> 
     let mut i = 0;
     while i < stmts.len() {
         // Pattern: If { cond, then=[Goto(L)], else=[] }  followed by  Label(L)  and rest
-        if let HirStmt::If { cond, then_body, else_body } = &stmts[i] {
+        if let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &stmts[i]
+        {
             if else_body.is_empty() {
                 if let [HirStmt::Goto(goto_label)] = then_body.as_slice() {
                     // Find the immediately following Label(L) at the top level.
@@ -94,8 +99,7 @@ fn cond_goto_inversion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> 
                             if goto_label == label {
                                 // Collect everything after the label as the inlined else body.
                                 let inverted_cond = negate_expr(cond.clone());
-                                let rest_body: Vec<HirStmt> =
-                                    stmts[i + 2..].to_vec();
+                                let rest_body: Vec<HirStmt> = stmts[i + 2..].to_vec();
                                 if !rest_body.is_empty() {
                                     *changed = true;
                                     out.push(HirStmt::If {
@@ -542,8 +546,17 @@ mod tests {
         ];
         let result = eliminate_redundant_gotos(stmts);
         // After inversion the Label should be gone and we should have a single If.
-        assert_eq!(result.len(), 1, "expected single If after inversion: {result:?}");
-        let HirStmt::If { else_body, then_body, .. } = &result[0] else {
+        assert_eq!(
+            result.len(),
+            1,
+            "expected single If after inversion: {result:?}"
+        );
+        let HirStmt::If {
+            else_body,
+            then_body,
+            ..
+        } = &result[0]
+        else {
             panic!("expected If: {result:?}");
         };
         assert!(else_body.is_empty(), "else should be empty: {result:?}");

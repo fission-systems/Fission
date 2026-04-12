@@ -1,14 +1,14 @@
 use crate::cli::args::OneShotArgs;
+use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::oneshot::function_select::{
     canonical_functions_sorted, select_function_by_address, select_functions_from_addresses_file,
 };
-use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use fission_core::FissionError;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::cmp::min;
 use std::fs;
 use std::io::{self, Write};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 const DEFAULT_DECOMP_STACK_MB: usize = 32;
@@ -90,7 +90,16 @@ fn strip_inferred_structs(code: &str) -> String {
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
-) -> Result<(String, bool, Option<String>, Option<fission_pcode::NirBuildStats>, Option<fission_pcode::NirHintStats>), FissionError> {
+) -> Result<
+    (
+        String,
+        bool,
+        Option<String>,
+        Option<fission_pcode::NirBuildStats>,
+        Option<fission_pcode::NirHintStats>,
+    ),
+    FissionError,
+> {
     let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();
     let result = fission_decompiler_core::decompile_with_rust_sleigh(
         binary,
@@ -113,7 +122,9 @@ fn render_with_rust_sleigh(
 
 fn collect_target_functions(cli: &OneShotArgs, binary: &LoadedBinary) -> Vec<FunctionInfo> {
     if let Some(addr) = cli.address {
-        if let Some(func) = select_function_by_address(binary, addr).or_else(|| binary.function_at(addr)) {
+        if let Some(func) =
+            select_function_by_address(binary, addr).or_else(|| binary.function_at(addr))
+        {
             return vec![func.clone()];
         }
         return Vec::new();
@@ -126,8 +137,10 @@ fn collect_target_functions(cli: &OneShotArgs, binary: &LoadedBinary) -> Vec<Fun
             }
             return Vec::new();
         }
-        let mut functions: Vec<FunctionInfo> =
-            canonical_functions_sorted(binary).into_iter().cloned().collect();
+        let mut functions: Vec<FunctionInfo> = canonical_functions_sorted(binary)
+            .into_iter()
+            .cloned()
+            .collect();
         if let Some(limit) = cli.decomp_limit {
             functions.truncate(limit);
         }
@@ -394,30 +407,32 @@ fn run_worker_fanout_fanin(
         let spawn = thread::Builder::new()
             .name(format!("fission-rust-decomp-worker-{worker_idx}"))
             .stack_size(stack_size_bytes)
-            .spawn(move || loop {
-            let task = match rx.lock() {
-                Ok(locked) => locked.recv(),
-                Err(_) => return,
-            };
-            let func = match task {
-                Ok(func) => func,
-                Err(_) => return,
-            };
-            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                render_one_function(binary.as_ref(), &func, config)
-            }))
-            .unwrap_or_else(|_| {
-                make_internal_error_result(
-                    binary.as_ref(),
-                    &func,
-                    "worker thread panicked while rendering function".to_string(),
-                    config,
-                )
+            .spawn(move || {
+                loop {
+                    let task = match rx.lock() {
+                        Ok(locked) => locked.recv(),
+                        Err(_) => return,
+                    };
+                    let func = match task {
+                        Ok(func) => func,
+                        Err(_) => return,
+                    };
+                    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        render_one_function(binary.as_ref(), &func, config)
+                    }))
+                    .unwrap_or_else(|_| {
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func,
+                            "worker thread panicked while rendering function".to_string(),
+                            config,
+                        )
+                    });
+                    if tx.send(rendered).is_err() {
+                        return;
+                    }
+                }
             });
-            if tx.send(rendered).is_err() {
-                return;
-            }
-        });
 
         if let Ok(handle) = spawn {
             worker_handles.push(handle);
@@ -502,12 +517,9 @@ fn render_one_function(
             let decomp_sec = start.elapsed().as_secs_f64();
             let error_text = err.to_string();
 
-            if let Some(fallback) = make_assembly_fallback(
-                binary,
-                binary.inner().data.as_slice(),
-                func,
-                &error_text,
-            ) {
+            if let Some(fallback) =
+                make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &error_text)
+            {
                 let mut entry = serde_json::json!({
                     "address": format!("0x{:x}", func.address),
                     "name": func.name,

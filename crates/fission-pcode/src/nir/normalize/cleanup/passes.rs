@@ -50,6 +50,11 @@ pub(crate) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
             idx += 1;
             continue;
         };
+        let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
+        if target_uses > 1 && !expr_is_low_cost_inline_candidate(&rhs) {
+            idx += 1;
+            continue;
+        }
         replace_var_in_stmt(&mut stmts[target_idx], &name, &rhs);
         to_remove[idx] = true;
         changed = true;
@@ -182,10 +187,10 @@ pub(crate) fn collapse_redundant_conditional_returns(stmts: &mut Vec<HirStmt>) -
         // if (cond) return X; return X;  ==>  [cond side effects]; return X;
         // if (cond) {} else return X; return X;  ==>  [cond side effects]; return X;
         if let Some(next_ret) = stmts.get(idx + 1).and_then(as_return_stmt) {
-            let then_matches_next = then_ret.as_ref().is_some_and(|ret| ret == next_ret)
-                && else_body.is_empty();
-            let else_matches_next = else_ret.as_ref().is_some_and(|ret| ret == next_ret)
-                && then_body.is_empty();
+            let then_matches_next =
+                then_ret.as_ref().is_some_and(|ret| ret == next_ret) && else_body.is_empty();
+            let else_matches_next =
+                else_ret.as_ref().is_some_and(|ret| ret == next_ret) && then_body.is_empty();
             if then_matches_next || else_matches_next {
                 changed = true;
                 if expr_has_side_effects(cond) {
@@ -829,6 +834,14 @@ fn is_trivial_temp_name(name: &str) -> bool {
         || name.starts_with("bVar")
 }
 
+fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Cast { expr, .. } => expr_is_low_cost_inline_candidate(expr),
+        _ => false,
+    }
+}
+
 fn is_dead_local_clobber_name(name: &str) -> bool {
     if name.starts_with("param_ffff")
         || name.starts_with("param_fff")
@@ -1228,7 +1241,11 @@ fn elide_casts_in_stmt(
 /// outer cast matches are NOT stripped because the inner cast may still be
 /// needed.
 fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr> {
-    let HirExpr::Cast { ty: cast_ty, expr: inner } = expr else {
+    let HirExpr::Cast {
+        ty: cast_ty,
+        expr: inner,
+    } = expr
+    else {
         return None;
     };
     if cast_ty != binding_ty {
@@ -1249,8 +1266,12 @@ fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr>
         (NirType::Bool, NirType::Int { .. }) => true,
         // Int → Int: safe when inner bits <= outer bits (widening or same).
         (
-            NirType::Int { bits: inner_bits, .. },
-            NirType::Int { bits: outer_bits, .. },
+            NirType::Int {
+                bits: inner_bits, ..
+            },
+            NirType::Int {
+                bits: outer_bits, ..
+            },
         ) => inner_bits <= outer_bits,
         _ => false,
     };
@@ -1295,7 +1316,10 @@ pub(crate) fn elide_unused_popcount_assigns(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn elide_popcount_round(func: &mut HirFunction, use_map: &super::super::analysis::defuse::DefUseMap) -> bool {
+fn elide_popcount_round(
+    func: &mut HirFunction,
+    use_map: &super::super::analysis::defuse::DefUseMap,
+) -> bool {
     let mut changed = false;
     elide_popcount_in_stmts(&mut func.body, use_map, &mut changed);
     if changed {
@@ -1308,12 +1332,7 @@ fn elide_popcount_round(func: &mut HirFunction, use_map: &super::super::analysis
         func.locals.retain(|b| {
             // Keep bindings that still have assignments OR are used elsewhere.
             remaining_names.contains(&b.name)
-                || use_map
-                    .use_count
-                    .get(&b.name)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0
+                || use_map.use_count.get(&b.name).copied().unwrap_or(0) > 0
         });
     }
     changed
@@ -1420,8 +1439,9 @@ fn elide_popcount_in_stmts(
 fn rhs_contains_popcount(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Call { target, .. } if target == "__popcount" => true,
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. } => rhs_contains_popcount(inner),
+        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+            rhs_contains_popcount(inner)
+        }
         HirExpr::Binary { lhs, rhs, .. } => {
             rhs_contains_popcount(lhs) || rhs_contains_popcount(rhs)
         }

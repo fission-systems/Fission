@@ -1,7 +1,6 @@
 use super::super::*;
 use super::util::*;
 
-
 pub(crate) fn collapse_zero_offset_cast(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Load { ptr, ty } => {
@@ -182,7 +181,6 @@ pub(crate) fn cleanup_arithmetic_wrappers(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-
 // ── SubPiece / Cast chain simplifications ─────────────────────────────────────
 
 /// Simplify `Cast(IntN, Shr(Cast(IntM, x), K))` where the inner cast is a
@@ -246,7 +244,11 @@ pub(crate) fn simplify_subpiece_chain(expr: &HirExpr) -> Option<HirExpr> {
     if mid_bits >= source_bits {
         let outer_bits = int_type_bits(outer_ty).unwrap_or(0);
         // Preserve the shift result type as the wider of the two integer sizes.
-        let shr_result_ty = if mid_bits >= outer_bits { mid_ty.clone() } else { outer_ty.clone() };
+        let shr_result_ty = if mid_bits >= outer_bits {
+            mid_ty.clone()
+        } else {
+            outer_ty.clone()
+        };
         return Some(HirExpr::Cast {
             ty: outer_ty.clone(),
             expr: Box::new(HirExpr::Binary {
@@ -303,7 +305,10 @@ pub(crate) fn merge_consecutive_shifts(expr: &HirExpr) -> Option<HirExpr> {
     Some(HirExpr::Binary {
         op: HirBinaryOp::Shr,
         lhs: x.clone(),
-        rhs: Box::new(HirExpr::Const(total, rhs1.as_ref().clone().into_const_type())),
+        rhs: Box::new(HirExpr::Const(
+            total,
+            rhs1.as_ref().clone().into_const_type(),
+        )),
         ty: ty.clone(),
     })
 }
@@ -315,7 +320,10 @@ impl IntoConstType for HirExpr {
     fn into_const_type(self) -> NirType {
         match self {
             HirExpr::Const(_, ty) => ty,
-            _ => NirType::Int { bits: 64, signed: false },
+            _ => NirType::Int {
+                bits: 64,
+                signed: false,
+            },
         }
     }
 }

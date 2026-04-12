@@ -63,9 +63,7 @@ pub use nir_engine::{
     select_nir_output, select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
     select_nir_output_with_facts,
 };
-pub use nir_taxonomy::{
-    classified_nir_error, classify_nir_failure, classify_nir_failure_refined,
-};
+pub use nir_taxonomy::{classified_nir_error, classify_nir_failure, classify_nir_failure_refined};
 pub use nir_types::{NirWorkerRequest, NirWorkerResponse};
 pub use nir_worker::execute_nir_worker;
 pub use postprocess::RustPostProcessOptions;
