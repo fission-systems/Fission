@@ -320,12 +320,21 @@ pub struct DispatcherShape {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofFailureFamily {
     MissingBounds,
+    MissingOrdinalCoverage,
     MixedSelectorFamily,
     AmbiguousTargetMap,
     MissingFollow,
     SharedTailConflict,
     NonSideEffectFreeSelector,
     WidthOrSpaceMismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatcherCaseMapSource {
+    SuccessorOnly,
+    JumpTableRecovered,
+    CompareChainRecovered,
+    Merged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,12 +348,19 @@ pub enum DispatcherProofScope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatcherProofUnit {
     pub selector_expr: String,
+    pub rendered_selector_expr: Option<String>,
     pub candidate_targets: Vec<u64>,
     pub recovered_cases: Vec<(i64, u64)>,
+    pub selector_cardinality: usize,
+    pub target_cardinality: usize,
+    pub case_map_source: DispatcherCaseMapSource,
     pub default_target: Option<u64>,
     pub guard_set: Vec<String>,
     pub follow_block: Option<u64>,
+    pub normalization: Option<SelectorNormalization>,
+    pub legality_witness: Option<DispatcherLegality>,
     pub proof_scope: DispatcherProofScope,
+    pub proof_complete: bool,
     pub failure_family: Option<ProofFailureFamily>,
 }
 
@@ -356,6 +372,16 @@ pub struct SelectorNormalization {
     pub width: Option<u32>,
     pub address_space: Option<u64>,
     pub guard_bounds: Vec<(Option<i64>, Option<i64>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatcherLegality {
+    pub follow_block: Option<u64>,
+    pub postdom_ok: bool,
+    pub side_effect_free_selector: bool,
+    pub ordinal_domain_complete: bool,
+    pub shared_tail_conflict: bool,
+    pub valid: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +413,14 @@ impl IndirectControlClassification {
     #[must_use]
     pub fn from_pcode(pcode: &crate::pcode::PcodeFunction) -> Self {
         Self::from_stats_or_observation(None, crate::pcode_has_indirect_control_flow(pcode))
+    }
+
+    #[must_use]
+    pub fn from_stats_only(stats: Option<&NirBuildStats>) -> Self {
+        match stats {
+            Some(stats) => Self::from_stats(Some(stats), Self::stats_indicate_indirect_control(stats)),
+            None => Self::default(),
+        }
     }
 
     #[must_use]
@@ -799,6 +833,27 @@ pub struct NirBuildStats {
     /// Heavy reruns skipped because the preserving pass made no structural change.
     #[serde(default)]
     pub pass_rerun_skipped_by_preservation_count: usize,
+    /// Dispatcher proof units discovered before emission gating.
+    #[serde(default)]
+    pub dispatcher_proof_unit_count: usize,
+    /// Dispatcher proof units that completed with a legal target map.
+    #[serde(default)]
+    pub dispatcher_proof_completed_count: usize,
+    /// Dispatcher proof units rejected after proof analysis.
+    #[serde(default)]
+    pub dispatcher_proof_failed_count: usize,
+    /// Compare-chain dispatcher proofs discovered from conditional ladders.
+    #[serde(default)]
+    pub compare_chain_dispatcher_count: usize,
+    /// Candidate-scoped jump resolver admissions that reached the solver.
+    #[serde(default)]
+    pub candidate_scoped_jump_resolver_count: usize,
+    /// SCCP passes skipped because admission analysis found no useful control-flow seeds.
+    #[serde(default)]
+    pub sccp_skipped_by_admission_count: usize,
+    /// Memory normalization passes skipped because typed-fact prefilter found no object roots.
+    #[serde(default)]
+    pub memory_fact_prefilter_skip_count: usize,
     /// Canonical family totals derived from structuring failures/recovery in pcode.
     #[serde(default)]
     pub structuring_reason_region_legality_count: usize,
@@ -977,6 +1032,13 @@ impl NirBuildStats {
         self.proof_payload_direct_emit_count += other.proof_payload_direct_emit_count;
         self.pass_rerun_skipped_by_preservation_count +=
             other.pass_rerun_skipped_by_preservation_count;
+        self.dispatcher_proof_unit_count += other.dispatcher_proof_unit_count;
+        self.dispatcher_proof_completed_count += other.dispatcher_proof_completed_count;
+        self.dispatcher_proof_failed_count += other.dispatcher_proof_failed_count;
+        self.compare_chain_dispatcher_count += other.compare_chain_dispatcher_count;
+        self.candidate_scoped_jump_resolver_count += other.candidate_scoped_jump_resolver_count;
+        self.sccp_skipped_by_admission_count += other.sccp_skipped_by_admission_count;
+        self.memory_fact_prefilter_skip_count += other.memory_fact_prefilter_skip_count;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;
         self.structuring_reason_follow_failure_count +=

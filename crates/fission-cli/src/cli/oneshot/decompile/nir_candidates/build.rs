@@ -9,12 +9,9 @@ use fission_pcode::{IndirectControlClassification, NirBuildStats};
 
 fn canonical_indirect_classification(
     build_stats: Option<&NirBuildStats>,
-    raw_has_indirect_control_flow: bool,
+    _raw_has_indirect_control_flow: bool,
 ) -> IndirectControlClassification {
-    IndirectControlClassification::from_stats_or_observation(
-        build_stats,
-        raw_has_indirect_control_flow,
-    )
+    IndirectControlClassification::from_stats_only(build_stats)
 }
 
 fn build_preview_candidate_entry(
@@ -178,7 +175,7 @@ fn build_preview_candidate_entry(
         nir_build_stats,
     );
     let indirect_classification =
-        IndirectControlClassification::from_stats(nir_build_stats.as_ref(), has_indirect);
+        IndirectControlClassification::from_stats_only(nir_build_stats.as_ref());
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
         if let Some(after) = recovery_goto_count_after {

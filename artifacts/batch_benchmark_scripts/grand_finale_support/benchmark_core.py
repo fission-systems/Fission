@@ -109,6 +109,34 @@ AUTO_VAR_RE = re.compile(
 SYNTHETIC_FAILURE_PREFIX = "// Decompilation failed:"
 SIMILARITY_BACKEND = "rapidfuzz" if _rapidfuzz_fuzz is not None else "difflib"
 
+ROW_FIDELITY_TARGETS: tuple[tuple[str, str], ...] = (
+    ("0x140001160", "primary"),
+    ("0x140008900", "secondary"),
+    ("0x140007da0", "canary"),
+    ("0x140008090", "canary"),
+    ("0x140006ef0", "canary"),
+    ("0x140006c20", "canary"),
+    ("0x140006fe0", "canary"),
+)
+
+
+def select_row_fidelity_targets(role_filter: str) -> list[tuple[str, str]]:
+    if role_filter == "all":
+        return list(ROW_FIDELITY_TARGETS)
+    if role_filter == "canary-only":
+        return [
+            (address, role)
+            for address, role in ROW_FIDELITY_TARGETS
+            if role == "canary"
+        ]
+    if role_filter == "primary-secondary-only":
+        return [
+            (address, role)
+            for address, role in ROW_FIDELITY_TARGETS
+            if role in ("primary", "secondary")
+        ]
+    return list(ROW_FIDELITY_TARGETS)
+
 from .metrics import collect_code_metrics, load_struct_pointer_aliases, normalize_address
 from .resource_monitor import (
     HAS_PSUTIL,
@@ -283,6 +311,16 @@ def parse_args() -> argparse.Namespace:
             "before the run is considered a regression. Default: 2.0 pp."
         ),
     )
+    parser.add_argument(
+        "--row-fidelity-role-filter",
+        choices=("all", "canary-only", "primary-secondary-only"),
+        default="all",
+        help=(
+            "Filter row-fidelity target roles for preflight/acceptance reporting. "
+            "all=use full target set, canary-only=only canary rows, "
+            "primary-secondary-only=only primary and secondary rows."
+        ),
+    )
 
     parser.add_argument(
         "--timestamped-output",
@@ -415,23 +453,148 @@ def load_baseline_summary(baseline_dir: Path) -> dict[str, Any] | None:
         return json.load(fh)
 
 
-def check_regression(
+def _pairwise_row_map(summary_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = _lookup_path(
+        summary_payload,
+        ("pairwise", "pyghidra_vs_fission", "comparisons"),
+        [],
+    )
+    if not isinstance(rows, list):
+        return {}
+    return {
+        str(row.get("address", "")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("address")
+    }
+
+
+def _engine_entries_map(summary_payload: dict[str, Any], engine: str) -> dict[str, Any]:
+    entries = _lookup_path(summary_payload, ("engines", engine, "entries"), {})
+    return entries if isinstance(entries, dict) else {}
+
+
+def _build_row_fidelity_gate(
+    current_benchmark: dict[str, Any],
+    baseline_summary_json: dict[str, Any],
+    row_targets: list[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
+    cur_rows_map = _pairwise_row_map(current_benchmark)
+    base_rows_map = _pairwise_row_map(baseline_summary_json)
+    cur_fission_entries = _engine_entries_map(current_benchmark, "fission")
+    base_fission_entries = _engine_entries_map(baseline_summary_json, "fission")
+
+    row_results: list[dict[str, Any]] = []
+    improved = 0
+    degraded = 0
+    unchanged = 0
+    missing = 0
+    failed_targets: list[str] = []
+
+    targets = row_targets or list(ROW_FIDELITY_TARGETS)
+
+    for address, role in targets:
+        cur_row = cur_rows_map.get(address)
+        base_row = base_rows_map.get(address)
+        if cur_row is None or base_row is None:
+            status = "missing"
+            missing += 1
+            failed_targets.append(address)
+            row_results.append(
+                {
+                    "address": address,
+                    "role": role,
+                    "status": status,
+                    "present_in_current": cur_row is not None,
+                    "present_in_baseline": base_row is not None,
+                    "failure_reasons": ["missing_row"],
+                }
+            )
+            continue
+
+        cur_norm = _safe_float(cur_row.get("normalized_similarity", 0.0), 0.0)
+        base_norm = _safe_float(base_row.get("normalized_similarity", 0.0), 0.0)
+        delta = cur_norm - base_norm
+
+        cur_fission = cur_fission_entries.get(address, {})
+        base_fission = base_fission_entries.get(address, {})
+        cur_stats = cur_fission.get("preview_build_stats") if isinstance(cur_fission, dict) else {}
+        base_stats = base_fission.get("preview_build_stats") if isinstance(base_fission, dict) else {}
+        if not isinstance(cur_stats, dict):
+            cur_stats = {}
+        if not isinstance(base_stats, dict):
+            base_stats = {}
+
+        failure_reasons: list[str] = []
+        cur_success = bool(cur_row.get("fission_success", False))
+        base_success = bool(base_row.get("fission_success", False))
+        if base_success and not cur_success:
+            failure_reasons.append("new_failure")
+        if delta < -1e-9:
+            failure_reasons.append("similarity_regressed")
+
+        if failure_reasons:
+            status = "degraded"
+            degraded += 1
+            failed_targets.append(address)
+        elif delta > 1e-9:
+            status = "improved"
+            improved += 1
+        else:
+            status = "unchanged"
+            unchanged += 1
+
+        row_results.append(
+            {
+                "address": address,
+                "role": role,
+                "status": status,
+                "failure_reasons": failure_reasons,
+                "pyghidra_name": cur_row.get("pyghidra_name") or base_row.get("pyghidra_name") or "",
+                "fission_name": cur_row.get("fission_name") or base_row.get("fission_name") or "",
+                "previous_normalized_similarity": round(base_norm, 3),
+                "current_normalized_similarity": round(cur_norm, 3),
+                "normalized_similarity_delta": round(delta, 3),
+                "previous_fission_success": base_success,
+                "current_fission_success": cur_success,
+                "previous_unsupported_indirect_control_count": _safe_int(
+                    base_stats.get("unsupported_indirect_control_count"), 0
+                ),
+                "current_unsupported_indirect_control_count": _safe_int(
+                    cur_stats.get("unsupported_indirect_control_count"), 0
+                ),
+                "previous_indirect_surface_preserved_count": _safe_int(
+                    base_stats.get("indirect_surface_preserved_count"), 0
+                ),
+                "current_indirect_surface_preserved_count": _safe_int(
+                    cur_stats.get("indirect_surface_preserved_count"), 0
+                ),
+                "previous_dispatcher_shape_recovered_count": _safe_int(
+                    base_stats.get("dispatcher_shape_recovered_count"), 0
+                ),
+                "current_dispatcher_shape_recovered_count": _safe_int(
+                    cur_stats.get("dispatcher_shape_recovered_count"), 0
+                ),
+            }
+        )
+
+    return {
+        "status": "failed" if failed_targets else "passed",
+        "failed_target_count": len(failed_targets),
+        "failed_targets": failed_targets,
+        "improved_count": improved,
+        "degraded_count": degraded,
+        "unchanged_count": unchanged,
+        "missing_count": missing,
+        "rows": row_results,
+    }
+
+
+def _build_baseline_regression_report(
     current_benchmark: dict[str, Any],
     baseline_summary_json: dict[str, Any],
     threshold_pp: float,
-) -> bool:
-    """
-    Compare current run against baseline.  Returns True if a regression is detected.
-
-    Checked metrics (pair label: pyghidra_vs_fission):
-      - avg_normalized_similarity  (lower = worse; alert if drops > threshold_pp)
-            - both_success_rate_pct      (lower = worse; alert if drops > 1.0 pp)
-            - high_divergence_pct        (higher = worse; alert if rises > 2.0 pp)
-            - fission success_rate_pct   (lower = worse; alert if drops > 1.0 pp)
-            - goto_total                 (higher = worse; alert if rises > 10%)
-            - readability penalty        (higher = worse; alert if rises > 10%)
-            - undefined_return_type_rate (higher = worse; alert if rises > 5 pp)
-    """
+    row_targets: list[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
     regressions: list[str] = []
 
     cur_quality = (
@@ -597,10 +760,70 @@ def check_regression(
             f"fission undefined_return_type_rate: {base_undef_rate:.3f}% -> {cur_undef_rate:.3f}% "
             f"(Δ={undef_delta:.3f}pp, threshold=+5.000pp)"
         )
+    cur_unsupported_indirect = _safe_int(
+        _lookup_path(
+            current_benchmark,
+            ("summary", "engines", "fission", "unsupported_indirect_control_count"),
+            0,
+        ),
+        0,
+    )
+    base_unsupported_indirect = _safe_int(
+        _lookup_path(
+            baseline_summary_json,
+            ("summary", "engines", "fission", "unsupported_indirect_control_count"),
+            0,
+        ),
+        0,
+    )
+    if cur_unsupported_indirect > base_unsupported_indirect:
+        regressions.append(
+            f"fission unsupported_indirect_control_count: {base_unsupported_indirect} -> {cur_unsupported_indirect}"
+        )
 
-    if regressions:
+    row_fidelity_gate = _build_row_fidelity_gate(
+        current_benchmark,
+        baseline_summary_json,
+        row_targets=row_targets,
+    )
+    if row_fidelity_gate.get("status") != "passed":
+        regressions.append(
+            "row_fidelity_gate failed for "
+            + ", ".join(str(addr) for addr in row_fidelity_gate.get("failed_targets", []))
+        )
+
+    return {
+        "status": "failed" if regressions else "passed",
+        "regressions": regressions,
+        "threshold_pp": round(float(threshold_pp), 3),
+        "row_fidelity_gate": row_fidelity_gate,
+        "top_degraded_functions": collect_top_degraded_functions_vs_previous(
+            current_benchmark,
+            baseline_summary_json,
+            limit=20,
+            similarity_drop_pp_threshold=0.0,
+        ),
+    }
+
+
+def check_regression(
+    current_benchmark: dict[str, Any],
+    baseline_summary_json: dict[str, Any],
+    threshold_pp: float,
+    row_targets: list[tuple[str, str]] | None = None,
+) -> bool:
+    """
+    Compare current run against baseline.  Returns True if a regression is detected.
+    """
+    report = _build_baseline_regression_report(
+        current_benchmark,
+        baseline_summary_json,
+        threshold_pp,
+        row_targets=row_targets,
+    )
+    if report.get("status") != "passed":
         print("\n[REGRESSION DETECTED]", file=sys.stderr)
-        for msg in regressions:
+        for msg in report.get("regressions", []):
             print(f"  - {msg}", file=sys.stderr)
         return True
 
@@ -955,6 +1178,90 @@ def write_previous_comparison_files(
         fh.write("\n".join(lines) + "\n")
 
     return compare_json_path, compare_md_path
+
+
+def write_baseline_regression_files(
+    output_dir: Path,
+    report: dict[str, Any],
+) -> tuple[Path, Path]:
+    report_json_path = output_dir / "benchmark_regression_gate.json"
+    report_md_path = output_dir / "benchmark_regression_gate.md"
+
+    with report_json_path.open("w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2)
+
+    row_gate = report.get("row_fidelity_gate", {}) if isinstance(report.get("row_fidelity_gate"), dict) else {}
+    degraded_rows = (
+        report.get("top_degraded_functions", {}).get("top_degraded", [])
+        if isinstance(report.get("top_degraded_functions", {}), dict)
+        else []
+    )
+    lines = [
+        "# Benchmark Regression Gate vs Baseline",
+        "",
+        f"- Status: {report.get('status', 'unknown')}",
+        f"- Similarity regression threshold: {float(report.get('threshold_pp', 0.0) or 0.0):.3f}pp",
+        "",
+        "## Regression Reasons",
+        "",
+    ]
+    regressions = report.get("regressions", [])
+    if regressions:
+        lines.extend([f"- {msg}" for msg in regressions])
+    else:
+        lines.append("- No baseline regression detected.")
+
+    lines.extend(
+        [
+            "",
+            "## Row Fidelity Gate",
+            "",
+            f"- Status: {row_gate.get('status', 'unknown')}",
+            f"- Failed targets: {int(row_gate.get('failed_target_count', 0) or 0)}",
+            "",
+            "| Role | Address | Prev sim | Cur sim | Delta | Status | Reasons |",
+            "| --- | --- | ---: | ---: | ---: | --- | --- |",
+        ]
+    )
+    for row in row_gate.get("rows", []):
+        lines.append(
+            f"| {row.get('role', '')} | {row.get('address', '')} | "
+            f"{_safe_float(row.get('previous_normalized_similarity', 0.0), 0.0):.3f}% | "
+            f"{_safe_float(row.get('current_normalized_similarity', 0.0), 0.0):.3f}% | "
+            f"{_safe_float(row.get('normalized_similarity_delta', 0.0), 0.0):+.3f}pp | "
+            f"{row.get('status', '')} | {', '.join(row.get('failure_reasons', [])) or 'none'} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Top Regressions vs Baseline",
+            "",
+        ]
+    )
+    if degraded_rows:
+        lines.extend(
+            [
+                "| Address | Function | Prev sim | Cur sim | Delta | Reasons |",
+                "| --- | --- | ---: | ---: | ---: | --- |",
+            ]
+        )
+        for row in degraded_rows[:10]:
+            fn_name = row.get("fission_name") or row.get("pyghidra_name") or ""
+            lines.append(
+                f"| {row.get('address', '')} | {fn_name} | "
+                f"{_safe_float(row.get('previous_normalized_similarity', 0.0), 0.0):.3f}% | "
+                f"{_safe_float(row.get('current_normalized_similarity', 0.0), 0.0):.3f}% | "
+                f"{_safe_float(row.get('normalized_similarity_delta', 0.0), 0.0):+.3f}pp | "
+                f"{', '.join(row.get('reason_tags', []))} |"
+            )
+    else:
+        lines.append("- No degraded rows recorded.")
+
+    with report_md_path.open("w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+    return report_json_path, report_md_path
 
 
 def print_previous_comparison_summary(comparison: dict[str, Any]) -> None:
@@ -1754,6 +2061,14 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         "indirect_surface_preserved_count": preview_stat_total("indirect_surface_preserved_count"),
         "indirect_target_set_refined_count": preview_stat_total("indirect_target_set_refined_count"),
         "dispatcher_shape_recovered_count": preview_stat_total("dispatcher_shape_recovered_count"),
+        "materialization_stabilized_count": preview_stat_total("materialization_stabilized_count"),
+        "proof_payload_direct_emit_count": preview_stat_total("proof_payload_direct_emit_count"),
+        "pass_rerun_skipped_by_preservation_count": preview_stat_total("pass_rerun_skipped_by_preservation_count"),
+        "dispatcher_proof_completed_count": preview_stat_total("dispatcher_proof_completed_count"),
+        "dispatcher_proof_failed_count": preview_stat_total("dispatcher_proof_failed_count"),
+        "candidate_scoped_jump_resolver_count": preview_stat_total("candidate_scoped_jump_resolver_count"),
+        "sccp_skipped_by_admission_count": preview_stat_total("sccp_skipped_by_admission_count"),
+        "memory_fact_prefilter_skip_count": preview_stat_total("memory_fact_prefilter_skip_count"),
         # Phase 4 pass quality indicators
         "undefined_return_type_total": sum(
             1 for entry in success_entries
@@ -2001,6 +2316,139 @@ def build_intersection_kpi_from_pair(pair: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_row_fidelity_targets_snapshot(
+    pair: dict[str, Any],
+    row_targets: list[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
+    rows = pair.get("comparisons", [])
+    row_map = {
+        str(row.get("address", "")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("address")
+    }
+    target_rows: list[dict[str, Any]] = []
+    targets = row_targets or list(ROW_FIDELITY_TARGETS)
+
+    for address, role in targets:
+        row = row_map.get(address)
+        if row is None:
+            target_rows.append({"address": address, "role": role, "present": False})
+            continue
+        target_rows.append(
+            {
+                "address": address,
+                "role": role,
+                "present": True,
+                "pyghidra_name": row.get("pyghidra_name", ""),
+                "fission_name": row.get("fission_name", ""),
+                "normalized_similarity": round(_safe_float(row.get("normalized_similarity", 0.0), 0.0), 3),
+                "both_success": bool(row.get("both_success", False)),
+                "fission_unsupported_indirect_control_count": _safe_int(
+                    row.get("fission_unsupported_indirect_control_count"), 0
+                ),
+                "fission_indirect_surface_preserved_count": _safe_int(
+                    row.get("fission_indirect_surface_preserved_count"), 0
+                ),
+                "fission_dispatcher_shape_recovered_count": _safe_int(
+                    row.get("fission_dispatcher_shape_recovered_count"), 0
+                ),
+                "fission_dispatcher_proof_completed_count": _safe_int(
+                    row.get("fission_dispatcher_proof_completed_count"), 0
+                ),
+                "fission_dispatcher_proof_failed_count": _safe_int(
+                    row.get("fission_dispatcher_proof_failed_count"), 0
+                ),
+                "fission_proof_payload_direct_emit_count": _safe_int(
+                    row.get("fission_proof_payload_direct_emit_count"), 0
+                ),
+            }
+        )
+    return {
+        "target_count": len(targets),
+        "present_count": sum(1 for row in target_rows if row.get("present")),
+        "rows": target_rows,
+    }
+
+
+def build_proof_fidelity_summary(pair: dict[str, Any]) -> dict[str, Any]:
+    rows = [
+        row for row in pair.get("comparisons", [])
+        if isinstance(row, dict) and row.get("both_success", False)
+    ]
+
+    def _subset(predicate: Any) -> tuple[int, float]:
+        matched = [row for row in rows if predicate(row)]
+        sims = [_safe_float(row.get("normalized_similarity", 0.0), 0.0) for row in matched]
+        return len(matched), round(statistics.fmean(sims), 3) if sims else 0.0
+
+    proof_completed_count, proof_completed_avg = _subset(
+        lambda row: _safe_int(row.get("fission_dispatcher_proof_completed_count"), 0) > 0
+    )
+    proof_failed_count, proof_failed_avg = _subset(
+        lambda row: _safe_int(row.get("fission_dispatcher_proof_failed_count"), 0) > 0
+    )
+    direct_emit_count, direct_emit_avg = _subset(
+        lambda row: _safe_int(row.get("fission_proof_payload_direct_emit_count"), 0) > 0
+    )
+    dispatcher_count, dispatcher_avg = _subset(
+        lambda row: bool(row.get("fission_has_dispatcher_recovery", False))
+    )
+    return {
+        "proof_completed_row_count": proof_completed_count,
+        "proof_completed_row_avg_normalized_similarity": proof_completed_avg,
+        "proof_failed_row_count": proof_failed_count,
+        "proof_failed_row_avg_normalized_similarity": proof_failed_avg,
+        "proof_direct_emit_row_count": direct_emit_count,
+        "proof_direct_emit_row_avg_normalized_similarity": direct_emit_avg,
+        "dispatcher_row_count": dispatcher_count,
+        "dispatcher_row_avg_normalized_similarity": dispatcher_avg,
+    }
+
+
+def build_residue_family_summary(pair: dict[str, Any]) -> dict[str, Any]:
+    rows = [row for row in pair.get("comparisons", []) if isinstance(row, dict)]
+    return {
+        "unsupported_indirect_row_count": sum(
+            1 for row in rows if bool(row.get("fission_has_unresolved_unsupported_indirect", False))
+        ),
+        "preserved_indirect_row_count": sum(
+            1 for row in rows if bool(row.get("fission_has_preserved_indirect_surface", False))
+        ),
+        "dispatcher_recovery_row_count": sum(
+            1 for row in rows if bool(row.get("fission_has_dispatcher_recovery", False))
+        ),
+        "target_proof_row_count": sum(
+            1 for row in rows if bool(row.get("fission_has_indirect_target_proof", False))
+        ),
+        "proof_failed_row_count": sum(
+            1 for row in rows if _safe_int(row.get("fission_dispatcher_proof_failed_count"), 0) > 0
+        ),
+        "proof_completed_row_count": sum(
+            1 for row in rows if _safe_int(row.get("fission_dispatcher_proof_completed_count"), 0) > 0
+        ),
+        "materialization_stabilized_row_count": sum(
+            1 for row in rows if _safe_int(row.get("fission_materialization_stabilized_count"), 0) > 0
+        ),
+    }
+
+
+def build_perf_admission_summary(fission_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_scoped_jump_resolver_count": _safe_int(
+            fission_summary.get("candidate_scoped_jump_resolver_count"), 0
+        ),
+        "sccp_skipped_by_admission_count": _safe_int(
+            fission_summary.get("sccp_skipped_by_admission_count"), 0
+        ),
+        "memory_fact_prefilter_skip_count": _safe_int(
+            fission_summary.get("memory_fact_prefilter_skip_count"), 0
+        ),
+        "pass_rerun_skipped_by_preservation_count": _safe_int(
+            fission_summary.get("pass_rerun_skipped_by_preservation_count"), 0
+        ),
+    }
+
+
 def build_layered_quality_from_pair(pair: dict[str, Any]) -> dict[str, Any]:
     rows = pair.get("comparisons", [])
     left_label = str(pair.get("left_label", "left"))
@@ -2151,6 +2599,30 @@ def build_pairwise_engine_comparison(
             row[f"{label}_dispatcher_shape_recovered_count"] = _safe_int(
                 preview_build_stats.get("dispatcher_shape_recovered_count"), 0
             )
+            row[f"{label}_dispatcher_proof_completed_count"] = _safe_int(
+                preview_build_stats.get("dispatcher_proof_completed_count"), 0
+            )
+            row[f"{label}_dispatcher_proof_failed_count"] = _safe_int(
+                preview_build_stats.get("dispatcher_proof_failed_count"), 0
+            )
+            row[f"{label}_proof_payload_direct_emit_count"] = _safe_int(
+                preview_build_stats.get("proof_payload_direct_emit_count"), 0
+            )
+            row[f"{label}_materialization_stabilized_count"] = _safe_int(
+                preview_build_stats.get("materialization_stabilized_count"), 0
+            )
+            row[f"{label}_pass_rerun_skipped_by_preservation_count"] = _safe_int(
+                preview_build_stats.get("pass_rerun_skipped_by_preservation_count"), 0
+            )
+            row[f"{label}_candidate_scoped_jump_resolver_count"] = _safe_int(
+                preview_build_stats.get("candidate_scoped_jump_resolver_count"), 0
+            )
+            row[f"{label}_sccp_skipped_by_admission_count"] = _safe_int(
+                preview_build_stats.get("sccp_skipped_by_admission_count"), 0
+            )
+            row[f"{label}_memory_fact_prefilter_skip_count"] = _safe_int(
+                preview_build_stats.get("memory_fact_prefilter_skip_count"), 0
+            )
             for flag_name, flag_value in _canonical_indirect_flags(preview_build_stats).items():
                 row[f"{label}_{flag_name}"] = flag_value
         rows.append(row)
@@ -2217,6 +2689,7 @@ def build_comparison(
     pairwise_auto_shared_full_max: int,
     raw_similarity: bool,
     aggregate_similarity_mode: str,
+    row_fidelity_targets_filter: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     pair_py_fission = build_pairwise_engine_comparison(
         "pyghidra",
@@ -2293,6 +2766,18 @@ def build_comparison(
     layered_quality = {
         "pyghidra_vs_fission": build_layered_quality_from_pair(pair_py_fission),
     }
+    proof_fidelity = {
+        "pyghidra_vs_fission": build_proof_fidelity_summary(pair_py_fission),
+    }
+    residue_families = {
+        "pyghidra_vs_fission": build_residue_family_summary(pair_py_fission),
+    }
+    row_fidelity_targets = {
+        "pyghidra_vs_fission": build_row_fidelity_targets_snapshot(
+            pair_py_fission,
+            row_targets=row_fidelity_targets_filter,
+        ),
+    }
     independent_top_n_coverage = build_address_alignment_summary(
         pyghidra["meta"].get("independent_top_n_addresses", list(pyghidra["entries"].keys())),
         fission["meta"].get("independent_top_n_addresses", list(fission["entries"].keys())),
@@ -2306,6 +2791,7 @@ def build_comparison(
         "pairwise_raw_similarity_enabled": bool(raw_similarity),
         "pairwise_aggregate_similarity_mode": aggregate_similarity_mode,
         "pairwise_auto_shared_full_max": int(pairwise_auto_shared_full_max),
+        "row_fidelity_role_filter": "all",
         "engines": {
             "pyghidra": {
                 **pyghidra["meta"],
@@ -2330,6 +2816,9 @@ def build_comparison(
             "pyghidra_vs_fission": pair_py_fission["summary"],
         },
         "quality_layers": layered_quality,
+        "proof_fidelity": proof_fidelity,
+        "residue_families": residue_families,
+        "row_fidelity_targets": row_fidelity_targets,
         "resources": {
             "pyghidra": py_resources,
             "fission": fission_resources,
@@ -2360,6 +2849,14 @@ def build_comparison(
         "samples": {
             "pyghidra_vs_fission_lowest_similarity": sorted(pair_py_fission["comparisons"], key=lambda row: row["normalized_similarity"])[:20],
             "fission_hot_path_phases": summarize_native_hot_paths(fission["entries"]),
+        },
+        "admission_and_preservation": {
+            "fission": build_perf_admission_summary(
+                {
+                    **fission_quality,
+                    **engine_kpi["fission"],
+                }
+            ),
         },
         "public_summary_line": "",
     }
@@ -2401,6 +2898,9 @@ def write_summary_files(
     summary = benchmark["summary"]
     low_rows = summary["samples"]["pyghidra_vs_fission_lowest_similarity"]
     hot_rows = summary["samples"].get("fission_hot_path_phases", [])
+    baseline_gate = benchmark.get("baseline_regression_gate")
+    if not isinstance(baseline_gate, dict):
+        baseline_gate = {}
     def _format_macos_snapshot(snapshot: dict[str, Any] | None) -> str:
         if not snapshot:
             return "n/a"
@@ -2426,11 +2926,28 @@ def write_summary_files(
         f"- Aggregate similarity mode: `{summary.get('pairwise_aggregate_similarity_mode', 'weighted')}`",
         f"- Public summary: {summary['public_summary_line']}",
         "",
-        "## Function Set Alignment",
-        "",
-        "| Pair | Left total | Right total | Shared | Left-only | Right-only | Coverage | Mode | Evaluated shared |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |",
     ]
+    if baseline_gate:
+        row_gate = baseline_gate.get("row_fidelity_gate", {})
+        lines.extend(
+            [
+                "## Baseline Gate",
+                "",
+                f"- Status: `{baseline_gate.get('status', 'unknown')}`",
+                f"- Similarity regression threshold: `{float(baseline_gate.get('threshold_pp', 0.0) or 0.0):.3f}pp`",
+                f"- Row fidelity gate: `{row_gate.get('status', 'unknown')}`",
+                f"- Failed targets: `{', '.join(row_gate.get('failed_targets', [])) or 'none'}`",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Function Set Alignment",
+            "",
+            "| Pair | Left total | Right total | Shared | Left-only | Right-only | Coverage | Mode | Evaluated shared |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |",
+        ]
+    )
     for label, pair in summary["coverage"].items():
         lines.append(
             f"| `{label}` | {pair.get('left_total_count', 0)} | {pair.get('right_total_count', 0)} | "
@@ -2595,6 +3112,61 @@ def write_summary_files(
             f"raw similarity enabled: `{pair.get('raw_similarity_enabled', False)}`"
         )
 
+    lines.extend(["", "## Proof vs Fidelity", ""])
+    for label, block in summary.get("proof_fidelity", {}).items():
+        lines.append(
+            f"- {label}: proof-completed rows={int(block.get('proof_completed_row_count', 0) or 0)} "
+            f"(avg sim {_safe_float(block.get('proof_completed_row_avg_normalized_similarity', 0.0), 0.0):.3f}%), "
+            f"proof-failed rows={int(block.get('proof_failed_row_count', 0) or 0)} "
+            f"(avg sim {_safe_float(block.get('proof_failed_row_avg_normalized_similarity', 0.0), 0.0):.3f}%), "
+            f"direct-emit rows={int(block.get('proof_direct_emit_row_count', 0) or 0)} "
+            f"(avg sim {_safe_float(block.get('proof_direct_emit_row_avg_normalized_similarity', 0.0), 0.0):.3f}%)"
+        )
+
+    residue = summary.get("residue_families", {}).get("pyghidra_vs_fission", {})
+    lines.extend(
+        [
+            "",
+            "## Residue Families",
+            "",
+            "| Unsupported rows | Preserved rows | Dispatcher rows | Target-proof rows | Proof-failed rows | Proof-completed rows | Materialized rows |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            f"| {int(residue.get('unsupported_indirect_row_count', 0) or 0)} | "
+            f"{int(residue.get('preserved_indirect_row_count', 0) or 0)} | "
+            f"{int(residue.get('dispatcher_recovery_row_count', 0) or 0)} | "
+            f"{int(residue.get('target_proof_row_count', 0) or 0)} | "
+            f"{int(residue.get('proof_failed_row_count', 0) or 0)} | "
+            f"{int(residue.get('proof_completed_row_count', 0) or 0)} | "
+            f"{int(residue.get('materialization_stabilized_row_count', 0) or 0)} |",
+        ]
+    )
+
+    row_targets = summary.get("row_fidelity_targets", {}).get("pyghidra_vs_fission", {})
+    if row_targets:
+        lines.extend(["", "## Fixed Row Targets", ""])
+        lines.extend(
+            [
+                "| Role | Address | Similarity | Both success | Unsupported | Preserved | Dispatcher | Proof completed | Direct emit |",
+                "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in row_targets.get("rows", []):
+            if not row.get("present"):
+                lines.append(
+                    f"| {row.get('role', '')} | `{row.get('address', '')}` | n/a | no | n/a | n/a | n/a | n/a | n/a |"
+                )
+                continue
+            lines.append(
+                f"| {row.get('role', '')} | `{row.get('address', '')}` | "
+                f"{_safe_float(row.get('normalized_similarity', 0.0), 0.0):.3f}% | "
+                f"{'yes' if row.get('both_success', False) else 'no'} | "
+                f"{int(row.get('fission_unsupported_indirect_control_count', 0) or 0)} | "
+                f"{int(row.get('fission_indirect_surface_preserved_count', 0) or 0)} | "
+                f"{int(row.get('fission_dispatcher_shape_recovered_count', 0) or 0)} | "
+                f"{int(row.get('fission_dispatcher_proof_completed_count', 0) or 0)} | "
+                f"{int(row.get('fission_proof_payload_direct_emit_count', 0) or 0)} |"
+            )
+
     lines.extend(["", "## Layered Quality (by max decomp-sec terciles)", ""])
     for label, layer in summary.get("quality_layers", {}).items():
         lines.append(
@@ -2657,6 +3229,49 @@ def write_summary_files(
     else:
         lines.append("- No shared successful functions to compare.")
 
+    if baseline_gate:
+        row_gate = baseline_gate.get("row_fidelity_gate", {})
+        lines.extend(["", "## Row Fidelity Gate vs Baseline", ""])
+        lines.extend(
+            [
+                "| Role | Address | Prev sim | Cur sim | Delta | Status | Reasons |",
+                "| --- | --- | ---: | ---: | ---: | --- | --- |",
+            ]
+        )
+        for row in row_gate.get("rows", []):
+            lines.append(
+                f"| {row.get('role', '')} | `{row.get('address', '')}` | "
+                f"{_safe_float(row.get('previous_normalized_similarity', 0.0), 0.0):.3f}% | "
+                f"{_safe_float(row.get('current_normalized_similarity', 0.0), 0.0):.3f}% | "
+                f"{_safe_float(row.get('normalized_similarity_delta', 0.0), 0.0):+.3f}pp | "
+                f"{row.get('status', '')} | {', '.join(row.get('failure_reasons', [])) or 'none'} |"
+            )
+
+        degraded_rows = (
+            baseline_gate.get("top_degraded_functions", {}).get("top_degraded", [])
+            if isinstance(baseline_gate.get("top_degraded_functions", {}), dict)
+            else []
+        )
+        lines.extend(["", "## Top Regressions vs Baseline", ""])
+        if degraded_rows:
+            lines.extend(
+                [
+                    "| Address | Function | Prev sim | Cur sim | Delta | Reasons |",
+                    "| --- | --- | ---: | ---: | ---: | --- |",
+                ]
+            )
+            for row in degraded_rows[:10]:
+                fn_name = row.get("fission_name") or row.get("pyghidra_name") or ""
+                lines.append(
+                    f"| `{row.get('address', '')}` | `{fn_name}` | "
+                    f"{_safe_float(row.get('previous_normalized_similarity', 0.0), 0.0):.3f}% | "
+                    f"{_safe_float(row.get('current_normalized_similarity', 0.0), 0.0):.3f}% | "
+                    f"{_safe_float(row.get('normalized_similarity_delta', 0.0), 0.0):+.3f}pp | "
+                    f"{', '.join(row.get('reason_tags', []))} |"
+                )
+        else:
+            lines.append("- No degraded rows recorded.")
+
     lines.extend(["", "## Fission Native Hot Paths", ""])
     if hot_rows:
         lines.append("| Address | Function | Decomp Sec | Top Phases | Helper Counts |")
@@ -2684,6 +3299,14 @@ def write_summary_files(
         f"- Fission FPU-op function count: {summary['engines']['fission'].get('fpu_function_count', 0)}",
         f"- Fission jump-table total: {summary['engines']['fission'].get('jump_table_total', 0)}",
         f"- Fission jump-table function count: {summary['engines']['fission'].get('jump_table_function_count', 0)}",
+        f"- Fission materialization stabilized total: {summary['engines']['fission'].get('materialization_stabilized_count', 0)}",
+        f"- Fission proof payload direct emit total: {summary['engines']['fission'].get('proof_payload_direct_emit_count', 0)}",
+        f"- Fission dispatcher proof completed total: {summary['engines']['fission'].get('dispatcher_proof_completed_count', 0)}",
+        f"- Fission dispatcher proof failed total: {summary['engines']['fission'].get('dispatcher_proof_failed_count', 0)}",
+        f"- Fission candidate-scoped jump-resolver total: {summary['admission_and_preservation']['fission'].get('candidate_scoped_jump_resolver_count', 0)}",
+        f"- Fission SCCP skipped by admission total: {summary['admission_and_preservation']['fission'].get('sccp_skipped_by_admission_count', 0)}",
+        f"- Fission memory-fact prefilter skip total: {summary['admission_and_preservation']['fission'].get('memory_fact_prefilter_skip_count', 0)}",
+        f"- Fission rerun skipped by preservation total: {summary['admission_and_preservation']['fission'].get('pass_rerun_skipped_by_preservation_count', 0)}",
     ])
 
     lines.extend(
@@ -2703,7 +3326,11 @@ def write_summary_files(
     return summary_json_path, summary_md_path
 
 
-def print_console_summary(summary: dict[str, Any], output_dir: Path) -> None:
+def print_console_summary(
+    summary: dict[str, Any],
+    output_dir: Path,
+    baseline_gate: dict[str, Any] | None = None,
+) -> None:
     print("\n=== Whole Decomp Benchmark Summary ===")
     print(f"Binary: {summary['binary']}")
     print(summary["public_summary_line"])
@@ -2783,6 +3410,33 @@ def print_console_summary(summary: dict[str, Any], output_dir: Path) -> None:
             f"callee={top['callee_preanalysis_count']}, "
             f"callgraph={top['callgraph_reanalysis_count']})"
         )
+    proof = summary.get("proof_fidelity", {}).get("pyghidra_vs_fission", {})
+    if proof:
+        print(
+            "Proof/Fidelity: "
+            f"completed_rows={int(proof.get('proof_completed_row_count', 0) or 0)} "
+            f"(avg={_safe_float(proof.get('proof_completed_row_avg_normalized_similarity', 0.0), 0.0):.3f}%), "
+            f"failed_rows={int(proof.get('proof_failed_row_count', 0) or 0)} "
+            f"(avg={_safe_float(proof.get('proof_failed_row_avg_normalized_similarity', 0.0), 0.0):.3f}%), "
+            f"direct_emit_rows={int(proof.get('proof_direct_emit_row_count', 0) or 0)}"
+        )
+    row_targets = summary.get("row_fidelity_targets", {}).get("pyghidra_vs_fission", {})
+    if row_targets:
+        present = [row for row in row_targets.get("rows", []) if row.get("present")]
+        if present:
+            top_targets = ", ".join(
+                f"{row.get('address')}={_safe_float(row.get('normalized_similarity', 0.0), 0.0):.2f}%"
+                for row in present[:4]
+            )
+            print(f"Row targets: {top_targets}")
+    if baseline_gate:
+        row_gate = baseline_gate.get("row_fidelity_gate", {}) if isinstance(baseline_gate, dict) else {}
+        print(
+            "Baseline gate: "
+            f"status={baseline_gate.get('status', 'unknown')}, "
+            f"row_fidelity={row_gate.get('status', 'unknown')}, "
+            f"failed_targets={','.join(row_gate.get('failed_targets', [])) or 'none'}"
+        )
     print(f"Artifacts: {output_dir}")
 
 
@@ -2799,6 +3453,7 @@ def main() -> int:
     )
 
     previous_summary_payload: dict[str, Any] | None = None
+    baseline_summary_payload: dict[str, Any] | None = None
     previous_summary_path = output_dir / "benchmark_summary.json"
     if previous_summary_path.is_file():
         try:
@@ -2807,6 +3462,13 @@ def main() -> int:
             print(f"[*] Previous summary detected for auto-compare: {previous_summary_path}")
         except Exception as exc:
             print(f"[!] Failed to load previous summary for auto-compare: {exc}", file=sys.stderr)
+
+    baseline_dir: Path | None = getattr(args, "baseline_dir", None)
+    if baseline_dir is not None:
+        baseline_dir = baseline_dir.expanduser().resolve()
+        baseline_summary_payload = load_baseline_summary(baseline_dir)
+        if baseline_summary_payload is not None:
+            print(f"[*] Baseline summary detected: {baseline_dir / 'benchmark_summary.json'}")
 
     print(f"[*] Binary: {binary_path}")
     print(f"[*] Fission CLI: {fission_bin}")
@@ -2825,6 +3487,14 @@ def main() -> int:
         f"raw_similarity={args.raw_similarity}, "
         f"aggregate_mode={args.aggregate_similarity_mode}, "
         f"backend={SIMILARITY_BACKEND}"
+    )
+    row_fidelity_targets_filter = select_row_fidelity_targets(
+        str(getattr(args, "row_fidelity_role_filter", "all"))
+    )
+    print(
+        "[*] Row-fidelity targets: "
+        f"filter={args.row_fidelity_role_filter}, "
+        f"count={len(row_fidelity_targets_filter)}"
     )
     if SIMILARITY_BACKEND != "rapidfuzz":
         print(
@@ -2908,9 +3578,24 @@ def main() -> int:
         pairwise_auto_shared_full_max=args.pairwise_auto_shared_full_max,
         raw_similarity=bool(args.raw_similarity),
         aggregate_similarity_mode=args.aggregate_similarity_mode,
+        row_fidelity_targets_filter=row_fidelity_targets_filter,
     )
+    benchmark["summary"]["row_fidelity_role_filter"] = str(
+        getattr(args, "row_fidelity_role_filter", "all")
+    )
+    if baseline_summary_payload is not None:
+        benchmark["baseline_regression_gate"] = _build_baseline_regression_report(
+            benchmark,
+            baseline_summary_payload,
+            float(getattr(args, "regression_threshold", 2.0)),
+            row_targets=row_fidelity_targets_filter,
+        )
     write_summary_files(output_dir, benchmark)
-    print_console_summary(benchmark["summary"], output_dir)
+    print_console_summary(
+        benchmark["summary"],
+        output_dir,
+        benchmark.get("baseline_regression_gate"),
+    )
 
     if previous_summary_payload is not None:
         previous_comparison = compare_with_previous_summary(benchmark, previous_summary_payload)
@@ -2919,13 +3604,18 @@ def main() -> int:
         print(f"Previous delta artifacts: {compare_json_path}, {compare_md_path}")
 
     # ── Regression gate ───────────────────────────────────────────────────────
-    baseline_dir: Path | None = getattr(args, "baseline_dir", None)
-    if baseline_dir is not None:
-        baseline_dir = baseline_dir.expanduser().resolve()
-        baseline = load_baseline_summary(baseline_dir)
-        if baseline is not None:
-            threshold = float(getattr(args, "regression_threshold", 2.0))
-            if check_regression(benchmark, baseline, threshold):
-                return 1
+    if baseline_summary_payload is not None:
+        report = benchmark.get("baseline_regression_gate")
+        if isinstance(report, dict):
+            report_json_path, report_md_path = write_baseline_regression_files(output_dir, report)
+            print(f"Baseline gate artifacts: {report_json_path}, {report_md_path}")
+        threshold = float(getattr(args, "regression_threshold", 2.0))
+        if check_regression(
+            benchmark,
+            baseline_summary_payload,
+            threshold,
+            row_targets=row_fidelity_targets_filter,
+        ):
+            return 1
 
     return 0

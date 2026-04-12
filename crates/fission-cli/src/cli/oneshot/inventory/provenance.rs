@@ -127,20 +127,12 @@ fn canonical_indirect_classification(
 
 fn indirect_classification_from_parts(
     stats: Option<&NirBuildStats>,
-    has_indirect_control_flow: bool,
+    _has_indirect_control_flow: bool,
     _has_preserved_indirect_surface: bool,
     _has_unresolved_unsupported_indirect: bool,
     _has_dispatcher_recovery: bool,
 ) -> IndirectControlClassification {
-    stats.map_or_else(
-        IndirectControlClassification::default,
-        |stats| {
-            IndirectControlClassification::from_stats_or_observation(
-                Some(stats),
-                has_indirect_control_flow,
-            )
-        },
-    )
+    IndirectControlClassification::from_stats_only(stats)
 }
 
 pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {

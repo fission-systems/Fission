@@ -1,4 +1,4 @@
-use super::cleanup::{cleanup_redundant_labels, eliminate_redundant_gotos};
+use super::cleanup::finalize_structured_body;
 use super::irreducible::compute_node_splits;
 use super::*;
 
@@ -611,20 +611,33 @@ impl<'a> PreviewBuilder<'a> {
                     min_val,
                     proof,
                 } => {
-                    let cases: Vec<HirSwitchCase> = if let Some(proof) = proof.as_ref()
-                        && proof.failure_family.is_none()
-                        && !proof.recovered_cases.is_empty()
-                    {
-                        self.proof_payload_direct_emit_count += 1;
-                        proof
-                            .recovered_cases
-                            .iter()
-                            .filter(|(_, target)| Some(*target) != default_target)
+                    let cases: Vec<HirSwitchCase> = if let Some(proof) = proof.as_ref() {
+                        if proof_supports_direct_emit(proof) {
+                            self.proof_payload_direct_emit_count += 1;
+                            proof
+                                .recovered_cases
+                                .iter()
+                                .filter(|(_, target)| Some(*target) != default_target)
+                                .map(|(value, target)| HirSwitchCase {
+                                    values: vec![*value],
+                                    body: vec![HirStmt::Goto(block_label(*target))],
+                                })
+                                .collect()
+                        } else {
+                            recovered_switch_case_values(
+                                &targets,
+                                default_target,
+                                min_val,
+                                Some(proof),
+                            )
+                            .0
+                            .into_iter()
                             .map(|(value, target)| HirSwitchCase {
-                                values: vec![*value],
-                                body: vec![HirStmt::Goto(block_label(*target))],
+                                values: vec![value],
+                                body: vec![HirStmt::Goto(block_label(target))],
                             })
                             .collect()
+                        }
                     } else if let Some(parsed) = self.parse_switch_chain(idx).ok().flatten() {
                         parsed
                             .cases
@@ -692,8 +705,7 @@ impl<'a> PreviewBuilder<'a> {
         metrics::histogram!("fission.structuring.total_ms")
             .record(total_start.elapsed().as_secs_f64() * 1000.0);
         metrics::counter!("fission.structuring.invocations_total").increment(1);
-        let body = eliminate_redundant_gotos(body);
-        Ok(cleanup_redundant_labels(body))
+        Ok(finalize_structured_body(body))
     }
 
     fn should_force_linear_structuring(&self) -> bool {

@@ -370,6 +370,107 @@ fn multi_block_preview_lowers_switch_chain_after_upper_bound_guard() {
 }
 
 #[test]
+fn multi_block_preview_rejects_switch_chain_with_mixed_selector_family() {
+    let cond0 = uniq(0x550, 1);
+    let cond1 = uniq(0x551, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5500,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x5500,
+                        output: Some(cond0.clone()),
+                        inputs: vec![reg(0x08, 4), cst(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5501,
+                        output: None,
+                        inputs: vec![cst(0x5530, 8), cond0],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5510,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x5510,
+                        output: Some(cond1.clone()),
+                        inputs: vec![reg(0x10, 4), cst(2, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5511,
+                        output: None,
+                        inputs: vec![cst(0x5540, 8), cond1],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5520,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5520,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5530,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5530,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x5540,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5540,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(2, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "mixed_switch", 0x5500, &preview_options())
+        .expect("preview render");
+    assert!(!code.contains("switch ("), "{code}");
+    assert!(code.contains("param_1 == 1"), "{code}");
+    assert!(code.contains("param_2 == 2"), "{code}");
+}
+
+#[test]
 fn multiblock_preview_skips_orphan_unreachable_unsupported_block() {
     let orphan_target = uniq(0x700, 8);
     let func = PcodeFunction {

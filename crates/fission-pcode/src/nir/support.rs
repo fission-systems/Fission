@@ -269,8 +269,7 @@ pub(crate) fn recovered_switch_case_values(
     proof: Option<&DispatcherProofUnit>,
 ) -> (Vec<(i64, u64)>, bool) {
     if let Some(proof) = proof
-        && proof.failure_family.is_none()
-        && !proof.recovered_cases.is_empty()
+        && proof_supports_direct_emit(proof)
     {
         let recovered = proof
             .recovered_cases
@@ -294,6 +293,20 @@ pub(crate) fn recovered_switch_case_values(
             .collect(),
         false,
     )
+}
+
+pub(crate) fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
+    proof.proof_complete
+        && proof.failure_family.is_none()
+        && !proof.recovered_cases.is_empty()
+        && proof.selector_cardinality >= 2
+        && proof.recovered_cases.len() >= proof.selector_cardinality
+        && proof.legality_witness.as_ref().is_some_and(|legality| {
+            legality.valid
+                && legality.side_effect_free_selector
+                && legality.ordinal_domain_complete
+                && !legality.shared_tail_conflict
+        })
 }
 
 /// x64 calling convention used when identifying parameter registers.

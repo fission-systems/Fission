@@ -23,7 +23,7 @@ use super::super::analysis::defuse::DefUseMap;
 /// Detects if-else structures where both branches end by assigning to the
 /// *same* set of variables and renames join-point uses to the shared variable.
 /// This models the classical SSA out-of-SSA transformation for 2-way joins.
-use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
+use super::super::cleanup::prune_unused_temp_bindings;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 
@@ -51,6 +51,16 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
     let def_count = count_definitions_in_stmts(&func.body, &temp_names);
     let mut copy_map: HashMap<String, String> = HashMap::new();
     collect_copies(&func.body, &temp_names, &def_count, &mut copy_map);
+
+    if copy_map.is_empty() {
+        return false;
+    }
+
+    // Keep predicate-carried temporaries explicit. Replacing these aggressively
+    // harms readability and can destabilize row-fidelity on control-heavy code.
+    let mut predicate_vars = HashSet::new();
+    collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
+    copy_map.retain(|name, _| !predicate_vars.contains(name));
 
     if copy_map.is_empty() {
         return false;
@@ -213,6 +223,98 @@ fn collect_copies_stmt(
             collect_copies(default, temp_names, def_count, copy_map);
         }
         _ => {}
+    }
+}
+
+fn collect_predicate_vars_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_predicate_vars_in_stmt(stmt, out);
+    }
+}
+
+fn collect_predicate_vars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_vars_in_expr(cond, out);
+            collect_predicate_vars_in_stmts(then_body, out);
+            collect_predicate_vars_in_stmts(else_body, out);
+        }
+        HirStmt::While { cond, body } => {
+            collect_vars_in_expr(cond, out);
+            collect_predicate_vars_in_stmts(body, out);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            collect_predicate_vars_in_stmts(body, out);
+            collect_vars_in_expr(cond, out);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_predicate_vars_in_stmt(init, out);
+            }
+            if let Some(cond) = cond {
+                collect_vars_in_expr(cond, out);
+            }
+            if let Some(update) = update {
+                collect_predicate_vars_in_stmt(update, out);
+            }
+            collect_predicate_vars_in_stmts(body, out);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_vars_in_expr(expr, out);
+            for case in cases {
+                collect_predicate_vars_in_stmts(&case.body, out);
+            }
+            collect_predicate_vars_in_stmts(default, out);
+        }
+        HirStmt::Block(stmts) => collect_predicate_vars_in_stmts(stmts, out),
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_) => {}
+    }
+}
+
+fn collect_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => collect_vars_in_expr(expr, out),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_vars_in_expr(lhs, out);
+            collect_vars_in_expr(rhs, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_vars_in_expr(arg, out);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_vars_in_expr(base, out);
+            collect_vars_in_expr(index, out);
+        }
     }
 }
 

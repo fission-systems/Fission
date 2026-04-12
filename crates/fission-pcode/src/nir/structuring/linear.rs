@@ -220,9 +220,9 @@ impl<'a> PreviewBuilder<'a> {
                         continue;
                     }
                     let cases = if let Some(proof) = proof.as_ref()
-                        && proof.failure_family.is_none()
-                        && !proof.recovered_cases.is_empty()
+                        && proof_supports_direct_emit(proof)
                     {
+                        self.proof_payload_direct_emit_count += 1;
                         proof
                             .recovered_cases
                             .iter()
@@ -259,7 +259,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut body = cleanup_redundant_labels(body);
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
-        Ok(cleanup_redundant_labels(body))
+        Ok(finalize_structured_body(body))
     }
 
     pub(super) fn build_linear_multiblock_body(
@@ -285,7 +285,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(proof) = proof else {
             return Ok(None);
         };
-        if proof.failure_family.is_some() {
+        if !proof_supports_direct_emit(proof) {
             return Ok(None);
         }
 
@@ -1623,8 +1623,152 @@ impl<'a> PreviewBuilder<'a> {
             for succ in &self.successors[idx] {
                 targets.insert(self.block_target_key(*succ));
             }
+            // Do not force-lower uncached terminators here: this helper should
+            // stay side-effect free for inventory/stat counters.
+            if let Some(term) = self.terminator_cache.get(&idx) {
+                match term {
+                    LoweredTerminator::Goto(target)
+                    | LoweredTerminator::Fallthrough(Some(target)) => {
+                        targets.insert(*target);
+                    }
+                    LoweredTerminator::Cond {
+                        true_target,
+                        false_target,
+                        ..
+                    } => {
+                        targets.insert(*true_target);
+                        if let Some(false_target) = false_target {
+                            targets.insert(*false_target);
+                        }
+                    }
+                    LoweredTerminator::Switch {
+                        targets: switch_targets,
+                        default_target,
+                        proof,
+                        ..
+                    } => {
+                        targets.extend(switch_targets.iter().copied());
+                        if let Some(default_target) = default_target {
+                            targets.insert(*default_target);
+                        }
+                        if let Some(proof) = proof.as_ref() {
+                            targets.extend(proof.candidate_targets.iter().copied());
+                            targets.extend(proof.recovered_cases.iter().map(|(_, target)| *target));
+                            if let Some(default_target) = proof.default_target {
+                                targets.insert(default_target);
+                            }
+                            if let Some(follow_block) = proof.follow_block {
+                                targets.insert(follow_block);
+                            }
+                            if let Some(legality) = proof.legality_witness.as_ref()
+                                && let Some(follow_block) = legality.follow_block
+                            {
+                                targets.insert(follow_block);
+                            }
+                        }
+                    }
+                    LoweredTerminator::Unsupported { evidence, .. } => {
+                        targets.extend(evidence.successor_targets.iter().copied());
+                    }
+                    LoweredTerminator::Return(_) | LoweredTerminator::Fallthrough(None) => {}
+                }
+            }
         }
         self.jump_targets_cache = Some(targets.clone());
         Ok(targets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PcodeBasicBlock;
+
+    fn test_options() -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0,
+            sections: Vec::new(),
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            global_names: Default::default(),
+            calling_convention: Default::default(),
+        }
+    }
+
+    #[test]
+    fn collect_jump_targets_includes_proof_recovered_switch_targets() {
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1100,
+                    successors: vec![],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1200,
+                    successors: vec![],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x1300,
+                    successors: vec![],
+                    ops: vec![],
+                },
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&func, &options, None);
+        builder.terminator_cache.insert(
+            0,
+            LoweredTerminator::Switch {
+                expr: HirExpr::Var("selector".to_string()),
+                targets: vec![0x1100],
+                default_target: Some(0x1300),
+                min_val: 0,
+                proof: Some(DispatcherProofUnit {
+                    selector_expr: "selector".to_string(),
+                    rendered_selector_expr: Some("selector".to_string()),
+                    candidate_targets: vec![0x1100],
+                    recovered_cases: vec![(0, 0x1100), (1, 0x1200)],
+                    selector_cardinality: 2,
+                    target_cardinality: 2,
+                    case_map_source: DispatcherCaseMapSource::Merged,
+                    default_target: Some(0x1300),
+                    guard_set: vec!["ordinal_domain_complete".to_string()],
+                    follow_block: Some(0x1300),
+                    normalization: None,
+                    legality_witness: Some(DispatcherLegality {
+                        follow_block: Some(0x1300),
+                        postdom_ok: true,
+                        side_effect_free_selector: true,
+                        ordinal_domain_complete: true,
+                        shared_tail_conflict: false,
+                        valid: true,
+                    }),
+                    proof_scope: DispatcherProofScope::OuterDispatch,
+                    proof_complete: true,
+                    failure_family: None,
+                }),
+            },
+        );
+
+        let targets = builder.collect_jump_targets().expect("targets");
+        assert!(targets.contains(&0x1100), "{targets:?}");
+        assert!(targets.contains(&0x1200), "{targets:?}");
+        assert!(targets.contains(&0x1300), "{targets:?}");
     }
 }

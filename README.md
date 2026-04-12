@@ -6,76 +6,67 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
-Rust reverse-engineering and decompilation workspace focused on **static analysis**, **p-code-driven reconstruction**, and a **desktop analysis workflow**, with a long-term direction toward a unified platform that brings together static, dynamic, and network analysis.
+Fission is a Rust-first reverse-engineering and decompilation workspace.
 
-This repository is still an **early-stage** and **immature public codebase**. The direction is real and the core engine is advancing quickly, but the project is still under heavy development, parts of the repository are rough, and the public-facing docs are still being cleaned up.
+The current architectural direction is:
 
-Fission is converging on a simple architecture:
+- `fission-sleigh` owns decode, instruction semantics, and lift contracts
+- `fission-pcode` owns canonical IR, structuring, and pseudocode rendering
+- `fission-static` owns orchestration, routing, and fact application
+- `fission-cli` and `fission-tauri` are product surfaces over the same core
+- Ghidra is used for comparison, benchmarking, and reference invariants, not as an active decompilation path inside Fission
 
-- **Fission Sleigh as the primary lift engine**
-- **Rust as the decompiler brain**
-- **Native/Ghidra as a compatibility lane, not the architectural center**
-- **CLI and Tauri as product surfaces over the same core**
+This repository is active engineering code, not a polished end-user release. The Rust decompiler path is real and improving quickly, but contracts, docs, and output quality are still moving.
 
-Its long-term direction goes beyond single-function pseudocode. Fission is aimed at **project-level software restoration**: recovering structure, behavior, and intent from compiled artifacts, while growing toward a unified platform that combines static, dynamic, and network analysis and absorbs the strengths of traditionally fragmented reverse-engineering tools into one workflow. AI is intended to sit on top of that stack as a deeply tool-coupled workflow layer.
+License: AGPL-3.0-or-later. Contributions are accepted under the CLA in [`CLA.md`](./CLA.md).
 
-The repository currently includes:
+## What Fission Is Today
 
-- a Fission-owned Sleigh lifting engine in [`crates/fission-sleigh`](./crates/fission-sleigh)
-- a Rust analysis/decompilation stack in [`crates`](./crates)
-- a Rust-owned Fission NIR decompiler core under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
-- a buildable CLI in [`crates/fission-cli`](./crates/fission-cli)
-- a Tauri desktop frontend in [`crates/fission-tauri`](./crates/fission-tauri)
+Fission currently exposes one primary decompilation path:
 
-Current engine status:
+| Path | Role | Notes |
+| --- | --- | --- |
+| `nir` | Primary architecture path | Fission Sleigh lift -> Rust NIR/HIR -> structuring -> printer |
 
-- `legacy`: native Ghidra decompilation + Rust postprocess, compatibility path
-- `Fission NIR`: Fission Sleigh p-code -> Rust NIR/HIR -> structuring -> printer, the primary forward architecture path
+Current project bias:
 
-Fission NIR currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving engineering codebase rather than a mature end-user product.
+- Rust owns the decompiler core
+- preview-first routing is the default policy
+- unsupported giant functions must fail closed into explicit fallback, not fabricated structure
+- telemetry and quality gates are treated as first-class engineering inputs
 
-License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
+## Repository Layout
 
-## Why Fission Exists
+Important workspace members:
 
-Fission started from a very personal reverse-engineering problem. Years ago, I was obsessed with a Nexon MMORPG called Everplanet. After the service shut down, I started looking for ways to bring it back. That search led me into reverse engineering long before I had any serious programming background.
+| Crate | Responsibility |
+| --- | --- |
+| [`crates/fission-sleigh`](./crates/fission-sleigh) | Sleigh decoding, lift semantics, CFG skeleton |
+| [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, printer |
+| [`crates/fission-static`](./crates/fission-static) | Static orchestration, routing, fact application |
+| [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbols, sections, strings |
+| [`crates/fission-signatures`](./crates/fission-signatures) | Signature and type data |
+| [`crates/fission-automation`](./crates/fission-automation) | `nir-check`, quality lanes, artifact reports |
+| [`crates/fission-cli`](./crates/fission-cli) | CLI surface |
+| [`crates/fission-tauri`](./crates/fission-tauri) | Desktop UI |
 
-I failed repeatedly. The game was protected, the engine was unfamiliar, and every approach I tried, from unpacking and static analysis to later AI-assisted workflows, eventually hit a wall. Fission grew out of that frustration: not from the idea of building just another decompiler frontend, but from the desire to build a tool that helps recover how a program behaves, what it is trying to do, and how its pieces fit together again.
+Secondary crates:
 
-That is what "project restoration" means here. Fission is not trying to reconstruct the exact original source code bit-for-bit. It is trying to recover a usable equivalent: the structure, behavior, intent, and workflow of the original software, even when the final reconstructed project is not textually identical to what was first written.
-
-## Screenshots
-
-Main desktop workspace:
-
-![Fission main screen](./image/main_screen.jpeg)
-
-Decompiler view:
-
-![Fission decompile view](./image/decompile.jpeg)
-
-## What Works Today
-
-If you are evaluating Fission today, the most accurate short version is:
-
-- the repository is real, buildable, and under active development
-- the CLI and analysis crates are the most mature parts of the workspace
-- the Tauri desktop app is real and wired into the same engine stack
-- `Fission NIR` is the primary architecture path and already useful on covered functions
-- `legacy` remains available as a compatibility and fallback lane
-- PE x64 currently has the strongest Fission NIR coverage
-- PE x86 Fission NIR coverage exists, but it is still limited and seed-driven
-- broader dynamic-analysis, network-analysis, and AI workflow layers are part of the long-term direction, not the fully realized present-day state
+- [`crates/fission-analysis`](./crates/fission-analysis)
+- [`crates/fission-disasm`](./crates/fission-disasm)
+- [`crates/fission-core`](./crates/fission-core)
+- [`crates/fission-dynamic`](./crates/fission-dynamic)
+- [`crates/fission-decompiler-core`](./crates/fission-decompiler-core)
 
 ## Quick Start
 
-Build the CLI first. The native backend is optional and can be built for compatibility testing:
+Build the CLI:
 
 ```bash
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-cargo build --release --bin fission_cli
+cargo build -p fission-cli --release
 ```
 
 Basic CLI usage:
@@ -87,555 +78,129 @@ Basic CLI usage:
 # One-shot decompilation
 ./target/release/fission_cli <binary> --decomp <address>
 
-# Interactive REPL
+# Interactive mode
 ./target/release/fission_cli <binary>
 ```
 
-For detailed build steps, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).  
+Run the main quality lane:
+
+```bash
+cargo run -p fission-automation -- nir-check --lane nir
+```
+
+For build details, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).  
 For CLI examples, see [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md).
 
-## Engine Modes
+## Current Engineering Status
 
-| Engine | Role today | Notes |
-|---|---|---|
-| `legacy` | Compatibility lane | Native Ghidra decompilation with Rust-side cleanup and enrichment |
-| `nir` | Primary architecture path | Fission NIR: Fission Sleigh lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
+What is solid today:
 
-In practical terms:
+- the Rust workspace builds
+- the CLI is the most mature product surface
+- the automation lane is wired into the canonical Rust telemetry
+- the `nir` path is the primary implementation target
+- Ghidra-backed comparison remains available for benchmarking and differential validation
 
-- use `nir` as the primary Fission-owned direction
-- use `legacy` for compatibility checks and fallback behavior
-- expect the two paths to differ in type surfacing, readability, and large-function coverage
+What is still in motion:
 
-## Where To Look First
+- large-function readability
+- data abstraction and memory surfacing
+- richer type/name surfacing on the Rust path
+- desktop polish and end-user workflow packaging
 
-If you are new to the repository, start here:
+PE x64 currently has the strongest direct `nir` coverage. Other architectures and formats exist in the workspace, but they should be treated as development targets rather than equal-production claims.
 
-1. [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)  
-   The architectural source of truth.
-2. [`docs/ROADMAP.md`](./docs/ROADMAP.md)  
-   Current direction and priority areas.
-3. [`docs/build/BUILD.md`](./docs/build/BUILD.md)  
-  How to build the Rust workspace and optional native compatibility backend.
-4. [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)  
-   Practical CLI usage.
-5. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)  
-   Recent technical milestones.
+## Architecture Summary
+
+Fission is organized around four layers:
+
+1. Instruction semantics and lifting
+2. Canonical IR
+3. Structured IR
+4. Presentation
+
+Practical ownership:
+
+- lifting quality is an input-contract problem
+- semantics-preserving normalization belongs in canonical IR
+- control-flow recovery belongs in structured IR
+- naming and formatting polish belongs at presentation time
+
+If a function cannot be structured safely, Fission should end in explicit fallback or unstructured preview output rather than incorrect high-level code.
+
+The full architectural source of truth is [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md).
+
+## Benchmark And Quality Workflow
+
+Fission treats benchmarking as part of the decompiler, not an afterthought.
+
+Current workflow:
+
+- crate and targeted tests for local correctness
+- `nir-check` for regression and fast-lane telemetry
+- 2-way benchmark runs against Ghidra for row-level quality tracking
+- row-level canaries and lowest-similarity reports for release decisions
+
+Important artifact locations:
+
+- [`artifacts/fission-automation/`](./artifacts/fission-automation)
+- [`artifacts/batch_benchmark/`](./artifacts/batch_benchmark)
+- [`artifacts/batch_benchmark_scripts/full_decomp_benchmark.py`](./artifacts/batch_benchmark_scripts/full_decomp_benchmark.py)
+
+Representative validation commands:
+
+```bash
+cargo test -p fission-pcode
+cargo check -p fission-static
+cargo check -p fission-cli
+cargo test -p fission-automation
+
+cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli
+
+python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
+  samples/windows/x64/putty.exe \
+  --fission-bin target/release/fission_cli \
+  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
+  --output-dir artifacts/batch_benchmark/putty-latest \
+  --limit 50
+```
+
+## Where To Start
+
+If you are new to the repository, read these first:
+
+1. [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
+2. [`docs/build/BUILD.md`](./docs/build/BUILD.md)
+3. [`docs/ROADMAP.md`](./docs/ROADMAP.md)
+4. [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)
+5. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
+
+For contributor conventions, see [`AGENTS.md`](./AGENTS.md).
+
+## Screenshots
+
+Main desktop workspace:
+
+![Fission main screen](./image/main_screen.jpeg)
+
+Decompiler view:
+
+![Fission decompile view](./image/decompile.jpeg)
 
 ## Community
 
 - Discord: [Fission community server](https://discord.gg/dgzqGwBpcE)
 - LinkedIn: [Sung Joo Kim](https://www.linkedin.com/in/sung-joo-kim-718a93303/)
 
-## Project Vision
+## Long-Term Direction
 
-Fission is not trying to be a thin UI around Ghidra or just another decompiler frontend.
+Fission is not trying to be a thin UI over someone else's decompiler.
 
-The longer-term goal is **project-level restoration**: not reconstructing the exact original source code bit-for-bit, but recovering a usable understanding of how a program is structured, what it does, and what kind of system it is trying to implement.
+The long-term target is project-level software restoration:
 
-That long-term direction also means treating Fission as more than a decompiler. The project is aiming toward an integrated reverse-engineering platform that can combine **static analysis**, **dynamic analysis**, and **network-facing analysis**, while absorbing the strongest parts of what are usually separate and fragmented tools into a single workflow.
+- recover structure and behavior from compiled artifacts
+- connect static analysis, dynamic analysis, and protocol-facing analysis
+- accumulate facts across functions and binaries
+- provide AI-assisted workflows on top of real analysis artifacts instead of detached text generation
 
-That means going beyond questions like "what does this function do?" and moving toward:
-
-- how the application is organized as a whole
-- what behaviors and workflows it exposes to users
-- what domain concepts, protocols, and state machines exist inside the binary
-- how runtime behavior and network behavior connect back to that static structure
-- how those can be reconstructed into a meaningful project again
-
-The current architecture is converging on:
-
-- Fission Sleigh as the primary lifting, CFG, and decode backend
-- Fission-owned Rust IR as the place where high-level control flow, data abstraction, type surfacing, and pseudocode cleanup happen
-- native/Ghidra C++ as an optional compatibility and differential-check backend
-- CLI/Tauri as product surfaces over the same analysis core
-- AI as a future workflow layer that is tightly integrated with decompilation, analysis artifacts, and project-wide context rather than acting as a generic chatbot on the side
-
-In practical terms:
-
-- the `Fission NIR` engine is the primary architecture path
-- the `legacy` engine remains as a compatibility lane
-- the `nir` code under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir) is not a string post-processor; it is the start of a separate decompiler core
-
-## Current Snapshot
-
-As of March 14, 2026, the repository has two real decompilation paths:
-
-### 1. `legacy`
-
-This is the compatibility path:
-
-- native Ghidra decompilation
-- Fission post-processing and cleanup
-- broadest type surface coverage today
-- current regression guard and compatibility fallback baseline
-
-### 2. `Fission NIR`
-
-This is the Fission-owned experimental path:
-
-- Fission Sleigh decode and p-code extraction
-- Rust-side NIR/HIR reconstruction
-- Rust-side CFG structuring
-- Rust-side normalization and idiom recognition
-- Rust-side type hint surfacing
-- Rust-side pseudocode printer
-
-This path now supports:
-
-- PE x64 direct Fission NIR output
-- bootstrap-level PE x86 direct Fission NIR output on selected seed functions
-- stack-slot recovery
-- straight-line lowering
-- multi-block `if`, `if/else`, `while`, and `do-while`
-- short-circuit folding for canonical `&&` / `||`
-- cast canonicalization
-- `PIECE` / `SUBPIECE` recombination
-- slot/table surfacing
-- slot-family recovery groundwork
-- Fission NIR-only pseudo intrinsics such as `WRITE_BITS`, `FLUSH_BITS`, and `EMIT_CODE`
-
-It still remains experimental. The important difference is that it is now a real product path exposed in both CLI and desktop UI, not an isolated demo path.
-
-## Verified Recent Milestones
-
-The repository has moved through several recent internal milestones. The detailed historical record lives in [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md). The short version is:
-
-- v14 restored legacy-path benchmark stability and removed the last known benchmark `type` failures in that round
-- v15 widened Fission NIR adoption and kept NIR fallback/goto/temp-surface metrics at zero on the covered set
-- v16 improved Fission NIR type surfacing and made [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe) `0x140006260` output directly surface:
-  - `LPRECT param_2`
-  - `RECT local_3c`
-  - `*param_2 = local_3c;`
-- v24 recovered direct Fission NIR output on representative x64 targets again and bootstrapped direct Fission NIR output on at least one x86 seed
-- v25 refactored the `nir` implementation into a real module tree for maintainability
-- v26 fixed the `AARCH64_AppleSilicon` parse blocker by resolving `AARCH64neon.sinc` `Execution(InvalidRef)` handling in `sleigh-rs`, unblocking arm64 spec parsing for the Rust-owned path
-
-Important current nuance:
-
-- Fission NIR coverage is now high enough to be a meaningful engineering target
-- Fission NIR output quality is no longer blocked only by control-flow structuring
-- the next major frontier is data abstraction and large-function body readability
-
-## Current Practical Status
-
-If you are trying to use Fission today, the most accurate status is:
-
-- the CLI and analysis crates are the most mature part of the repository
-- the Tauri frontend is real, buildable, and connected to the same engine stack
-- `Fission NIR` is the primary architecture path under active investment
-- `legacy` is maintained as a compatibility and fallback lane
-- `nir` is already large enough that it should be thought of as a decompiler subsystem, not a convenience helper
-
-Current `Fission NIR` strengths:
-
-- structured multi-block output on many real functions
-- aggressive removal of surface temporaries
-- reduced goto usage on covered functions
-- improving control over printer output because the Rust path owns the final render
-
-Current `Fission NIR` weaknesses:
-
-- broader real-world type surfacing still trails `legacy`
-- large-function direct Fission NIR coverage is not complete
-- data abstraction for memory slots, array/table access, and state-machine style code is still in progress
-- output can still be mechanically correct but visually lower-level than desired on large functions
-
-## Workspace Layout
-
-Workspace members are declared in [`Cargo.toml`](./Cargo.toml). The important crates are:
-
-- [`crates/fission-core`](./crates/fission-core)
-  - shared core types and utilities
-- [`crates/fission-loader`](./crates/fission-loader)
-  - PE/ELF/Mach-O loading
-- [`crates/fission-disasm`](./crates/fission-disasm)
-  - disassembly support
-- [`crates/fission-pcode`](./crates/fission-pcode)
-  - p-code model, transforms, Fission NIR core
-- [`crates/fission-signatures`](./crates/fission-signatures)
-  - WinAPI/type/signature data
-- [`crates/fission-static`](./crates/fission-static)
-  - static analysis and decompilation orchestration
-- [`crates/fission-dynamic`](./crates/fission-dynamic)
-  - debugger/runtime/plugin infrastructure
-- [`crates/fission-analysis`](./crates/fission-analysis)
-  - compatibility facade over split analysis crates
-- [`crates/fission-cli`](./crates/fission-cli)
-  - CLI entrypoint
-- [`crates/fission-tauri/src-tauri`](./crates/fission-tauri/src-tauri)
-  - Tauri backend
-
-Important top-level directories:
-
-- [`crates/fission-automation`](./crates/fission-automation)
-  - canonical Fission NIR quality runner and report generator
-- [`docs`](./docs)
-  - architecture, build, benchmark, changelog, and analysis notes
-- [`vendor`](./vendor)
-  - reference codebases and third-party trees used for study and comparison
-
-Practical ownership guidance:
-
-- new static/decompile work belongs in [`crates/fission-static`](./crates/fission-static)
-- new Fission NIR IR/lowering/normalization/printer work belongs in [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
-- new runtime/debug/plugin work belongs in [`crates/fission-dynamic`](./crates/fission-dynamic)
-- `fission-analysis` should be treated as a compatibility layer, not the default home for new features
-
-## The `nir` Module Tree
-
-The Fission NIR decompiler core now has a real directory layout:
-
-- [`crates/fission-pcode/src/nir/mod.rs`](./crates/fission-pcode/src/nir/mod.rs)
-  - public entrypoints and module wiring
-- [`crates/fission-pcode/src/nir/builder`](./crates/fission-pcode/src/nir/builder)
-  - lowering from p-code into HIR/NIR building blocks
-- [`crates/fission-pcode/src/nir/normalize`](./crates/fission-pcode/src/nir/normalize)
-  - arithmetic normalization, cleanup, slots/tables, bitstream helpers
-- [`crates/fission-pcode/src/nir/structuring`](./crates/fission-pcode/src/nir/structuring)
-  - control-flow reconstruction
-- [`crates/fission-pcode/src/nir/cfg.rs`](./crates/fission-pcode/src/nir/cfg.rs)
-  - CFG helpers and condition manipulation
-- [`crates/fission-pcode/src/nir/piece.rs`](./crates/fission-pcode/src/nir/piece.rs)
-  - piece/subpiece reconstruction support
-- [`crates/fission-pcode/src/nir/printer.rs`](./crates/fission-pcode/src/nir/printer.rs)
-  - Fission NIR pseudocode printer
-- [`crates/fission-pcode/src/nir/types.rs`](./crates/fission-pcode/src/nir/types.rs)
-  - IR types and errors
-- [`crates/fission-pcode/src/nir/tests`](./crates/fission-pcode/src/nir/tests)
-  - split test suite by feature area
-
-This matters because Fission is no longer just appending small helpers around native output. The code organization now reflects actual subsystem boundaries:
-
-- lowering
-- normalization
-- structuring
-- printing
-- testing
-
-## Decompilation Architecture
-
-At a high level, the decompilation stack looks like this:
-
-1. load binary
-2. initialize analysis context and selected backend
-3. choose engine
-4. decompile or lift
-5. apply engine-specific high-level reconstruction
-6. render pseudocode
-
-### `legacy` path
-
-The `legacy` path is roughly:
-
-1. native Ghidra decompilation in C++
-2. Rust orchestration in [`crates/fission-static/src/analysis/decomp`](./crates/fission-static/src/analysis/decomp)
-3. post-processing passes for type promotion, expression cleanup, goto cleanup, etc.
-4. final legacy C-like output
-
-This path is still the strongest for broad type recovery and default stability.
-
-### `Fission NIR` path
-
-The Fission NIR path is roughly:
-
-1. Fission Sleigh decode + p-code extraction
-2. build HIR through [`crates/fission-pcode/src/nir/builder`](./crates/fission-pcode/src/nir/builder)
-3. normalize through [`crates/fission-pcode/src/nir/normalize`](./crates/fission-pcode/src/nir/normalize)
-4. structure through [`crates/fission-pcode/src/nir/structuring`](./crates/fission-pcode/src/nir/structuring)
-5. apply Fission NIR type hints
-6. render through the Rust printer
-
-Important design rule:
-
-- Fission NIR is not a legacy string-rewrite layer
-- Fission NIR does not reuse legacy post-processing wholesale
-- Fission NIR owns its own IR, normalization, and printer behavior
-
-## Build Prerequisites
-
-Minimum practical requirements:
-
-- Rust 1.85+
-- CMake 3.16+
-- a working C++17 toolchain
-- Node.js/npm for the Tauri frontend
-
-Platform notes:
-
-- Windows:
-  - `zlib` is expected through `vcpkg`
-- macOS:
-  - the Tauri app needs full Xcode, not only Command Line Tools
-- Linux:
-  - GUI builds need the usual GTK/WebKit/Tauri dependencies
-
-For fuller details, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).
-
-## Build
-
-### CLI
-
-```bash
-git clone https://github.com/sjkim1127/Fission.git
-cd Fission
-
-cargo build --release --bin fission_cli
-```
-
-### Tauri desktop app
-
-```bash
-cd crates/fission-tauri
-npm install
-npm run tauri dev
-```
-
-Fast validation without launching the desktop app:
-
-```bash
-cargo check -p fission-tauri
-cd crates/fission-tauri && npm run build
-```
-
-## CLI Quick Start
-
-The one-shot CLI lives in [`crates/fission-cli`](./crates/fission-cli).
-
-Common commands:
-
-```bash
-# binary metadata
-./target/release/fission_cli <binary> -i
-
-# function list
-./target/release/fission_cli <binary> -l
-
-# strings
-./target/release/fission_cli <binary> --strings 8
-
-# decompile one function
-./target/release/fission_cli <binary> --decomp 0x140001160
-
-# disassemble one address or whole function
-./target/release/fission_cli <binary> --disasm 0x140001160
-./target/release/fission_cli <binary> --disasm-function 0x140001160
-
-# batch decompile
-./target/release/fission_cli <binary> --decomp-all --decomp-limit 20 --json
-```
-
-Useful decompilation flags:
-
-- `--profile balanced|quality|speed`
-- `--engine legacy|nir|auto`
-- `--compiler-id auto|windows|gcc|clang|default`
-- `--timeout-ms <ms>`
-- `--ghidra-compat`
-- `--benchmark`
-
-Examples:
-
-```bash
-# stable path
-./target/release/fission_cli <binary> --decomp 0x140001160 --engine legacy
-
-# force Fission NIR
-./target/release/fission_cli <binary> --decomp 0x140001160 --engine nir
-
-# try Fission NIR first, then fall back
-./target/release/fission_cli <binary> --decomp 0x140001160 --engine auto
-```
-
-## Desktop GUI
-
-The current desktop UI is the Tauri project in [`crates/fission-tauri`](./crates/fission-tauri).
-
-What exists today:
-
-- function list and filtering
-- assembly and decompile views
-- strings/imports/exports
-- comments/bookmarks/function rename plumbing
-- decompiler options dialog
-- engine selector in the UI
-- engine-used and fallback badges in the decompile view
-
-Important policy:
-
-- `Fission NIR` is the primary Fission-owned path
-- `legacy` is a compatibility and fallback path
-- `auto` exists to try Fission NIR first and fall back safely
-
-The older GUI guide at [`docs/gui/GUI_GUIDE.md`](./docs/gui/GUI_GUIDE.md) documents an earlier egui-based UI and is not the source of truth for the current Tauri frontend.
-
-## Benchmarks and Comparison Workflow
-
-Fission uses two benchmark styles:
-
-### 1. Canonical lane-based quality run
-
-Driver:
-
-- [`crates/fission-automation`](./crates/fission-automation)
-
-Purpose:
-
-- sentinel-based Fission NIR quality tracking
-- inventory / diagnosis / corpus refinement in one run
-- local Markdown/JSON report generation under `artifacts/fission-automation/`
-
-Typical entrypoints:
-
-- `cargo run -p fission-automation -- nir-check --lane pdb`
-- `cargo run -p fission-automation -- nir-check --lane nir`
-- `cargo run -p fission-automation -- nir-check --lane regression`
-- `cargo run -p fission-automation -- nir-check --lane full`
-
-This split matters:
-
-- `pdb` tells you whether PDB detection and ingestion are actually surfacing rows
-- `nir` tells you whether Fission NIR block signatures are shrinking
-- `regression` gives a compact mixed-sample stability pass
-- `full` combines the sentinel set with aligned/high-priority sources when local artifacts exist
-
-Repository benchmark docs:
-
-- [`docs/benchmark/grand_finale_summary.md`](./docs/benchmark/grand_finale_summary.md)
-- [`docs/benchmark/grand_finale_summary.json`](./docs/benchmark/grand_finale_summary.json)
-
-## Representative Binaries Used During Development
-
-The project frequently validates changes against a mixed set of synthetic and real-world binaries.
-
-### Real-world x64
-
-- [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe)
-  - WinAPI types, GUI-style code, medium/large functions
-- [`samples/windows/x64/everything.exe`](./samples/windows/x64/everything.exe)
-  - large-function coverage, bitstream/state-machine style loops, table access
-- [`samples/windows/x64/notepad++.exe`](./samples/windows/x64/notepad++.exe)
-  - large real-world GUI application, different style from PuTTY
-- [`vendor/x64dbg-development/cmake/cmkr.exe`](./vendor/x64dbg-development/cmake/cmkr.exe)
-  - CLI/medium-function fallback and Fission NIR stability guard
-
-### Real-world x86
-
-- [`samples/windows/x86/7zr.exe`](./samples/windows/x86/7zr.exe)
-  - x86 bootstrap, split-register patterns, 32-bit stack/pointer assumptions
-
-### Synthetic binaries
-
-Located under [`samples/windows/x64`](./samples/windows/x64), including:
-
-- `test_control_flow_*`
-- `test_arithmetic_idioms_*`
-- `test_structs_classes_*`
-- `test_string_memory_*`
-- `test_real_world_algorithms_*`
-- `test_advanced_patterns_*`
-
-These are used to validate specific reconstruction and normalization behaviors in isolation.
-
-## Preview Type Surfacing Policy
-
-Preview type surfacing is intentionally conservative.
-
-Current policy:
-
-- prefer safe alias surfacing over guessed field names
-- use known-signature and known-structure hints where confidence is high
-- do not guess member names
-- prefer pointer aliases like `LPRECT` for parameters
-- prefer aggregate aliases like `RECT` for locals when the whole-object pattern is reliable
-
-Representative direct Fission NIR acceptance case:
-
-- [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe) `0x140006260`
-  - `LPRECT param_2`
-  - `RECT local_3c`
-  - `*param_2 = local_3c;`
-
-## Current Engineering Priorities
-
-The current Fission NIR work is no longer blocked on basic enablement. The practical roadmap now looks like:
-
-1. recover direct Fission NIR output on more large functions
-2. improve data abstraction
-3. improve large-function body readability
-4. widen x86 coverage beyond bootstrap level
-5. keep `legacy` stable while Fission NIR matures
-
-In concrete terms, the most important active areas are:
-
-- large-function coverage recovery
-- memory-slot and array/table surfacing
-- bitstream/state-machine idiom recognition
-- loop-body compaction
-- broader Fission NIR type quality
-
-## Known Limitations
-
-The most important limitations today are:
-
-- `legacy` still has broader compatibility coverage on part of the corpus
-- `Fission NIR` still has incomplete large-function coverage
-- x86 Fission NIR support exists, but it is bootstrap-level, not parity with x64
-- Fission NIR body readability still lags the desired end state on large state-machine/table-driven code
-- Fission NIR type surfacing is still narrower than legacy outside the current hint set
-
-Also note:
-
-- benchmark artifacts and local sample binaries are commonly used during development but are not meant to be committed as canonical repository deliverables
-- some benchmark/data paths referenced during active development may be local-only or generated during internal runs
-
-## Development Notes
-
-The repository has been moving toward clearer ownership boundaries.
-
-Recent structural changes worth knowing before editing:
-
-- `nir` is now split by subsystem rather than kept in single giant files
-- the benchmark workflow now uses `fission-automation` lanes as the canonical local runner
-- current development typically proceeds by:
-  - synthetic tests first
-  - representative real-world function checks next
-  - lane-based automation closure last
-
-If you are adding work in the Fission NIR path:
-
-- prefer IR/HIR transforms over string rewrites
-- prefer conservative correctness over aggressive prettification
-- use synthetic tests for exact idiom recovery
-- use `cargo run -p fission-automation -- nir-check --lane nir` for Fission NIR quality checks
-- use `cargo run -p fission-automation -- nir-check --lane regression` for broader regression closure
-
-## Key Documentation
-
-- [`docs/README.md`](./docs/README.md)
-  - documentation index
-- [`docs/build/BUILD.md`](./docs/build/BUILD.md)
-  - build instructions
-- [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
-  - architecture notes
-- [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
-  - change history
-- [`docs/analysis/PASS_SYSTEM.md`](./docs/analysis/PASS_SYSTEM.md)
-  - legacy post-processing system
-- [`docs/analysis/POSTPROCESS_MODULES.md`](./docs/analysis/POSTPROCESS_MODULES.md)
-  - post-processing module notes
-- [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)
-  - CLI behavior
-- [`docs/ROADMAP.md`](./docs/ROADMAP.md)
-  - roadmap
-
-## Status
-
-Fission is under active development.
-
-The clearest way to summarize the current status is:
-
-- `legacy` is stable and useful
-- `Fission NIR` is real and increasingly capable
-- `nir` is now an organized subsystem rather than an experimental blob
-- the project direction is clear: Fission should own more of the high-level decompiler stack over time
+That direction is real, but the current repository should still be judged by what it already does well today: a Rust-owned decompiler core, measurable quality lanes, and a buildable analysis product surface.

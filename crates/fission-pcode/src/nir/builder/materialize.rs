@@ -149,6 +149,7 @@ impl<'a> PreviewBuilder<'a> {
             let maybe_stmt = self.with_lowering_site(
                 site,
                 |this| -> Result<Option<HirStmt>, MlilPreviewError> {
+                    let mut visiting = HashSet::new();
                     match op.opcode {
                         PcodeOpcode::Store => {
                             if op.inputs.len() < 3 {
@@ -221,7 +222,7 @@ impl<'a> PreviewBuilder<'a> {
                                     this.recover_call_args_from_block(block, op_idx)?
                                 };
                                 let expr = this
-                                    .lower_call(op, recovered_args, &mut HashSet::new())
+                                    .lower_call(op, recovered_args, &mut visiting)
                                     .map_err(|err| {
                                         this.debug_lowering_error(
                                             "call_expr",

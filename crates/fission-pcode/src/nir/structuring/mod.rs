@@ -16,7 +16,7 @@ mod switch;
 pub(crate) use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
-pub(crate) use cleanup::cleanup_redundant_labels;
+pub(crate) use cleanup::{cleanup_redundant_labels, finalize_structured_body};
 pub(crate) use driver::discover_guarded_tail_candidates_for_stats;
 pub(crate) use driver::structuring_diag_enabled;
 pub(crate) use linear::LinearBodyCachedOutcome;

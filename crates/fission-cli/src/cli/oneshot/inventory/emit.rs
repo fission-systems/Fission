@@ -37,7 +37,6 @@ use fission_decompiler_core::{RustSleighDecompileConfig, select_nir_output_from_
 #[cfg(not(feature = "native_decomp"))]
 use fission_pcode::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
-    pcode_has_indirect_control_flow,
 };
 #[cfg(not(feature = "native_decomp"))]
 use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
@@ -266,7 +265,7 @@ fn build_quality_tags_and_score(
     preview_surface_kind: Option<NirSurfaceKind>,
     pcode_block_count: usize,
     pcode_op_count: usize,
-    has_indirect_control_flow: bool,
+    indirect_classification: &IndirectControlClassification,
     preview_code: Option<&str>,
     preview_hint_stats: Option<NirHintStats>,
 ) -> (i32, Vec<String>) {
@@ -293,7 +292,10 @@ fn build_quality_tags_and_score(
         score += 2;
         tags.push("preview_direct_success".to_string());
     }
-    if !has_indirect_control_flow && pcode_block_count <= 12 && pcode_op_count <= 600 {
+    if !indirect_classification.has_indirect_control
+        && pcode_block_count <= 12
+        && pcode_op_count <= 600
+    {
         tags.push("low_cfg_risk".to_string());
     }
     if preview_code.is_some_and(|code| code.contains("slot_")) {
@@ -338,7 +340,7 @@ fn build_quality_tags_and_score(
 fn preview_block_signature(
     row_error_kind: Option<&str>,
     row_error_message: Option<&str>,
-    has_indirect_control_flow: bool,
+    indirect_classification: &IndirectControlClassification,
     pcode_block_count: usize,
     pcode_op_count: usize,
 ) -> Option<String> {
@@ -386,7 +388,7 @@ fn preview_block_signature(
         }
         "preview_unsupported_cfg" => {
             if message.contains("unsupported branch target") {
-                if has_indirect_control_flow {
+                if indirect_classification.has_indirect_control {
                     "unsupported_indirect_branch_target"
                 } else {
                     "unsupported_branch_target"
@@ -397,7 +399,7 @@ fn preview_block_signature(
                 "unsupported_phi_join"
             } else if message.contains("unsupported region shape") {
                 "unsupported_region_shape"
-            } else if has_indirect_control_flow {
+            } else if indirect_classification.has_indirect_control {
                 "unsupported_indirect_control_flow"
             } else {
                 "unsupported_cfg"
@@ -427,10 +429,9 @@ fn preview_block_detail(
 }
 
 #[cfg(not(feature = "native_decomp"))]
-fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
+fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize) {
     let total_ops = pcode.blocks.iter().map(|block| block.ops.len()).sum();
-    let has_indirect = pcode_has_indirect_control_flow(pcode);
-    (pcode.blocks.len(), total_ops, has_indirect)
+    (pcode.blocks.len(), total_ops)
 }
 
 #[cfg(not(feature = "native_decomp"))]
@@ -606,6 +607,7 @@ fn build_inventory_fallback_entry(
         has_dwarf_return_type,
         loader_type_count,
     );
+    let indirect_classification = IndirectControlClassification::from_stats_only(None);
     let (_, reason_tags) = build_quality_tags_and_score(
         dwarf_param_count,
         dwarf_local_count,
@@ -615,7 +617,7 @@ fn build_inventory_fallback_entry(
         None,
         0,
         0,
-        false,
+        &indirect_classification,
         None,
         None,
     );
@@ -641,7 +643,7 @@ fn build_inventory_fallback_entry(
         nir_block_signature: preview_block_signature(
             Some(row_error_kind),
             Some(reason.as_str()),
-            false,
+            &indirect_classification,
             0,
             0,
         ),
@@ -652,7 +654,7 @@ fn build_inventory_fallback_entry(
         preview_block_signature: preview_block_signature(
             Some(row_error_kind),
             Some(reason.as_str()),
-            false,
+            &indirect_classification,
             0,
             0,
         ),
@@ -715,7 +717,6 @@ fn build_inventory_candidate_entry_rust(
 
     let mut pcode_block_count = 0usize;
     let mut pcode_op_count = 0usize;
-    let mut has_indirect = false;
     let mut auto_eligible = false;
     let mut preview_direct_success = false;
     let mut preview_fallback_kind = None;
@@ -740,7 +741,6 @@ fn build_inventory_candidate_entry_rust(
             let metrics = pcode_metrics(&pcode);
             pcode_block_count = metrics.0;
             pcode_op_count = metrics.1;
-            has_indirect = metrics.2;
             auto_eligible = auto_nir_eligible(binary, &pcode);
 
             let mut options = NirRenderOptions::from_loaded_binary(binary);
@@ -800,6 +800,9 @@ fn build_inventory_candidate_entry_rust(
         }
     }
 
+    let indirect_classification =
+        IndirectControlClassification::from_stats_only(nir_build_stats.as_ref());
+
     let (_, reason_tags) = build_quality_tags_and_score(
         dwarf_param_count,
         dwarf_local_count,
@@ -809,7 +812,7 @@ fn build_inventory_candidate_entry_rust(
         preview_surface_kind,
         pcode_block_count,
         pcode_op_count,
-        has_indirect,
+        &indirect_classification,
         preview_code.as_deref(),
         preview_hint_stats,
     );
@@ -830,7 +833,7 @@ fn build_inventory_candidate_entry_rust(
     let nir_block_signature = preview_block_signature(
         row_error_kind.as_deref(),
         row_error_message.as_deref(),
-        has_indirect,
+        &indirect_classification,
         pcode_block_count,
         pcode_op_count,
     );
@@ -845,8 +848,6 @@ fn build_inventory_candidate_entry_rust(
         nir_goto_count,
         nir_build_stats.as_ref(),
     );
-    let indirect_classification =
-        IndirectControlClassification::from_stats(nir_build_stats.as_ref(), has_indirect);
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
         if let Some(after) = recovery_goto_count_after {

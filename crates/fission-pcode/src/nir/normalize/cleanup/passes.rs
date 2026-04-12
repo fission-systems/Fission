@@ -51,6 +51,12 @@ pub(crate) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
             continue;
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
+        let predicate_sensitive =
+            stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
+        if predicate_sensitive && !expr_is_low_cost_inline_candidate(&rhs) {
+            idx += 1;
+            continue;
+        }
         if target_uses > 1 && !expr_is_low_cost_inline_candidate(&rhs) {
             idx += 1;
             continue;
@@ -825,6 +831,33 @@ fn stmt_redefines_temp(stmt: &HirStmt, name: &str) -> bool {
     )
 }
 
+fn stmt_uses_var_in_predicate_position(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::If { cond, .. } => expr_contains_var(cond, name),
+        HirStmt::While { cond, .. } | HirStmt::DoWhile { cond, .. } => {
+            expr_contains_var(cond, name)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            ..
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmt_uses_var_in_predicate_position(stmt, name))
+                || cond.as_ref().is_some_and(|expr| expr_contains_var(expr, name))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmt_uses_var_in_predicate_position(stmt, name))
+        }
+        HirStmt::Switch { expr, .. } => expr_contains_var(expr, name),
+        HirStmt::Block(stmts) => stmts
+            .iter()
+            .any(|inner| stmt_uses_var_in_predicate_position(inner, name)),
+        _ => false,
+    }
+}
+
 fn is_trivial_temp_name(name: &str) -> bool {
     name == "result"
         || name == "retval"
@@ -837,7 +870,30 @@ fn is_trivial_temp_name(name: &str) -> bool {
 fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Var(_) | HirExpr::Const(_, _) => true,
-        HirExpr::Cast { expr, .. } => expr_is_low_cost_inline_candidate(expr),
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            expr_is_low_cost_inline_candidate(expr)
+        }
+        HirExpr::Binary { op, lhs, rhs, .. } => {
+            matches!(
+                op,
+                HirBinaryOp::Eq
+                    | HirBinaryOp::Ne
+                    | HirBinaryOp::Lt
+                    | HirBinaryOp::Le
+                    | HirBinaryOp::SLt
+                    | HirBinaryOp::SLe
+                    | HirBinaryOp::And
+                    | HirBinaryOp::Or
+                    | HirBinaryOp::Xor
+                    | HirBinaryOp::Add
+                    | HirBinaryOp::Sub
+                    | HirBinaryOp::Shl
+                    | HirBinaryOp::Shr
+                    | HirBinaryOp::Sar
+                    | HirBinaryOp::Mod
+            ) && expr_is_low_cost_inline_candidate(lhs)
+                && expr_is_low_cost_inline_candidate(rhs)
+        }
         _ => false,
     }
 }
@@ -944,6 +1000,25 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
         | HirStmt::Return(None)
         | HirStmt::Break
         | HirStmt::Continue => 0,
+    }
+}
+
+fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
+    match expr {
+        HirExpr::Var(var) => var == name,
+        HirExpr::Const(_, _) => false,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_var(lhs, name) || expr_contains_var(rhs, name)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, name)),
+        HirExpr::Index { base, index, .. } => {
+            expr_contains_var(base, name) || expr_contains_var(index, name)
+        }
     }
 }
 

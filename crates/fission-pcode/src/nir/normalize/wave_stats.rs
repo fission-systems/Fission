@@ -226,6 +226,55 @@ pub(crate) fn add_pass_rerun_skipped_by_preservation(n: usize) {
     WAVE.with(|w| w.borrow_mut().pass_rerun_skipped_by_preservation_count += n);
 }
 
+pub(crate) fn add_dispatcher_proof_units(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().dispatcher_proof_unit_count += n);
+}
+
+pub(crate) fn add_dispatcher_proof_completed(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().dispatcher_proof_completed_count += n);
+}
+
+pub(crate) fn add_dispatcher_proof_failed(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().dispatcher_proof_failed_count += n);
+}
+
+pub(crate) fn add_compare_chain_dispatcher_count(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().compare_chain_dispatcher_count += n);
+}
+
+pub(crate) fn add_candidate_scoped_jump_resolver_count(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().candidate_scoped_jump_resolver_count += n);
+}
+
+pub(crate) fn add_sccp_skipped_by_admission(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().sccp_skipped_by_admission_count += n);
+}
+
+pub(crate) fn add_memory_fact_prefilter_skip(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().memory_fact_prefilter_skip_count += n);
+}
+
 pub(crate) fn add_indirect_target_set_refinements(n: usize) {
     if n == 0 {
         return;

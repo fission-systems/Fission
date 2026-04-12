@@ -121,6 +121,7 @@ impl<'a> PreviewBuilder<'a> {
             temp_next_id: 0,
             materialized_vns: HashMap::new(),
             call_result_bindings: HashMap::new(),
+            selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
             register_param_aliases,
             stack_frame_size,
@@ -219,6 +220,9 @@ impl<'a> PreviewBuilder<'a> {
             indirect_surface_preserved_count: 0,
             indirect_target_set_refined_count: 0,
             dispatcher_shape_recovered_count: 0,
+            dispatcher_proof_unit_count: 0,
+            dispatcher_proof_completed_count: 0,
+            dispatcher_proof_failed_count: 0,
             proof_payload_direct_emit_count: 0,
         }
     }

@@ -233,29 +233,18 @@ Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 5
     - `cleanup_dead_binding_init_1: 42.5ms -> 42.2ms`
 
 Net effect:
-
-- indirect-control ownership drift is lower across `fission-pcode`, `fission-static`, `fission-cli`, automation, and benchmark reporting
 - explicit dispatcher/indirect residue is surfaced more consistently
 - coverage and direct success remain stable
 - similarity improved slightly, but proof-complete dispatcher recovery is still not done
-- the next bottleneck remains actual dispatcher/jump-table proof for `0x140001160`, `0x140008900`, and `0x140008090`, plus the existing cleanup perf gate
 
 ### Unsupported-elimination wave — unresolved indirect control now preserves explicit surface and canonical counters
 
-This wave moved unresolved indirect control out of the old bare `__fission_indirect_cf_unsupported()` bucket and into canonical `fission-pcode` evidence/counter ownership.
 
 - Added canonical unsupported-indirect contracts in [`types.rs`](crates/fission-pcode/src/nir/types.rs):
   - `UnsupportedControlEvidence`
-  - `IndirectControlSurface`
-  - `UnsupportedControlFamily`
-- [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now preserves evidence for unresolved `Branch`, `CBranch`, and `BranchInd` lowering instead of immediately degrading to a bare unsupported marker.
-- [`lower_expr.rs`](crates/fission-pcode/src/nir/builder/lower_expr.rs) now keeps opaque `CallInd` surfaces as `__fission_callind_opaque()` instead of failing the whole preview for unknown non-trap producers.
-- [`mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs), [`driver.rs`](crates/fission-pcode/src/nir/structuring/driver.rs), and [`linear.rs`](crates/fission-pcode/src/nir/structuring/linear.rs) now emit canonical pseudo-surfaces such as `__fission_branchind(...)` when an explicit indirect surface can be preserved.
-- Added canonical `NirBuildStats` counters:
   - `unsupported_indirect_control_count`
   - `unsupported_indirect_call_count`
   - `unsupported_external_target_count`
-  - `indirect_surface_preserved_count`
 - [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now reads these counters from `preview_build_stats`, includes them in lowest-sim rows, and prints them in the public summary line.
 - [`quality.rs`](crates/fission-automation/src/report/quality.rs) now rolls unsupported/preserved-indirect counters into canonical quality-family summaries.
 
@@ -264,18 +253,9 @@ Validation on the seeded [`putty.exe`](samples/windows/x64/putty.exe) `--limit 5
 - seeded shared coverage: `100.00% -> 100.00%`
 - independent top-N coverage: `96.00% -> 96.00%`
 - `both_success`: `100.000% -> 100.000%`
-- Fission direct-success public summary: remains `50/50`
-- new public summary counters:
-  - `fission unsupported indirect 1`
-  - `fission indirect-surface preserved 1`
-  - `fission dispatcher recovered 0`
-- `avg_normalized_similarity`: `37.43-37.45%` band remains `37.44%`
 - `nir-check` fast lane:
   - `changed_rows=0`
   - gate remains `stop_hold_p5h3f`
-  - dominant slow passes remain effectively flat:
-    - `cleanup_stmt_canonical_init_1: 118.7ms -> 120.6ms`
-    - `cleanup_dead_binding_init_1: 42.8ms -> 42.5ms`
 
 Net effect:
 
@@ -284,14 +264,9 @@ Net effect:
 - no meaningful similarity uplift yet
 - next bottleneck remains proof-driven dispatcher recovery for low-sim functions such as `0x140001160`, plus the existing cleanup perf gate
 
-### Benchmark contract fix — Fission direct-success summary now reports the Rust canonical path correctly
-
-The benchmark harness had drifted behind the current execution contract. Public summaries were reporting `fission direct-success 0/50` even when the seeded `putty.exe --limit 50` spot-check had `success_count=50`, `both_success=100%`, and all Fission rows were produced by the canonical `rust_sleigh` path without fallback.
 
 - [`benchmark_core.py`](artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now defines Fission direct-success as:
   - `success == true`
-  - `fell_back == false`
-  - engine is a canonical Fission engine, including `rust_sleigh`
 - This fixes the stale `mlil_preview`-only accounting that forced direct-success to zero after the Rust canonical path took over.
 - Validation:
   - reran [`full_decomp_benchmark.py`](artifacts/batch_benchmark_scripts/full_decomp_benchmark.py) on [`putty.exe`](samples/windows/x64/putty.exe) with `--limit 50`
@@ -305,19 +280,11 @@ The benchmark harness had drifted behind the current execution contract. Public 
 
 This wave moved another semantic ownership layer into the Rust canonical pipeline by introducing a shared typed-fact inventory, extending prototype and effect summaries with wrapper provenance and region-level effect facts, and wiring indirect-control telemetry into canonical `NirBuildStats`. The quality guardrails held on the short seeded `putty.exe --limit 50` spot-check, but the primary KPI still plateaued: similarity remained at `37.45%`.
 
-#### fission-pcode — shared typed-fact inventory now owns object-root and surface promotion evidence
-
 - Added a canonical typed-fact store in [`typed_facts.rs`](crates/fission-pcode/src/nir/normalize/memory/typed_facts.rs).
 - The new inventory produces `TypedFactStore`, `ObjectFact`, and `SurfaceFact` data from partitioned access evidence, explicit surface types, and structural shape facts.
-- [`aggregate_fields.rs`](crates/fission-pcode/src/nir/normalize/memory/aggregate_fields.rs) and [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs) now consume the shared fact inventory instead of independently inventing object surfaces.
-- This removes another duplicated semantic owner from the memory recovery pipeline and keeps escaped/coarse roots conservative.
 
 #### fission-pcode — prototype and effect summaries gained wrapper provenance and canonical promotion telemetry
 
-- [`interproc_sig_prop.rs`](crates/fission-pcode/src/nir/normalize/types/interproc_sig_prop.rs) now carries `wrapper_of`, effect regions, import-seeded confidence, and prototype-round telemetry through the canonical summary lattice.
-- [`callsite_type_prop.rs`](crates/fission-pcode/src/nir/normalize/types/callsite_type_prop.rs) can now:
-  - rewrite call targets through canonical wrapper summaries
-  - promote high-confidence local surface names from import signatures
   - count conflicts and successful surface promotions in `NirBuildStats`
 - [`jump_resolver.rs`](crates/fission-pcode/src/nir/vsa/jump_resolver.rs) now records indirect-target and dispatcher recovery telemetry at the canonical owner.
 
@@ -329,28 +296,15 @@ This wave moved another semantic ownership layer into the Rust canonical pipelin
   - `object_root_fact_promotion_count`
   - `surface_fact_promotion_count`
   - `prototype_summary_round_count`
-  - `indirect_target_set_refined_count`
-  - `dispatcher_shape_recovered_count`
-- Duplicate-logic audit result:
-  - object root / field / surface semantics: canonical owner is `fission-pcode`
-  - prototype / effect / wrapper summaries: canonical owner is `fission-pcode`
-  - `fission-static` remains fact supplier, routing layer, and naming-only polish path
-  - dormant static semantic postprocess modules still exist in-tree, but they are no longer the active semantic owner on the benchmarked Rust path
 
 #### Tests / validation
 
 - Passed:
   - `cargo test -p fission-pcode`
   - `cargo check -p fission-pcode`
-  - `cargo check -p fission-static`
-  - `cargo test -p fission-automation`
-  - `cargo build -p fission-cli --release`
-  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
 - `nir-check` fast lane:
   - `changed_rows=0`
   - gate remains `stop_hold_p5h3f`
-  - dominant costs improved slightly but not materially:
-    - `cleanup_stmt_canonical_init_1: 120.7ms -> 118.7ms`
     - `cleanup_dead_binding_init_1: 42.9ms -> 42.8ms`
   - new top build stats include `call_effect_summary_refined_count=104`
 - 2-way benchmark:

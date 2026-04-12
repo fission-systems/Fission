@@ -12,8 +12,8 @@
 ///   RHS has no observable side effects.
 use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
 use super::super::*;
-use crate::nir::normalize::pipeline::normalize_expr;
 use crate::nir::normalize::analysis::expr_key::pure_expr_key;
+use crate::nir::normalize::pipeline::normalize_expr;
 use crate::nir::support::{expr_type, next_temp_name};
 use std::collections::HashMap;
 
@@ -730,10 +730,8 @@ fn stabilize_repeated_pure_exprs_in_stmts(
                 then_body,
                 else_body,
             } => {
-                changed +=
-                    stabilize_repeated_pure_exprs_in_stmts(then_body, locals, next_temp_id);
-                changed +=
-                    stabilize_repeated_pure_exprs_in_stmts(else_body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(then_body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(else_body, locals, next_temp_id);
                 if let Some((temp_stmt, stabilized_cond)) =
                     stabilize_expr_with_temp(cond, locals, next_temp_id)
                 {
@@ -908,7 +906,11 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
             ty: ty.clone(),
             expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
         },
-        HirExpr::Unary { op, expr: inner, ty } => HirExpr::Unary {
+        HirExpr::Unary {
+            op,
+            expr: inner,
+            ty,
+        } => HirExpr::Unary {
             op: *op,
             expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
             ty: ty.clone(),
@@ -954,25 +956,25 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
 fn is_stabilization_candidate_expr(expr: &HirExpr) -> bool {
     matches!(
         expr,
-                HirExpr::Binary {
-                    op:
-                        HirBinaryOp::Add
-                    | HirBinaryOp::Sub
-                    | HirBinaryOp::Mul
-                    | HirBinaryOp::And
-                    | HirBinaryOp::Or
-                    | HirBinaryOp::Xor
-                    | HirBinaryOp::Eq
-                    | HirBinaryOp::Ne
-                    | HirBinaryOp::Lt
-                    | HirBinaryOp::Le
-                    | HirBinaryOp::SLt
-                    | HirBinaryOp::SLe
-                    | HirBinaryOp::Shl
-                    | HirBinaryOp::Shr
-                    | HirBinaryOp::Sar,
+        HirExpr::Binary {
+            op: HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::And
+                | HirBinaryOp::Or
+                | HirBinaryOp::Xor
+                | HirBinaryOp::Eq
+                | HirBinaryOp::Ne
+                | HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar,
             ..
-        } | HirExpr::Unary { .. } | HirExpr::Cast { .. }
+        } | HirExpr::Unary { .. }
+            | HirExpr::Cast { .. }
     )
 }
 

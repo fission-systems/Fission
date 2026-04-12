@@ -136,6 +136,11 @@ pub(crate) fn eliminate_redundant_gotos(mut stmts: Vec<HirStmt>) -> Vec<HirStmt>
     stmts
 }
 
+pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
+    body = eliminate_redundant_gotos(body);
+    cleanup_redundant_labels(body)
+}
+
 // ---------------------------------------------------------------------------
 // Existing label-cleanup utilities
 // ---------------------------------------------------------------------------
@@ -636,5 +641,22 @@ mod tests {
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body.clone());
         assert_eq!(rewritten, 0);
         assert_eq!(normalized, body);
+    }
+
+    #[test]
+    fn finalize_structured_body_inlines_single_predecessor_dead_forward_segment() {
+        let body = vec![
+            HirStmt::Goto("block_join".to_string()),
+            HirStmt::Expr(HirExpr::Var("dead_unreachable".to_string())),
+            HirStmt::Goto("block_join".to_string()),
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let finalized = finalize_structured_body(body);
+        assert_eq!(
+            finalized,
+            vec![HirStmt::Return(Some(HirExpr::Var("ret".to_string())))]
+        );
     }
 }

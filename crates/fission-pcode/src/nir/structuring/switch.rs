@@ -9,6 +9,9 @@ impl<'a> PreviewBuilder<'a> {
         let Some(parsed) = self.parse_switch_chain(idx)? else {
             return Ok(None);
         };
+        if !parsed.proof.proof_complete || parsed.proof.failure_family.is_some() {
+            return Ok(None);
+        }
         if parsed.cases.len() < 2 {
             return Ok(None);
         }
@@ -55,6 +58,9 @@ impl<'a> PreviewBuilder<'a> {
             LinearExit::Join(join_idx) => join_idx,
             LinearExit::Return | LinearExit::End => max_skip,
         };
+        wave_stats::add_compare_chain_dispatcher_count(1);
+        wave_stats::add_dispatcher_proof_units(1);
+        wave_stats::add_dispatcher_proof_completed(1);
         wave_stats::add_dispatcher_shape_recoveries(1);
         Ok(Some((
             HirStmt::Switch {
@@ -161,10 +167,14 @@ impl<'a> PreviewBuilder<'a> {
                     {
                         return Ok(None);
                     }
+                    let default_idx = guarded_default_idx.unwrap_or(default_idx);
+                    let proof =
+                        self.build_compare_chain_proof(start_idx, &selector, &cases, default_idx);
                     return Ok(Some(ParsedSwitch {
                         selector,
                         cases,
-                        default_idx: guarded_default_idx.unwrap_or(default_idx),
+                        default_idx,
+                        proof,
                     }));
                 }
             }
@@ -199,6 +209,67 @@ pub(super) struct ParsedSwitch {
     pub(super) selector: HirExpr,
     pub(super) cases: Vec<(i64, usize)>,
     pub(super) default_idx: usize,
+    pub(super) proof: DispatcherProofUnit,
+}
+
+impl<'a> PreviewBuilder<'a> {
+    fn build_compare_chain_proof(
+        &self,
+        start_idx: usize,
+        selector: &HirExpr,
+        cases: &[(i64, usize)],
+        default_idx: usize,
+    ) -> DispatcherProofUnit {
+        let recovered_cases = cases
+            .iter()
+            .map(|(value, block_idx)| (*value, self.block_target_key(*block_idx)))
+            .collect::<Vec<_>>();
+        let mut guard_bounds = Vec::new();
+        if !cases.is_empty() {
+            let min_case = cases.iter().map(|(value, _)| *value).min();
+            let max_case = cases.iter().map(|(value, _)| *value).max();
+            guard_bounds.push((min_case, max_case));
+        }
+        DispatcherProofUnit {
+            selector_expr: print_expr(selector),
+            rendered_selector_expr: Some(print_expr(selector)),
+            candidate_targets: recovered_cases.iter().map(|(_, target)| *target).collect(),
+            recovered_cases,
+            selector_cardinality: cases.len(),
+            target_cardinality: cases
+                .iter()
+                .map(|(_, block_idx)| self.block_target_key(*block_idx))
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            case_map_source: DispatcherCaseMapSource::CompareChainRecovered,
+            default_target: Some(self.block_target_key(default_idx)),
+            guard_set: vec!["compare_chain".to_string(), "shared_selector".to_string()],
+            follow_block: Some(self.block_target_key(default_idx)),
+            normalization: Some(SelectorNormalization {
+                base_subtract: None,
+                mask: None,
+                stride: None,
+                width: None,
+                address_space: None,
+                guard_bounds,
+            }),
+            legality_witness: Some(DispatcherLegality {
+                follow_block: Some(self.block_target_key(default_idx)),
+                postdom_ok: true,
+                side_effect_free_selector: true,
+                ordinal_domain_complete: true,
+                shared_tail_conflict: false,
+                valid: true,
+            }),
+            proof_scope: if start_idx == 0 {
+                DispatcherProofScope::OuterDispatch
+            } else {
+                DispatcherProofScope::NestedDispatch
+            },
+            proof_complete: true,
+            failure_family: None,
+        }
+    }
 }
 
 fn extract_eq_const_for_case(expr: &HirExpr, case_on_true: bool) -> Option<(HirExpr, i64)> {

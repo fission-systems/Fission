@@ -4,6 +4,7 @@ use super::*;
 struct InferredJumpTableTargets {
     unique_targets: Vec<u64>,
     recovered_cases: Vec<(i64, u64)>,
+    selector_cardinality: usize,
     decode_mode: &'static str,
 }
 
@@ -25,7 +26,9 @@ impl<'a> PreviewBuilder<'a> {
                     block_idx: pcode_idx,
                     op_idx: term_idx,
                 },
-                |this| match op.opcode {
+                |this| {
+                    let mut visiting = HashSet::new();
+                    match op.opcode {
                     PcodeOpcode::Return => {
                         let expr = op
                             .inputs
@@ -148,8 +151,10 @@ impl<'a> PreviewBuilder<'a> {
                                 return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                             }
                         };
-                        let cond = this
+                        let recovered_cond = this
                             .try_recover_x86_branch_condition(&op.inputs[1])?
+                            .filter(|expr| !Self::branch_cond_too_complex(expr));
+                        let cond = recovered_cond
                             .map(Ok)
                             .unwrap_or_else(|| {
                                 this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
@@ -172,7 +177,8 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     PcodeOpcode::BranchInd => {
                         let switch_var = &op.inputs[0];
-                        let switch_expr = this.lower_branchind_switch_expr(idx, switch_var)?;
+                        let switch_expr =
+                            this.lower_branchind_switch_expr(idx, switch_var, &mut visiting)?;
                         if preview_builder_diag_enabled() {
                             eprintln!(
                                 "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
@@ -182,6 +188,7 @@ impl<'a> PreviewBuilder<'a> {
                             );
                         }
                         let mut targets = Vec::new();
+                        let had_successor_targets = !block.successors.is_empty();
                         for succ_idx in &block.successors {
                             let succ_idx = *succ_idx as usize;
                             if succ_idx < this.pcode.blocks.len() {
@@ -195,6 +202,7 @@ impl<'a> PreviewBuilder<'a> {
                             this.recover_branchind_jump_table_selector_varnode(idx);
                         let mut inferred_single_input_target = false;
                         let mut recovered_case_map = None;
+                        let mut recovered_selector_cardinality = None;
                         if targets.is_empty()
                             && let Some(recovered_targets) = this
                                 .infer_branchind_targets_from_jump_table_expr(
@@ -203,8 +211,14 @@ impl<'a> PreviewBuilder<'a> {
                                     selector_alias.as_ref(),
                                 )
                         {
+                            recovered_selector_cardinality =
+                                Some(recovered_targets.selector_cardinality);
                             recovered_case_map = Some(recovered_targets.recovered_cases);
-                            targets.extend(recovered_targets.unique_targets);
+                            for target in recovered_targets.unique_targets {
+                                if !targets.contains(&target) {
+                                    targets.push(target);
+                                }
+                            }
                         }
                         if targets.is_empty()
                             && let Some(inferred_target) =
@@ -251,12 +265,14 @@ impl<'a> PreviewBuilder<'a> {
                                             idx,
                                             alias,
                                             switch_expr.clone(),
+                                            &mut visiting,
                                         )
                                     })
                                     .or_else(|| {
                                         this.recover_branchind_switch_expr_from_predecessors(
                                             idx,
                                             switch_var,
+                                            &mut visiting,
                                         )
                                     })
                                     .unwrap_or_else(|| switch_expr.clone());
@@ -304,6 +320,7 @@ impl<'a> PreviewBuilder<'a> {
                                                 idx,
                                                 alias,
                                                 selector.discriminant.clone(),
+                                                &mut visiting,
                                             )
                                         })
                                         .unwrap_or_else(|| selector.discriminant.clone());
@@ -313,6 +330,47 @@ impl<'a> PreviewBuilder<'a> {
                                     )
                                 })
                                 .unwrap_or_else(|| (switch_expr.clone(), 0));
+                            let normalization = recovered_selector.as_ref().map(|selector| {
+                                this.selector_normalization_for_branchind(
+                                    &expr,
+                                    selector.min_val,
+                                    selector.entry_size,
+                                    recovered_case_map.as_deref(),
+                                )
+                            });
+                            let side_effect_free_selector =
+                                Self::selector_expr_is_side_effect_free(&expr);
+                            let recovered_cases = recovered_case_map.unwrap_or_else(|| {
+                                targets
+                                    .iter()
+                                    .copied()
+                                    .enumerate()
+                                    .filter_map(|(ordinal, target)| {
+                                        (Some(target) != default_target)
+                                            .then_some((min_val + ordinal as i64, target))
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
+                            let selector_cardinality = recovered_selector_cardinality
+                                .unwrap_or(recovered_cases.len());
+                            let target_cardinality = recovered_cases
+                                .iter()
+                                .map(|(_, target)| *target)
+                                .collect::<std::collections::BTreeSet<_>>()
+                                .len();
+                            let ordinal_domain_complete = selector_cardinality >= 2
+                                && !recovered_cases.is_empty()
+                                && recovered_cases.len() >= selector_cardinality;
+                            let shared_tail_conflict = false;
+                            let case_map_source = match (
+                                had_successor_targets,
+                                recovered_selector_cardinality.is_some(),
+                            ) {
+                                (true, true) => DispatcherCaseMapSource::Merged,
+                                (false, true) => DispatcherCaseMapSource::JumpTableRecovered,
+                                (true, false) => DispatcherCaseMapSource::SuccessorOnly,
+                                (false, false) => DispatcherCaseMapSource::SuccessorOnly,
+                            };
                             let mut guard_set = vec!["successor_bounded".to_string()];
                             if recovered_selector.is_some() {
                                 guard_set.push("selector_normalized".to_string());
@@ -320,35 +378,64 @@ impl<'a> PreviewBuilder<'a> {
                             if default_target.is_some() {
                                 guard_set.push("follow_candidate".to_string());
                             }
+                            if ordinal_domain_complete {
+                                guard_set.push("ordinal_domain_complete".to_string());
+                            }
+                            let follow_or_bounded = default_target.is_some() || ordinal_domain_complete;
+                            let proof_complete = follow_or_bounded
+                                && ordinal_domain_complete
+                                && side_effect_free_selector
+                                && !single_target_dispatcher
+                                && !shared_tail_conflict;
+                            let failure_family = if proof_complete {
+                                None
+                            } else if !side_effect_free_selector {
+                                Some(ProofFailureFamily::NonSideEffectFreeSelector)
+                            } else if !ordinal_domain_complete {
+                                Some(ProofFailureFamily::MissingOrdinalCoverage)
+                            } else if !follow_or_bounded {
+                                Some(ProofFailureFamily::MissingFollow)
+                            } else if shared_tail_conflict {
+                                Some(ProofFailureFamily::SharedTailConflict)
+                            } else {
+                                Some(ProofFailureFamily::AmbiguousTargetMap)
+                            };
+                            let legality_witness = Some(DispatcherLegality {
+                                follow_block: default_target,
+                                postdom_ok: follow_or_bounded,
+                                side_effect_free_selector,
+                                ordinal_domain_complete,
+                                shared_tail_conflict,
+                                valid: proof_complete,
+                            });
                             let proof = Some(DispatcherProofUnit {
                                 selector_expr: print_expr(&expr),
+                                rendered_selector_expr: Some(print_expr(&expr)),
                                 candidate_targets: targets.clone(),
-                                recovered_cases: recovered_case_map.unwrap_or_else(|| {
-                                    targets
-                                        .iter()
-                                        .copied()
-                                        .enumerate()
-                                        .filter_map(|(ordinal, target)| {
-                                            (Some(target) != default_target)
-                                                .then_some((min_val + ordinal as i64, target))
-                                        })
-                                        .collect()
-                                }),
+                                recovered_cases,
+                                selector_cardinality,
+                                target_cardinality,
+                                case_map_source,
                                 default_target,
                                 guard_set,
                                 follow_block: default_target,
+                                normalization,
+                                legality_witness,
                                 proof_scope: DispatcherProofScope::TerminatorLocal,
-                                failure_family: None,
+                                proof_complete,
+                                failure_family,
                             });
-                            let non_default_targets = targets
-                                .iter()
-                                .filter(|target| Some(**target) != default_target)
-                                .count();
+                            this.dispatcher_proof_unit_count += 1;
+                            if proof_complete {
+                                this.dispatcher_proof_completed_count += 1;
+                            } else {
+                                this.dispatcher_proof_failed_count += 1;
+                            }
                             this.indirect_target_set_refined_count += 1;
                             if dispatcher_recovered {
                                 this.dispatcher_shape_recovered_count += 1;
                             }
-                            if non_default_targets == 0 || single_target_dispatcher {
+                            if target_cardinality == 0 || single_target_dispatcher {
                                 let evidence = UnsupportedControlEvidence {
                                     opcode: format!("{:?}", op.opcode),
                                     source_block: Some(block.start_address),
@@ -374,6 +461,7 @@ impl<'a> PreviewBuilder<'a> {
                         }
                     }
                     _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
+                    }
                 },
             )?
         } else {
@@ -456,6 +544,48 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     _ => Err(err),
                 }
+            }
+        }
+    }
+
+    fn branch_cond_too_complex(expr: &HirExpr) -> bool {
+        Self::expr_contains_call(expr) || Self::expr_node_count(expr) > 24
+    }
+
+    fn expr_contains_call(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Call { .. } => true,
+            HirExpr::Const(_, _) | HirExpr::Var(_) => false,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => Self::expr_contains_call(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_contains_call(lhs) || Self::expr_contains_call(rhs)
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_contains_call(base) || Self::expr_contains_call(index)
+            }
+        }
+    }
+
+    fn expr_node_count(expr: &HirExpr) -> usize {
+        match expr {
+            HirExpr::Const(_, _) | HirExpr::Var(_) => 1,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => 1 + Self::expr_node_count(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                1 + Self::expr_node_count(lhs) + Self::expr_node_count(rhs)
+            }
+            HirExpr::Call { args, .. } => {
+                1 + args.iter().map(Self::expr_node_count).sum::<usize>()
+            }
+            HirExpr::Index { base, index, .. } => {
+                1 + Self::expr_node_count(base) + Self::expr_node_count(index)
             }
         }
     }
@@ -739,10 +869,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         switch_var: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
-        let exact_expr = self.lower_wrapped_varnode(switch_var, &mut HashSet::new()).ok();
-        let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var);
-        let predecessor_expr = self.recover_branchind_switch_expr_from_predecessors(idx, switch_var);
+        let exact_expr = self.lower_wrapped_varnode(switch_var, visiting).ok();
+        let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var, visiting);
+        let predecessor_expr =
+            self.recover_branchind_switch_expr_from_predecessors(idx, switch_var, visiting);
 
         let best_jump_table_expr = exact_expr
             .iter()
@@ -756,7 +888,7 @@ impl<'a> PreviewBuilder<'a> {
             (None, Some(expr), _, _) => Ok(expr),
             (None, None, Some(alias), _) => Ok(alias),
             (None, None, None, Some(expr)) => Ok(expr),
-            (None, None, None, None) => self.lower_wrapped_varnode(switch_var, &mut HashSet::new()),
+            (None, None, None, None) => self.lower_wrapped_varnode(switch_var, visiting),
         }
     }
 
@@ -764,6 +896,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         switch_var: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<HirExpr> {
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
@@ -804,7 +937,7 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: def_idx,
             };
             if let Ok(expr) = self.with_lowering_site(site, |this| {
-                this.lower_selector_source_expr(output, &mut HashSet::new())
+                this.lower_selector_source_expr(output, visiting)
             }) {
                 return Some(expr);
             }
@@ -817,9 +950,10 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         selector_alias: &Varnode,
         fallback: HirExpr,
+        visiting: &mut HashSet<VarnodeKey>,
     ) -> HirExpr {
-        self.lower_branchind_same_block_alias_expr(idx, selector_alias)
-            .or_else(|| self.recover_selector_expr_from_predecessors(idx, selector_alias))
+        self.lower_branchind_same_block_alias_expr(idx, selector_alias, visiting)
+            .or_else(|| self.recover_selector_expr_from_predecessors(idx, selector_alias, visiting))
             .unwrap_or(fallback)
     }
 
@@ -827,6 +961,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         switch_var: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<HirExpr> {
         let predecessors = self.predecessors.get(idx)?.clone();
         if preview_builder_diag_enabled() {
@@ -866,7 +1001,7 @@ impl<'a> PreviewBuilder<'a> {
                     op_idx,
                 };
                 if let Ok(expr) = self.with_lowering_site(site, |this| {
-                    this.lower_wrapped_varnode(output, &mut HashSet::new())
+                    this.lower_wrapped_varnode(output, visiting)
                 }) {
                     if preview_builder_diag_enabled() {
                         eprintln!(
@@ -890,7 +1025,7 @@ impl<'a> PreviewBuilder<'a> {
                         op_idx: term_idx,
                     };
                     if let Ok(expr) = self.with_lowering_site(site, |this| {
-                        this.lower_wrapped_varnode(term_input, &mut HashSet::new())
+                        this.lower_wrapped_varnode(term_input, visiting)
                     }) && super::switch_table::has_jump_table_surface(&expr, &self.options)
                     {
                         if preview_builder_diag_enabled() {
@@ -922,6 +1057,77 @@ impl<'a> PreviewBuilder<'a> {
         (base_expr, next_min)
     }
 
+    fn selector_normalization_for_branchind(
+        &self,
+        expr: &HirExpr,
+        min_val: i64,
+        entry_size: u64,
+        recovered_cases: Option<&[(i64, u64)]>,
+    ) -> SelectorNormalization {
+        let guard_bounds = recovered_cases
+            .filter(|cases| !cases.is_empty())
+            .map(|cases| {
+                let min_case = cases.iter().map(|(value, _)| *value).min();
+                let max_case = cases.iter().map(|(value, _)| *value).max();
+                vec![(min_case, max_case)]
+            })
+            .unwrap_or_default();
+        SelectorNormalization {
+            base_subtract: (min_val != 0).then_some(min_val),
+            mask: None,
+            stride: (entry_size > 1).then_some(entry_size),
+            width: Self::selector_expr_width(expr),
+            address_space: None,
+            guard_bounds,
+        }
+    }
+
+    fn selector_expr_width(expr: &HirExpr) -> Option<u32> {
+        match expr {
+            HirExpr::Const(_, ty)
+            | HirExpr::Load { ty, .. }
+            | HirExpr::Cast { ty, .. }
+            | HirExpr::Unary { ty, .. }
+            | HirExpr::Binary { ty, .. } => Self::nir_type_width(ty),
+            HirExpr::Var(_) => None,
+            HirExpr::Call { ty, .. } => Self::nir_type_width(ty),
+            HirExpr::PtrOffset { .. } => None,
+            HirExpr::AggregateCopy { size, .. } => Some(*size * 8),
+            HirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
+        }
+    }
+
+    fn nir_type_width(ty: &NirType) -> Option<u32> {
+        match ty {
+            NirType::Bool => Some(1),
+            NirType::Int { bits, .. } => Some(*bits),
+            NirType::Ptr(_) => None,
+            NirType::Aggregate { size, .. } => Some(*size * 8),
+            NirType::Float { bits } => Some(*bits),
+            NirType::Unknown => None,
+        }
+    }
+
+    fn selector_expr_is_side_effect_free(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Const(_, _) | HirExpr::Var(_) => true,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => Self::selector_expr_is_side_effect_free(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::selector_expr_is_side_effect_free(lhs)
+                    && Self::selector_expr_is_side_effect_free(rhs)
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::selector_expr_is_side_effect_free(base)
+                    && Self::selector_expr_is_side_effect_free(index)
+            }
+            HirExpr::Call { .. } => false,
+        }
+    }
+
     fn infer_branchind_targets_from_jump_table_expr(
         &mut self,
         idx: usize,
@@ -947,7 +1153,14 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let normalized_selector = selector_alias
-            .and_then(|alias| self.recover_selector_expr_from_predecessors(idx, alias))
+            .and_then(|alias| {
+                let mut selector_visiting = HashSet::new();
+                self.recover_selector_expr_from_predecessors(
+                    idx,
+                    alias,
+                    &mut selector_visiting,
+                )
+            })
             .unwrap_or_else(|| selector.discriminant.clone());
         let max_selector = self
             .infer_branchind_selector_upper_bound(idx, &normalized_selector, selector.min_val)
@@ -977,18 +1190,12 @@ impl<'a> PreviewBuilder<'a> {
         let pointer_size = u64::from(self.options.pointer_size.max(1));
         let entry_width = selector.entry_size.min(pointer_size).max(4) as usize;
         let little_endian = !binary.arch_spec.contains(":BE:");
-        let decode_modes = if selector.relative_entries {
-            vec![(
-                "relative_target_base",
-                true,
-                selector.target_base.or(Some(selector.table_base)),
-            )]
-        } else {
-            vec![
-                ("absolute", false, None),
-                ("relative_table_base", true, Some(selector.table_base)),
-            ]
-        };
+        let decode_modes = branchind_decode_modes(
+            selector.relative_entries,
+            selector.table_base,
+            selector.target_base,
+            self.options.image_base,
+        );
 
         let mut best: Option<InferredJumpTableTargets> = None;
         for (decode_mode, relative_entries, relative_base) in decode_modes {
@@ -1031,6 +1238,7 @@ impl<'a> PreviewBuilder<'a> {
             let candidate = InferredJumpTableTargets {
                 unique_targets,
                 recovered_cases,
+                selector_cardinality: case_count as usize,
                 decode_mode,
             };
             let replace = best.as_ref().is_none_or(|current| {
@@ -1129,7 +1337,13 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         selector_alias: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<HirExpr> {
+        let cache_key = (idx, selector_alias.space_id, selector_alias.offset);
+        if let Some(cached) = self.selector_representatives.get(&cache_key) {
+            return Some(cached.clone());
+        }
+
         let predecessors = self.predecessors.get(idx)?.clone();
         let selector_family = (selector_alias.space_id, selector_alias.offset);
         for pred_idx in predecessors {
@@ -1151,8 +1365,9 @@ impl<'a> PreviewBuilder<'a> {
                     op_idx,
                 };
                 if let Ok(expr) = self.with_lowering_site(site, |this| {
-                    this.lower_selector_source_expr(output, &mut HashSet::new())
+                    this.lower_selector_source_expr(output, visiting)
                 }) {
+                    self.selector_representatives.insert(cache_key, expr.clone());
                     return Some(expr);
                 }
             }
@@ -1809,6 +2024,29 @@ fn decode_jump_table_target(
     }
 }
 
+fn branchind_decode_modes(
+    relative_entries: bool,
+    table_base: u64,
+    target_base: Option<u64>,
+    image_base: u64,
+) -> Vec<(&'static str, bool, Option<u64>)> {
+    if relative_entries {
+        return vec![(
+            "relative_target_base",
+            true,
+            target_base.or(Some(table_base)),
+        )];
+    }
+    let mut modes = vec![
+        ("absolute", false, None),
+        ("relative_table_base", true, Some(table_base)),
+    ];
+    if image_base != 0 {
+        modes.push(("image_base_relative", true, Some(image_base)));
+    }
+    modes
+}
+
 fn extract_selector_upper_bound_from_cond(
     cond: &HirExpr,
     selector: &HirExpr,
@@ -1850,6 +2088,28 @@ fn extract_selector_upper_bound_from_cond(
         }
         (HirBinaryOp::Lt | HirBinaryOp::SLt, false, true) if !current_on_true => const_u64(&lhs),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::branchind_decode_modes;
+
+    #[test]
+    fn branchind_decode_modes_include_image_base_relative_for_absolute_tables() {
+        let modes = branchind_decode_modes(false, 0x1400_5000, None, 0x1400_0000);
+        assert!(modes.contains(&("absolute", false, None)));
+        assert!(modes.contains(&("relative_table_base", true, Some(0x1400_5000))));
+        assert!(modes.contains(&("image_base_relative", true, Some(0x1400_0000))));
+    }
+
+    #[test]
+    fn branchind_decode_modes_keep_relative_tables_target_based() {
+        let modes = branchind_decode_modes(true, 0x1400_5000, Some(0x1400_7000), 0x1400_0000);
+        assert_eq!(
+            modes,
+            vec![("relative_target_base", true, Some(0x1400_7000))]
+        );
     }
 }
 

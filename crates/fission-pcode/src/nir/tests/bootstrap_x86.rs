@@ -209,6 +209,70 @@ fn preview_branchind_with_successors_sets_default_target() {
 }
 
 #[test]
+fn preview_branchind_with_duplicate_successors_preserves_case_ordinals() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x405110,
+                successors: vec![1, 1, 2, 1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x405110,
+                    output: None,
+                    inputs: vec![reg(0x00, 4)],
+                    asm_mnemonic: Some("JMP EAX".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x405120,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405120,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x405130,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405130,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Switch {
+            targets,
+            default_target,
+            ..
+        } => {
+            assert_eq!(targets, vec![0x405120, 0x405120, 0x405130, 0x405120]);
+            assert_eq!(default_target, Some(0x405120));
+        }
+        other => panic!("expected switch terminator, got {other:?}"),
+    }
+}
+
+#[test]
 fn preview_branchind_without_successors_recovers_constant_target() {
     let func = PcodeFunction {
         blocks: vec![

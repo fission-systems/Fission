@@ -237,7 +237,11 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     // SCCP: global sparse constant propagation on structured HIR (lattice merge
     // at joins).  Runs after local constant folding so folded seeds propagate.
-    if run_pass_logged(func, "sccp", perf, apply_sccp_pass) {
+    let sccp_admission = sccp_admission_summary(&func.body);
+    if !sccp_admission.eligible {
+        wave_stats::add_sccp_skipped_by_admission(1);
+    }
+    if sccp_admission.eligible && run_pass_logged(func, "sccp", perf, apply_sccp_pass) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         if run_pass_logged(func, "constant_folding_after_sccp", perf, |f| {
             constant_folding_pass(&mut f.body)
@@ -381,14 +385,13 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         );
     }
     let allow_expensive_passes = !is_large_hir_function(func);
-    let mut changed = false;
-    changed |= if allow_expensive_passes {
-        run_pass_logged(
-            func,
-            "memory_slot_surfacing_full",
-            perf,
-            apply_memory_slot_surfacing,
-        )
+    let has_loopish_control = body_has_loopish_shapes(&func.body);
+    let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
+    let slot_changed = if !memory_fact_prefilter {
+        wave_stats::add_memory_fact_prefilter_skip(1);
+        false
+    } else if allow_expensive_passes {
+        run_pass_logged(func, "memory_slot_surfacing_full", perf, apply_memory_slot_surfacing)
     } else {
         run_pass_logged(
             func,
@@ -401,7 +404,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         eprintln!(
             "[DIAG] normalize slots: {} changed={} mode={}",
             func.name,
-            changed,
+            slot_changed,
             if allow_expensive_passes {
                 "full"
             } else {
@@ -409,7 +412,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             }
         );
     }
-    if changed {
+    if slot_changed {
         run_cleanup_family_passes(
             func,
             "init_2",
@@ -421,15 +424,19 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             },
         );
     }
+    let bitstream_changed = if allow_expensive_passes {
+        run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms)
+    } else {
+        false
+    };
     if allow_expensive_passes {
-        changed |= run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms);
         if diag {
             eprintln!(
                 "[DIAG] normalize bitstream: {} changed={}",
-                func.name, changed,
+                func.name, bitstream_changed,
             );
         }
-        if changed {
+        if bitstream_changed {
             run_cleanup_family_passes(
                 func,
                 "init_3",
@@ -511,7 +518,11 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Aggregate field layout recovery: collect PtrOffset access offsets on
     // Ptr(Aggregate) variables and annotate the aggregate type with named
     // StructFields.  Must run after ptr_arith_recovery so PtrOffset nodes exist.
-    run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass);
+    if memory_fact_prefilter {
+        run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass);
+    } else {
+        wave_stats::add_memory_fact_prefilter_skip(1);
+    }
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.
@@ -577,7 +588,13 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Value Set Analysis: use range information to eliminate dead switch
     // cases and constant-condition branches.  Runs last so all structural
     // passes have already simplified the body.
-    if jump_resolver_within_budget(&func.body)
+    let jump_resolver_admission = jump_resolver_admission(&func.body);
+    if jump_resolver_admission.eligible {
+        if jump_resolver_admission.candidate_scoped {
+            wave_stats::add_candidate_scoped_jump_resolver_count(1);
+        }
+    }
+    if jump_resolver_admission.eligible
         && run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass)
     {
         run_cleanup_block(func, "cleanup_prune1_11", perf, |f| {
@@ -655,12 +672,309 @@ fn body_exceeds_early_cleanup_budget(body: &[HirStmt]) -> bool {
         || count_hir_blocks(body) > EARLY_CLEANUP_BLOCK_BLOCK_LIMIT
 }
 
-fn jump_resolver_within_budget(body: &[HirStmt]) -> bool {
+#[derive(Debug, Clone, Copy)]
+struct JumpResolverAdmission {
+    eligible: bool,
+    candidate_scoped: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SccpAdmissionSummary {
+    eligible: bool,
+}
+
+fn jump_resolver_admission(body: &[HirStmt]) -> JumpResolverAdmission {
     if !body_exceeds_early_cleanup_budget(body) {
-        return true;
+        return JumpResolverAdmission {
+            eligible: true,
+            candidate_scoped: false,
+        };
     }
     let candidate_count = jump_resolver_candidate_count(body);
-    candidate_count > 0 && candidate_count <= 16
+    JumpResolverAdmission {
+        eligible: candidate_count > 0 && candidate_count <= 16,
+        candidate_scoped: candidate_count > 0 && candidate_count <= 16,
+    }
+}
+
+fn sccp_admission_summary(body: &[HirStmt]) -> SccpAdmissionSummary {
+    let has_control_seed = body_has_sccp_control_seed(body);
+    let has_const_seed = body_has_sccp_const_seed(body);
+    SccpAdmissionSummary {
+        eligible: has_control_seed && has_const_seed,
+    }
+}
+
+fn memory_fact_prefilter_allows_full(func: &HirFunction) -> bool {
+    func.params
+        .iter()
+        .chain(func.locals.iter())
+        .any(|binding| matches!(binding.ty, NirType::Ptr(_)))
+        || body_has_memory_surface_interest(&func.body)
+}
+
+fn body_has_sccp_control_seed(body: &[HirStmt]) -> bool {
+    body.iter().any(stmt_has_sccp_control_seed)
+}
+
+fn stmt_has_sccp_control_seed(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::If { .. } | HirStmt::Switch { .. } => true,
+        HirStmt::Block(body) => body_has_sccp_control_seed(body),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            expr_contains_const(cond) || body_has_sccp_control_seed(body)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(stmt_has_sccp_const_seed)
+                || cond.as_ref().is_some_and(expr_contains_const)
+                || update.as_deref().is_some_and(stmt_has_sccp_const_seed)
+                || body_has_sccp_control_seed(body)
+        }
+        _ => false,
+    }
+}
+
+fn body_has_sccp_const_seed(body: &[HirStmt]) -> bool {
+    body.iter().any(stmt_has_sccp_const_seed)
+}
+
+fn stmt_has_sccp_const_seed(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+            expr_contains_const(rhs)
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_contains_const(cond)
+                || body_has_sccp_const_seed(then_body)
+                || body_has_sccp_const_seed(else_body)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_contains_const(expr)
+                || cases.iter().any(|case| body_has_sccp_const_seed(&case.body))
+                || body_has_sccp_const_seed(default)
+        }
+        HirStmt::Block(body) => body_has_sccp_const_seed(body),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            expr_contains_const(cond) || body_has_sccp_const_seed(body)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(stmt_has_sccp_const_seed)
+                || cond.as_ref().is_some_and(expr_contains_const)
+                || update.as_deref().is_some_and(stmt_has_sccp_const_seed)
+                || body_has_sccp_const_seed(body)
+        }
+        HirStmt::VaStart { .. }
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_) => false,
+    }
+}
+
+fn body_has_memory_surface_interest(body: &[HirStmt]) -> bool {
+    body.iter().any(stmt_has_memory_surface_interest)
+}
+
+fn stmt_has_memory_surface_interest(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            lvalue_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_has_memory_surface_interest(expr),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_has_memory_surface_interest(cond)
+                || body_has_memory_surface_interest(then_body)
+                || body_has_memory_surface_interest(else_body)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_has_memory_surface_interest(expr)
+                || cases
+                    .iter()
+                    .any(|case| body_has_memory_surface_interest(&case.body))
+                || body_has_memory_surface_interest(default)
+        }
+        HirStmt::Block(body) => body_has_memory_surface_interest(body),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            expr_has_memory_surface_interest(cond) || body_has_memory_surface_interest(body)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .is_some_and(stmt_has_memory_surface_interest)
+                || cond.as_ref().is_some_and(expr_has_memory_surface_interest)
+                || update
+                    .as_deref()
+                    .is_some_and(stmt_has_memory_surface_interest)
+                || body_has_memory_surface_interest(body)
+        }
+        HirStmt::VaStart { .. }
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_) => false,
+    }
+}
+
+fn lvalue_has_memory_surface_interest(lhs: &HirLValue) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false,
+        HirLValue::Deref { ptr, .. } => {
+            let _ = ptr;
+            true
+        }
+        HirLValue::Index { base, index, .. } => {
+            let _ = (base, index);
+            true
+        }
+    }
+}
+
+fn expr_has_memory_surface_interest(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Const(_, _) | HirExpr::Var(_) => false,
+        HirExpr::Load { ptr, .. } => {
+            let _ = ptr;
+            true
+        }
+        HirExpr::PtrOffset { base, .. } => {
+            let _ = base;
+            true
+        }
+        HirExpr::Index { base, index, .. } => {
+            let _ = (base, index);
+            true
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_has_memory_surface_interest(expr),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(expr_has_memory_surface_interest),
+    }
+}
+
+fn expr_contains_const(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Const(_, _) => true,
+        HirExpr::Var(_) => false,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_const(expr),
+        HirExpr::Binary { lhs, rhs, .. } => expr_contains_const(lhs) || expr_contains_const(rhs),
+        HirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
+        HirExpr::Index { base, index, .. } => expr_contains_const(base) || expr_contains_const(index),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_func() -> HirFunction {
+        HirFunction {
+            name: "admission".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: Vec::new(),
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    #[test]
+    fn sccp_admission_rejects_linear_body_without_control_seed() {
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("xVar0".to_string()),
+            rhs: HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        }];
+        assert!(!sccp_admission_summary(&body).eligible);
+    }
+
+    #[test]
+    fn sccp_admission_accepts_if_with_const_guard() {
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("uVar0".to_string())),
+                rhs: Box::new(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Return(None)],
+            else_body: Vec::new(),
+        }];
+        assert!(sccp_admission_summary(&body).eligible);
+    }
+
+    #[test]
+    fn memory_fact_prefilter_rejects_non_pointer_function() {
+        let mut func = empty_func();
+        func.body.push(HirStmt::Return(None));
+        assert!(!memory_fact_prefilter_allows_full(&func));
+    }
+
+    #[test]
+    fn memory_fact_prefilter_accepts_pointer_param() {
+        let mut func = empty_func();
+        func.params.push(NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        });
+        assert!(memory_fact_prefilter_allows_full(&func));
+    }
 }
 
 fn run_cleanup_block<F>(func: &mut HirFunction, pass_name: &str, perf: bool, mut block: F) -> bool
