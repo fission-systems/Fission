@@ -164,6 +164,28 @@ pub enum NirBindingOrigin {
     ReturnScaffold,
     DerivedFromStackOffset(i64),
     Temp,
+    TempPreserved,
+}
+
+impl NirBindingOrigin {
+    pub fn is_temp_like(self) -> bool {
+        matches!(self, Self::Temp | Self::TempPreserved)
+    }
+
+    pub fn preserves_materialization(self) -> bool {
+        matches!(self, Self::TempPreserved)
+    }
+}
+
+impl NirBinding {
+    pub fn is_temp_like(&self) -> bool {
+        self.origin.is_some_and(NirBindingOrigin::is_temp_like)
+    }
+
+    pub fn preserves_materialization(&self) -> bool {
+        self.origin
+            .is_some_and(NirBindingOrigin::preserves_materialization)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

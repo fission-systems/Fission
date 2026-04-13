@@ -4,9 +4,8 @@ use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode,
-    PcodeOptimizer, PcodeOptimizerConfig, pcode_has_indirect_control_flow,
-    render_nir_with_binary_and_context, render_nir_with_context, take_last_nir_build_stats,
-    take_last_nir_hint_stats,
+    PcodeOptimizer, PcodeOptimizerConfig, render_nir_with_binary_and_context,
+    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
@@ -122,13 +121,11 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
-    let has_indirect_control = pcode_has_indirect_control_flow(pcode);
     if enforce_auto_gate
         && !(binary.is_64bit
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(pcode) <= 600
-            && !has_indirect_control
             && max_multiequal_fanin(pcode) <= 4)
     {
         return Ok(None);
@@ -365,14 +362,12 @@ pub(crate) fn render_nir_from_json_with_type_context(
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
-    let has_indirect_control = pcode_has_indirect_control_flow(&pcode);
     nir_diag_stage(address, "parse_pcode_done", parse_start);
     if enforce_auto_gate
         && !(binary.is_64bit
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !has_indirect_control
             && max_multiequal_fanin(&pcode) <= 4)
     {
         return Ok(None);
@@ -392,7 +387,6 @@ pub(crate) fn render_nir_from_json_with_type_context(
             && binary.format.to_ascii_uppercase().starts_with("PE")
             && pcode.blocks.len() <= 12
             && pcode_total_ops(&pcode) <= 600
-            && !has_indirect_control
             && max_multiequal_fanin(&pcode) <= 4);
 
     if should_use_worker {

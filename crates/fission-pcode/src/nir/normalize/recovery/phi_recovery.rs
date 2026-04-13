@@ -39,7 +39,7 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
     let temp_names: HashSet<String> = func
         .locals
         .iter()
-        .filter(|b| matches!(b.origin, Some(NirBindingOrigin::Temp)))
+        .filter(|b| b.is_temp_like())
         .map(|b| b.name.clone())
         .collect();
     if temp_names.is_empty() {
@@ -536,7 +536,7 @@ pub(crate) fn join_coalescing_pass(func: &mut HirFunction) -> bool {
     let temp_names: HashSet<String> = func
         .locals
         .iter()
-        .filter(|b| matches!(b.origin, Some(NirBindingOrigin::Temp)))
+        .filter(|b| b.is_temp_like())
         .map(|b| b.name.clone())
         .collect();
 

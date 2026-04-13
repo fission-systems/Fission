@@ -220,6 +220,7 @@ impl<'a> PreviewBuilder<'a> {
             indirect_surface_preserved_count: 0,
             indirect_target_set_refined_count: 0,
             dispatcher_shape_recovered_count: 0,
+            materialization_stabilized_count: 0,
             dispatcher_proof_unit_count: 0,
             dispatcher_proof_completed_count: 0,
             dispatcher_proof_failed_count: 0,

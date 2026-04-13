@@ -355,7 +355,7 @@ fn is_surface_stable_slot_display_base(
                 .chain(func.locals.iter())
                 .find(|binding| binding.name == *name)
             {
-                return !matches!(binding.origin, Some(NirBindingOrigin::Temp));
+                return !binding.is_temp_like();
             }
             !looks_like_synthetic_temp_name(name)
         }

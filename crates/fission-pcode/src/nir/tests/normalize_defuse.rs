@@ -52,6 +52,16 @@ fn temp_binding(name: &str, bits: u32) -> NirBinding {
     }
 }
 
+fn preserved_temp_binding(name: &str, bits: u32) -> NirBinding {
+    NirBinding {
+        name: name.to_string(),
+        ty: int(bits),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::TempPreserved),
+        initializer: None,
+    }
+}
+
 fn return_expr(expr: HirExpr) -> HirStmt {
     HirStmt::Return(Some(expr))
 }
@@ -344,6 +354,56 @@ fn normalize_stabilizes_repeated_nontrivial_pure_expr_in_if_condition() {
     assert!(
         code.contains("if (uVar0 == 0 || uVar0 < esi)"),
         "condition should reuse the stabilized temp instead of duplicating the expression; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_keeps_builder_preserved_temp_in_if_condition() {
+    let mut func = make_func(
+        "test_keep_builder_preserved_temp",
+        vec![preserved_temp_binding("uVar0", 32)],
+        vec![
+            assign(
+                "uVar0",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(varexpr("eax")),
+                    rhs: Box::new(varexpr("uVar128")),
+                    ty: int(32),
+                },
+            ),
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::LogicalOr,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs: Box::new(varexpr("uVar0")),
+                        rhs: Box::new(const_expr(0, 32)),
+                        ty: NirType::Bool,
+                    }),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(varexpr("uVar0")),
+                        rhs: Box::new(varexpr("esi")),
+                        ty: NirType::Bool,
+                    }),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![return_expr(const_expr(1, 32))],
+                else_body: vec![return_expr(const_expr(0, 32))],
+            },
+        ],
+    );
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("uVar0 = eax - uVar128;"),
+        "builder-preserved temp should remain materialized; got: {code}"
+    );
+    assert!(
+        code.contains("if (uVar0 == 0 || uVar0 < esi)"),
+        "condition should keep the preserved temp instead of reinlining it; got: {code}"
     );
 }
 

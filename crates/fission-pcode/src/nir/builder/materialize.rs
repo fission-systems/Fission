@@ -1,6 +1,20 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(..) => false,
+            HirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
+            HirExpr::Unary { .. }
+            | HirExpr::Binary { .. }
+            | HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. } => true,
+        }
+    }
+
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
         let Some(asm) = op.asm_mnemonic.as_deref() else {
             return false;
@@ -112,6 +126,7 @@ impl<'a> PreviewBuilder<'a> {
                         is_constant: false,
                         constant_val: 0,
                     },
+                    false,
                 )
                 .name;
         };
@@ -335,7 +350,11 @@ impl<'a> PreviewBuilder<'a> {
                 return Err(err);
             }
         };
-        let lhs = HirLValue::Var(self.ensure_temp_binding_for_output(op, output).name);
+        let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
+        let lhs = HirLValue::Var(
+            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
+                .name,
+        );
         Ok(Some(HirStmt::Assign { lhs, rhs }))
     }
 

@@ -30,7 +30,10 @@ pub(crate) fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool 
     changed
 }
 
-pub(crate) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
+pub(crate) fn inline_single_use_temps(
+    stmts: &mut Vec<HirStmt>,
+    preserved_temps: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
     let mut idx = 0usize;
@@ -45,6 +48,10 @@ pub(crate) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
                 continue;
             }
         };
+        if preserved_temps.contains(&name) {
+            idx += 1;
+            continue;
+        }
 
         let Some(target_idx) = find_inline_forward_target(stmts, idx, &name) else {
             idx += 1;
@@ -53,11 +60,21 @@ pub(crate) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
         let predicate_sensitive =
             stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
-        if predicate_sensitive && !expr_is_low_cost_inline_candidate(&rhs) {
+        let prefers_stable_materialization = expr_prefers_stable_materialization(&rhs);
+        let low_cost_inline = expr_is_low_cost_inline_candidate(&rhs);
+        if predicate_sensitive && prefers_stable_materialization {
             idx += 1;
             continue;
         }
-        if target_uses > 1 && !expr_is_low_cost_inline_candidate(&rhs) {
+        if target_uses > 1 && prefers_stable_materialization {
+            idx += 1;
+            continue;
+        }
+        if predicate_sensitive && !low_cost_inline {
+            idx += 1;
+            continue;
+        }
+        if target_uses > 1 && !low_cost_inline {
             idx += 1;
             continue;
         }
@@ -895,6 +912,39 @@ fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
                 && expr_is_low_cost_inline_candidate(rhs)
         }
         _ => false,
+    }
+}
+
+fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Cast { expr, .. } => expr_prefers_stable_materialization(expr),
+        HirExpr::Unary { .. }
+        | HirExpr::Load { .. }
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::Index { .. }
+        | HirExpr::AggregateCopy { .. }
+        | HirExpr::Call { .. } => true,
+        HirExpr::Binary { op, .. } => matches!(
+            op,
+            HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::Div
+                | HirBinaryOp::Mod
+                | HirBinaryOp::And
+                | HirBinaryOp::Or
+                | HirBinaryOp::Xor
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar
+                | HirBinaryOp::Eq
+                | HirBinaryOp::Ne
+                | HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe
+        ),
     }
 }
 

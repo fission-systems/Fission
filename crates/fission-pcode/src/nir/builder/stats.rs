@@ -154,7 +154,7 @@ impl<'a> PreviewBuilder<'a> {
             indirect_surface_preserved_count: self.indirect_surface_preserved_count,
             indirect_target_set_refined_count: self.indirect_target_set_refined_count,
             dispatcher_shape_recovered_count: self.dispatcher_shape_recovered_count,
-            materialization_stabilized_count: 0,
+            materialization_stabilized_count: self.materialization_stabilized_count,
             dispatcher_proof_unit_count: self.dispatcher_proof_unit_count,
             dispatcher_proof_completed_count: self.dispatcher_proof_completed_count,
             dispatcher_proof_failed_count: self.dispatcher_proof_failed_count,

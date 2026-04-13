@@ -9,7 +9,6 @@ use fission_pcode::{IndirectControlClassification, NirBuildStats};
 
 fn canonical_indirect_classification(
     build_stats: Option<&NirBuildStats>,
-    _raw_has_indirect_control_flow: bool,
 ) -> IndirectControlClassification {
     IndirectControlClassification::from_stats_only(build_stats)
 }
@@ -49,7 +48,6 @@ fn build_preview_candidate_entry(
     let mut preview_surface_kind = None;
     let mut preview_hint_stats = None;
     let mut nir_build_stats = None;
-    let mut raw_has_indirect_control_flow = false;
     let mut preview_code = None;
     let mut recovery_strategy_attempted = None;
     let mut recovery_strategy_applied = None;
@@ -67,7 +65,6 @@ fn build_preview_candidate_entry(
                 let metrics = pcode_metrics(&pcode);
                 pcode_block_count = metrics.0;
                 pcode_op_count = metrics.1;
-                raw_has_indirect_control_flow = metrics.2;
                 auto_eligible = auto_nir_eligible(binary, &pcode);
             }
 
@@ -107,10 +104,8 @@ fn build_preview_candidate_entry(
                 }
             }
 
-            let indirect_classification = canonical_indirect_classification(
-                nir_build_stats.as_ref(),
-                raw_has_indirect_control_flow,
-            );
+            let indirect_classification =
+                canonical_indirect_classification(nir_build_stats.as_ref());
             has_indirect = indirect_classification.has_indirect_control;
         }
         Err(err) => {
@@ -119,7 +114,7 @@ fn build_preview_candidate_entry(
             preview_fallback_reason = Some(format!(
                 "mlil-preview frontend unavailable: failed to load pcode: {err}"
             ));
-            has_indirect = raw_has_indirect_control_flow;
+            has_indirect = false;
         }
     }
 

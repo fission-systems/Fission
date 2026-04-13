@@ -141,6 +141,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) indirect_surface_preserved_count: usize,
     pub(crate) indirect_target_set_refined_count: usize,
     pub(crate) dispatcher_shape_recovered_count: usize,
+    pub(crate) materialization_stabilized_count: usize,
     pub(crate) dispatcher_proof_unit_count: usize,
     pub(crate) dispatcher_proof_completed_count: usize,
     pub(crate) dispatcher_proof_failed_count: usize,

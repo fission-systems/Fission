@@ -19,10 +19,39 @@ use super::*;
 /// Returns `(cleaned, changed)` where `changed` indicates whether any rule fired.
 fn goto_elim_pass(stmts: Vec<HirStmt>) -> (Vec<HirStmt>, bool) {
     let mut changed = false;
+    let stmts = strip_unreachable_after_unconditional_transfer(stmts, &mut changed);
     let stmts = empty_jump_removal(stmts, &mut changed);
     let stmts = single_ref_label_inline(stmts, &mut changed);
     let stmts = cond_goto_inversion(stmts, &mut changed);
     (stmts, changed)
+}
+
+fn strip_unreachable_after_unconditional_transfer(
+    stmts: Vec<HirStmt>,
+    changed: &mut bool,
+) -> Vec<HirStmt> {
+    let mut out = Vec::with_capacity(stmts.len());
+    let mut dropping = false;
+    for (idx, stmt) in stmts.iter().cloned().enumerate() {
+        if dropping {
+            if matches!(stmt, HirStmt::Label(_)) {
+                dropping = false;
+                out.push(stmt);
+            } else {
+                *changed = true;
+            }
+            continue;
+        }
+
+        dropping = match &stmt {
+            HirStmt::Goto(label) => stmts[idx + 1..]
+                .iter()
+                .any(|candidate| matches!(candidate, HirStmt::Label(next) if next == label)),
+            _ => false,
+        };
+        out.push(stmt);
+    }
+    out
 }
 
 /// Rule 1: If a `Goto(L)` is immediately followed by `Label(L)`, remove the Goto.
@@ -138,7 +167,12 @@ pub(crate) fn eliminate_redundant_gotos(mut stmts: Vec<HirStmt>) -> Vec<HirStmt>
 
 pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
     body = eliminate_redundant_gotos(body);
-    cleanup_redundant_labels(body)
+    body = cleanup_redundant_labels(body);
+    let referenced = collect_referenced_labels(&body);
+    while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label)) {
+        body.remove(0);
+    }
+    body
 }
 
 // ---------------------------------------------------------------------------

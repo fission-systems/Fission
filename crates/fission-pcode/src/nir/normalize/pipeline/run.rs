@@ -42,6 +42,7 @@ use super::super::types::{
 use super::super::wave_stats;
 use super::super::*;
 use crate::nir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
+use std::collections::HashSet;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
@@ -127,6 +128,28 @@ pub(crate) fn normalize_function_body(body: &mut Vec<HirStmt>) {
     cleanup_stmt_list(body, "<body>", 0);
 }
 
+fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<String> {
+    bindings
+        .iter()
+        .filter(|binding| binding.preserves_materialization())
+        .map(|binding| binding.name.clone())
+        .collect()
+}
+
+fn cleanup_func_stmt_list(func: &mut HirFunction) {
+    let preserved_temps = preserved_materialization_names(&func.locals);
+    cleanup_stmt_list_with_options_and_preserved(
+        &mut func.body,
+        &func.name,
+        0,
+        CleanupStmtOptions {
+            include_boundary_labels: true,
+            round_limit: 16,
+        },
+        &preserved_temps,
+    );
+}
+
 pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     wave_stats::reset_normalize_wave_stats();
     let diag = normalize_diag_enabled();
@@ -157,7 +180,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // can eliminate now-dead flag-variable assignments.
     if run_pass_logged(func, "flag_recovery", perf, apply_flag_recovery_pass) {
         run_cleanup_block(func, "cleanup_defuse_4", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             defuse_dead_assignment_pass(f);
 
@@ -187,7 +210,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         remove_callee_save_prologue_epilogue,
     ) {
         run_cleanup_block(func, "cleanup_defuse_5", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             defuse_dead_assignment_pass(f);
 
@@ -209,7 +232,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         constant_folding_pass(&mut f.body)
     }) {
         run_cleanup_block(func, "cleanup_elim_7", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             eliminate_dead_local_clobber_assigns(f);
 
@@ -226,7 +249,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_entry_param_promotion_pass,
     ) {
         run_cleanup_block(func, "cleanup_defuse_6", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             defuse_dead_assignment_pass(f);
 
@@ -242,12 +265,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         wave_stats::add_sccp_skipped_by_admission(1);
     }
     if sccp_admission.eligible && run_pass_logged(func, "sccp", perf, apply_sccp_pass) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        cleanup_func_stmt_list(func);
         if run_pass_logged(func, "constant_folding_after_sccp", perf, |f| {
             constant_folding_pass(&mut f.body)
         }) {
             run_cleanup_block(func, "cleanup_elim_8", perf, |f| {
-                cleanup_stmt_list(&mut f.body, &f.name, 0);
+                cleanup_func_stmt_list(f);
 
                 eliminate_dead_local_clobber_assigns(f);
 
@@ -321,7 +344,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         perf,
         apply_branch_prefix_hoist_pass,
     ) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        cleanup_func_stmt_list(func);
         if run_pass_logged(
             func,
             "copy_propagation_after_branch_hoist",
@@ -346,7 +369,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
     if run_pass_logged(func, "gvn_join_hoist", perf, apply_gvn_join_hoist_pass) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        cleanup_func_stmt_list(func);
         if run_pass_logged(
             func,
             "copy_propagation_after_gvn",
@@ -460,7 +483,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_ptr_arith_recovery_pass,
     ) {
         run_cleanup_block(func, "cleanup_standalone_12", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
         });
         run_pass_logged(
             func,
@@ -479,7 +502,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_dead_store_elimination,
     ) {
         run_cleanup_block(func, "cleanup_standalone_13", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
         });
         run_pass_logged(
             func,
@@ -497,7 +520,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_redundant_load_elimination,
     ) {
         run_cleanup_block(func, "cleanup_standalone_14", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
         });
         run_pass_logged(
             func,
@@ -529,7 +552,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     if run_pass_logged(func, "single_pred_label_inline", perf, |f| {
         single_pred_label_inline(&mut f.body)
     }) {
-        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        cleanup_func_stmt_list(func);
         apply_for_loop_folding(&mut func.body);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
@@ -539,7 +562,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // simplified first.
     if run_pass_logged(func, "iv_recovery", perf, apply_iv_recovery_pass) {
         run_cleanup_block(func, "cleanup_prune_9", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             prune_unused_temp_bindings(f);
 
@@ -555,7 +578,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_break_continue_pass,
     ) {
         run_cleanup_block(func, "cleanup_prune_10", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             prune_unused_temp_bindings(f);
 
@@ -567,7 +590,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // loop structure is finalised.
     if run_pass_logged(func, "licm", perf, apply_licm_pass) {
         run_cleanup_block(func, "cleanup_standalone_15", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
         });
         run_pass_logged(
             func,
@@ -598,7 +621,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         && run_pass_logged(func, "jump_resolver", perf, apply_jump_resolver_pass)
     {
         run_cleanup_block(func, "cleanup_prune1_11", perf, |f| {
-            cleanup_stmt_list(&mut f.body, &f.name, 0);
+            cleanup_func_stmt_list(f);
 
             prune_unused_temp_bindings(f);
         });
@@ -1476,7 +1499,8 @@ struct CleanupStmtOptions {
 }
 
 fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
-    cleanup_stmt_list_with_options(
+    let preserved_temps = HashSet::new();
+    cleanup_stmt_list_with_options_and_preserved(
         stmts,
         func_name,
         depth,
@@ -1484,6 +1508,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             include_boundary_labels: true,
             round_limit: 16,
         },
+        &preserved_temps,
     );
 }
 
@@ -1493,40 +1518,105 @@ fn cleanup_stmt_list_with_options(
     depth: usize,
     options: CleanupStmtOptions,
 ) {
+    let preserved_temps = HashSet::new();
+    cleanup_stmt_list_with_options_and_preserved(
+        stmts,
+        func_name,
+        depth,
+        options,
+        &preserved_temps,
+    );
+}
+
+fn cleanup_stmt_list_with_options_and_preserved(
+    stmts: &mut Vec<HirStmt>,
+    func_name: &str,
+    depth: usize,
+    options: CleanupStmtOptions,
+    preserved_temps: &HashSet<String>,
+) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                cleanup_stmt_list_with_options(body, func_name, depth + 1, options)
+                cleanup_stmt_list_with_options_and_preserved(
+                    body,
+                    func_name,
+                    depth + 1,
+                    options,
+                    preserved_temps,
+                )
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
                     if let HirStmt::Block(b) = &mut **i {
-                        cleanup_stmt_list_with_options(b, func_name, depth + 1, options);
+                        cleanup_stmt_list_with_options_and_preserved(
+                            b,
+                            func_name,
+                            depth + 1,
+                            options,
+                            preserved_temps,
+                        );
                     }
                 }
                 if let Some(u) = update {
                     if let HirStmt::Block(b) = &mut **u {
-                        cleanup_stmt_list_with_options(b, func_name, depth + 1, options);
+                        cleanup_stmt_list_with_options_and_preserved(
+                            b,
+                            func_name,
+                            depth + 1,
+                            options,
+                            preserved_temps,
+                        );
                     }
                 }
-                cleanup_stmt_list_with_options(body, func_name, depth + 1, options)
+                cleanup_stmt_list_with_options_and_preserved(
+                    body,
+                    func_name,
+                    depth + 1,
+                    options,
+                    preserved_temps,
+                )
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                cleanup_stmt_list_with_options(then_body, func_name, depth + 1, options);
-                cleanup_stmt_list_with_options(else_body, func_name, depth + 1, options);
+                cleanup_stmt_list_with_options_and_preserved(
+                    then_body,
+                    func_name,
+                    depth + 1,
+                    options,
+                    preserved_temps,
+                );
+                cleanup_stmt_list_with_options_and_preserved(
+                    else_body,
+                    func_name,
+                    depth + 1,
+                    options,
+                    preserved_temps,
+                );
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    cleanup_stmt_list_with_options(&mut case.body, func_name, depth + 1, options);
+                    cleanup_stmt_list_with_options_and_preserved(
+                        &mut case.body,
+                        func_name,
+                        depth + 1,
+                        options,
+                        preserved_temps,
+                    );
                 }
-                cleanup_stmt_list_with_options(default, func_name, depth + 1, options);
+                cleanup_stmt_list_with_options_and_preserved(
+                    default,
+                    func_name,
+                    depth + 1,
+                    options,
+                    preserved_temps,
+                );
             }
             HirStmt::Assign { .. }
             | HirStmt::VaStart { .. }
@@ -1550,7 +1640,7 @@ fn cleanup_stmt_list_with_options(
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
         }
-        if inline_single_use_temps(stmts) {
+        if inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
         }

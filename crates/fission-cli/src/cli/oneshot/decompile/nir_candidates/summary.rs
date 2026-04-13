@@ -1,6 +1,6 @@
 use super::super::*;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
-use fission_pcode::{IndirectControlClassification, NirBuildStats, pcode_has_indirect_control_flow};
+use fission_pcode::{IndirectControlClassification, NirBuildStats};
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
@@ -407,12 +407,8 @@ pub(crate) fn load_resume_rows(
     Ok((seen, summary))
 }
 
-pub(super) fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize, bool) {
-    (
-        pcode.blocks.len(),
-        pcode_total_ops(pcode),
-        pcode_has_indirect_control_flow(pcode),
-    )
+pub(super) fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize) {
+    (pcode.blocks.len(), pcode_total_ops(pcode))
 }
 
 pub(super) fn fact_density(

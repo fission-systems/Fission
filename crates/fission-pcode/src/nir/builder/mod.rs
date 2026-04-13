@@ -323,11 +323,19 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         output: &Varnode,
+        preserve_materialization: bool,
     ) -> NirBinding {
         let key = MaterializedVarnodeKey::new(output, op);
         if let Some(name) = self.materialized_vns.get(&key)
-            && let Some(binding) = self.temps.get(name)
+            && let Some(binding) = self.temps.get_mut(name)
         {
+            if preserve_materialization
+                && !binding.preserves_materialization()
+                && binding.is_temp_like()
+            {
+                binding.origin = Some(NirBindingOrigin::TempPreserved);
+                self.materialization_stabilized_count += 1;
+            }
             return binding.clone();
         }
 
@@ -337,9 +345,16 @@ impl<'a> PreviewBuilder<'a> {
             name: name.clone(),
             ty,
             surface_type_name: None,
-            origin: Some(NirBindingOrigin::Temp),
+            origin: Some(if preserve_materialization {
+                NirBindingOrigin::TempPreserved
+            } else {
+                NirBindingOrigin::Temp
+            }),
             initializer: None,
         };
+        if preserve_materialization {
+            self.materialization_stabilized_count += 1;
+        }
         self.materialized_vns.insert(key, name.clone());
         self.temps.insert(name, binding.clone());
         binding

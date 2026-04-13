@@ -110,7 +110,10 @@ fn object_root_id(binding: &NirBinding) -> ObjectRootId {
         | Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => offset,
         Some(NirBindingOrigin::ReturnScaffold) => 2_000_000,
         Some(NirBindingOrigin::VaRegion) => 3_000_000,
-        Some(NirBindingOrigin::Temp) | None => stable_name_root(&binding.name),
+        Some(NirBindingOrigin::Temp) | Some(NirBindingOrigin::TempPreserved) => {
+            stable_name_root(&binding.name)
+        }
+        None => stable_name_root(&binding.name),
     }
 }
 

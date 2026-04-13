@@ -467,15 +467,15 @@ fn mask_to_bits(value: i64, bits: u32) -> i64 {
 /// traversal instead of a flat per-stmt-list scan.
 ///
 /// Safety restriction: only removes assignments to **pure temporary** bindings
-/// (those with `origin == Some(NirBindingOrigin::Temp)`).  Stack slots and
+/// (those with a temp-like origin).  Stack slots and
 /// other memory-backed locals must NOT be removed even when their name is never
 /// read, because the write itself may be observable through aliased pointers.
 pub(crate) fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
-    // Collect pure-temp variable names (Temp origin only).
+    // Collect pure-temp variable names (including builder-preserved temps).
     let temp_names: std::collections::HashSet<String> = func
         .locals
         .iter()
-        .filter(|b| matches!(b.origin, Some(NirBindingOrigin::Temp)))
+        .filter(|b| b.is_temp_like())
         .map(|b| b.name.clone())
         .collect();
     if temp_names.is_empty() {

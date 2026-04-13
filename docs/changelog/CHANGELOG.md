@@ -9,6 +9,87 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-12 (latest)
 
+### Builder-provenance stabilization wave - producer-owned materialization now recovers the row-fidelity canaries without reopening indirect-control drift
+
+This wave moved the row-fidelity fix back to the canonical owner. Instead of trying to paper over degraded rendered expressions in late cleanup or consumer layers, `fission-pcode` now preserves builder-selected stable representatives, propagates that preservation through normalization, and keeps CLI/static active paths on canonical indirect-control payloads only.
+
+- [`types.rs`](crates/fission-pcode/src/nir/types.rs) adds `NirBindingOrigin::TempPreserved` plus helper predicates so preserved materialization is a first-class canonical contract rather than a name-only convention.
+- [`mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs), [`materialize.rs`](crates/fission-pcode/src/nir/builder/materialize.rs), [`state.rs`](crates/fission-pcode/src/nir/builder/state.rs), [`init.rs`](crates/fission-pcode/src/nir/builder/init.rs), and [`stats.rs`](crates/fission-pcode/src/nir/builder/stats.rs) now mark nontrivial builder-owned representatives as preserved and report `materialization_stabilized_count` from the producer owner.
+- [`passes.rs`](crates/fission-pcode/src/nir/normalize/cleanup/passes.rs) and [`run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now honor preserved materialization during cleanup instead of re-inlining nontrivial predicate-carried temps on a pure single-use heuristic.
+- [`defuse.rs`](crates/fission-pcode/src/nir/normalize/analysis/defuse.rs), [`phi_recovery.rs`](crates/fission-pcode/src/nir/normalize/recovery/phi_recovery.rs), [`call_artifact.rs`](crates/fission-pcode/src/nir/normalize/idioms/call_artifact.rs), [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs), and [`typed_facts.rs`](crates/fission-pcode/src/nir/normalize/memory/typed_facts.rs) now treat `TempPreserved` as temp-like where required, keeping the analysis contract aligned with builder ownership.
+- [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now preserves duplicate ordinal successors in `BranchInd` lowering so many-to-one dispatcher surfaces no longer collapse away ordinal case information before structuring.
+- [`build.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/build.rs), [`summary.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/summary.rs), [`routing.rs`](crates/fission-static/src/analysis/decomp/nir/routing.rs), and [`render.rs`](crates/fission-static/src/analysis/decomp/nir/render.rs) now stay on canonical `NirBuildStats` / `IndirectControlClassification` instead of rebuilding active-path indirect semantics from raw observations.
+- [`cleanup.rs`](crates/fission-pcode/src/nir/structuring/cleanup.rs) and [`normalize_defuse.rs`](crates/fission-pcode/src/nir/tests/normalize_defuse.rs) gained regression coverage around forward-goto residue cleanup, duplicate successor case ordinals, and builder-preserved predicate temps.
+
+Accepted benchmark artifact:
+
+- [`putty-builder-provenance-wave`](../../artifacts/batch_benchmark/putty-builder-provenance-wave)
+
+Accepted benchmark delta vs the prior accepted baseline [`putty-row-fidelity-wave-v8`](../../artifacts/batch_benchmark/putty-row-fidelity-wave-v8):
+
+- seeded shared coverage: `100.00% -> 100.00%`
+- independent top-N coverage: `96.00% -> 96.00%`
+- `both_success`: `100.000% -> 100.000%`
+- public direct-success: `50/50 -> 50/50`
+- `avg_normalized_similarity`: `38.79 -> 38.82`
+- public indirect counters:
+  - `unsupported_indirect_control_count`: `1 -> 1`
+  - `indirect_surface_preserved_count`: `9 -> 9`
+  - `dispatcher_shape_recovered_count`: `12 -> 12`
+  - `dispatcher_proof_completed_count`: `4 -> 4`
+  - `proof_payload_direct_emit_count`: `8 -> 8`
+- builder/preservation counters:
+  - `materialization_stabilized_count`: surfaced across canary rows and benchmark summary
+  - `sccp_skipped_by_admission_count`: `20`
+  - `memory_fact_prefilter_skip_count`: `18`
+  - `pass_rerun_skipped_by_preservation_count`: `49`
+- key rows:
+  - `0x140001160`: `27.34 -> 31.61`
+  - `0x140008900`: `20.68 -> 23.62`
+  - `0x140007da0`: `34.45 -> 34.54`
+  - `0x140008090`: `35.41 -> 35.63`
+  - `0x140006ef0`: `35.33 -> 35.33`
+  - `0x140006c20`: `37.66 -> 40.52`
+  - `0x140006fe0`: `34.76 -> 34.76`
+
+Validation:
+
+- `cargo test -p fission-pcode`
+- `cargo check -p fission-static`
+- `cargo check -p fission-cli`
+- `cargo test -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+- `cargo build -p fission-cli --release`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --fission-bin target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC --output-dir artifacts/batch_benchmark/putty-builder-provenance-wave --baseline-dir artifacts/batch_benchmark/putty-row-fidelity-wave-v8 --limit 50`
+
+`nir-check` fast lane stayed non-worse:
+
+- `changed_rows=0`
+- gate remains `stop_hold_p5h3f`
+- dominant slow passes:
+  - `sccp: 226.7ms`
+  - `jump_resolver: 26.0ms`
+  - `aggregate_fields: 21.7ms`
+  - `memory_slot_surfacing_full: 19.5ms`
+  - `cleanup_elim_7: 12.4ms`
+
+Duplicate-logic audit result:
+
+- active CLI/static consumer paths no longer rebuild indirect semantics from raw pcode/flags; the active paths consume canonical `IndirectControlClassification` / `NirBuildStats`
+- CLI inventory, NIR candidate build/summary, static routing, and static render all stay on the canonical payload
+- remaining preservation follow-up is producer-side hardening only:
+  - preserved-temp awareness in some cleanup pruning/collapse helpers
+  - preserved-temp exclusion in copy propagation
+  - `gvn_join` hoists still emit plain `Temp` instead of `TempPreserved`
+
+Next bottleneck:
+
+- the next primary KPI should stay on producer-owned row fidelity, not broader dispatcher recovery
+- specifically:
+  - finish preserved-materialization hardening in cleanup / copy propagation / `gvn_join`
+  - keep the new canary gains while preventing future alias/materialization regressions
+  - only after that, move primary effort to pure perf on `sccp`, `jump_resolver`, `aggregate_fields`, and `memory_slot_surfacing_full`
+
 ### Row-fidelity stabilization wave - accepted dispatcher recovery now clears the `0x140007da0` canary without regressing the dispatcher targets
 
 This wave closed the remaining release blocker from the accepted dispatcher-recovery branch. The canonical fix stayed in `fission-pcode`: instead of widening dispatcher proof yet again, the work stabilized rendered slot/materialization choices so zero-offset slot aliases no longer surface through naked synthetic temp bases such as `xVar203`, while nonzero-offset and already-proven slot surfaces continue to survive.

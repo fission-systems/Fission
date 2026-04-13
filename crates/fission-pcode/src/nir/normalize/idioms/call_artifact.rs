@@ -201,7 +201,7 @@ pub(crate) fn apply_call_artifact_cleanup_pass(func: &mut HirFunction) -> bool {
         .locals
         .iter()
         .filter_map(|binding| {
-            matches!(binding.origin, Some(NirBindingOrigin::Temp)).then(|| binding.name.clone())
+            binding.is_temp_like().then(|| binding.name.clone())
         })
         .collect::<HashSet<_>>();
     let removed = remove_inlineable_call_artifacts(&mut func.body, &temp_names);

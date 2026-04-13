@@ -192,10 +192,7 @@ impl<'a> PreviewBuilder<'a> {
                         for succ_idx in &block.successors {
                             let succ_idx = *succ_idx as usize;
                             if succ_idx < this.pcode.blocks.len() {
-                                let target = this.block_target_key(succ_idx);
-                                if !targets.contains(&target) {
-                                    targets.push(target);
-                                }
+                                targets.push(this.block_target_key(succ_idx));
                             }
                         }
                         let selector_alias =
