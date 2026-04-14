@@ -219,6 +219,56 @@ pub(crate) fn add_materialization_stabilized(n: usize) {
     WAVE.with(|w| w.borrow_mut().materialization_stabilized_count += n);
 }
 
+pub(crate) fn add_representative_downgrade(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().representative_downgrade_count += n);
+}
+
+pub(crate) fn add_representative_downgrade_no_aliassafe_source(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| {
+        let mut wave = w.borrow_mut();
+        wave.representative_downgrade_count += n;
+        wave.representative_downgrade_no_aliassafe_source_count += n;
+    });
+}
+
+pub(crate) fn add_representative_downgrade_join_conflict(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| {
+        let mut wave = w.borrow_mut();
+        wave.representative_downgrade_count += n;
+        wave.representative_downgrade_join_conflict_count += n;
+    });
+}
+
+pub(crate) fn add_preserved_temp_prune_blocked(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().preserved_temp_prune_blocked_count += n);
+}
+
+pub(crate) fn add_preserved_temp_copyprop_skip(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().preserved_temp_copyprop_skip_count += n);
+}
+
+pub(crate) fn add_gvn_join_preserved(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().gvn_join_preserved_count += n);
+}
+
 pub(crate) fn add_pass_rerun_skipped_by_preservation(n: usize) {
     if n == 0 {
         return;
@@ -273,6 +323,20 @@ pub(crate) fn add_memory_fact_prefilter_skip(n: usize) {
         return;
     }
     WAVE.with(|w| w.borrow_mut().memory_fact_prefilter_skip_count += n);
+}
+
+pub(crate) fn add_aggregate_fields_skipped_by_admission(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().aggregate_fields_skipped_by_admission_count += n);
+}
+
+pub(crate) fn add_memory_slot_cheap_exit(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().memory_slot_cheap_exit_count += n);
 }
 
 pub(crate) fn add_indirect_target_set_refinements(n: usize) {

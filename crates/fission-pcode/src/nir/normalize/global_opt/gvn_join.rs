@@ -7,7 +7,9 @@
 //! [`super::phi_recovery::copy_propagation_pass`] can eliminate copies.
 
 use super::super::analysis::expr_key::pure_expr_key;
+use super::super::analysis::preservation::preserved_binding_origin;
 use super::super::cleanup::expr_has_side_effects;
+use super::super::wave_stats;
 use super::super::*;
 use crate::nir::support::expr_type;
 
@@ -48,9 +50,10 @@ fn hoist_stmts(
                     name: tmp.clone(),
                     ty,
                     surface_type_name: None,
-                    origin: Some(NirBindingOrigin::Temp),
+                    origin: Some(preserved_binding_origin()),
                     initializer: None,
                 });
+                wave_stats::add_gvn_join_preserved(1);
                 let hoist = HirStmt::Assign {
                     lhs: HirLValue::Var(tmp.clone()),
                     rhs,
@@ -72,6 +75,56 @@ fn hoist_stmts(
         i += 1;
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn gvn_join_hoist_marks_temp_preserved() {
+        let mut func = HirFunction {
+            name: "test_gvn_join_preserved".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("a".to_string())),
+                        rhs: Box::new(HirExpr::Var("b".to_string())),
+                        ty: int(32),
+                    },
+                }],
+                else_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("y".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("a".to_string())),
+                        rhs: Box::new(HirExpr::Var("b".to_string())),
+                        ty: int(32),
+                    },
+                }],
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_gvn_join_hoist_pass(&mut func));
+        assert!(func.locals.iter().any(|binding| {
+            binding.name.starts_with("__gvn_join_") && binding.preserves_materialization()
+        }));
+    }
 }
 
 fn hoist_stmt_deep(

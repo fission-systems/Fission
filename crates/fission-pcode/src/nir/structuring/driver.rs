@@ -315,17 +315,18 @@ impl<'a> PreviewBuilder<'a> {
             }
             let block_key = self.block_target_key(idx);
             let block_start = self.block_start_address(idx);
-            let has_same_start_peer = self
-                .pcode
-                .blocks
-                .iter()
-                .enumerate()
-                .any(|(peer_idx, block)| peer_idx != self.pcode_block_idx(idx) && block.start_address == block_start);
-            let is_orphan_unreachable =
-                idx != 0
-                    && self.predecessors[idx].is_empty()
-                    && !targeted.contains(&block_key)
-                    && !has_same_start_peer;
+            let has_same_start_peer =
+                self.pcode
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .any(|(peer_idx, block)| {
+                        peer_idx != self.pcode_block_idx(idx) && block.start_address == block_start
+                    });
+            let is_orphan_unreachable = idx != 0
+                && self.predecessors[idx].is_empty()
+                && !targeted.contains(&block_key)
+                && !has_same_start_peer;
             if is_orphan_unreachable {
                 idx += 1;
                 continue;

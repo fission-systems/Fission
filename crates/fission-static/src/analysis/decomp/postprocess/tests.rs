@@ -1,5 +1,8 @@
 use super::PostProcessor;
 use super::condition::negate_condition;
+use super::pass::PassContext;
+use super::pass::PostProcessPass;
+use super::passes::InlineSingleUseTempsPass;
 use fission_loader::loader::types::{InferredFieldInfo, InferredTypeInfo};
 
 #[test]
@@ -1003,6 +1006,69 @@ fn test_var_sweep_inlines_single_use_temp_into_return() {
         output.contains("return (ulonglong)(iVar1 != 0);"),
         "must inline cast expression into return: {}",
         output
+    );
+}
+
+#[test]
+fn test_process_keeps_single_use_temp_when_canonical_semantics_owned_upstream() {
+    let input = r#"ulonglong test(int iVar1)
+{
+  uVar3 = (ulonglong)(iVar1 != 0);
+  return uVar3;
+}"#;
+
+    let output = PostProcessor::new().process(input);
+    assert!(
+        !output.contains("return (ulonglong)(iVar1 != 0);"),
+        "default process path must not inline away the upstream-owned representative: {}",
+        output
+    );
+    assert!(
+        output.contains("= (ulonglong)(iVar1 != 0);"),
+        "default process path must keep an explicit representative assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("return result;") || output.contains("return uVar3;"),
+        "default process path must keep returning the representative temp: {}",
+        output
+    );
+}
+
+#[test]
+fn test_process_with_registry_keeps_single_use_temp_when_canonical_semantics_owned_upstream() {
+    let input = r#"ulonglong test(int iVar1)
+{
+  uVar3 = (ulonglong)(iVar1 != 0);
+  return uVar3;
+}"#;
+
+    let output = PostProcessor::new()
+        .process_with_registry(input)
+        .expect("postprocess with registry");
+    assert!(
+        !output.contains("return (ulonglong)(iVar1 != 0);"),
+        "registry path must not inline away the upstream-owned representative: {}",
+        output
+    );
+    assert!(
+        output.contains("= (ulonglong)(iVar1 != 0);"),
+        "registry path must keep an explicit representative assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("return result;") || output.contains("return uVar3;"),
+        "registry path must keep returning the representative temp: {}",
+        output
+    );
+}
+
+#[test]
+fn test_inline_single_use_temps_pass_skips_when_canonical_semantics_owned_upstream() {
+    let pass = InlineSingleUseTempsPass;
+    assert!(
+        !pass.should_run(&PassContext::new()),
+        "lexical temp-inline must stay disabled on the active canonical release path"
     );
 }
 

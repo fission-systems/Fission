@@ -14,6 +14,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use crate::cli::oneshot::assessment::canonical_indirect_classification;
 #[cfg(feature = "native_decomp")]
 use crate::cli::oneshot::common::{
     apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
@@ -607,7 +608,7 @@ fn build_inventory_fallback_entry(
         has_dwarf_return_type,
         loader_type_count,
     );
-    let indirect_classification = IndirectControlClassification::from_stats_only(None);
+    let indirect_classification = canonical_indirect_classification(None);
     let (_, reason_tags) = build_quality_tags_and_score(
         dwarf_param_count,
         dwarf_local_count,
@@ -800,8 +801,7 @@ fn build_inventory_candidate_entry_rust(
         }
     }
 
-    let indirect_classification =
-        IndirectControlClassification::from_stats_only(nir_build_stats.as_ref());
+    let indirect_classification = canonical_indirect_classification(nir_build_stats.as_ref());
 
     let (_, reason_tags) = build_quality_tags_and_score(
         dwarf_param_count,

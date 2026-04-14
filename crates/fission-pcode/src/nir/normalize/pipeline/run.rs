@@ -2,6 +2,7 @@ use super::super::analysis::defuse::{
     apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
     stabilize_repeated_pure_exprs,
 };
+use super::super::analysis::preservation::preserved_materialization_names;
 use super::super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
@@ -42,7 +43,6 @@ use super::super::types::{
 use super::super::wave_stats;
 use super::super::*;
 use crate::nir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
-use std::collections::HashSet;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
@@ -126,14 +126,6 @@ fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bo
 
 pub(crate) fn normalize_function_body(body: &mut Vec<HirStmt>) {
     cleanup_stmt_list(body, "<body>", 0);
-}
-
-fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<String> {
-    bindings
-        .iter()
-        .filter(|binding| binding.preserves_materialization())
-        .map(|binding| binding.name.clone())
-        .collect()
 }
 
 fn cleanup_func_stmt_list(func: &mut HirFunction) {
@@ -412,10 +404,17 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
     let slot_changed = if !memory_fact_prefilter {
         wave_stats::add_memory_fact_prefilter_skip(1);
+        wave_stats::add_memory_slot_cheap_exit(1);
         false
     } else if allow_expensive_passes {
-        run_pass_logged(func, "memory_slot_surfacing_full", perf, apply_memory_slot_surfacing)
+        run_pass_logged(
+            func,
+            "memory_slot_surfacing_full",
+            perf,
+            apply_memory_slot_surfacing,
+        )
     } else {
+        wave_stats::add_memory_slot_cheap_exit(1);
         run_pass_logged(
             func,
             "memory_slot_surfacing_cheap",
@@ -545,6 +544,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass);
     } else {
         wave_stats::add_memory_fact_prefilter_skip(1);
+        wave_stats::add_aggregate_fields_skipped_by_admission(1);
     }
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
@@ -629,12 +629,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     let stabilized_materializations = stabilize_repeated_pure_exprs(func);
     if stabilized_materializations > 0 {
         wave_stats::add_materialization_stabilized(stabilized_materializations);
-        run_pass_logged(
-            func,
-            "proof_fidelity_materialization",
-            perf,
-            |_f| true,
-        );
+        run_pass_logged(func, "proof_fidelity_materialization", perf, |_f| true);
     } else {
         wave_stats::add_pass_rerun_skipped_by_preservation(1);
     }
@@ -786,7 +781,9 @@ fn stmt_has_sccp_const_seed(stmt: &HirStmt) -> bool {
             default,
         } => {
             expr_contains_const(expr)
-                || cases.iter().any(|case| body_has_sccp_const_seed(&case.body))
+                || cases
+                    .iter()
+                    .any(|case| body_has_sccp_const_seed(&case.body))
                 || body_has_sccp_const_seed(default)
         }
         HirStmt::Block(body) => body_has_sccp_const_seed(body),
@@ -920,7 +917,9 @@ fn expr_contains_const(expr: &HirExpr) -> bool {
         | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_const(expr),
         HirExpr::Binary { lhs, rhs, .. } => expr_contains_const(lhs) || expr_contains_const(rhs),
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
-        HirExpr::Index { base, index, .. } => expr_contains_const(base) || expr_contains_const(index),
+        HirExpr::Index { base, index, .. } => {
+            expr_contains_const(base) || expr_contains_const(index)
+        }
     }
 }
 
@@ -1636,7 +1635,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
         iterations += 1;
         let mut changed = false;
         let mut last_changed_pass = None;
-        if collapse_trivial_assign_returns(stmts) {
+        if collapse_trivial_assign_returns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
         }
@@ -1644,7 +1643,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
         }
-        if eliminate_dead_temp_assigns(stmts) {
+        if eliminate_dead_temp_assigns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("eliminate_dead_temp_assigns");
         }

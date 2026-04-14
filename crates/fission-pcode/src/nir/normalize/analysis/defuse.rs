@@ -864,7 +864,9 @@ fn collect_repeated_pure_exprs(
 ) {
     if let Some(key) = pure_expr_key(expr) {
         let nodes = expr_node_count(expr);
-        let entry = counts.entry(key).or_insert_with(|| (0, nodes, expr.clone()));
+        let entry = counts
+            .entry(key)
+            .or_insert_with(|| (0, nodes, expr.clone()));
         entry.0 += 1;
         if nodes > entry.1 {
             entry.1 = nodes;
@@ -977,7 +979,6 @@ fn is_stabilization_candidate_expr(expr: &HirExpr) -> bool {
             | HirExpr::Cast { .. }
     )
 }
-
 fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
     match expr {
         HirExpr::Const(_, _) => 0,

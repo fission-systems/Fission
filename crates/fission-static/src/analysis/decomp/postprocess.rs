@@ -97,7 +97,7 @@ pub struct PostProcessor {
 }
 
 impl PostProcessor {
-    fn canonical_semantics_owned_upstream() -> bool {
+    pub(super) fn canonical_semantics_owned_upstream() -> bool {
         true
     }
 
@@ -231,6 +231,7 @@ impl PostProcessor {
             pass_registry.disable("replace_string_pointers");
         }
         if Self::canonical_semantics_owned_upstream() {
+            pass_registry.disable("inline_single_use_temps");
             pass_registry.disable("field_offsets");
             pass_registry.disable("promote_rect_params");
             pass_registry.disable("clean_slate");
@@ -303,7 +304,7 @@ impl PostProcessor {
                 processed = Self::normalize_aggregate_copies(&processed);
             }
         }
-        if self.options.temp_var_inlining {
+        if self.options.temp_var_inlining && !Self::canonical_semantics_owned_upstream() {
             processed = Self::inline_single_use_temps(&processed);
         }
         if self.options.stack_var_normalization {

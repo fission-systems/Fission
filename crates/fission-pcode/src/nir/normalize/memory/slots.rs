@@ -75,20 +75,18 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
     let alias_defs = collect_single_var_aliases(&func.body);
     let mut ordered_candidates = candidates.values().collect::<Vec<_>>();
     ordered_candidates.sort_by(|lhs, rhs| {
-        lhs.first_seen
-            .cmp(&rhs.first_seen)
-            .then_with(|| {
-                lhs.key
-            .base_repr
-            .cmp(&rhs.key.base_repr)
-            .then_with(|| lhs.key.offset.cmp(&rhs.key.offset))
-            .then_with(|| lhs.key.access_size.cmp(&rhs.key.access_size))
-            .then_with(|| lhs.key.stride.cmp(&rhs.key.stride))
-            .then_with(|| lhs.offset.cmp(&rhs.offset))
-            .then_with(|| lhs.count.cmp(&rhs.count))
-            .then_with(|| print_expr(&lhs.base).cmp(&print_expr(&rhs.base)))
-            .then_with(|| format!("{:?}", lhs.elem_ty).cmp(&format!("{:?}", rhs.elem_ty)))
-            })
+        lhs.first_seen.cmp(&rhs.first_seen).then_with(|| {
+            lhs.key
+                .base_repr
+                .cmp(&rhs.key.base_repr)
+                .then_with(|| lhs.key.offset.cmp(&rhs.key.offset))
+                .then_with(|| lhs.key.access_size.cmp(&rhs.key.access_size))
+                .then_with(|| lhs.key.stride.cmp(&rhs.key.stride))
+                .then_with(|| lhs.offset.cmp(&rhs.offset))
+                .then_with(|| lhs.count.cmp(&rhs.count))
+                .then_with(|| print_expr(&lhs.base).cmp(&print_expr(&rhs.base)))
+                .then_with(|| format!("{:?}", lhs.elem_ty).cmp(&format!("{:?}", rhs.elem_ty)))
+        })
     });
     let inventory = collect_typed_fact_inventory(func, false);
     let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
@@ -124,7 +122,9 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
         let family_lane_count = family_lanes.get(&family_key).map(HashSet::len).unwrap_or(0);
         let exact_indexable = candidate.key.stride.is_none()
             || candidate.key.stride == Some(i64::from(candidate.key.access_size));
-        if !((exact_indexable && candidate.count >= 2) || (family_total >= 2 && family_lane_count >= 2)) {
+        if !((exact_indexable && candidate.count >= 2)
+            || (family_total >= 2 && family_lane_count >= 2))
+        {
             continue;
         }
         let display_base = resolve_slot_alias_base(func, &alias_defs, &candidate.base);
@@ -208,9 +208,7 @@ fn collect_single_var_aliases(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
                     defs.remove(name);
                 }
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 for nested in body {
                     visit_stmt(nested, counts, defs);
                 }
@@ -362,7 +360,10 @@ fn is_surface_stable_slot_display_base(
         HirExpr::Cast { expr, .. } => {
             is_surface_stable_slot_display_base(func, inventory, expr, offset)
         }
-        HirExpr::PtrOffset { base, offset: base_offset } => {
+        HirExpr::PtrOffset {
+            base,
+            offset: base_offset,
+        } => {
             if *base_offset != 0 {
                 return true;
             }

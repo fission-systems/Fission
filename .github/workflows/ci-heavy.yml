@@ -15,6 +15,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  corpus-generalization-smoke-config:
+    name: Corpus Generalization Smoke Config
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Validate corpus manifests and referenced binaries
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          repo = Path.cwd()
+          manifests = [
+              repo / "config/benchmark_corpus/smoke_corpus.json",
+              repo / "config/benchmark_corpus/release_corpus.json",
+          ]
+          for manifest in manifests:
+              payload = json.loads(manifest.read_text(encoding="utf-8"))
+              entries = payload.get("entries", [])
+              assert isinstance(entries, list) and entries, f"empty entries: {manifest}"
+              seen = set()
+              for entry in entries:
+                  entry_id = entry["id"]
+                  assert entry_id not in seen, f"duplicate id {entry_id} in {manifest}"
+                  seen.add(entry_id)
+                  binary = Path(entry["binary_path"])
+                  assert binary.is_file(), f"missing binary {binary}"
+              print(f"{manifest.name}: {len(entries)} entries OK")
+          PY
+
   linux-full-validation:
     name: Linux Full Validation
     runs-on: ubuntu-latest

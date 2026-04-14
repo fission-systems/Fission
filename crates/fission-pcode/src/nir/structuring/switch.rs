@@ -308,18 +308,13 @@ fn extract_range_guard_for_chain(expr: &HirExpr, chain_on_true: bool) -> Option<
     let expr = strip_casts(expr);
     match expr {
         HirExpr::Binary {
-            op:
-                HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe,
+            op: HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe,
             lhs,
             rhs,
             ..
         } => match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
-            (other, HirExpr::Const(_, _)) if chain_on_true => {
-                normalize_affine_bound_expr(&other)
-            }
-            (HirExpr::Const(_, _), other) if !chain_on_true => {
-                normalize_affine_bound_expr(&other)
-            }
+            (other, HirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
+            (HirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
             _ => None,
         },
         HirExpr::Unary {

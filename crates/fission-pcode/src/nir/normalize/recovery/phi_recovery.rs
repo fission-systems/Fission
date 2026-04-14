@@ -1,4 +1,7 @@
 use super::super::analysis::defuse::DefUseMap;
+use super::super::analysis::preservation::{
+    preserved_materialization_names, should_skip_copyprop_for_preserved_name,
+};
 /// HIR-level copy propagation and join-variable coalescing.
 ///
 /// These passes improve the HIR after structuring by eliminating unnecessary
@@ -24,6 +27,7 @@ use super::super::analysis::defuse::DefUseMap;
 /// *same* set of variables and renames join-point uses to the shared variable.
 /// This models the classical SSA out-of-SSA transformation for 2-way joins.
 use super::super::cleanup::prune_unused_temp_bindings;
+use super::super::wave_stats;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 
@@ -35,6 +39,7 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Returns `true` if any substitution was made.
 pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
+    let preserved_temps = preserved_materialization_names(&func.locals);
     // Step 1: collect names of pure temporaries.
     let temp_names: HashSet<String> = func
         .locals
@@ -61,6 +66,18 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
     let mut predicate_vars = HashSet::new();
     collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
     copy_map.retain(|name, _| !predicate_vars.contains(name));
+    let preserved_skip_count = copy_map
+        .iter()
+        .filter(|(name, source)| {
+            should_skip_copyprop_for_preserved_name(name, &preserved_temps)
+                || should_skip_copyprop_for_preserved_name(source, &preserved_temps)
+        })
+        .count();
+    copy_map.retain(|name, source| {
+        !should_skip_copyprop_for_preserved_name(name, &preserved_temps)
+            && !should_skip_copyprop_for_preserved_name(source, &preserved_temps)
+    });
+    wave_stats::add_preserved_temp_copyprop_skip(preserved_skip_count);
 
     if copy_map.is_empty() {
         return false;
@@ -90,6 +107,100 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
         prune_unused_temp_bindings(func);
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nir::normalize::analysis::preservation::preserved_binding_origin;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn copy_propagation_skips_preserved_temp_alias() {
+        let mut func = HirFunction {
+            name: "test_copy_prop_preserved".to_string(),
+            params: vec![],
+            locals: vec![NirBinding {
+                name: "uVar0".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(preserved_binding_origin()),
+                initializer: None,
+            }],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar0".to_string()),
+                    rhs: HirExpr::Var("eax".to_string()),
+                },
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs: Box::new(HirExpr::Var("uVar0".to_string())),
+                        rhs: Box::new(HirExpr::Const(0, int(32))),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, int(32))))],
+                    else_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!copy_propagation_pass(&mut func));
+        let HirStmt::If { cond, .. } = &func.body[1] else {
+            panic!("expected preserved temp consumer to stay in the if condition");
+        };
+        assert!(print_expr(cond).contains("uVar0"));
+    }
+
+    #[test]
+    fn copy_propagation_skips_single_use_alias_of_preserved_source() {
+        let mut func = HirFunction {
+            name: "test_copy_prop_preserved_source".to_string(),
+            params: vec![],
+            locals: vec![
+                NirBinding {
+                    name: "uVar0".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: Some(preserved_binding_origin()),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "uVar1".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar1".to_string()),
+                    rhs: HirExpr::Var("uVar0".to_string()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!copy_propagation_pass(&mut func));
+        assert_eq!(func.body.len(), 2);
+        assert!(matches!(
+            &func.body[1],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "uVar1"
+        ));
+    }
 }
 
 /// Count definition sites (assignments to LHS Var(name)) for each name in

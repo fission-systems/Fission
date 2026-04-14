@@ -58,10 +58,10 @@ pub use caching_decompiler::{CachingDecompiler, DecompilerNative, RecommendedDec
 pub use facts::{FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, log_type_diag};
 pub use nir_engine::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
-    auto_nir_eligible, classify_native_failure_kind, native_failure_routing_decision,
-    nir_fallback_reason_with_kind, rescue_nir_output, rescue_nir_output_with_facts,
-    select_nir_output, select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
-    select_nir_output_with_facts,
+    auto_nir_admission_eligible, auto_nir_eligible, classify_native_failure_kind,
+    native_failure_routing_decision, nir_fallback_reason_with_kind, rescue_nir_output,
+    rescue_nir_output_with_facts, select_nir_output, select_nir_output_from_pcode,
+    select_nir_output_from_pcode_with_facts, select_nir_output_with_facts,
 };
 pub use nir_taxonomy::{classified_nir_error, classify_nir_failure, classify_nir_failure_refined};
 pub use nir_types::{NirWorkerRequest, NirWorkerResponse};

@@ -41,9 +41,9 @@ pub(crate) fn jump_resolver_candidate_count(stmts: &[HirStmt]) -> usize {
                 let local_cost = 1 + cases.len().min(8) + usize::from(!default.is_empty());
                 local_cost
                     + cases
-                    .iter()
-                    .map(|case| jump_resolver_candidate_count(&case.body))
-                    .sum::<usize>()
+                        .iter()
+                        .map(|case| jump_resolver_candidate_count(&case.body))
+                        .sum::<usize>()
                     + jump_resolver_candidate_count(default)
             }
             HirStmt::If {

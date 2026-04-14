@@ -4,9 +4,10 @@ use fission_pcode::{NirRenderOptions, PcodeFunction};
 
 pub use super::nir_recovery::{PreviewRoutingDecision, PreviewSelection};
 pub use super::nir_routing::{
-    auto_nir_eligible, native_failure_routing_decision, rescue_nir_output,
-    rescue_nir_output_with_facts, select_nir_output, select_nir_output_from_pcode,
-    select_nir_output_from_pcode_with_facts, select_nir_output_with_facts,
+    auto_nir_admission_eligible, auto_nir_eligible, native_failure_routing_decision,
+    rescue_nir_output, rescue_nir_output_with_facts, select_nir_output,
+    select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
+    select_nir_output_with_facts,
 };
 pub use super::nir_taxonomy::{
     classified_nir_error, classify_native_failure_kind, classify_nir_failure,
@@ -24,7 +25,7 @@ pub fn nir_fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> Str
 }
 
 pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
-    auto_nir_eligible(binary, pcode)
+    auto_nir_admission_eligible(binary, pcode)
 }
 
 pub fn select_preview_output<S: NirSource>(

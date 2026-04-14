@@ -35,11 +35,12 @@ mod decompile_render;
 mod decompile_targets;
 mod nir_candidates;
 
+pub(crate) use crate::cli::oneshot::assessment::canonical_indirect_classification;
 pub(super) use decompile_exec::{
     emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
 };
 pub(super) use decompile_targets::select_candidate_functions;
-pub(super) use nir_candidates::{
+pub(crate) use nir_candidates::{
     PreviewCandidateEntry, PreviewCandidateScanSummary, ScopedQuietPanicHook,
     preview_candidate_entry_with_recovery, update_scan_summary,
 };

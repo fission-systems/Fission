@@ -440,7 +440,9 @@ impl IndirectControlClassification {
     #[must_use]
     pub fn from_stats_only(stats: Option<&NirBuildStats>) -> Self {
         match stats {
-            Some(stats) => Self::from_stats(Some(stats), Self::stats_indicate_indirect_control(stats)),
+            Some(stats) => {
+                Self::from_stats(Some(stats), Self::stats_indicate_indirect_control(stats))
+            }
             None => Self::default(),
         }
     }
@@ -849,6 +851,24 @@ pub struct NirBuildStats {
     /// Nontrivial repeated pure expressions stabilized into explicit temporaries.
     #[serde(default)]
     pub materialization_stabilized_count: usize,
+    /// Representative selections that fell back to a weaker form instead of a preserved alias/temp.
+    #[serde(default)]
+    pub representative_downgrade_count: usize,
+    /// Representative downgrades caused by the absence of an alias-safe source expression.
+    #[serde(default)]
+    pub representative_downgrade_no_aliassafe_source_count: usize,
+    /// Representative downgrades caused by join-shape conflicts.
+    #[serde(default)]
+    pub representative_downgrade_join_conflict_count: usize,
+    /// Preserved representatives that cleanup/prune intentionally refused to erase.
+    #[serde(default)]
+    pub preserved_temp_prune_blocked_count: usize,
+    /// Preserved representatives intentionally excluded from copy propagation.
+    #[serde(default)]
+    pub preserved_temp_copyprop_skip_count: usize,
+    /// Join-hoisted shared representatives emitted as preserved temps.
+    #[serde(default)]
+    pub gvn_join_preserved_count: usize,
     /// Switch/dispatcher surfaces emitted directly from proof payloads.
     #[serde(default)]
     pub proof_payload_direct_emit_count: usize,
@@ -876,6 +896,12 @@ pub struct NirBuildStats {
     /// Memory normalization passes skipped because typed-fact prefilter found no object roots.
     #[serde(default)]
     pub memory_fact_prefilter_skip_count: usize,
+    /// Aggregate-field recovery skipped by explicit admission guards.
+    #[serde(default)]
+    pub aggregate_fields_skipped_by_admission_count: usize,
+    /// Memory slot surfacing exited through the cheap path because no alias-safe roots were present.
+    #[serde(default)]
+    pub memory_slot_cheap_exit_count: usize,
     /// Canonical family totals derived from structuring failures/recovery in pcode.
     #[serde(default)]
     pub structuring_reason_region_legality_count: usize,
@@ -1051,6 +1077,14 @@ impl NirBuildStats {
         self.indirect_target_set_refined_count += other.indirect_target_set_refined_count;
         self.dispatcher_shape_recovered_count += other.dispatcher_shape_recovered_count;
         self.materialization_stabilized_count += other.materialization_stabilized_count;
+        self.representative_downgrade_count += other.representative_downgrade_count;
+        self.representative_downgrade_no_aliassafe_source_count +=
+            other.representative_downgrade_no_aliassafe_source_count;
+        self.representative_downgrade_join_conflict_count +=
+            other.representative_downgrade_join_conflict_count;
+        self.preserved_temp_prune_blocked_count += other.preserved_temp_prune_blocked_count;
+        self.preserved_temp_copyprop_skip_count += other.preserved_temp_copyprop_skip_count;
+        self.gvn_join_preserved_count += other.gvn_join_preserved_count;
         self.proof_payload_direct_emit_count += other.proof_payload_direct_emit_count;
         self.pass_rerun_skipped_by_preservation_count +=
             other.pass_rerun_skipped_by_preservation_count;
@@ -1061,6 +1095,9 @@ impl NirBuildStats {
         self.candidate_scoped_jump_resolver_count += other.candidate_scoped_jump_resolver_count;
         self.sccp_skipped_by_admission_count += other.sccp_skipped_by_admission_count;
         self.memory_fact_prefilter_skip_count += other.memory_fact_prefilter_skip_count;
+        self.aggregate_fields_skipped_by_admission_count +=
+            other.aggregate_fields_skipped_by_admission_count;
+        self.memory_slot_cheap_exit_count += other.memory_slot_cheap_exit_count;
         self.structuring_reason_region_legality_count +=
             other.structuring_reason_region_legality_count;
         self.structuring_reason_follow_failure_count +=

@@ -1,17 +1,13 @@
 use super::super::*;
+use super::assessment::{
+    build_quality_tags_and_score, canonical_indirect_classification, classify_nir_output_class,
+    explicit_hint_surface_count, fact_density, preview_goto_count, preview_surface_kind_str,
+};
 use super::schema::PreviewCandidateEntry;
 use super::summary::{
-    build_quality_tags_and_score, canonicalize_nir_failure_kind, classify_nir_output_class,
-    explicit_hint_surface_count, fact_density, pcode_metrics, preview_block_detail,
-    preview_block_signature, preview_goto_count, preview_surface_kind_str,
+    canonicalize_nir_failure_kind, pcode_metrics, preview_block_detail, preview_block_signature,
 };
-use fission_pcode::{IndirectControlClassification, NirBuildStats};
-
-fn canonical_indirect_classification(
-    build_stats: Option<&NirBuildStats>,
-) -> IndirectControlClassification {
-    IndirectControlClassification::from_stats_only(build_stats)
-}
+use fission_pcode::NirBuildStats;
 
 fn build_preview_candidate_entry(
     decomp: &mut DecompilerNative,
@@ -169,8 +165,7 @@ fn build_preview_candidate_entry(
         nir_goto_count,
         nir_build_stats,
     );
-    let indirect_classification =
-        IndirectControlClassification::from_stats_only(nir_build_stats.as_ref());
+    let indirect_classification = canonical_indirect_classification(nir_build_stats.as_ref());
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
         if let Some(after) = recovery_goto_count_after {
@@ -412,13 +407,10 @@ mod tests {
 
     #[test]
     fn build_stats_prefer_over_raw_flags_for_indirect_classification() {
-        let classification = canonical_indirect_classification(
-            Some(&NirBuildStats {
-                unsupported_indirect_control_count: 1,
-                ..Default::default()
-            }),
-            false,
-        );
+        let classification = canonical_indirect_classification(Some(&NirBuildStats {
+            unsupported_indirect_control_count: 1,
+            ..Default::default()
+        }));
 
         assert!(classification.has_indirect_control);
         assert!(classification.has_unresolved_unsupported_indirect);
@@ -427,9 +419,9 @@ mod tests {
 
     #[test]
     fn legacy_flags_remain_fallback_when_stats_missing() {
-        let classification = canonical_indirect_classification(None, true);
+        let classification = canonical_indirect_classification(None);
 
-        assert!(classification.has_indirect_control);
+        assert!(!classification.has_indirect_control);
         assert!(!classification.has_unresolved_unsupported_indirect);
     }
 }

@@ -665,6 +665,10 @@ impl PostProcessPass for InlineSingleUseTempsPass {
         }
     }
 
+    fn should_run(&self, _context: &PassContext) -> bool {
+        !PostProcessor::canonical_semantics_owned_upstream()
+    }
+
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         Ok(PostProcessor::inline_single_use_temps_cow(code))
     }

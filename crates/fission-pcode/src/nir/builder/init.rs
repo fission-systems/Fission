@@ -30,10 +30,7 @@ impl<'a> PreviewBuilder<'a> {
                         op_idx,
                         _marker: std::marker::PhantomData,
                     };
-                    block_def_map
-                        .entry(key.clone())
-                        .or_default()
-                        .push(op_idx);
+                    block_def_map.entry(key.clone()).or_default().push(op_idx);
                     def_sites.entry(key.clone()).or_default().push(site);
                     defs.insert(key, site);
                 }
@@ -221,6 +218,9 @@ impl<'a> PreviewBuilder<'a> {
             indirect_target_set_refined_count: 0,
             dispatcher_shape_recovered_count: 0,
             materialization_stabilized_count: 0,
+            representative_downgrade_count: 0,
+            representative_downgrade_no_aliassafe_source_count: 0,
+            representative_downgrade_join_conflict_count: 0,
             dispatcher_proof_unit_count: 0,
             dispatcher_proof_completed_count: 0,
             dispatcher_proof_failed_count: 0,

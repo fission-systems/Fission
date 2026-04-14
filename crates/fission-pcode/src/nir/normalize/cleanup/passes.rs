@@ -1,9 +1,18 @@
+use super::super::analysis::preservation::{
+    should_block_trivial_return_collapse, should_keep_unused_temp_binding,
+    should_skip_inline_for_preserved_temp,
+};
+use super::super::wave_stats;
 use super::super::*;
 use crate::nir::structuring::cleanup_redundant_labels;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
+pub(crate) fn collapse_trivial_assign_returns(
+    stmts: &mut Vec<HirStmt>,
+    preserved_temps: &HashSet<String>,
+) -> bool {
     let mut changed = false;
+    let mut blocked = 0usize;
     let mut to_remove = vec![false; stmts.len()];
     let mut idx = 0usize;
     while idx + 1 < stmts.len() {
@@ -14,7 +23,14 @@ pub(crate) fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool 
                     rhs,
                 },
                 HirStmt::Return(Some(HirExpr::Var(ret_name))),
-            ) if name == ret_name && is_trivial_temp_name(name) => Some(rhs.clone()),
+            ) if name == ret_name && is_trivial_temp_name(name) => {
+                if should_block_trivial_return_collapse(name, preserved_temps) {
+                    blocked += 1;
+                    None
+                } else {
+                    Some(rhs.clone())
+                }
+            }
             _ => None,
         };
         if let Some(expr) = replacement {
@@ -27,6 +43,7 @@ pub(crate) fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool 
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+    wave_stats::add_preserved_temp_prune_blocked(blocked);
     changed
 }
 
@@ -48,7 +65,7 @@ pub(crate) fn inline_single_use_temps(
                 continue;
             }
         };
-        if preserved_temps.contains(&name) {
+        if should_skip_inline_for_preserved_temp(&name, preserved_temps) {
             idx += 1;
             continue;
         }
@@ -58,8 +75,7 @@ pub(crate) fn inline_single_use_temps(
             continue;
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
-        let predicate_sensitive =
-            stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
+        let predicate_sensitive = stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
         let prefers_stable_materialization = expr_prefers_stable_materialization(&rhs);
         let low_cost_inline = expr_is_low_cost_inline_candidate(&rhs);
         if predicate_sensitive && prefers_stable_materialization {
@@ -89,7 +105,10 @@ pub(crate) fn inline_single_use_temps(
     changed
 }
 
-pub(crate) fn eliminate_dead_temp_assigns(stmts: &mut Vec<HirStmt>) -> bool {
+pub(crate) fn eliminate_dead_temp_assigns(
+    stmts: &mut Vec<HirStmt>,
+    _preserved_temps: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
 
@@ -489,6 +508,86 @@ fn should_preserve_unreferenced_leading_labels(stmts: &[HirStmt]) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    fn preserved_temp_binding(name: &str, bits: u32) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: int(bits),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        }
+    }
+
+    #[test]
+    fn collapse_trivial_assign_returns_skips_preserved_temp() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar0".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("eax".to_string())),
+                    rhs: Box::new(HirExpr::Var("ecx".to_string())),
+                    ty: int(32),
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Var("uVar0".to_string()))),
+        ];
+
+        assert!(!collapse_trivial_assign_returns(
+            &mut stmts,
+            &HashSet::from([String::from("uVar0")]),
+        ));
+        assert!(matches!(stmts[0], HirStmt::Assign { .. }));
+        assert!(matches!(stmts[1], HirStmt::Return(Some(HirExpr::Var(_)))));
+    }
+
+    #[test]
+    fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
+        let mut stmts = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("uVar0".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("eax".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        }];
+
+        assert!(eliminate_dead_temp_assigns(
+            &mut stmts,
+            &HashSet::from([String::from("uVar0")]),
+        ));
+        assert!(stmts.is_empty());
+    }
+
+    #[test]
+    fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
+        let mut func = HirFunction {
+            name: "test_preserved_prune".to_string(),
+            params: vec![],
+            locals: vec![preserved_temp_binding("uVar0", 32)],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+            ..Default::default()
+        };
+
+        assert!(prune_unused_temp_bindings(&mut func));
+        assert!(func.locals.is_empty());
+    }
+}
+
 fn next_adjacent_label_name(stmts: &[HirStmt], start_idx: usize) -> Option<String> {
     for stmt in stmts.iter().skip(start_idx) {
         match stmt {
@@ -672,12 +771,14 @@ pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
     let mut changed = false;
     func.locals.retain(|binding| {
         let used = count_uses_in_stmt_list(&func.body, &binding.name) > 0;
-        let keep = !is_trivial_temp_name(&binding.name)
-            || used
-            || binding
+        let keep = should_keep_unused_temp_binding(
+            is_trivial_temp_name(&binding.name),
+            used,
+            binding
                 .initializer
                 .as_ref()
-                .is_some_and(expr_has_side_effects);
+                .is_some_and(expr_has_side_effects),
+        );
         changed |= !keep;
         keep
     });
@@ -855,14 +956,13 @@ fn stmt_uses_var_in_predicate_position(stmt: &HirStmt, name: &str) -> bool {
             expr_contains_var(cond, name)
         }
         HirStmt::For {
-            init,
-            cond,
-            update,
-            ..
+            init, cond, update, ..
         } => {
             init.as_deref()
                 .is_some_and(|stmt| stmt_uses_var_in_predicate_position(stmt, name))
-                || cond.as_ref().is_some_and(|expr| expr_contains_var(expr, name))
+                || cond
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_var(expr, name))
                 || update
                     .as_deref()
                     .is_some_and(|stmt| stmt_uses_var_in_predicate_position(stmt, name))

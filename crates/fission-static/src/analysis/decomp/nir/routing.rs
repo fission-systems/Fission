@@ -14,12 +14,21 @@ use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirRenderOptions, PcodeFunction};
 use std::time::Instant;
 
-pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
+/// Admission-only heuristic for preview/NIR auto mode.
+///
+/// This is intentionally a raw pcode-shape gate, not a semantic success/failure
+/// classifier. It should never be used as a substitute for canonical
+/// `NirBuildStats`-based ownership decisions.
+pub fn auto_nir_admission_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
     binary.is_64bit
         && binary.format.to_ascii_uppercase().starts_with("PE")
         && pcode.blocks.len() <= 12
         && pcode_total_ops(pcode) <= 600
         && max_multiequal_fanin(pcode) <= 4
+}
+
+pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
+    auto_nir_admission_eligible(binary, pcode)
 }
 
 pub fn native_failure_routing_decision(error: &str) -> NirRoutingDecision {

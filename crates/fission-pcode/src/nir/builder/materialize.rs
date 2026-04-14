@@ -301,14 +301,27 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
-        self.materialize_output_stmt(block_addr, op)
+        let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? else {
+            return Ok(None);
+        };
+        if self.output_prefers_inline_single_use_expr(block, op_idx, output, &rhs) {
+            self.representative_downgrade_count += 1;
+            self.representative_downgrade_no_aliassafe_source_count += 1;
+            return Ok(None);
+        }
+        let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
+        let lhs = HirLValue::Var(
+            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
+                .name,
+        );
+        Ok(Some(HirStmt::Assign { lhs, rhs }))
     }
 
-    fn materialize_output_stmt(
+    fn try_lower_materialized_output_rhs(
         &mut self,
         block_addr: u64,
         op: &PcodeOp,
-    ) -> Result<Option<HirStmt>, MlilPreviewError> {
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
@@ -350,12 +363,129 @@ impl<'a> PreviewBuilder<'a> {
                 return Err(err);
             }
         };
-        let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs = HirLValue::Var(
-            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
-                .name,
-        );
-        Ok(Some(HirStmt::Assign { lhs, rhs }))
+        let _ = output;
+        Ok(Some(rhs))
+    }
+
+    fn output_prefers_inline_single_use_expr(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> bool {
+        let uses = self.output_use_sites_in_block(block, op_idx, output);
+        uses.len() == 1
+            && Self::expr_is_low_cost_builder_inline_candidate(rhs)
+            && if Self::expr_requires_passthrough_single_use_inline(rhs) {
+                Self::use_opcode_allows_passthrough_single_use_builder_inline(uses[0].1.opcode)
+            } else {
+                Self::use_opcode_allows_single_use_builder_inline(uses[0].1.opcode)
+            }
+    }
+
+    fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::expr_is_low_cost_builder_inline_candidate(expr)
+            }
+            HirExpr::Load { ptr, .. }
+            | HirExpr::PtrOffset { base: ptr, .. }
+            | HirExpr::AggregateCopy { src: ptr, .. } => {
+                Self::expr_is_low_cost_builder_inline_candidate(ptr)
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_is_low_cost_builder_inline_candidate(base)
+                    && Self::expr_is_low_cost_builder_inline_candidate(index)
+            }
+            HirExpr::Binary { op, lhs, rhs, .. } => {
+                matches!(
+                    op,
+                    HirBinaryOp::Eq
+                        | HirBinaryOp::Ne
+                        | HirBinaryOp::Lt
+                        | HirBinaryOp::Le
+                        | HirBinaryOp::SLt
+                        | HirBinaryOp::SLe
+                        | HirBinaryOp::And
+                        | HirBinaryOp::Or
+                        | HirBinaryOp::Xor
+                        | HirBinaryOp::Add
+                        | HirBinaryOp::Sub
+                        | HirBinaryOp::Shl
+                        | HirBinaryOp::Shr
+                        | HirBinaryOp::Sar
+                        | HirBinaryOp::Mul
+                ) && Self::expr_is_low_cost_builder_inline_candidate(lhs)
+                    && Self::expr_is_low_cost_builder_inline_candidate(rhs)
+            }
+            HirExpr::Call { .. } => false,
+        }
+    }
+
+    fn use_opcode_allows_single_use_builder_inline(opcode: PcodeOpcode) -> bool {
+        matches!(
+            opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::Load
+                | PcodeOpcode::Store
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::IntXor
+                | PcodeOpcode::IntAnd
+                | PcodeOpcode::IntOr
+                | PcodeOpcode::IntLeft
+                | PcodeOpcode::IntRight
+                | PcodeOpcode::IntSRight
+                | PcodeOpcode::IntMult
+                | PcodeOpcode::Piece
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::Cast
+                | PcodeOpcode::PtrAdd
+                | PcodeOpcode::PtrSub
+        )
+    }
+
+    fn use_opcode_allows_passthrough_single_use_builder_inline(opcode: PcodeOpcode) -> bool {
+        matches!(
+            opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::Piece
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::Cast
+        )
+    }
+
+    fn expr_requires_passthrough_single_use_inline(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Cast { expr, .. } => Self::expr_requires_passthrough_single_use_inline(expr),
+            HirExpr::Unary { op, expr, .. } => {
+                matches!(op, HirUnaryOp::Not)
+                    || Self::expr_requires_passthrough_single_use_inline(expr)
+            }
+            HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. } => true,
+            HirExpr::Binary { op, .. } => matches!(
+                op,
+                HirBinaryOp::LogicalAnd
+                    | HirBinaryOp::LogicalOr
+                    | HirBinaryOp::Eq
+                    | HirBinaryOp::Ne
+                    | HirBinaryOp::Lt
+                    | HirBinaryOp::Le
+                    | HirBinaryOp::SLt
+                    | HirBinaryOp::SLe
+            ),
+            HirExpr::Call { .. } => true,
+        }
     }
 
     fn output_used_only_by_block_terminator(
@@ -460,5 +590,142 @@ impl<'a> PreviewBuilder<'a> {
                     | PcodeOpcode::Return
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn low_cost_builder_inline_accepts_single_use_load_chain() {
+        let expr = HirExpr::Load {
+            ptr: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0x20,
+            }),
+            ty: int(64),
+        };
+
+        assert!(PreviewBuilder::expr_is_low_cost_builder_inline_candidate(
+            &expr
+        ));
+    }
+
+    #[test]
+    fn low_cost_builder_inline_rejects_calls() {
+        let expr = HirExpr::Call {
+            target: "helper".to_string(),
+            args: vec![HirExpr::Var("param_1".to_string())],
+            ty: int(32),
+        };
+
+        assert!(!PreviewBuilder::expr_is_low_cost_builder_inline_candidate(
+            &expr
+        ));
+    }
+
+    #[test]
+    fn single_use_builder_inline_blocks_call_like_consumers() {
+        assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::Call));
+        assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CallInd));
+        assert!(
+            !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CallOther)
+        );
+        assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CBranch));
+        assert!(
+            !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::BranchInd)
+        );
+        assert!(
+            !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::IntEqual)
+        );
+    }
+
+    #[test]
+    fn single_use_builder_inline_keeps_dataflow_consumers() {
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::Copy
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::Load
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::IntAdd
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::PtrAdd
+        ));
+    }
+
+    #[test]
+    fn memory_backed_single_use_inline_requires_passthrough_consumer() {
+        let expr = HirExpr::Load {
+            ptr: Box::new(HirExpr::Var("param_1".to_string())),
+            ty: int(64),
+        };
+
+        assert!(PreviewBuilder::expr_requires_passthrough_single_use_inline(
+            &expr
+        ));
+        assert!(
+            PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(
+                PcodeOpcode::Copy
+            )
+        );
+        assert!(
+            !PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(
+                PcodeOpcode::IntAdd
+            )
+        );
+    }
+
+    #[test]
+    fn plain_leaf_single_use_inline_can_flow_into_data_consumer() {
+        let expr = HirExpr::Var("tmp_1".to_string());
+        assert!(!PreviewBuilder::expr_requires_passthrough_single_use_inline(&expr));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::IntAdd
+        ));
+    }
+
+    #[test]
+    fn arithmetic_single_use_inline_can_flow_into_data_consumer() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("x".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: int(32),
+        };
+
+        assert!(!PreviewBuilder::expr_requires_passthrough_single_use_inline(&expr));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::IntAdd
+        ));
+    }
+
+    #[test]
+    fn predicate_single_use_inline_requires_passthrough_consumer() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(HirExpr::Var("x".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: NirType::Bool,
+        };
+
+        assert!(PreviewBuilder::expr_requires_passthrough_single_use_inline(
+            &expr
+        ));
+        assert!(
+            !PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(
+                PcodeOpcode::IntAdd
+            )
+        );
     }
 }

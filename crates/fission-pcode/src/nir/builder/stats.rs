@@ -155,6 +155,14 @@ impl<'a> PreviewBuilder<'a> {
             indirect_target_set_refined_count: self.indirect_target_set_refined_count,
             dispatcher_shape_recovered_count: self.dispatcher_shape_recovered_count,
             materialization_stabilized_count: self.materialization_stabilized_count,
+            representative_downgrade_count: self.representative_downgrade_count,
+            representative_downgrade_no_aliassafe_source_count: self
+                .representative_downgrade_no_aliassafe_source_count,
+            representative_downgrade_join_conflict_count: self
+                .representative_downgrade_join_conflict_count,
+            preserved_temp_prune_blocked_count: 0,
+            preserved_temp_copyprop_skip_count: 0,
+            gvn_join_preserved_count: 0,
             dispatcher_proof_unit_count: self.dispatcher_proof_unit_count,
             dispatcher_proof_completed_count: self.dispatcher_proof_completed_count,
             dispatcher_proof_failed_count: self.dispatcher_proof_failed_count,
@@ -162,6 +170,8 @@ impl<'a> PreviewBuilder<'a> {
             candidate_scoped_jump_resolver_count: 0,
             sccp_skipped_by_admission_count: 0,
             memory_fact_prefilter_skip_count: 0,
+            aggregate_fields_skipped_by_admission_count: 0,
+            memory_slot_cheap_exit_count: 0,
             proof_payload_direct_emit_count: self.proof_payload_direct_emit_count,
             pass_rerun_skipped_by_preservation_count: 0,
             structuring_reason_region_legality_count: 0,

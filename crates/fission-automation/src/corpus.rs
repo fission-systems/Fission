@@ -76,12 +76,8 @@ fn normalize_address(value: &str) -> String {
     }
 }
 
-fn indirect_classification_from_parts(
+fn canonical_indirect_classification(
     stats: Option<&NirBuildStats>,
-    _has_indirect_control_flow: bool,
-    _has_preserved_indirect_surface: bool,
-    _has_unresolved_unsupported_indirect: bool,
-    _has_dispatcher_recovery: bool,
 ) -> IndirectControlClassification {
     IndirectControlClassification::from_stats_only(stats)
 }
@@ -111,13 +107,7 @@ pub fn candidate_passes_explicit_quality_prefilter(
     entry: &InventoryRow,
     source_meta: Option<&SourceMeta>,
 ) -> bool {
-    let indirect = indirect_classification_from_parts(
-        entry.nir_build_stats.as_ref(),
-        entry.has_indirect_control_flow,
-        entry.has_preserved_indirect_surface,
-        entry.has_unresolved_unsupported_indirect,
-        entry.has_dispatcher_recovery,
-    );
+    let indirect = canonical_indirect_classification(entry.nir_build_stats.as_ref());
     source_is_nir_aligned(source_meta)
         && explicit_fact_total(entry) >= 2
         && entry.nir_direct_success
@@ -396,16 +386,10 @@ mod tests {
 
     #[test]
     fn stats_prefer_over_raw_flags_for_explicit_quality_prefilter() {
-        let classification = indirect_classification_from_parts(
-            Some(&NirBuildStats {
-                dispatcher_shape_recovered_count: 1,
-                ..Default::default()
-            }),
-            false,
-            true,
-            true,
-            false,
-        );
+        let classification = canonical_indirect_classification(Some(&NirBuildStats {
+            dispatcher_shape_recovered_count: 1,
+            ..Default::default()
+        }));
 
         assert!(classification.has_indirect_control);
         assert!(classification.has_dispatcher_recovery);
@@ -414,7 +398,7 @@ mod tests {
 
     #[test]
     fn missing_stats_fail_closed_for_indirect_classification() {
-        let classification = indirect_classification_from_parts(None, true, true, false, false);
+        let classification = canonical_indirect_classification(None);
 
         assert!(!classification.has_indirect_control);
         assert!(!classification.has_preserved_indirect_surface);

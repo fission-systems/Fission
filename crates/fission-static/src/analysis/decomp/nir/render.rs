@@ -1,11 +1,12 @@
 use super::FactStore;
+use super::nir_routing::auto_nir_admission_eligible;
 use super::nir_types::NirWorkerRequest;
 use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode,
-    PcodeOptimizer, PcodeOptimizerConfig, render_nir_with_binary_and_context,
-    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats,
+    NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOptimizer,
+    PcodeOptimizerConfig, render_nir_with_binary_and_context, render_nir_with_context,
+    take_last_nir_build_stats, take_last_nir_hint_stats,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
@@ -36,7 +37,7 @@ pub(crate) fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
         .blocks
         .iter()
         .flat_map(|block| block.ops.iter())
-        .filter(|op| op.opcode == PcodeOpcode::MultiEqual)
+        .filter(|op| op.opcode == fission_pcode::PcodeOpcode::MultiEqual)
         .map(|op| op.inputs.len())
         .max()
         .unwrap_or(0)
@@ -121,13 +122,7 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
-    if enforce_auto_gate
-        && !(binary.is_64bit
-            && binary.format.to_ascii_uppercase().starts_with("PE")
-            && pcode.blocks.len() <= 12
-            && pcode_total_ops(pcode) <= 600
-            && max_multiequal_fanin(pcode) <= 4)
-    {
+    if enforce_auto_gate && !auto_nir_admission_eligible(binary, pcode) {
         return Ok(None);
     }
 
@@ -363,13 +358,8 @@ pub(crate) fn render_nir_from_json_with_type_context(
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
     nir_diag_stage(address, "parse_pcode_done", parse_start);
-    if enforce_auto_gate
-        && !(binary.is_64bit
-            && binary.format.to_ascii_uppercase().starts_with("PE")
-            && pcode.blocks.len() <= 12
-            && pcode_total_ops(&pcode) <= 600
-            && max_multiequal_fanin(&pcode) <= 4)
-    {
+    let auto_gate_eligible = auto_nir_admission_eligible(binary, &pcode);
+    if enforce_auto_gate && !auto_gate_eligible {
         return Ok(None);
     }
 
@@ -383,11 +373,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
     let should_use_worker = binary.is_64bit
         && binary.format.to_ascii_uppercase().starts_with("PE")
         && !enforce_auto_gate
-        && !(binary.is_64bit
-            && binary.format.to_ascii_uppercase().starts_with("PE")
-            && pcode.blocks.len() <= 12
-            && pcode_total_ops(&pcode) <= 600
-            && max_multiequal_fanin(&pcode) <= 4);
+        && !auto_gate_eligible;
 
     if should_use_worker {
         let worker_timeout_ms = nir_worker_timeout_ms(timeout_ms);

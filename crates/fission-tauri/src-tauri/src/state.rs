@@ -5,7 +5,7 @@ use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
 use crate::services::cross_image::{AutoRenameKind, PropagationReason};
 use fission_dynamic::debug::ttd::Timeline;
-use fission_dynamic::plugin::PluginManager;
+use fission_plugin::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::{FactProvenance, FactStore};
 use std::collections::{HashMap, HashSet};

@@ -1,0 +1,21 @@
+[package]
+name = "fission-plugin"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Plugin facade crate for Fission runtime"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["fission", "plugin", "runtime"]
+categories = ["development-tools::debugging"]
+
+[features]
+default = []
+interactive_runtime = []
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+anyhow = "1.0"
+dirs = "5.0"

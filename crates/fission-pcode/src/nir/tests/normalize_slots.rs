@@ -350,7 +350,10 @@ fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
         .filter(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_"))
         .map(|binding| binding.name.clone())
         .collect::<Vec<_>>();
-    assert_eq!(surfaced_names, vec!["slot_0".to_string(), "slot_12f0".to_string()]);
+    assert_eq!(
+        surfaced_names,
+        vec!["slot_0".to_string(), "slot_12f0".to_string()]
+    );
 }
 
 #[test]
@@ -502,7 +505,10 @@ fn memory_slot_surfacing_skips_zero_offset_naked_temp_bases() {
     normalize_hir_function(&mut func);
 
     assert!(
-        !func.locals.iter().any(|binding| binding.name.starts_with("slot_")),
+        !func
+            .locals
+            .iter()
+            .any(|binding| binding.name.starts_with("slot_")),
         "unexpected slot alias locals: {:?}",
         func.locals
             .iter()

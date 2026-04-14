@@ -28,6 +28,7 @@ fission-loader = { path = "../../fission-loader" }
 fission-static = { path = "../../fission-static" }
 fission-decompiler-core = { path = "../../fission-decompiler-core" }
 fission-dynamic = { path = "../../fission-dynamic", features = ["interactive_runtime"] }  # needed for plugin/debug/runtime UI
+fission-plugin = { path = "../../fission-plugin", features = ["interactive_runtime"] }
 fission-pcode = { path = "../../fission-pcode" }
 fission-sleigh = { path = "../../fission-sleigh" }
 fission-signatures = { path = "../../fission-signatures" }

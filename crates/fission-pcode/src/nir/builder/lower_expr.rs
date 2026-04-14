@@ -46,15 +46,19 @@ impl<'a> PreviewBuilder<'a> {
         if resolved_site.is_none() {
             if let Some(scope_site) = scope {
                 resolved_site = self.def_sites.get(&key).and_then(|sites| {
-                    sites.iter()
+                    sites
+                        .iter()
                         .filter_map(|site| {
                             let candidate = LoweringSite {
                                 block_idx: site.block_idx,
                                 op_idx: site.op_idx,
                             };
                             if candidate.block_idx == scope_site.block_idx {
-                                return (candidate.op_idx < scope_site.op_idx)
-                                    .then_some((usize::MAX, candidate.op_idx, candidate));
+                                return (candidate.op_idx < scope_site.op_idx).then_some((
+                                    usize::MAX,
+                                    candidate.op_idx,
+                                    candidate,
+                                ));
                             }
                             self.dom_tree
                                 .dominates(candidate.block_idx, scope_site.block_idx)

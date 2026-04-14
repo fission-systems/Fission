@@ -15,6 +15,7 @@ members = [
     "crates/fission-signatures",
     "crates/fission-static",
     "crates/fission-dynamic",
+    "crates/fission-plugin",
     "crates/fission-ai",
     "crates/fission-analysis",
     "crates/fission-cli",

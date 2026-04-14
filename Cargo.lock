@@ -1453,6 +1453,7 @@ dependencies = [
  "dirs 5.0.1",
  "fission-core",
  "fission-loader",
+ "fission-plugin",
  "fission-static",
  "flate2",
  "hex",
@@ -1535,6 +1536,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 5.0.1",
+ "fission-core",
+ "fission-loader",
+]
+
+[[package]]
 name = "fission-signatures"
 version = "0.1.0"
 dependencies = [
@@ -1607,6 +1618,7 @@ dependencies = [
  "fission-dynamic",
  "fission-loader",
  "fission-pcode",
+ "fission-plugin",
  "fission-signatures",
  "fission-sleigh",
  "fission-static",

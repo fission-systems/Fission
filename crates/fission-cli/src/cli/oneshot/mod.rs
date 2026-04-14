@@ -2,6 +2,7 @@
 //!
 //! Executes a single command and exits (non-interactive).
 
+mod assessment;
 mod binary_info;
 #[cfg(feature = "native_decomp")]
 mod common;

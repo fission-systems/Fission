@@ -8,6 +8,21 @@ struct InferredJumpTableTargets {
     decode_mode: &'static str,
 }
 
+fn merge_inferred_branchind_targets(
+    targets: &mut Vec<u64>,
+    recovered_targets: InferredJumpTableTargets,
+    recovered_case_map: &mut Option<Vec<(i64, u64)>>,
+    recovered_selector_cardinality: &mut Option<usize>,
+) {
+    *recovered_selector_cardinality = Some(recovered_targets.selector_cardinality);
+    *recovered_case_map = Some(recovered_targets.recovered_cases);
+    for target in recovered_targets.unique_targets {
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir) fn lower_block_terminator(
         &mut self,
@@ -29,76 +44,23 @@ impl<'a> PreviewBuilder<'a> {
                 |this| {
                     let mut visiting = HashSet::new();
                     match op.opcode {
-                    PcodeOpcode::Return => {
-                        let expr = op
-                            .inputs
-                            .last()
-                            .map(|input| this.lower_wrapped_varnode(input, &mut HashSet::new()))
-                            .transpose()?;
-                        Ok(LoweredTerminator::Return(expr))
-                    }
-                    PcodeOpcode::Branch if op.inputs.len() == 1 => {
-                        let target_idx = op.inputs.first().and_then(|input| {
-                            this.resolve_branch_target_index_with_recovery(idx, op, input)
-                        });
-                        if let Some(target_idx) = target_idx {
-                            return Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)));
+                        PcodeOpcode::Return => {
+                            let expr = op
+                                .inputs
+                                .last()
+                                .map(|input| this.lower_wrapped_varnode(input, &mut HashSet::new()))
+                                .transpose()?;
+                            Ok(LoweredTerminator::Return(expr))
                         }
-                        if let Some(target_vn) = op.inputs.first() {
-                            let target_expr = this
-                                .lower_wrapped_varnode(target_vn, &mut HashSet::new())
-                                .ok();
-                            let succ_addrs = block
-                                .successors
-                                .iter()
-                                .filter_map(|succ_idx| {
-                                    this.pcode
-                                        .blocks
-                                        .get(*succ_idx as usize)
-                                        .map(|succ| succ.start_address)
-                                })
-                                .collect::<Vec<_>>();
-                            this.debug_branch_target_resolution_failure(
-                                "terminator_branch_target_resolve_fail",
-                                idx,
-                                block.start_address,
-                                op,
-                                target_vn,
-                                &succ_addrs,
-                            );
-
-                            if let Some(fallback_target) =
-                                this.infer_unconditional_branch_successor_target(idx)
-                            {
-                                return Ok(LoweredTerminator::Goto(fallback_target));
+                        PcodeOpcode::Branch if op.inputs.len() == 1 => {
+                            let target_idx = op.inputs.first().and_then(|input| {
+                                this.resolve_branch_target_index_with_recovery(idx, op, input)
+                            });
+                            if let Some(target_idx) = target_idx {
+                                return Ok(LoweredTerminator::Goto(
+                                    this.block_target_key(target_idx),
+                                ));
                             }
-
-                            // If the branch target points outside the current p-code slice,
-                            // degrade to explicit unsupported marker instead of aborting render.
-                            if branch_target_address(target_vn).is_some() {
-                                let evidence = this.build_unsupported_control_evidence(
-                                    op.opcode,
-                                    Some(block.start_address),
-                                    target_expr.as_ref(),
-                                    succ_addrs,
-                                    UnsupportedControlFamily::ExternalTarget,
-                                    IndirectControlSurface::BranchInd,
-                                    48,
-                                );
-                                return Ok(LoweredTerminator::Unsupported {
-                                    evidence,
-                                    target_expr,
-                                });
-                            }
-                        }
-                        Err(MlilPreviewError::UnsupportedCfgBranchTarget)
-                    }
-                    PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
-                        let true_target = if let Some(true_target_idx) =
-                            this.resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
-                        {
-                            this.block_target_key(true_target_idx)
-                        } else {
                             if let Some(target_vn) = op.inputs.first() {
                                 let target_expr = this
                                     .lower_wrapped_varnode(target_vn, &mut HashSet::new())
@@ -114,7 +76,7 @@ impl<'a> PreviewBuilder<'a> {
                                     })
                                     .collect::<Vec<_>>();
                                 this.debug_branch_target_resolution_failure(
-                                    "terminator_cbranch_target_resolve_fail",
+                                    "terminator_branch_target_resolve_fail",
                                     idx,
                                     block.start_address,
                                     op,
@@ -123,14 +85,14 @@ impl<'a> PreviewBuilder<'a> {
                                 );
 
                                 if let Some(fallback_target) =
-                                    this.infer_cbranch_true_target_from_successors(idx)
+                                    this.infer_unconditional_branch_successor_target(idx)
                                 {
-                                    // Keep conditional structure if CFG successors provide a unique
-                                    // non-fallthrough edge even when direct target resolution fails.
-                                    fallback_target
-                                } else if branch_target_address(target_vn).is_some() {
-                                    // Same policy as Branch: keep rendering by degrading to explicit
-                                    // unsupported marker when target resolution is external/unknown.
+                                    return Ok(LoweredTerminator::Goto(fallback_target));
+                                }
+
+                                // If the branch target points outside the current p-code slice,
+                                // degrade to explicit unsupported marker instead of aborting render.
+                                if branch_target_address(target_vn).is_some() {
                                     let evidence = this.build_unsupported_control_evidence(
                                         op.opcode,
                                         Some(block.start_address),
@@ -138,326 +100,380 @@ impl<'a> PreviewBuilder<'a> {
                                         succ_addrs,
                                         UnsupportedControlFamily::ExternalTarget,
                                         IndirectControlSurface::BranchInd,
-                                        40,
+                                        48,
                                     );
                                     return Ok(LoweredTerminator::Unsupported {
                                         evidence,
                                         target_expr,
                                     });
+                                }
+                            }
+                            Err(MlilPreviewError::UnsupportedCfgBranchTarget)
+                        }
+                        PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
+                            let true_target = if let Some(true_target_idx) = this
+                                .resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
+                            {
+                                this.block_target_key(true_target_idx)
+                            } else {
+                                if let Some(target_vn) = op.inputs.first() {
+                                    let target_expr = this
+                                        .lower_wrapped_varnode(target_vn, &mut HashSet::new())
+                                        .ok();
+                                    let succ_addrs = block
+                                        .successors
+                                        .iter()
+                                        .filter_map(|succ_idx| {
+                                            this.pcode
+                                                .blocks
+                                                .get(*succ_idx as usize)
+                                                .map(|succ| succ.start_address)
+                                        })
+                                        .collect::<Vec<_>>();
+                                    this.debug_branch_target_resolution_failure(
+                                        "terminator_cbranch_target_resolve_fail",
+                                        idx,
+                                        block.start_address,
+                                        op,
+                                        target_vn,
+                                        &succ_addrs,
+                                    );
+
+                                    if let Some(fallback_target) =
+                                        this.infer_cbranch_true_target_from_successors(idx)
+                                    {
+                                        // Keep conditional structure if CFG successors provide a unique
+                                        // non-fallthrough edge even when direct target resolution fails.
+                                        fallback_target
+                                    } else if branch_target_address(target_vn).is_some() {
+                                        // Same policy as Branch: keep rendering by degrading to explicit
+                                        // unsupported marker when target resolution is external/unknown.
+                                        let evidence = this.build_unsupported_control_evidence(
+                                            op.opcode,
+                                            Some(block.start_address),
+                                            target_expr.as_ref(),
+                                            succ_addrs,
+                                            UnsupportedControlFamily::ExternalTarget,
+                                            IndirectControlSurface::BranchInd,
+                                            40,
+                                        );
+                                        return Ok(LoweredTerminator::Unsupported {
+                                            evidence,
+                                            target_expr,
+                                        });
+                                    } else {
+                                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
+                                    }
                                 } else {
                                     return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                                 }
-                            } else {
-                                return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
-                            }
-                        };
-                        let recovered_cond = this
-                            .try_recover_x86_branch_condition(&op.inputs[1])?
-                            .filter(|expr| !Self::branch_cond_too_complex(expr));
-                        let cond = recovered_cond
-                            .map(Ok)
-                            .unwrap_or_else(|| {
-                                this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
+                            };
+                            let recovered_cond = this
+                                .try_recover_x86_branch_condition(&op.inputs[1])?
+                                .filter(|expr| !Self::branch_cond_too_complex(expr));
+                            let cond = recovered_cond
+                                .map(Ok)
+                                .unwrap_or_else(|| {
+                                    this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
+                                })
+                                .map_err(|err| {
+                                    this.debug_lowering_error(
+                                        "terminator_cond",
+                                        block.start_address,
+                                        u64::from(op.seq_num),
+                                        op.opcode,
+                                        &err,
+                                    );
+                                    err
+                                })?;
+                            Ok(LoweredTerminator::Cond {
+                                cond,
+                                true_target,
+                                false_target: this.next_block_address(idx),
                             })
-                            .map_err(|err| {
-                                this.debug_lowering_error(
-                                    "terminator_cond",
+                        }
+                        PcodeOpcode::BranchInd => {
+                            let switch_var = &op.inputs[0];
+                            let switch_expr =
+                                this.lower_branchind_switch_expr(idx, switch_var, &mut visiting)?;
+                            if preview_builder_diag_enabled() {
+                                eprintln!(
+                                    "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
                                     block.start_address,
-                                    u64::from(op.seq_num),
-                                    op.opcode,
-                                    &err,
+                                    op.seq_num,
+                                    print_expr(&switch_expr)
                                 );
-                                err
-                            })?;
-                        Ok(LoweredTerminator::Cond {
-                            cond,
-                            true_target,
-                            false_target: this.next_block_address(idx),
-                        })
-                    }
-                    PcodeOpcode::BranchInd => {
-                        let switch_var = &op.inputs[0];
-                        let switch_expr =
-                            this.lower_branchind_switch_expr(idx, switch_var, &mut visiting)?;
-                        if preview_builder_diag_enabled() {
-                            eprintln!(
-                                "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
-                                block.start_address,
-                                op.seq_num,
-                                print_expr(&switch_expr)
-                            );
-                        }
-                        let mut targets = Vec::new();
-                        let had_successor_targets = !block.successors.is_empty();
-                        for succ_idx in &block.successors {
-                            let succ_idx = *succ_idx as usize;
-                            if succ_idx < this.pcode.blocks.len() {
-                                targets.push(this.block_target_key(succ_idx));
                             }
-                        }
-                        let selector_alias =
-                            this.recover_branchind_jump_table_selector_varnode(idx);
-                        let mut inferred_single_input_target = false;
-                        let mut recovered_case_map = None;
-                        let mut recovered_selector_cardinality = None;
-                        if targets.is_empty()
-                            && let Some(recovered_targets) = this
+                            let mut targets = Vec::new();
+                            let had_successor_targets = !block.successors.is_empty();
+                            for succ_idx in &block.successors {
+                                let succ_idx = *succ_idx as usize;
+                                if succ_idx < this.pcode.blocks.len() {
+                                    targets.push(this.block_target_key(succ_idx));
+                                }
+                            }
+                            let selector_alias =
+                                this.recover_branchind_jump_table_selector_varnode(idx);
+                            let mut inferred_single_input_target = false;
+                            let mut recovered_case_map = None;
+                            let mut recovered_selector_cardinality = None;
+                            if let Some(recovered_targets) = this
                                 .infer_branchind_targets_from_jump_table_expr(
                                     idx,
                                     &switch_expr,
                                     selector_alias.as_ref(),
                                 )
-                        {
-                            recovered_selector_cardinality =
-                                Some(recovered_targets.selector_cardinality);
-                            recovered_case_map = Some(recovered_targets.recovered_cases);
-                            for target in recovered_targets.unique_targets {
-                                if !targets.contains(&target) {
-                                    targets.push(target);
-                                }
-                            }
-                        }
-                        if targets.is_empty()
-                            && let Some(inferred_target) =
-                                this.infer_branchind_target_from_input(idx, op, switch_var)
-                        {
-                            inferred_single_input_target = true;
-                            targets.push(inferred_target);
-                        }
-                        if targets.is_empty() {
-                            this.record_unsupported_inventory_event(
-                                "terminator_branchind_no_targets",
-                                Some(switch_var),
-                                Some(op),
-                                Some(op.opcode),
-                                Some(block.start_address),
-                                Some(u64::from(op.seq_num)),
-                                true,
-                                "branchind_targets_missing",
-                            );
-                            let evidence = this.build_unsupported_control_evidence(
-                                op.opcode,
-                                Some(block.start_address),
-                                Some(&switch_expr),
-                                Vec::new(),
-                                UnsupportedControlFamily::MissingTargets,
-                                IndirectControlSurface::BranchInd,
-                                32,
-                            );
-                            Ok(LoweredTerminator::Unsupported {
-                                evidence,
-                                target_expr: Some(switch_expr),
-                            })
-                        } else {
-                            if inferred_single_input_target
-                                && super::switch_table::has_jump_table_surface(
-                                    &switch_expr,
-                                    &this.options,
-                                )
                             {
-                                let rendered_target_expr = selector_alias
-                                    .as_ref()
-                                    .map(|alias| {
-                                        this.recover_branchind_render_selector_expr(
-                                            idx,
-                                            alias,
-                                            switch_expr.clone(),
-                                            &mut visiting,
-                                        )
-                                    })
-                                    .or_else(|| {
-                                        this.recover_branchind_switch_expr_from_predecessors(
-                                            idx,
-                                            switch_var,
-                                            &mut visiting,
-                                        )
-                                    })
-                                    .unwrap_or_else(|| switch_expr.clone());
-                                this.indirect_target_set_refined_count += 1;
-                                this.dispatcher_shape_recovered_count += 1;
+                                merge_inferred_branchind_targets(
+                                    &mut targets,
+                                    recovered_targets,
+                                    &mut recovered_case_map,
+                                    &mut recovered_selector_cardinality,
+                                );
+                            }
+                            if targets.is_empty()
+                                && let Some(inferred_target) =
+                                    this.infer_branchind_target_from_input(idx, op, switch_var)
+                            {
+                                inferred_single_input_target = true;
+                                targets.push(inferred_target);
+                            }
+                            if targets.is_empty() {
+                                this.record_unsupported_inventory_event(
+                                    "terminator_branchind_no_targets",
+                                    Some(switch_var),
+                                    Some(op),
+                                    Some(op.opcode),
+                                    Some(block.start_address),
+                                    Some(u64::from(op.seq_num)),
+                                    true,
+                                    "branchind_targets_missing",
+                                );
                                 let evidence = this.build_unsupported_control_evidence(
                                     op.opcode,
                                     Some(block.start_address),
-                                    Some(&rendered_target_expr),
-                                    targets,
-                                    UnsupportedControlFamily::NonStructuralDispatcher,
-                                    IndirectControlSurface::DispatcherLike,
-                                    52,
+                                    Some(&switch_expr),
+                                    Vec::new(),
+                                    UnsupportedControlFamily::MissingTargets,
+                                    IndirectControlSurface::BranchInd,
+                                    32,
                                 );
-                                return Ok(LoweredTerminator::Unsupported {
+                                Ok(LoweredTerminator::Unsupported {
                                     evidence,
-                                    target_expr: Some(rendered_target_expr),
-                                });
-                            }
-                            let default_target = this.infer_switch_default_target(idx, &targets);
-                            // Attempt to recover a proof-bearing selector before we synthesize
-                            // a switch. Single-target self-loop dispatcher shapes stay as
-                            // explicit indirect surfaces instead of becoming degenerate switches.
-                            let recovered_selector =
-                                super::switch_table::recover_switch_discriminant(
-                                    &switch_expr,
-                                    &this.options,
-                                );
-                            let single_target_dispatcher =
-                                super::switch_table::proves_single_target_dispatcher_surface(
-                                    &switch_expr,
-                                    &targets,
-                                    this.block_target_key(idx),
-                                    &this.options,
-                                );
-                            let dispatcher_recovered =
-                                recovered_selector.is_some() || single_target_dispatcher;
-                            let (expr, min_val) = recovered_selector
-                                .as_ref()
-                                .map(|selector| {
-                                    let render_expr = selector_alias
+                                    target_expr: Some(switch_expr),
+                                })
+                            } else {
+                                if inferred_single_input_target
+                                    && super::switch_table::has_jump_table_surface(
+                                        &switch_expr,
+                                        &this.options,
+                                    )
+                                {
+                                    let rendered_target_expr = selector_alias
                                         .as_ref()
                                         .map(|alias| {
                                             this.recover_branchind_render_selector_expr(
                                                 idx,
                                                 alias,
-                                                selector.discriminant.clone(),
+                                                switch_expr.clone(),
                                                 &mut visiting,
                                             )
                                         })
-                                        .unwrap_or_else(|| selector.discriminant.clone());
-                                    this.normalize_rendered_selector_expr(
-                                        render_expr,
-                                        selector.min_val,
-                                    )
-                                })
-                                .unwrap_or_else(|| (switch_expr.clone(), 0));
-                            let normalization = recovered_selector.as_ref().map(|selector| {
-                                this.selector_normalization_for_branchind(
-                                    &expr,
-                                    selector.min_val,
-                                    selector.entry_size,
-                                    recovered_case_map.as_deref(),
-                                )
-                            });
-                            let side_effect_free_selector =
-                                Self::selector_expr_is_side_effect_free(&expr);
-                            let recovered_cases = recovered_case_map.unwrap_or_else(|| {
-                                targets
-                                    .iter()
-                                    .copied()
-                                    .enumerate()
-                                    .filter_map(|(ordinal, target)| {
-                                        (Some(target) != default_target)
-                                            .then_some((min_val + ordinal as i64, target))
-                                    })
-                                    .collect::<Vec<_>>()
-                            });
-                            let selector_cardinality = recovered_selector_cardinality
-                                .unwrap_or(recovered_cases.len());
-                            let target_cardinality = recovered_cases
-                                .iter()
-                                .map(|(_, target)| *target)
-                                .collect::<std::collections::BTreeSet<_>>()
-                                .len();
-                            let ordinal_domain_complete = selector_cardinality >= 2
-                                && !recovered_cases.is_empty()
-                                && recovered_cases.len() >= selector_cardinality;
-                            let shared_tail_conflict = false;
-                            let case_map_source = match (
-                                had_successor_targets,
-                                recovered_selector_cardinality.is_some(),
-                            ) {
-                                (true, true) => DispatcherCaseMapSource::Merged,
-                                (false, true) => DispatcherCaseMapSource::JumpTableRecovered,
-                                (true, false) => DispatcherCaseMapSource::SuccessorOnly,
-                                (false, false) => DispatcherCaseMapSource::SuccessorOnly,
-                            };
-                            let mut guard_set = vec!["successor_bounded".to_string()];
-                            if recovered_selector.is_some() {
-                                guard_set.push("selector_normalized".to_string());
-                            }
-                            if default_target.is_some() {
-                                guard_set.push("follow_candidate".to_string());
-                            }
-                            if ordinal_domain_complete {
-                                guard_set.push("ordinal_domain_complete".to_string());
-                            }
-                            let follow_or_bounded = default_target.is_some() || ordinal_domain_complete;
-                            let proof_complete = follow_or_bounded
-                                && ordinal_domain_complete
-                                && side_effect_free_selector
-                                && !single_target_dispatcher
-                                && !shared_tail_conflict;
-                            let failure_family = if proof_complete {
-                                None
-                            } else if !side_effect_free_selector {
-                                Some(ProofFailureFamily::NonSideEffectFreeSelector)
-                            } else if !ordinal_domain_complete {
-                                Some(ProofFailureFamily::MissingOrdinalCoverage)
-                            } else if !follow_or_bounded {
-                                Some(ProofFailureFamily::MissingFollow)
-                            } else if shared_tail_conflict {
-                                Some(ProofFailureFamily::SharedTailConflict)
-                            } else {
-                                Some(ProofFailureFamily::AmbiguousTargetMap)
-                            };
-                            let legality_witness = Some(DispatcherLegality {
-                                follow_block: default_target,
-                                postdom_ok: follow_or_bounded,
-                                side_effect_free_selector,
-                                ordinal_domain_complete,
-                                shared_tail_conflict,
-                                valid: proof_complete,
-                            });
-                            let proof = Some(DispatcherProofUnit {
-                                selector_expr: print_expr(&expr),
-                                rendered_selector_expr: Some(print_expr(&expr)),
-                                candidate_targets: targets.clone(),
-                                recovered_cases,
-                                selector_cardinality,
-                                target_cardinality,
-                                case_map_source,
-                                default_target,
-                                guard_set,
-                                follow_block: default_target,
-                                normalization,
-                                legality_witness,
-                                proof_scope: DispatcherProofScope::TerminatorLocal,
-                                proof_complete,
-                                failure_family,
-                            });
-                            this.dispatcher_proof_unit_count += 1;
-                            if proof_complete {
-                                this.dispatcher_proof_completed_count += 1;
-                            } else {
-                                this.dispatcher_proof_failed_count += 1;
-                            }
-                            this.indirect_target_set_refined_count += 1;
-                            if dispatcher_recovered {
-                                this.dispatcher_shape_recovered_count += 1;
-                            }
-                            if target_cardinality == 0 || single_target_dispatcher {
-                                let evidence = UnsupportedControlEvidence {
-                                    opcode: format!("{:?}", op.opcode),
-                                    source_block: Some(block.start_address),
-                                    target_expr: Some(print_expr(&expr)),
-                                    successor_targets: targets,
-                                    failure_family:
+                                        .or_else(|| {
+                                            this.recover_branchind_switch_expr_from_predecessors(
+                                                idx,
+                                                switch_var,
+                                                &mut visiting,
+                                            )
+                                        })
+                                        .unwrap_or_else(|| switch_expr.clone());
+                                    this.indirect_target_set_refined_count += 1;
+                                    this.dispatcher_shape_recovered_count += 1;
+                                    let evidence = this.build_unsupported_control_evidence(
+                                        op.opcode,
+                                        Some(block.start_address),
+                                        Some(&rendered_target_expr),
+                                        targets,
                                         UnsupportedControlFamily::NonStructuralDispatcher,
-                                    surface: IndirectControlSurface::DispatcherLike,
-                                    confidence: if dispatcher_recovered { 60 } else { 40 },
-                                };
-                                return Ok(LoweredTerminator::Unsupported {
-                                    evidence,
-                                    target_expr: Some(expr),
+                                        IndirectControlSurface::DispatcherLike,
+                                        52,
+                                    );
+                                    return Ok(LoweredTerminator::Unsupported {
+                                        evidence,
+                                        target_expr: Some(rendered_target_expr),
+                                    });
+                                }
+                                let default_target =
+                                    this.infer_switch_default_target(idx, &targets);
+                                // Attempt to recover a proof-bearing selector before we synthesize
+                                // a switch. Single-target self-loop dispatcher shapes stay as
+                                // explicit indirect surfaces instead of becoming degenerate switches.
+                                let recovered_selector =
+                                    super::switch_table::recover_switch_discriminant(
+                                        &switch_expr,
+                                        &this.options,
+                                    );
+                                let single_target_dispatcher =
+                                    super::switch_table::proves_single_target_dispatcher_surface(
+                                        &switch_expr,
+                                        &targets,
+                                        this.block_target_key(idx),
+                                        &this.options,
+                                    );
+                                let dispatcher_recovered =
+                                    recovered_selector.is_some() || single_target_dispatcher;
+                                let (expr, min_val) = recovered_selector
+                                    .as_ref()
+                                    .map(|selector| {
+                                        let render_expr = selector_alias
+                                            .as_ref()
+                                            .map(|alias| {
+                                                this.recover_branchind_render_selector_expr(
+                                                    idx,
+                                                    alias,
+                                                    selector.discriminant.clone(),
+                                                    &mut visiting,
+                                                )
+                                            })
+                                            .unwrap_or_else(|| selector.discriminant.clone());
+                                        this.normalize_rendered_selector_expr(
+                                            render_expr,
+                                            selector.min_val,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| (switch_expr.clone(), 0));
+                                let normalization = recovered_selector.as_ref().map(|selector| {
+                                    this.selector_normalization_for_branchind(
+                                        &expr,
+                                        selector.min_val,
+                                        selector.entry_size,
+                                        recovered_case_map.as_deref(),
+                                    )
                                 });
+                                let side_effect_free_selector =
+                                    Self::selector_expr_is_side_effect_free(&expr);
+                                let recovered_cases = recovered_case_map.unwrap_or_else(|| {
+                                    targets
+                                        .iter()
+                                        .copied()
+                                        .enumerate()
+                                        .filter_map(|(ordinal, target)| {
+                                            (Some(target) != default_target)
+                                                .then_some((min_val + ordinal as i64, target))
+                                        })
+                                        .collect::<Vec<_>>()
+                                });
+                                let selector_cardinality =
+                                    recovered_selector_cardinality.unwrap_or(recovered_cases.len());
+                                let target_cardinality = recovered_cases
+                                    .iter()
+                                    .map(|(_, target)| *target)
+                                    .collect::<std::collections::BTreeSet<_>>()
+                                    .len();
+                                let ordinal_domain_complete = selector_cardinality >= 2
+                                    && !recovered_cases.is_empty()
+                                    && recovered_cases.len() >= selector_cardinality;
+                                let shared_tail_conflict = false;
+                                let case_map_source = match (
+                                    had_successor_targets,
+                                    recovered_selector_cardinality.is_some(),
+                                ) {
+                                    (true, true) => DispatcherCaseMapSource::Merged,
+                                    (false, true) => DispatcherCaseMapSource::JumpTableRecovered,
+                                    (true, false) => DispatcherCaseMapSource::SuccessorOnly,
+                                    (false, false) => DispatcherCaseMapSource::SuccessorOnly,
+                                };
+                                let mut guard_set = vec!["successor_bounded".to_string()];
+                                if recovered_selector.is_some() {
+                                    guard_set.push("selector_normalized".to_string());
+                                }
+                                if default_target.is_some() {
+                                    guard_set.push("follow_candidate".to_string());
+                                }
+                                if ordinal_domain_complete {
+                                    guard_set.push("ordinal_domain_complete".to_string());
+                                }
+                                let follow_or_bounded =
+                                    default_target.is_some() || ordinal_domain_complete;
+                                let proof_complete = follow_or_bounded
+                                    && ordinal_domain_complete
+                                    && side_effect_free_selector
+                                    && !single_target_dispatcher
+                                    && !shared_tail_conflict;
+                                let failure_family = if proof_complete {
+                                    None
+                                } else if !side_effect_free_selector {
+                                    Some(ProofFailureFamily::NonSideEffectFreeSelector)
+                                } else if !ordinal_domain_complete {
+                                    Some(ProofFailureFamily::MissingOrdinalCoverage)
+                                } else if !follow_or_bounded {
+                                    Some(ProofFailureFamily::MissingFollow)
+                                } else if shared_tail_conflict {
+                                    Some(ProofFailureFamily::SharedTailConflict)
+                                } else {
+                                    Some(ProofFailureFamily::AmbiguousTargetMap)
+                                };
+                                let legality_witness = Some(DispatcherLegality {
+                                    follow_block: default_target,
+                                    postdom_ok: follow_or_bounded,
+                                    side_effect_free_selector,
+                                    ordinal_domain_complete,
+                                    shared_tail_conflict,
+                                    valid: proof_complete,
+                                });
+                                let proof = Some(DispatcherProofUnit {
+                                    selector_expr: print_expr(&expr),
+                                    rendered_selector_expr: Some(print_expr(&expr)),
+                                    candidate_targets: targets.clone(),
+                                    recovered_cases,
+                                    selector_cardinality,
+                                    target_cardinality,
+                                    case_map_source,
+                                    default_target,
+                                    guard_set,
+                                    follow_block: default_target,
+                                    normalization,
+                                    legality_witness,
+                                    proof_scope: DispatcherProofScope::TerminatorLocal,
+                                    proof_complete,
+                                    failure_family,
+                                });
+                                this.dispatcher_proof_unit_count += 1;
+                                if proof_complete {
+                                    this.dispatcher_proof_completed_count += 1;
+                                } else {
+                                    this.dispatcher_proof_failed_count += 1;
+                                }
+                                this.indirect_target_set_refined_count += 1;
+                                if dispatcher_recovered {
+                                    this.dispatcher_shape_recovered_count += 1;
+                                }
+                                if target_cardinality == 0 || single_target_dispatcher {
+                                    let evidence = UnsupportedControlEvidence {
+                                        opcode: format!("{:?}", op.opcode),
+                                        source_block: Some(block.start_address),
+                                        target_expr: Some(print_expr(&expr)),
+                                        successor_targets: targets,
+                                        failure_family:
+                                            UnsupportedControlFamily::NonStructuralDispatcher,
+                                        surface: IndirectControlSurface::DispatcherLike,
+                                        confidence: if dispatcher_recovered { 60 } else { 40 },
+                                    };
+                                    return Ok(LoweredTerminator::Unsupported {
+                                        evidence,
+                                        target_expr: Some(expr),
+                                    });
+                                }
+                                Ok(LoweredTerminator::Switch {
+                                    expr,
+                                    targets,
+                                    default_target,
+                                    min_val,
+                                    proof,
+                                })
                             }
-                            Ok(LoweredTerminator::Switch {
-                                expr,
-                                targets,
-                                default_target,
-                                min_val,
-                                proof,
-                            })
                         }
-                    }
-                    _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
+                        _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
                     }
                 },
             )?
@@ -578,9 +594,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Binary { lhs, rhs, .. } => {
                 1 + Self::expr_node_count(lhs) + Self::expr_node_count(rhs)
             }
-            HirExpr::Call { args, .. } => {
-                1 + args.iter().map(Self::expr_node_count).sum::<usize>()
-            }
+            HirExpr::Call { args, .. } => 1 + args.iter().map(Self::expr_node_count).sum::<usize>(),
             HirExpr::Index { base, index, .. } => {
                 1 + Self::expr_node_count(base) + Self::expr_node_count(index)
             }
@@ -880,7 +894,12 @@ impl<'a> PreviewBuilder<'a> {
             .find(|expr| super::switch_table::has_jump_table_surface(expr, &self.options))
             .cloned();
 
-        match (best_jump_table_expr, exact_expr, alias_expr, predecessor_expr) {
+        match (
+            best_jump_table_expr,
+            exact_expr,
+            alias_expr,
+            predecessor_expr,
+        ) {
             (Some(expr), _, _, _) => Ok(expr),
             (None, Some(expr), _, _) => Ok(expr),
             (None, None, Some(alias), _) => Ok(alias),
@@ -997,9 +1016,9 @@ impl<'a> PreviewBuilder<'a> {
                     block_idx: pcode_idx,
                     op_idx,
                 };
-                if let Ok(expr) = self.with_lowering_site(site, |this| {
-                    this.lower_wrapped_varnode(output, visiting)
-                }) {
+                if let Ok(expr) = self
+                    .with_lowering_site(site, |this| this.lower_wrapped_varnode(output, visiting))
+                {
                     if preview_builder_diag_enabled() {
                         eprintln!(
                             "[DIAG] branchind_pred_expr block=0x{:x} pred=0x{:x} op_seq=0x{:x} expr={}",
@@ -1112,7 +1131,9 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => Self::selector_expr_is_side_effect_free(expr),
+            | HirExpr::AggregateCopy { src: expr, .. } => {
+                Self::selector_expr_is_side_effect_free(expr)
+            }
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::selector_expr_is_side_effect_free(lhs)
                     && Self::selector_expr_is_side_effect_free(rhs)
@@ -1152,11 +1173,7 @@ impl<'a> PreviewBuilder<'a> {
         let normalized_selector = selector_alias
             .and_then(|alias| {
                 let mut selector_visiting = HashSet::new();
-                self.recover_selector_expr_from_predecessors(
-                    idx,
-                    alias,
-                    &mut selector_visiting,
-                )
+                self.recover_selector_expr_from_predecessors(idx, alias, &mut selector_visiting)
             })
             .unwrap_or_else(|| selector.discriminant.clone());
         let max_selector = self
@@ -1208,12 +1225,9 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(raw) = binary.get_bytes(entry_addr, entry_width) else {
                     break;
                 };
-                let Some(target_addr) = decode_jump_table_target(
-                    &raw,
-                    little_endian,
-                    relative_entries,
-                    relative_base,
-                ) else {
+                let Some(target_addr) =
+                    decode_jump_table_target(&raw, little_endian, relative_entries, relative_base)
+                else {
                     continue;
                 };
                 let Some(target_idx) = canonical_block_index_for_address(
@@ -1364,7 +1378,8 @@ impl<'a> PreviewBuilder<'a> {
                 if let Ok(expr) = self.with_lowering_site(site, |this| {
                     this.lower_selector_source_expr(output, visiting)
                 }) {
-                    self.selector_representatives.insert(cache_key, expr.clone());
+                    self.selector_representatives
+                        .insert(cache_key, expr.clone());
                     return Some(expr);
                 }
             }
@@ -2090,7 +2105,9 @@ fn extract_selector_upper_bound_from_cond(
 
 #[cfg(test)]
 mod tests {
-    use super::branchind_decode_modes;
+    use super::{
+        InferredJumpTableTargets, branchind_decode_modes, merge_inferred_branchind_targets,
+    };
 
     #[test]
     fn branchind_decode_modes_include_image_base_relative_for_absolute_tables() {
@@ -2106,6 +2123,31 @@ mod tests {
         assert_eq!(
             modes,
             vec![("relative_target_base", true, Some(0x1400_7000))]
+        );
+    }
+
+    #[test]
+    fn merge_inferred_branchind_targets_preserves_case_map_with_successors() {
+        let mut targets = vec![0x2000];
+        let mut recovered_case_map = None;
+        let mut recovered_selector_cardinality = None;
+        merge_inferred_branchind_targets(
+            &mut targets,
+            InferredJumpTableTargets {
+                unique_targets: vec![0x2000, 0x3000, 0x4000],
+                recovered_cases: vec![(0, 0x2000), (1, 0x3000), (2, 0x4000), (3, 0x3000)],
+                selector_cardinality: 4,
+                decode_mode: "absolute",
+            },
+            &mut recovered_case_map,
+            &mut recovered_selector_cardinality,
+        );
+
+        assert_eq!(targets, vec![0x2000, 0x3000, 0x4000]);
+        assert_eq!(recovered_selector_cardinality, Some(4));
+        assert_eq!(
+            recovered_case_map,
+            Some(vec![(0, 0x2000), (1, 0x3000), (2, 0x4000), (3, 0x3000)])
         );
     }
 }

@@ -1,3 +1,4 @@
+mod assessment;
 mod build;
 mod schema;
 mod summary;

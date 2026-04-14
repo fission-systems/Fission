@@ -19,8 +19,7 @@ pub mod app;
 )]
 pub mod debug;
 #[cfg(feature = "interactive_runtime")]
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-pub mod plugin;
+pub use fission_plugin::plugin;
 pub mod prelude;
 #[cfg(feature = "unpacker_runtime")]
 #[allow(

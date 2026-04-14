@@ -361,8 +361,8 @@ fn multi_block_preview_lowers_switch_chain_after_upper_bound_guard() {
 
     let mut options = preview_options();
     options.force_linear_structuring = true;
-    let code = render_mlil_preview(&func, "guarded_switchy", 0x5400, &options)
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "guarded_switchy", 0x5400, &options).expect("preview render");
     assert!(code.contains("switch (param_1) {"), "{code}");
     assert!(code.contains("case 1:"), "{code}");
     assert!(code.contains("case 2:"), "{code}");

@@ -269,10 +269,7 @@ pub(super) fn proves_single_target_dispatcher_surface(
     has_jump_table_surface(switch_expr, options)
 }
 
-pub(super) fn has_jump_table_surface(
-    switch_expr: &HirExpr,
-    options: &NirRenderOptions,
-) -> bool {
+pub(super) fn has_jump_table_surface(switch_expr: &HirExpr, options: &NirRenderOptions) -> bool {
     recover_switch_discriminant(switch_expr, options).is_some()
         || is_mapped_global_load_source(switch_expr, options)
 }
@@ -553,7 +550,10 @@ mod tests {
     fn recovers_selector_with_split_constant_base_chain() {
         let opts = options_with_section(0x40b000, 0x40c000);
         let sel = var("sel");
-        let expr = load32(add(cst(0x40af00), add(cst(0x100), shl(sel.clone(), cst(2)))));
+        let expr = load32(add(
+            cst(0x40af00),
+            add(cst(0x100), shl(sel.clone(), cst(2))),
+        ));
         let result = recover_switch_discriminant(&expr, &opts);
         assert!(result.is_some());
         let recovered = result.unwrap();
