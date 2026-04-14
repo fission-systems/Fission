@@ -63,6 +63,10 @@ vendor/
 # Local sample corpora and scratch projects
 samples/
 
+# Local scripts and thesis working directories
+/scripts/
+/thesis/
+
 # Script run outputs (result dirs, benchmarks, temp comparison runs)
 # Use ** (not trailing /) so specific files can be un-ignored below
 scripts/result/**
