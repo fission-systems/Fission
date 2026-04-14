@@ -3,14 +3,36 @@
 /target2/
 /coverage/
 
+# Native/C++ build artifacts
+/build/
+ghidra_decompiler/build/
+ghidra_decompiler/fission_decomp
+*.obj
+*.lib
+*.exe
+*.pdb
+build_log.txt
+cargo_error*.txt
+
+# Temporary files created during development
+memory_loadimage.hh
+memory_loadimage.cc
+/putty_single.c
+
 # Python and environment
 .venv/
 .opencode/
 __pycache__/
 *.pyc
+*.pyo
+.Python
+*.egg-info/
+scripts/**/__pycache__/
+scripts/**/*.pyc
 
-# Cargo lock for binaries (optional, some prefer to commit it)
-# Cargo.lock
+# Environment files
+.env
+.env.local
 
 # IDE and editor files
 .idea/
@@ -24,50 +46,11 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 
-# Debug files
-*.pdb
-
-# Python cache (if using Python scripting)
-__pycache__/
-*.pyc
-*.pyo
-.Python
-*.egg-info/
-
-# Environment files
-.env
-.env.local
-
 # Logs
 *.log
 
-# C++ Build artifacts
-/build/
-*.obj
-*.lib
-*.exe
-build_log.txt
-cargo_error*.txt
-
-# Temporary files created during development
-memory_loadimage.hh
-memory_loadimage.cc
-/putty_single.c
-
-# Submodule build directories
-ghidra_decompiler/build/
-
-# Ghidra and vendor dependencies
+# Third-party/vendor dependencies
 vendor/
-
-# Build artifacts
-/build/
-ghidra_decompiler/build/
-ghidra_decompiler/fission_decomp
-*.obj
-*.lib
-*.exe
-*.pdb
 
 # Examples and results
 /examples/results/
@@ -89,11 +72,7 @@ scripts/result*/**
 !scripts/result/baseline_x86_summary.json
 scripts/out/
 
-# Python cache in scripts
-scripts/**/__pycache__/
-scripts/**/*.pyc
-
-# Backup artifacts
+# Backup/cache artifacts
 *.backup
 *.cache/
 ghidra_decompiler/.cache/
@@ -114,7 +93,10 @@ artifacts/
 # Local benchmark scratch file
 /test_bench.json
 
-# Local benchmark scratch file
-/test_bench.json
-
+# Local agent/tooling and benchmark workspace state
+/.cursor/
+/.claude/
+/.agent/
 /.sisyphus/
+/.venv-bench/
+/config/
