@@ -6,10 +6,9 @@ use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::function_select::{
     canonical_functions_sorted, select_functions_from_addresses_file,
 };
+use fission_decompiler_core::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_static::analysis::decomp::{
-    FactStore, NirEngineMode, NirSurfaceKind, auto_nir_eligible,
-};
+use fission_static::analysis::decomp::FactStore;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};

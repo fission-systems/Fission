@@ -169,7 +169,7 @@ pub(super) fn decompile_code_with_profile(
         EngineMode::RustSleigh => NirEngineMode::Nir,
     };
     let preview = select_nir_output_with_facts(
-        decomp,
+        &mut NativeNirSource::new(decomp),
         binary,
         &fact_store,
         address,
@@ -210,7 +210,7 @@ pub(super) fn decompile_code_with_profile(
             let error_text = e.to_string();
             if !matches!(engine_mode, EngineMode::Legacy) {
                 if let Some(selection) = rescue_nir_output_with_facts(
-                    decomp,
+                    &mut NativeNirSource::new(decomp),
                     binary,
                     &fact_store,
                     address,

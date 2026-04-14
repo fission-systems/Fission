@@ -1,24 +1,24 @@
-use crate::analysis::decomp::FactStore;
+use fission_static::analysis::decomp::facts::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirRenderOptions, PcodeFunction};
 
-pub use super::nir_recovery::{PreviewRoutingDecision, PreviewSelection};
-pub use super::nir_routing::{
+pub use crate::recovery::{PreviewRoutingDecision, PreviewSelection};
+pub use crate::routing::{
     auto_nir_admission_eligible, auto_nir_eligible, native_failure_routing_decision,
     rescue_nir_output, rescue_nir_output_with_facts, select_nir_output,
     select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
     select_nir_output_with_facts,
 };
-pub use super::nir_taxonomy::{
+pub use crate::taxonomy::{
     classified_nir_error, classify_native_failure_kind, classify_nir_failure,
     classify_nir_failure_refined, fallback_reason_with_kind,
 };
-pub use super::nir_types::{
+pub use crate::types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
     NirWorkerRequest, NirWorkerResponse, PreviewEngineMode, PreviewRoutingResolver, PreviewSource,
     PreviewSurfaceKind, PreviewWorkerRequest, PreviewWorkerResponse,
 };
-pub use super::nir_worker::{execute_nir_worker, execute_preview_worker};
+pub use crate::worker::{execute_nir_worker, execute_preview_worker};
 
 pub fn nir_fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
     fallback_reason_with_kind(kind, detail)
@@ -103,9 +103,9 @@ pub fn rescue_preview_output_with_facts<S: NirSource>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::nir_render::{build_nir_type_context_from_facts, make_nir_request};
-    use super::super::nir_types::sanitize_preview_symbol_name;
-    use super::super::nir_worker::nir_worker_timeout_ms;
+    use crate::facts::sanitize_nir_symbol_name;
+    use crate::render::{build_nir_type_context_from_facts, make_nir_request};
+    use crate::worker::nir_worker_timeout_ms;
     use super::*;
     use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::types::{
@@ -300,7 +300,7 @@ mod tests {
         facts.ingest_name_fact(
             0x401000,
             "RenamedTarget".to_string(),
-            crate::analysis::decomp::FactProvenance::StrongFid,
+            fission_static::analysis::decomp::facts::FactProvenance::StrongFid,
         );
 
         let context = build_nir_type_context_from_facts(&binary, &facts, 0x401000);
@@ -370,10 +370,10 @@ mod tests {
     #[test]
     fn sanitize_preview_symbol_name_strips_import_prefixes_and_suffixes() {
         assert_eq!(
-            sanitize_preview_symbol_name("__imp_MessageBoxW"),
+            sanitize_nir_symbol_name("__imp_MessageBoxW"),
             "MessageBoxW"
         );
-        assert_eq!(sanitize_preview_symbol_name("foo [import]"), "foo");
+        assert_eq!(sanitize_nir_symbol_name("foo [import]"), "foo");
     }
 
     #[test]

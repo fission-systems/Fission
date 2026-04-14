@@ -1,4 +1,4 @@
-use crate::analysis::decomp::postprocess::PostProcessor;
+use crate::postprocess::PostProcessor;
 use crate::utils::patterns::*;
 use fission_loader::loader::types::DwarfLocation;
 use once_cell::sync::Lazy;

@@ -1,8 +1,44 @@
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, Varnode};
 use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
+use fission_static::analysis::decomp::facts::FactStore;
 
-pub use fission_static::analysis::decomp::{NirEngineMode, NirSelection};
+pub mod adapters;
+pub mod engine;
+pub mod facts;
+pub mod postprocess;
+pub mod recovery;
+pub mod render;
+pub mod request;
+pub mod routing;
+pub mod taxonomy;
+pub mod types;
+pub mod worker;
+
+pub use fission_static::utils;
+pub use adapters::{NativeDecompilerBackend, NativeDecompilerSource};
+
+pub use engine::{
+    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
+    NirSurfaceKind, NirWorkerRequest, NirWorkerResponse, PreviewEngineMode,
+    PreviewRoutingDecision, PreviewRoutingResolver, PreviewSelection, PreviewSource,
+    PreviewSurfaceKind, PreviewWorkerRequest, PreviewWorkerResponse, auto_nir_admission_eligible,
+    auto_nir_eligible, classified_nir_error, classify_native_failure_kind,
+    classify_nir_failure, classify_nir_failure_refined, execute_nir_worker,
+    execute_preview_worker, fallback_reason_with_kind, native_failure_routing_decision,
+    nir_fallback_reason_with_kind, rescue_nir_output, rescue_nir_output_with_facts,
+    select_nir_output, select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
+    select_nir_output_with_facts,
+};
+pub use postprocess::{PostProcessor, RustPostProcessOptions};
+pub use request::{DecompileRequest, DecompileResult, decompile_prebuilt_pcode};
+
+pub type DecompileEngineMode = NirEngineMode;
+pub type DecompileSelection = NirSelection;
+pub type DecompileRoutingDecision = NirRoutingDecision;
+pub type PostProcessOptions = RustPostProcessOptions;
+pub type WorkerRequest = NirWorkerRequest;
+pub type WorkerResponse = NirWorkerResponse;
 
 #[derive(Debug, Clone)]
 pub struct RustSleighDecompileConfig {
@@ -337,17 +373,18 @@ pub fn select_nir_output_from_prebuilt_pcode(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
-    let fact_store = fission_static::analysis::decomp::FactStore::from_binary(binary);
-    fission_static::analysis::decomp::select_nir_output_from_pcode_with_facts(
-        pcode,
+    let fact_store = FactStore::from_binary(binary);
+    let request = DecompileRequest {
         binary,
-        &fact_store,
-        address,
-        name,
-        mode,
+        fact_store: Some(&fact_store),
+        function_address: address,
+        function_name: Some(name),
+        engine_mode: mode,
         timeout_ms,
-        options,
-    )
+        render_options: Some(options),
+        postprocess_options: None,
+    };
+    decompile_prebuilt_pcode(pcode, &request).map(|result| result.selection)
 }
 
 #[cfg(test)]

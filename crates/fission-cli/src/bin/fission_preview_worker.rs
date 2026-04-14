@@ -1,4 +1,4 @@
-use fission_static::analysis::decomp::nir_worker::{
+use fission_decompiler_core::{
     PreviewWorkerRequest, PreviewWorkerResponse, execute_preview_worker,
 };
 use std::io::{self, Read, Write};

@@ -1,4 +1,4 @@
-use fission_static::analysis::decomp::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
+use fission_decompiler_core::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
 use std::io::{self, Read, Write};
 
 #[cfg(feature = "allocator-mimalloc")]

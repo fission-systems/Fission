@@ -65,7 +65,7 @@ fn build_preview_candidate_entry(
             }
 
             if let Ok(selection) = select_nir_output_with_facts(
-                decomp,
+                &mut NativeNirSource::new(decomp),
                 binary,
                 fact_store,
                 func.address,

@@ -1,8 +1,8 @@
-use super::nir_render::{
+use crate::render::{
     render_nir_from_json_with_type_context, render_nir_from_pcode_with_type_context_and_options,
 };
-use super::nir_taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
-use super::nir_types::{NirRoutingResolver, NirSelection};
+use crate::taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
+use crate::types::{NirRoutingResolver, NirSelection};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     NirBuildStats, NirRenderOptions, NirTypeContext, PcodeFunction, RecoveryMode,
@@ -242,4 +242,4 @@ pub(crate) fn try_structuring_recovery_from_pcode(
     }
 }
 
-pub use super::nir_types::{PreviewRoutingDecision, PreviewSelection};
+pub use crate::types::{PreviewRoutingDecision, PreviewSelection};

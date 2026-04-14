@@ -1,5 +1,5 @@
-use super::nir_render::{nir_diag_event, render_nir_request};
-use super::nir_types::{NirWorkerRequest, NirWorkerResponse};
+use crate::render::{nir_diag_event, render_nir_request};
+use crate::types::{NirWorkerRequest, NirWorkerResponse};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -177,4 +177,4 @@ pub fn execute_preview_worker(request: &NirWorkerRequest) -> NirWorkerResponse {
     execute_nir_worker(request)
 }
 
-pub use super::nir_types::{PreviewWorkerRequest, PreviewWorkerResponse};
+pub use crate::types::{PreviewWorkerRequest, PreviewWorkerResponse};

@@ -1,4 +1,3 @@
-use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
 use fission_pcode::{
@@ -7,6 +6,7 @@ use fission_pcode::{
 };
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
+use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::HashMap;
 
 pub(crate) fn build_nir_type_context(
@@ -162,7 +162,7 @@ fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirF
     }
 }
 
-fn sanitize_nir_symbol_name(name: &str) -> String {
+pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
     let mut sanitized = name.trim().to_string();
     if let Some((_, tail)) = sanitized.rsplit_once('!') {
         sanitized = tail.trim().to_string();
@@ -186,9 +186,7 @@ fn build_nir_call_param_rules(
     let target_addresses_by_name = call_target_refs.iter().fold(
         HashMap::<String, Vec<u64>>::new(),
         |mut acc, (addr, target_ref)| {
-            acc.entry(target_ref.symbol.clone())
-                .or_default()
-                .push(*addr);
+            acc.entry(target_ref.symbol.clone()).or_default().push(*addr);
             acc
         },
     );

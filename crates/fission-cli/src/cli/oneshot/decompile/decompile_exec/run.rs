@@ -498,7 +498,7 @@ fn run_sequential_decompilation<'a>(
                     continue;
                 }
                 if effective_json {
-                    let routing = fission_static::analysis::decomp::native_failure_routing_decision(
+                    let routing = fission_decompiler_core::native_failure_routing_decision(
                         &error_text,
                     );
                     let mut entry = serde_json::json!({

@@ -6,14 +6,17 @@ use crate::cli::oneshot::common::{
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
+use fission_decompiler_core::{
+    NativeDecompilerBackend, NativeDecompilerSource, NirEngineMode, NirSurfaceKind,
+    PostProcessor, auto_nir_eligible, classify_native_failure_kind, rescue_nir_output_with_facts,
+    select_nir_output_with_facts,
+};
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_pcode::{NirBuildStats, NirHintStats, PcodeFunction, PcodeOpcode};
-use fission_static::analysis::decomp::postprocess::PostProcessor;
 use fission_static::analysis::decomp::{
-    FactStore, NirEngineMode, NirSurfaceKind, PrepareOptions, PrepareTimings, auto_nir_eligible,
-    classify_native_failure_kind, log_type_diag, prepare_native_decompiler_for_binary,
-    rescue_nir_output_with_facts, select_nir_output_with_facts, serialize_win_api_signatures_json,
+    FactStore, PrepareOptions, PrepareTimings, log_type_diag, prepare_native_decompiler_for_binary,
+    serialize_win_api_signatures_json,
 };
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -44,3 +47,9 @@ pub(crate) use nir_candidates::{
     PreviewCandidateEntry, PreviewCandidateScanSummary, ScopedQuietPanicHook,
     preview_candidate_entry_with_recovery, update_scan_summary,
 };
+
+impl NativeDecompilerBackend for DecompilerNative {
+    fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
+        self.get_pcode(address)
+    }
+}

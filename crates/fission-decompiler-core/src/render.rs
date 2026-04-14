@@ -1,7 +1,8 @@
-use super::FactStore;
-use super::nir_routing::auto_nir_admission_eligible;
-use super::nir_types::NirWorkerRequest;
-use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
+use crate::routing::auto_nir_admission_eligible;
+use crate::types::NirWorkerRequest;
+use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};
+use crate::facts::build_nir_type_context;
+use fission_static::analysis::decomp::facts::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOptimizer,
@@ -28,21 +29,6 @@ fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> S
     format!("nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}")
 }
 
-pub(crate) fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
-    pcode.blocks.iter().map(|block| block.ops.len()).sum()
-}
-
-pub(crate) fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
-    pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .filter(|op| op.opcode == fission_pcode::PcodeOpcode::MultiEqual)
-        .map(|op| op.inputs.len())
-        .max()
-        .unwrap_or(0)
-}
-
 pub(crate) fn nir_diag_stage(address: u64, stage: &str, start: Instant) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
         eprintln!(
@@ -66,7 +52,7 @@ pub(crate) fn build_nir_type_context_from_facts(
     fact_store: &FactStore,
     address: u64,
 ) -> NirTypeContext {
-    crate::analysis::decomp::nir_context::build_nir_type_context(binary, fact_store, address)
+    build_nir_type_context(binary, fact_store, address)
 }
 
 pub(crate) fn make_nir_request(
@@ -368,12 +354,9 @@ pub(crate) fn render_nir_from_json_with_type_context(
         region_linearize_structuring,
         force_linear_structuring,
     );
+    let should_use_worker =
+        options.target_profile().worker_eligible && !enforce_auto_gate && !auto_gate_eligible;
     let request = make_nir_request(pcode_json, address, name, options, type_context);
-
-    let should_use_worker = binary.is_64bit
-        && binary.format.to_ascii_uppercase().starts_with("PE")
-        && !enforce_auto_gate
-        && !auto_gate_eligible;
 
     if should_use_worker {
         let worker_timeout_ms = nir_worker_timeout_ms(timeout_ms);

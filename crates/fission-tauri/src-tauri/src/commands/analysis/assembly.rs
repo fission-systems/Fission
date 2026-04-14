@@ -3,9 +3,10 @@
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
-use fission_decompiler_core::{decompile_with_rust_sleigh, RustSleighDecompileConfig};
+use fission_decompiler_core::{
+    RustSleighDecompileConfig, decompile_with_rust_sleigh, fallback_reason_with_kind,
+};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::decomp::fallback_reason_with_kind;
 use std::time::Duration;
 use tauri::State;
 

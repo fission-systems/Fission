@@ -1,4 +1,4 @@
-use super::nir_taxonomy::{
+use crate::taxonomy::{
     classified_nir_error, classify_native_failure_kind, extract_fallback_kind,
     extract_refined_fallback_kind, fallback_reason_with_kind,
 };
@@ -283,13 +283,6 @@ pub trait NirSource {
 impl NirSource for fission_ffi::DecompilerNative {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
         self.get_pcode(address)
-    }
-}
-
-#[cfg(feature = "native_decomp")]
-impl NirSource for crate::analysis::decomp::CachingDecompiler {
-    fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
-        self.inner_mut().get_pcode(address)
     }
 }
 

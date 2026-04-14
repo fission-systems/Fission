@@ -7,6 +7,78 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-14 (latest)
+
+### Decompiler-core ownership cutover wave - `fission-decompiler-core` now owns orchestration while `fission-static` is reduced to facts/native services
+
+This wave closes the architectural ownership drift that had left decompiler policy split across `fission-pcode`, `fission-static`, and `fission-decompiler-core`. The semantic owner stays in `fission-pcode`, but the application-layer decompile flow now lives in `fission-decompiler-core`, and `fission-static::analysis::decomp` has been reduced to facts/cache/prepare services only.
+
+- [`lib.rs`](../../crates/fission-decompiler-core/src/lib.rs) now acts as the real decompiler entry layer rather than a facade. It re-exports the canonical orchestration surface and routes prebuilt-pcode selection through the core-owned request/result flow.
+- [`request.rs`](../../crates/fission-decompiler-core/src/request.rs) adds the first explicit application contract:
+  - `DecompileRequest`
+  - `DecompileResult`
+  - `decompile_prebuilt_pcode(...)`
+- [`adapters.rs`](../../crates/fission-decompiler-core/src/adapters.rs) moves native backend adaptation into the core boundary through `NativeDecompilerBackend` and `NativeDecompilerSource`, removing the temporary CLI-owned adapter layer.
+- [`facts.rs`](../../crates/fission-decompiler-core/src/facts.rs) moves NIR type-context construction and symbol sanitization into the decompiler owner. `fission-static` now provides raw `FactStore` data only.
+- [`engine.rs`](../../crates/fission-decompiler-core/src/engine.rs), [`render.rs`](../../crates/fission-decompiler-core/src/render.rs), [`routing.rs`](../../crates/fission-decompiler-core/src/routing.rs), [`recovery.rs`](../../crates/fission-decompiler-core/src/recovery.rs), [`taxonomy.rs`](../../crates/fission-decompiler-core/src/taxonomy.rs), [`types.rs`](../../crates/fission-decompiler-core/src/types.rs), [`worker.rs`](../../crates/fission-decompiler-core/src/worker.rs), and [`postprocess.rs`](../../crates/fission-decompiler-core/src/postprocess.rs) now host the orchestration and downstream cleanup implementation that previously lived under `fission-static`.
+- The full downstream cleanup stack was moved under [`crates/fission-decompiler-core/src/postprocess/`](../../crates/fission-decompiler-core/src/postprocess), and the old `fission-static` copies were deleted.
+- [`mod.rs`](../../crates/fission-static/src/analysis/decomp/mod.rs) and [`facts.rs`](../../crates/fission-static/src/analysis/decomp/facts.rs) now leave `fission-static::analysis::decomp` with only:
+  - cache primitives
+  - raw fact ingestion and snapshots
+  - native prepare helpers
+  - `DecompilerNative` alias
+- CLI/Tauri decompile-facing imports now consume `fission-decompiler-core` instead of `fission-static`, including:
+  - [`fission_nir_worker.rs`](../../crates/fission-cli/src/bin/fission_nir_worker.rs)
+  - [`fission_preview_worker.rs`](../../crates/fission-cli/src/bin/fission_preview_worker.rs)
+  - [`decompile.rs`](../../crates/fission-cli/src/cli/oneshot/decompile.rs)
+  - [`run.rs`](../../crates/fission-cli/src/cli/oneshot/decompile/decompile_exec/run.rs)
+  - [`decompile_render.rs`](../../crates/fission-cli/src/cli/oneshot/decompile/decompile_render.rs)
+  - [`build.rs`](../../crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/build.rs)
+  - [`emit.rs`](../../crates/fission-cli/src/cli/oneshot/inventory/emit.rs)
+  - [`assembly.rs`](../../crates/fission-tauri/src-tauri/src/commands/analysis/assembly.rs)
+
+Validation:
+
+- `cargo check -p fission-static`
+- `cargo check -p fission-decompiler-core`
+- `cargo check -p fission-cli`
+- `cargo check -p fission-tauri`
+- `cargo test -p fission-decompiler-core`
+- `cargo test -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli`
+
+Targeted benchmark artifact:
+
+- [`putty-decompiler-core-cutover-wave-v2`](../../artifacts/batch_benchmark/putty-decompiler-core-cutover-wave-v2)
+
+Observed quality state after the structural cutover:
+
+- seeded shared coverage: `100.00%`
+- independent top-N coverage: `96.00%`
+- direct-success: `50/50`
+- `unsupported_indirect_control_count`: `1`
+- `avg_normalized_similarity`: `38.79`
+- key rows:
+  - `0x140001160`: `27.34`
+  - `0x140008900`: `20.68`
+  - `0x140007da0`: `34.45`
+  - `0x140008090`: `35.41`
+
+`nir-check` state remained stable:
+
+- `changed_rows=0`
+- dominant slow passes:
+  - `sccp: 246.5ms`
+  - `jump_resolver: 27.9ms`
+  - `aggregate_fields: 23.7ms`
+  - `memory_slot_surfacing_full: 21.6ms`
+
+Decision/result:
+
+- architectural ownership closure is complete for the decompiler application layer
+- `fission-static` no longer owns decompiler orchestration or postprocess implementation
+- semantic acceptance is still not met versus the accepted `putty-builder-provenance-wave` baseline, so this wave should be read as a structural cutover, not a semantic release win
+
 ## 2026-04-12 (latest)
 
 ### Builder-provenance stabilization wave - producer-owned materialization now recovers the row-fidelity canaries without reopening indirect-control drift

@@ -1,17 +1,17 @@
-use super::FactStore;
-use super::nir_recovery::{
+use crate::recovery::{
     is_type_failure_for_nir_rescue, try_structuring_recovery, try_structuring_recovery_from_pcode,
 };
-use super::nir_render::{
-    build_nir_type_context_from_facts, max_multiequal_fanin, pcode_total_ops,
-    render_nir_from_json_with_type_context, render_nir_from_pcode_with_type_context_and_options,
+use crate::render::{
+    build_nir_type_context_from_facts, render_nir_from_json_with_type_context,
+    render_nir_from_pcode_with_type_context_and_options,
 };
-use super::nir_taxonomy::classify_native_failure_kind;
-use super::nir_types::{
+use crate::taxonomy::classify_native_failure_kind;
+use crate::types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{NirRenderOptions, PcodeFunction};
+use fission_pcode::{NirAdmissionFacts, NirRenderOptions, PcodeFunction, TargetProfile};
+use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
 
 /// Admission-only heuristic for preview/NIR auto mode.
@@ -20,11 +20,8 @@ use std::time::Instant;
 /// classifier. It should never be used as a substitute for canonical
 /// `NirBuildStats`-based ownership decisions.
 pub fn auto_nir_admission_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
-    binary.is_64bit
-        && binary.format.to_ascii_uppercase().starts_with("PE")
-        && pcode.blocks.len() <= 12
-        && pcode_total_ops(pcode) <= 600
-        && max_multiequal_fanin(pcode) <= 4
+    let profile = TargetProfile::from_binary(binary, true);
+    profile.auto_admission_eligible(NirAdmissionFacts::from_pcode(pcode))
 }
 
 pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
@@ -283,6 +280,48 @@ pub fn select_nir_output_from_pcode_with_facts(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::auto_nir_admission_eligible;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+    use fission_pcode::{PcodeBasicBlock, PcodeFunction};
+
+    fn test_pcode(block_count: usize) -> PcodeFunction {
+        PcodeFunction {
+            blocks: (0..block_count)
+                .map(|idx| PcodeBasicBlock {
+                    index: idx as u32,
+                    start_address: 0x401000 + (idx as u64) * 0x10,
+                    successors: Vec::new(),
+                    ops: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn auto_nir_admission_uses_canonical_pe_x64_profile() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+
+        assert!(auto_nir_admission_eligible(&binary, &test_pcode(4)));
+    }
+
+    #[test]
+    fn auto_nir_admission_rejects_pe_x86_even_when_shape_is_small() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(false)
+            .build()
+            .expect("build test binary");
+
+        assert!(!auto_nir_admission_eligible(&binary, &test_pcode(4)));
     }
 }
 
