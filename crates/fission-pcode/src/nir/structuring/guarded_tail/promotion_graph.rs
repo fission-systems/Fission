@@ -39,6 +39,30 @@ impl<'a> PreviewBuilder<'a> {
         trailing
     }
 
+    /// True when the middle segment is only join glue: empty blocks, labels, and `Goto(label)`.
+    /// Such segments impose no semantic work beyond reaching the join label; all `Goto` refs are
+    /// fallthrough-equivalent for promotion bookkeeping (matches Ghidra-style join chains).
+    pub(super) fn middle_is_join_label_only_glue(middle: &[HirStmt], label: &str) -> bool {
+        middle.iter().all(|stmt| {
+            is_ignorable_discovery_stmt(stmt)
+                || matches!(stmt, HirStmt::Goto(target) if target == label)
+        })
+    }
+
+    /// Subtract trailing duplicate `Goto(label)` hops, or zero when the whole middle is join glue.
+    pub(super) fn effective_middle_refs_for_promotion(
+        middle: &[HirStmt],
+        label: &str,
+        middle_refs: usize,
+    ) -> usize {
+        if Self::middle_is_join_label_only_glue(middle, label) {
+            return 0;
+        }
+        middle_refs.saturating_sub(Self::trailing_middle_fallthrough_equivalent_refs(
+            middle, label,
+        ))
+    }
+
     pub(super) fn outside_refs_preserve_forward_owner(
         body: &[HirStmt],
         if_idx: usize,

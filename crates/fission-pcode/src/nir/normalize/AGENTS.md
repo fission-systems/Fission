@@ -19,6 +19,17 @@ Scope: `crates/fission-pcode/src/nir/normalize/`
 
 Legacy flat modules at crate root of `normalize/`: `wave_stats.rs` only; other passes live under the directories above.
 
+## Pass ownership (avoid duplicate policy)
+
+| Concern | Primary owner | Related (do not duplicate policy) |
+|---------|---------------|-----------------------------------|
+| PHI / join copies at merge | `recovery/phi_recovery.rs` | `global_opt/gvn_join.rs` (GVN at joins) |
+| IV / induction vs structured `for` | `recovery/iv_recovery.rs` | `recovery/for_loops.rs` (shape fold) |
+| Temp inline vs copy propagation | `cleanup/` passes | `global_opt/copy_propagation_pass.rs` |
+| Redundant load / stack stores | `global_opt/redundant_load.rs`, `memory/` | `AliasKey::Stack` — justify via store→load deps |
+
+`apply_iv_recovery` and related hooks are wired from `recovery/mod.rs` (not a legacy flat `iv_recovery.rs` at `normalize/` root).
+
 ## Conventions
 
 - Orchestration lives in `pipeline/`; behavior changes belong in the owning pass directory.

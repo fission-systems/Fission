@@ -7,6 +7,35 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-09
+
+### Guarded-tail join-glue bookkeeping for `effective_middle_refs`
+
+Promotion and verification now treat a guarded-tail **middle** segment that contains only join glue (ignorable labels / empty blocks and `Goto(join_label)` hops) as having **no surviving middle references** for gate and replacement checks. This matches Ghidra-style join chains where multiple forward `Goto` hops are fallthrough-equivalent, not only a **trailing** suffix of duplicate `Goto`s.
+
+- [`promotion_graph.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion_graph.rs): `middle_is_join_label_only_glue`, `effective_middle_refs_for_promotion`
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs): unified use in `classify_must_emit_label_rejection` and witness verification
+- [`structuring_guarded_tail.rs`](../../crates/fission-pcode/src/nir/tests/structuring_guarded_tail.rs): regression `structuring_candidate_discovery_join_glue_middle_elides_all_goto_refs`
+- [`normalize/AGENTS.md`](../../crates/fission-pcode/src/nir/normalize/AGENTS.md): pass-ownership table (PHI vs GVN, IV vs for-loops, copy vs cleanup)
+- [`builder/AGENTS.md`](../../crates/fission-pcode/src/nir/builder/AGENTS.md): builder scope and indirect-surface stats contract
+- Removed stray `guarded_tail/*.bak` files
+
+Validation:
+
+- `cargo test -p fission-pcode`
+
+Benchmark (2-way vs baseline): not run in this workspace because `samples/windows/x64/putty.exe` is not present in the repository clone. When the sample is available, use:
+
+```bash
+cargo build -p fission-cli --release
+python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
+  samples/windows/x64/putty.exe \
+  --limit 50 \
+  --fission-bin target/release/fission_cli \
+  --output-dir artifacts/batch_benchmark/putty-guarded-tail-join-glue-<run-id> \
+  --baseline-dir artifacts/batch_benchmark/putty-ghidra-guarded-tail-execute-wave-v8
+```
+
 ## 2026-04-15 (latest)
 
 ### Guarded-tail execute migration wave - Ghidra-style descendant replacement and guarded-tail diagnostics are now core-owned, but the real `putty` blocker remains pre-promotion legality

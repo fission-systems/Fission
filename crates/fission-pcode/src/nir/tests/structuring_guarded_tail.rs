@@ -353,6 +353,30 @@ fn structuring_candidate_discovery_relaxes_trailing_middle_goto_to_join_label() 
 }
 
 #[test]
+fn structuring_candidate_discovery_join_glue_middle_elides_all_goto_refs() {
+    // Middle is only ignorable labels and `Goto(join)` hops — not just a trailing suffix.
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Goto("block_tail".to_string()),
+        HirStmt::Label("glue".to_string()),
+        HirStmt::Goto("block_tail".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(
+        stats.rejected_must_emit_label_surviving_middle_ref, 0,
+        "join-glue-only middle should not count surviving Goto refs: {stats:#?}"
+    );
+}
+
+#[test]
 fn structuring_candidate_discovery_counts_owner_conflict_gate_rejection() {
     let body = vec![
         HirStmt::If {

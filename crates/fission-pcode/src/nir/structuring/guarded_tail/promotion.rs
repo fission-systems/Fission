@@ -62,8 +62,10 @@ impl<'a> PreviewBuilder<'a> {
         outside_refs: usize,
         middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
-        let effective_middle_refs = middle_refs.saturating_sub(
-            Self::trailing_middle_fallthrough_equivalent_refs(middle, label),
+        let effective_middle_refs = PreviewBuilder::effective_middle_refs_for_promotion(
+            middle,
+            label,
+            middle_refs,
         );
         if effective_middle_refs > 0 {
             return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
@@ -1186,11 +1188,11 @@ impl<'a> PreviewBuilder<'a> {
             witness.label_idx,
             &witness.target_label,
         );
-        let effective_middle_refs = middle_refs
-            .saturating_sub(Self::trailing_middle_fallthrough_equivalent_refs(
-                &witness.middle,
-                &witness.target_label,
-            ));
+        let effective_middle_refs = Self::effective_middle_refs_for_promotion(
+            &witness.middle,
+            &witness.target_label,
+            middle_refs,
+        );
         let rewritten = Self::rewrite_guarded_tail_sequence(
             &witness.middle,
             &witness.target_label,

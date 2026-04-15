@@ -11,7 +11,7 @@ This tree owns Rust-side decompiler semantics after p-code lifting: builder stat
 
 ```text
 nir/
-├── builder/        # Preview/NIR lowering from p-code
+├── builder/        # Preview/NIR lowering from p-code (see builder/AGENTS.md)
 ├── normalize/      # HIR normalization passes (see normalize/AGENTS.md)
 ├── structuring/    # CFG-driven reconstruction to higher-level HIR
 ├── tests/          # Synthetic NIR/structuring integration tests
