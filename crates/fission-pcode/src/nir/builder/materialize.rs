@@ -1,5 +1,56 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplacementReadClass {
+    SameBlockData,
+    PredicateSensitive,
+    SelectorSensitive,
+    ReturnPath,
+    Merge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaterializationRejectionReason {
+    AliasUnsafe,
+    MissingMergeBinding,
+    ConsumerRequiresStableRepresentative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplacementCompleteness {
+    Complete,
+    Incomplete(MaterializationRejectionReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReplacementValuePlan {
+    dominant_read: ReplacementReadClass,
+    completeness: ReplacementCompleteness,
+}
+
+impl ReplacementValuePlan {
+    fn complete(dominant_read: ReplacementReadClass) -> Self {
+        Self {
+            dominant_read,
+            completeness: ReplacementCompleteness::Complete,
+        }
+    }
+
+    fn incomplete(
+        dominant_read: ReplacementReadClass,
+        reason: MaterializationRejectionReason,
+    ) -> Self {
+        Self {
+            dominant_read,
+            completeness: ReplacementCompleteness::Incomplete(reason),
+        }
+    }
+
+    fn is_complete(self) -> bool {
+        matches!(self.completeness, ReplacementCompleteness::Complete)
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
         match expr {
@@ -293,9 +344,6 @@ impl<'a> PreviewBuilder<'a> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
-        if self.output_used_only_by_block_terminator(block, op_idx, terminator_index, output) {
-            return Ok(None);
-        }
         if self.output_used_only_by_single_store(block, op_idx, output)
             || self.output_used_only_by_passthrough_chain(block, op_idx, output)
         {
@@ -304,10 +352,16 @@ impl<'a> PreviewBuilder<'a> {
         let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? else {
             return Ok(None);
         };
-        if self.output_prefers_inline_single_use_expr(block, op_idx, output, &rhs) {
+        let legacy_inline_candidate =
+            self.output_replacement_is_complete(block, op_idx, output, &rhs);
+        let replacement_plan =
+            self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
+        if replacement_plan.is_complete() {
             self.representative_downgrade_count += 1;
-            self.representative_downgrade_no_aliassafe_source_count += 1;
             return Ok(None);
+        }
+        if legacy_inline_candidate {
+            self.materialization_inline_suppressed_count += 1;
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
         let lhs = HirLValue::Var(
@@ -367,7 +421,7 @@ impl<'a> PreviewBuilder<'a> {
         Ok(Some(rhs))
     }
 
-    fn output_prefers_inline_single_use_expr(
+    fn output_replacement_is_complete(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -382,6 +436,137 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 Self::use_opcode_allows_single_use_builder_inline(uses[0].1.opcode)
             }
+    }
+
+    fn build_replacement_value_plan(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> ReplacementValuePlan {
+        self.replacement_plan_candidate_count += 1;
+        if self.output_has_nonlocal_use(block, op_idx, output) {
+            self.replacement_plan_rejected_missing_merge_count += 1;
+            return ReplacementValuePlan::incomplete(
+                ReplacementReadClass::Merge,
+                MaterializationRejectionReason::MissingMergeBinding,
+            );
+        }
+        if let Some(read_class) =
+            self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
+        {
+            if Self::replacement_read_requires_stable_representative(read_class, rhs) {
+                self.replacement_plan_rejected_alias_unsafe_count += 1;
+                return ReplacementValuePlan::incomplete(
+                    read_class,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
+            }
+            self.replacement_plan_completed_count += 1;
+            return ReplacementValuePlan::complete(read_class);
+        }
+        if self.output_replacement_is_complete(block, op_idx, output, rhs) {
+            if Self::same_block_replacement_requires_stable_representative(rhs) {
+                self.replacement_plan_rejected_alias_unsafe_count += 1;
+                return ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::SameBlockData,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
+            }
+            self.replacement_plan_completed_count += 1;
+            return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
+        }
+        self.replacement_plan_rejected_alias_unsafe_count += 1;
+        ReplacementValuePlan::incomplete(
+            ReplacementReadClass::SameBlockData,
+            MaterializationRejectionReason::AliasUnsafe,
+        )
+    }
+
+    fn classify_terminator_sensitive_output_use(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+    ) -> Option<ReplacementReadClass> {
+        let Some(terminator_index) = terminator_index else {
+            return None;
+        };
+        let use_sites = self.output_use_sites_in_block(block, op_idx, output);
+        if use_sites.len() != 1 || use_sites[0].0 != terminator_index {
+            return None;
+        }
+        let terminator = &block.ops[terminator_index];
+        Some(match terminator.opcode {
+            PcodeOpcode::CBranch => ReplacementReadClass::PredicateSensitive,
+            PcodeOpcode::BranchInd => ReplacementReadClass::SelectorSensitive,
+            PcodeOpcode::Return => ReplacementReadClass::ReturnPath,
+            _ => ReplacementReadClass::SameBlockData,
+        })
+    }
+
+    fn replacement_read_requires_stable_representative(
+        read_class: ReplacementReadClass,
+        rhs: &HirExpr,
+    ) -> bool {
+        matches!(
+            read_class,
+            ReplacementReadClass::PredicateSensitive
+                | ReplacementReadClass::SelectorSensitive
+                | ReplacementReadClass::ReturnPath
+        ) && (Self::should_preserve_materialized_expr(rhs)
+            || !Self::expr_is_low_cost_builder_inline_candidate(rhs))
+    }
+
+    fn same_block_replacement_requires_stable_representative(rhs: &HirExpr) -> bool {
+        Self::should_preserve_materialized_expr(rhs)
+    }
+
+    fn output_has_nonlocal_use(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        let key = VarnodeKey::from(output);
+        let block_idx = self
+            .address_to_index
+            .get(&block.start_address)
+            .copied()
+            .unwrap_or(usize::MAX);
+        for (candidate_block_idx, candidate_block) in self.pcode.blocks.iter().enumerate() {
+            if candidate_block_idx == block_idx {
+                continue;
+            }
+            for candidate in &candidate_block.ops {
+                if candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == key)
+                {
+                    return true;
+                }
+                if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                    break;
+                }
+            }
+        }
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                break;
+            }
+            if candidate
+                .inputs
+                .iter()
+                .any(|input| VarnodeKey::from(input) == key)
+            {
+                return false;
+            }
+        }
+        false
     }
 
     fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
@@ -725,6 +910,60 @@ mod tests {
         assert!(
             !PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(
                 PcodeOpcode::IntAdd
+            )
+        );
+    }
+
+    #[test]
+    fn predicate_sensitive_reads_require_stable_representative_for_nontrivial_rhs() {
+        let expr = HirExpr::Load {
+            ptr: Box::new(HirExpr::Var("param_1".to_string())),
+            ty: int(64),
+        };
+        assert!(
+            PreviewBuilder::replacement_read_requires_stable_representative(
+                ReplacementReadClass::PredicateSensitive,
+                &expr
+            )
+        );
+        assert!(
+            PreviewBuilder::replacement_read_requires_stable_representative(
+                ReplacementReadClass::SelectorSensitive,
+                &expr
+            )
+        );
+    }
+
+    #[test]
+    fn predicate_sensitive_reads_allow_direct_leaf_replacement() {
+        let expr = HirExpr::Var("tmp_1".to_string());
+        assert!(
+            !PreviewBuilder::replacement_read_requires_stable_representative(
+                ReplacementReadClass::PredicateSensitive,
+                &expr
+            )
+        );
+        assert!(
+            !PreviewBuilder::replacement_read_requires_stable_representative(
+                ReplacementReadClass::ReturnPath,
+                &expr
+            )
+        );
+    }
+
+    #[test]
+    fn same_block_replacement_keeps_nonleaf_representatives() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("x".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: int(32),
+        };
+
+        assert!(PreviewBuilder::same_block_replacement_requires_stable_representative(&expr));
+        assert!(
+            !PreviewBuilder::same_block_replacement_requires_stable_representative(
+                &HirExpr::Var("tmp_1".to_string())
             )
         );
     }

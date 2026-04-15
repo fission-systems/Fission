@@ -8,26 +8,31 @@ on:
 permissions:
     contents: write
 
+concurrency:
+  group: cd-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
     build-and-release:
         name: Build & Release
         runs-on: ${{ matrix.os }}
+        timeout-minutes: 45
         strategy:
             matrix:
                 include:
                     - os: ubuntu-latest
                       target: x86_64-unknown-linux-gnu
-                      artifact_name: fission
+                      artifact_name: fission_cli
                       asset_name: fission-linux-x64
                       archive_ext: tar.gz
                     - os: macos-latest
                       target: aarch64-apple-darwin
-                      artifact_name: fission
+                      artifact_name: fission_cli
                       asset_name: fission-macos-arm64
                       archive_ext: tar.gz
                     - os: windows-latest
                       target: x86_64-pc-windows-msvc
-                      artifact_name: fission.exe
+                      artifact_name: fission_cli.exe
                       asset_name: fission-windows-x64
                       archive_ext: zip
 
@@ -44,7 +49,7 @@ jobs:
             # --- Rust Build Steps ---
 
             - name: Build Rust Binary (Release)
-              run: cargo build --release --target ${{ matrix.target }}
+              run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }}
 
             # --- Packaging ---
 
@@ -56,7 +61,13 @@ jobs:
                   cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
 
                   # Copy Resources (Ghidra data)
-                  cp -r ghidra release_pkg/
+                  if [ -d ghidra ]; then
+                    cp -r ghidra release_pkg/
+                  elif [ -d ghidra_decompiler ]; then
+                    cp -r ghidra_decompiler release_pkg/
+                  else
+                    echo "No ghidra resource directory found; skipping copy"
+                  fi
 
             - name: Create Archive (Unix)
               if: runner.os != 'Windows'

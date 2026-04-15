@@ -7,6 +7,9 @@ on:
     - cron: "30 2 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-heavy-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,7 @@ jobs:
   corpus-generalization-smoke-config:
     name: Corpus Generalization Smoke Config
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +56,7 @@ jobs:
   linux-full-validation:
     name: Linux Full Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 70
 
     steps:
       - uses: actions/checkout@v4
@@ -86,8 +91,8 @@ jobs:
 
       - name: Full Rust test suite (excluding tauri crate)
         run: |
-          cargo test --workspace --exclude fission-tauri --exclude fission-static --verbose
-          cargo test -p fission-static --verbose
+          cargo test --workspace --exclude fission-tauri --exclude fission-static --locked --verbose
+          cargo test -p fission-static --locked --verbose
 
       - name: Build Tauri frontend
         run: |
@@ -98,6 +103,7 @@ jobs:
   windows-heavy-build:
     name: Windows Heavy Build/Test
     runs-on: windows-latest
+    timeout-minutes: 70
 
     steps:
       - uses: actions/checkout@v4
@@ -111,14 +117,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --release
+        run: cargo build -p fission-cli --locked --release
 
       - name: Run Windows core tests
-        run: cargo test -p fission-pcode -p fission-automation --release --verbose
+        run: cargo test -p fission-pcode -p fission-automation --locked --release --verbose
 
   automation-nir-check:
     name: Automation Nir-Check + Artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -143,10 +150,10 @@ jobs:
             file
 
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --release
+        run: cargo build -p fission-cli --locked --release
 
       - name: Run automation crate tests
-        run: cargo test -p fission-automation --verbose
+        run: cargo test -p fission-automation --locked --verbose
 
       # Smoke the real nir-check lane (no committed baseline in CI → perf gate skipped; --no-update-latest avoids touching latest/).
       - name: Run fission-automation nir-check (fast profile)

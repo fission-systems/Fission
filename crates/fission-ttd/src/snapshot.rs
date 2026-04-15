@@ -1,6 +1,6 @@
-//! Execution Snapshot - Captures complete state at a point in time.
+//! Execution snapshot primitives.
 
-use super::super::types::RegisterState;
+use crate::RegisterState;
 use std::time::Instant;
 
 /// Memory change record for delta compression
@@ -37,7 +37,7 @@ pub struct ExecutionSnapshot {
     pub step_index: u64,
     /// Timestamp when this snapshot was taken
     pub timestamp: Instant,
-    ///CPU register state at this point
+    /// CPU register state at this point
     pub registers: RegisterState,
     /// Memory changes that occurred at this step
     pub memory_deltas: Vec<MemoryDelta>,

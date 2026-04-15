@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use super::support::CallingConvention;
+use crate::pcode::{PcodeFunction, PcodeOpcode};
 
 pub type NirValueId = u32;
 pub type StackSlotId = u32;
@@ -670,6 +671,25 @@ pub struct NirBuildStats {
     /// How many for-loop patterns were recognised and emitted as HirStmt::For.
     #[serde(default)]
     pub loop_for_lowered_count: usize,
+    /// Region proofs produced by the CFG/region structuring owner.
+    #[serde(default)]
+    pub region_proof_candidate_count: usize,
+    /// Region proofs that completed with legality fully closed.
+    #[serde(default)]
+    pub region_proof_completed_count: usize,
+    /// Region proofs that existed but failed emit-ready gating.
+    #[serde(default)]
+    pub region_emit_ready_failed_count: usize,
+    /// Conditional region candidates considered by the structuring owner.
+    #[serde(default)]
+    pub conditional_region_candidate_count: usize,
+    /// Conditional regions selected into the structured overlay.
+    #[serde(default)]
+    pub conditional_region_promoted_count: usize,
+    #[serde(default)]
+    pub guarded_tail_candidate_count: usize,
+    #[serde(default)]
+    pub guarded_tail_promoted_count: usize,
     #[serde(default)]
     pub promotion_candidate_count: usize,
     #[serde(default)]
@@ -684,6 +704,34 @@ pub struct NirBuildStats {
     pub promotion_rejected_by_gate_count: usize,
     #[serde(default)]
     pub discovery_seen_guarded_tail_like_shape_count: usize,
+    #[serde(default)]
+    pub guarded_tail_rejected_missing_terminal_join_count: usize,
+    #[serde(default)]
+    pub guarded_tail_rejected_side_entry_conflict_count: usize,
+    #[serde(default)]
+    pub guarded_tail_rejected_alias_interleave_conflict_count: usize,
+    #[serde(default)]
+    pub guarded_tail_rejected_ambiguous_follow_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_plan_candidate_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_plan_completed_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_plan_merge_created_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_plan_rejected_missing_merge_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_plan_rejected_unstable_read_count: usize,
+    #[serde(default)]
+    pub guarded_tail_exported_binding_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_read_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_read_rewritten_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_read_rejected_nondominated_count: usize,
+    #[serde(default)]
+    pub guarded_tail_replacement_read_rejected_nonremovable_op_count: usize,
     #[serde(default)]
     pub discovery_rejected_noncanonical_layout_count: usize,
     #[serde(default)]
@@ -851,6 +899,24 @@ pub struct NirBuildStats {
     /// Nontrivial repeated pure expressions stabilized into explicit temporaries.
     #[serde(default)]
     pub materialization_stabilized_count: usize,
+    /// Materialization/rewrite candidates considered by the replacement planner.
+    #[serde(default)]
+    pub replacement_plan_candidate_count: usize,
+    /// Candidates whose replacement plan completed without needing a preserved representative.
+    #[serde(default)]
+    pub replacement_plan_completed_count: usize,
+    /// Synthetic merge bindings introduced by the replacement planner.
+    #[serde(default)]
+    pub replacement_plan_merge_binding_count: usize,
+    /// Replacement plans rejected because no alias-safe rewrite existed.
+    #[serde(default)]
+    pub replacement_plan_rejected_alias_unsafe_count: usize,
+    /// Replacement plans rejected because a merge/read bridge was required but unavailable.
+    #[serde(default)]
+    pub replacement_plan_rejected_missing_merge_count: usize,
+    /// Legacy inline candidates intentionally kept materialized by the replacement planner.
+    #[serde(default)]
+    pub materialization_inline_suppressed_count: usize,
     /// Representative selections that fell back to a weaker form instead of a preserved alias/temp.
     #[serde(default)]
     pub representative_downgrade_count: usize,
@@ -884,6 +950,9 @@ pub struct NirBuildStats {
     /// Dispatcher proof units rejected after proof analysis.
     #[serde(default)]
     pub dispatcher_proof_failed_count: usize,
+    /// Switch-like regions that had proof/candidate evidence but failed emit-ready gating.
+    #[serde(default)]
+    pub switch_emit_ready_failed_count: usize,
     /// Compare-chain dispatcher proofs discovered from conditional ladders.
     #[serde(default)]
     pub compare_chain_dispatcher_count: usize,
@@ -893,6 +962,9 @@ pub struct NirBuildStats {
     /// SCCP passes skipped because admission analysis found no useful control-flow seeds.
     #[serde(default)]
     pub sccp_skipped_by_admission_count: usize,
+    /// Preview/render gating disagreed with the canonical target profile.
+    #[serde(default)]
+    pub pe_admission_profile_mismatch_count: usize,
     /// Memory normalization passes skipped because typed-fact prefilter found no object roots.
     #[serde(default)]
     pub memory_fact_prefilter_skip_count: usize,
@@ -977,6 +1049,13 @@ impl NirBuildStats {
         self.loop_while_subgraph_lowered_count += other.loop_while_subgraph_lowered_count;
         self.loop_multi_exit_break_count += other.loop_multi_exit_break_count;
         self.loop_for_lowered_count += other.loop_for_lowered_count;
+        self.region_proof_candidate_count += other.region_proof_candidate_count;
+        self.region_proof_completed_count += other.region_proof_completed_count;
+        self.region_emit_ready_failed_count += other.region_emit_ready_failed_count;
+        self.conditional_region_candidate_count += other.conditional_region_candidate_count;
+        self.conditional_region_promoted_count += other.conditional_region_promoted_count;
+        self.guarded_tail_candidate_count += other.guarded_tail_candidate_count;
+        self.guarded_tail_promoted_count += other.guarded_tail_promoted_count;
         self.promotion_candidate_count += other.promotion_candidate_count;
         self.promoted_region_count += other.promoted_region_count;
         self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;
@@ -987,6 +1066,32 @@ impl NirBuildStats {
         self.promotion_rejected_by_gate_count += other.promotion_rejected_by_gate_count;
         self.discovery_seen_guarded_tail_like_shape_count +=
             other.discovery_seen_guarded_tail_like_shape_count;
+        self.guarded_tail_rejected_missing_terminal_join_count +=
+            other.guarded_tail_rejected_missing_terminal_join_count;
+        self.guarded_tail_rejected_side_entry_conflict_count +=
+            other.guarded_tail_rejected_side_entry_conflict_count;
+        self.guarded_tail_rejected_alias_interleave_conflict_count +=
+            other.guarded_tail_rejected_alias_interleave_conflict_count;
+        self.guarded_tail_rejected_ambiguous_follow_count +=
+            other.guarded_tail_rejected_ambiguous_follow_count;
+        self.guarded_tail_replacement_plan_candidate_count +=
+            other.guarded_tail_replacement_plan_candidate_count;
+        self.guarded_tail_replacement_plan_completed_count +=
+            other.guarded_tail_replacement_plan_completed_count;
+        self.guarded_tail_replacement_plan_merge_created_count +=
+            other.guarded_tail_replacement_plan_merge_created_count;
+        self.guarded_tail_replacement_plan_rejected_missing_merge_count +=
+            other.guarded_tail_replacement_plan_rejected_missing_merge_count;
+        self.guarded_tail_replacement_plan_rejected_unstable_read_count +=
+            other.guarded_tail_replacement_plan_rejected_unstable_read_count;
+        self.guarded_tail_exported_binding_count += other.guarded_tail_exported_binding_count;
+        self.guarded_tail_replacement_read_count += other.guarded_tail_replacement_read_count;
+        self.guarded_tail_replacement_read_rewritten_count +=
+            other.guarded_tail_replacement_read_rewritten_count;
+        self.guarded_tail_replacement_read_rejected_nondominated_count +=
+            other.guarded_tail_replacement_read_rejected_nondominated_count;
+        self.guarded_tail_replacement_read_rejected_nonremovable_op_count +=
+            other.guarded_tail_replacement_read_rejected_nonremovable_op_count;
         self.discovery_rejected_noncanonical_layout_count +=
             other.discovery_rejected_noncanonical_layout_count;
         self.canonicalized_guarded_tail_shape_count += other.canonicalized_guarded_tail_shape_count;
@@ -1077,6 +1182,15 @@ impl NirBuildStats {
         self.indirect_target_set_refined_count += other.indirect_target_set_refined_count;
         self.dispatcher_shape_recovered_count += other.dispatcher_shape_recovered_count;
         self.materialization_stabilized_count += other.materialization_stabilized_count;
+        self.replacement_plan_candidate_count += other.replacement_plan_candidate_count;
+        self.replacement_plan_completed_count += other.replacement_plan_completed_count;
+        self.replacement_plan_merge_binding_count += other.replacement_plan_merge_binding_count;
+        self.replacement_plan_rejected_alias_unsafe_count +=
+            other.replacement_plan_rejected_alias_unsafe_count;
+        self.replacement_plan_rejected_missing_merge_count +=
+            other.replacement_plan_rejected_missing_merge_count;
+        self.materialization_inline_suppressed_count +=
+            other.materialization_inline_suppressed_count;
         self.representative_downgrade_count += other.representative_downgrade_count;
         self.representative_downgrade_no_aliassafe_source_count +=
             other.representative_downgrade_no_aliassafe_source_count;
@@ -1091,9 +1205,11 @@ impl NirBuildStats {
         self.dispatcher_proof_unit_count += other.dispatcher_proof_unit_count;
         self.dispatcher_proof_completed_count += other.dispatcher_proof_completed_count;
         self.dispatcher_proof_failed_count += other.dispatcher_proof_failed_count;
+        self.switch_emit_ready_failed_count += other.switch_emit_ready_failed_count;
         self.compare_chain_dispatcher_count += other.compare_chain_dispatcher_count;
         self.candidate_scoped_jump_resolver_count += other.candidate_scoped_jump_resolver_count;
         self.sccp_skipped_by_admission_count += other.sccp_skipped_by_admission_count;
+        self.pe_admission_profile_mismatch_count += other.pe_admission_profile_mismatch_count;
         self.memory_fact_prefilter_skip_count += other.memory_fact_prefilter_skip_count;
         self.aggregate_fields_skipped_by_admission_count +=
             other.aggregate_fields_skipped_by_admission_count;
@@ -1122,6 +1238,9 @@ impl NirBuildStats {
             .region_linearize_rejected_non_structuring_failure_count
             + self.region_linearize_rejected_no_exit_count
             + self.region_linearize_rejected_body_lowering_unsupported_terminator_count
+            + self.region_emit_ready_failed_count
+            + self.guarded_tail_rejected_missing_terminal_join_count
+            + self.guarded_tail_rejected_alias_interleave_conflict_count
             + self.rejected_external_entry
             + self.rejected_not_single_pred_succ;
         self.structuring_reason_follow_failure_count =
@@ -1129,6 +1248,7 @@ impl NirBuildStats {
                 + self.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count
                 + self.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count
                 + self.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count
+                + self.guarded_tail_rejected_ambiguous_follow_count
                 + self.region_linearize_rejected_body_lowering_successor_inline_rejected_count;
         self.structuring_reason_irreducible_count = self
             .region_linearize_rejected_irreducible_cfg_count
@@ -1136,10 +1256,12 @@ impl NirBuildStats {
             + self.structuring_irreducible_header_count;
         self.structuring_reason_loop_exit_count = self
             .region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count
+            + self.guarded_tail_rejected_side_entry_conflict_count
             + self.loop_control_rewrite_skipped_nested_scope_count
             + self.rejected_loop_or_switch_target;
-        self.structuring_reason_switch_shape_count =
-            self.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count;
+        self.structuring_reason_switch_shape_count = self
+            .region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count
+            + self.switch_emit_ready_failed_count;
         self.structuring_reason_budget_count =
             self.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count
                 + self.region_linearize_rejected_non_advancing_count
@@ -1294,6 +1416,8 @@ pub struct NirRenderOptions {
     pub region_linearize_structuring: bool,
     pub force_linear_structuring: bool,
     #[serde(default)]
+    pub structuring_engine: StructuringEngineKind,
+    #[serde(default)]
     pub conservative_irreducible_fallback: bool,
     /// Address → symbol name for IAT slots and global data symbols.
     /// Used to replace `DAT_<addr>` with the actual symbol name in decompiled output.
@@ -1303,6 +1427,139 @@ pub struct NirRenderOptions {
     /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
     #[serde(default)]
     pub calling_convention: CallingConvention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FormatFamily {
+    Pe,
+    Elf,
+    MachO,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AdmissionClass {
+    PreviewUnsupported,
+    PeX86PreviewOnly,
+    PeX64Auto,
+    GenericPreviewOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StructuringBudgetClass {
+    None,
+    PeX86Conditional,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+pub enum StructuringEngineKind {
+    #[default]
+    LegacyScored,
+    GraphCollapseV1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirAdmissionFacts {
+    pub block_count: usize,
+    pub op_count: usize,
+    pub max_multiequal_fanin: usize,
+}
+
+impl NirAdmissionFacts {
+    pub fn from_pcode(pcode: &PcodeFunction) -> Self {
+        Self {
+            block_count: pcode.blocks.len(),
+            op_count: pcode.blocks.iter().map(|block| block.ops.len()).sum(),
+            max_multiequal_fanin: pcode
+                .blocks
+                .iter()
+                .flat_map(|block| block.ops.iter())
+                .filter(|op| op.opcode == PcodeOpcode::MultiEqual)
+                .map(|op| op.inputs.len())
+                .max()
+                .unwrap_or(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TargetProfile {
+    pub format_family: FormatFamily,
+    pub pointer_width: u32,
+    pub admission_class: AdmissionClass,
+    pub structuring_budget_class: StructuringBudgetClass,
+    pub worker_eligible: bool,
+    pub preview_eligible: bool,
+}
+
+impl TargetProfile {
+    pub fn from_binary(binary: &LoadedBinary, pe_format_gate_enabled: bool) -> Self {
+        Self::from_format(
+            &binary.format,
+            if binary.is_64bit { 64 } else { 32 },
+            pe_format_gate_enabled,
+        )
+    }
+
+    pub fn from_options(options: &NirRenderOptions) -> Self {
+        Self::from_format(
+            &options.format,
+            options.pointer_size.saturating_mul(8),
+            options.pe_x64_only,
+        )
+    }
+
+    pub fn from_format(format: &str, pointer_width: u32, pe_format_gate_enabled: bool) -> Self {
+        let format_upper = format.to_ascii_uppercase();
+        let format_family = if format_upper.starts_with("PE") {
+            FormatFamily::Pe
+        } else if format_upper.starts_with("ELF") {
+            FormatFamily::Elf
+        } else if format_upper.starts_with("MACHO") || format_upper.starts_with("MACH-O") {
+            FormatFamily::MachO
+        } else {
+            FormatFamily::Other
+        };
+
+        let preview_eligible = !pe_format_gate_enabled || format_family == FormatFamily::Pe;
+        let worker_eligible =
+            preview_eligible && format_family == FormatFamily::Pe && pointer_width == 64;
+        let structuring_budget_class =
+            if preview_eligible && format_family == FormatFamily::Pe && pointer_width == 32 {
+                StructuringBudgetClass::PeX86Conditional
+            } else {
+                StructuringBudgetClass::None
+            };
+        let admission_class = match (preview_eligible, format_family, pointer_width) {
+            (false, _, _) => AdmissionClass::PreviewUnsupported,
+            (true, FormatFamily::Pe, 64) => AdmissionClass::PeX64Auto,
+            (true, FormatFamily::Pe, 32) => AdmissionClass::PeX86PreviewOnly,
+            (true, _, _) => AdmissionClass::GenericPreviewOnly,
+        };
+
+        Self {
+            format_family,
+            pointer_width,
+            admission_class,
+            structuring_budget_class,
+            worker_eligible,
+            preview_eligible,
+        }
+    }
+
+    pub fn auto_admission_eligible(self, facts: NirAdmissionFacts) -> bool {
+        self.worker_eligible
+            && facts.block_count <= 12
+            && facts.op_count <= 600
+            && facts.max_multiequal_fanin <= 4
+    }
+
+    pub fn if_lowering_budget_enabled(self) -> bool {
+        matches!(
+            self.structuring_budget_class,
+            StructuringBudgetClass::PeX86Conditional
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1382,14 +1639,35 @@ impl NirRenderOptions {
             sections,
             region_linearize_structuring: false,
             force_linear_structuring: false,
+            structuring_engine: StructuringEngineKind::LegacyScored,
             conservative_irreducible_fallback: false,
             global_names,
             calling_convention,
         }
     }
 
-    pub(super) fn is_supported_pe(&self) -> bool {
-        self.format.to_ascii_uppercase().starts_with("PE")
+    pub fn target_profile(&self) -> TargetProfile {
+        TargetProfile::from_options(self)
+    }
+
+    pub fn effective_structuring_engine(&self) -> StructuringEngineKind {
+        match std::env::var("FISSION_STRUCTURING_ENGINE")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("graph")
+            | Some("graphcollapsev1")
+            | Some("graph_collapse_v1")
+            | Some("graph-collapse-v1") => StructuringEngineKind::GraphCollapseV1,
+            Some("legacy")
+            | Some("legacyscored")
+            | Some("legacy_scored")
+            | Some("legacy-scored") => StructuringEngineKind::LegacyScored,
+            _ => self.structuring_engine,
+        }
     }
 
     pub(super) fn is_mapped_global(&self, address: u64) -> bool {

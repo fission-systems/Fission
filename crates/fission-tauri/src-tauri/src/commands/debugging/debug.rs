@@ -63,7 +63,7 @@ async fn drain_events_into_state(state: &AppState) {
             for evt in &events {
                 if let DebugEvent::SingleStep { thread_id } = evt {
                     if let Some(regs) = reg_cache.get(thread_id) {
-                        use fission_dynamic::debug::types::RegisterState;
+                        use fission_ttd::RegisterState;
                         let rs = RegisterState {
                             rax: regs.rax,
                             rbx: regs.rbx,
@@ -84,7 +84,7 @@ async fn drain_events_into_state(state: &AppState) {
                             rip: regs.rip,
                             rflags: regs.rflags,
                         };
-                        timeline.record_step_internal(rs, *thread_id);
+                        timeline.record_step(rs, *thread_id);
                     }
                 }
             }

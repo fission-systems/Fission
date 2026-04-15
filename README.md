@@ -12,13 +12,27 @@ The current architectural direction is:
 
 - `fission-sleigh` owns decode, instruction semantics, and lift contracts
 - `fission-pcode` owns canonical IR, structuring, and pseudocode rendering
-- `fission-static` owns orchestration, routing, and fact application
+- `fission-decompiler-core` owns decompiler orchestration, routing, and postprocess application
+- `fission-static` supplies facts, native prepare helpers, and static-analysis services
 - `fission-cli` and `fission-tauri` are product surfaces over the same core
 - Ghidra is used for comparison, benchmarking, and reference invariants, not as an active decompilation path inside Fission
 
 This repository is active engineering code, not a polished end-user release. The Rust decompiler path is real and improving quickly, but contracts, docs, and output quality are still moving.
 
 License: AGPL-3.0-or-later. Contributions are accepted under the CLA in [`CLA.md`](./CLA.md).
+
+## Documentation Hub
+
+Fission documentation is managed in a hybrid model:
+
+- Repository docs (design decisions, contributor-facing contracts, release notes):
+  - [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md)
+  - [`docs/DOCUMENT_CLASSIFICATION_DRAFT.md`](./docs/DOCUMENT_CLASSIFICATION_DRAFT.md)
+  - [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
+  - [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md)
+- GitHub Wiki (operator guides, tutorials, FAQ, troubleshooting):
+  - [Wiki Home](https://github.com/sjkim1127/Fission/wiki)
+  - [Wiki Git Repository](https://github.com/sjkim1127/Fission.wiki.git)
 
 ## What Fission Is Today
 
@@ -43,7 +57,8 @@ Important workspace members:
 | --- | --- |
 | [`crates/fission-sleigh`](./crates/fission-sleigh) | Sleigh decoding, lift semantics, CFG skeleton |
 | [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, printer |
-| [`crates/fission-static`](./crates/fission-static) | Static orchestration, routing, fact application |
+| [`crates/fission-static`](./crates/fission-static) | Static facts, native prepare helpers, analysis services |
+| [`crates/fission-decompiler-core`](./crates/fission-decompiler-core) | Canonical decompiler orchestration and postprocess owner |
 | [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbols, sections, strings |
 | [`crates/fission-signatures`](./crates/fission-signatures) | Signature and type data |
 | [`crates/fission-automation`](./crates/fission-automation) | `nir-check`, quality lanes, artifact reports |
@@ -88,8 +103,7 @@ Run the main quality lane:
 cargo run -p fission-automation -- nir-check --lane nir
 ```
 
-For build details, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).  
-For CLI examples, see [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md).
+For documentation map and migration plan, see [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md).
 
 ## Current Engineering Status
 
@@ -169,11 +183,11 @@ python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
 
 If you are new to the repository, read these first:
 
-1. [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
-2. [`docs/build/BUILD.md`](./docs/build/BUILD.md)
-3. [`docs/ROADMAP.md`](./docs/ROADMAP.md)
-4. [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)
-5. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
+1. [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md)
+2. [`docs/DOCUMENT_CLASSIFICATION_DRAFT.md`](./docs/DOCUMENT_CLASSIFICATION_DRAFT.md)
+3. [`docs/WIKI_TOC_DRAFT.md`](./docs/WIKI_TOC_DRAFT.md)
+4. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
+5. [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md)
 
 For contributor conventions, see [`AGENTS.md`](./AGENTS.md).
 

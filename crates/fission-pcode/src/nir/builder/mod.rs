@@ -147,31 +147,48 @@ impl<'a> PreviewBuilder<'a> {
                     min_val,
                     proof,
                 } => {
-                    let (case_values, used_proof_payload) = recovered_switch_case_values(
-                        &targets,
-                        default_target,
-                        min_val,
-                        proof.as_ref(),
-                    );
-                    if used_proof_payload {
-                        self.proof_payload_direct_emit_count += 1;
-                    }
-                    let cases = case_values
-                        .into_iter()
-                        .map(|(value, target)| crate::nir::types::HirSwitchCase {
-                            values: vec![value],
-                            body: vec![HirStmt::Goto(block_label(target))],
-                        })
-                        .collect();
-                    body.push(HirStmt::Switch {
-                        expr,
-                        cases,
-                        default: default_target
-                            .map(block_label)
-                            .map(HirStmt::Goto)
+                    let emit_ready =
+                        crate::nir::structuring::EmitReadyDecision::from_dispatcher_proof(
+                            proof.as_ref(),
+                        );
+                    if !emit_ready.emit_ready {
+                        let evidence = UnsupportedControlEvidence {
+                            opcode: "Switch".to_string(),
+                            source_block: Some(block.start_address),
+                            target_expr: Some(print_expr(&expr)),
+                            successor_targets: targets.clone(),
+                            failure_family: UnsupportedControlFamily::NonStructuralDispatcher,
+                            surface: IndirectControlSurface::DispatcherLike,
+                            confidence: 40,
+                        };
+                        body.push(self.emit_unsupported_control_surface(evidence, Some(expr)));
+                    } else {
+                        let (case_values, used_proof_payload) = recovered_switch_case_values(
+                            &targets,
+                            default_target,
+                            min_val,
+                            proof.as_ref(),
+                        );
+                        if used_proof_payload {
+                            self.proof_payload_direct_emit_count += 1;
+                        }
+                        let cases = case_values
                             .into_iter()
-                            .collect(),
-                    });
+                            .map(|(value, target)| crate::nir::types::HirSwitchCase {
+                                values: vec![value],
+                                body: vec![HirStmt::Goto(block_label(target))],
+                            })
+                            .collect();
+                        body.push(HirStmt::Switch {
+                            expr,
+                            cases,
+                            default: default_target
+                                .map(block_label)
+                                .map(HirStmt::Goto)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
                 }
             }
             if preview_builder_diag_enabled() {

@@ -3,6 +3,8 @@ use crate::analysis::decomp::DecompilerNative;
 #[cfg(feature = "native_decomp")]
 use fission_core::{PATHS, Result};
 #[cfg(feature = "native_decomp")]
+use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
+#[cfg(feature = "native_decomp")]
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 #[cfg(feature = "native_decomp")]
 use fission_signatures::WIN_API_DB;
@@ -75,58 +77,6 @@ fn preview_diag_prepare(binary: &LoadedBinary, stage: &str, start: Instant) {
 }
 
 #[cfg(feature = "native_decomp")]
-fn sanitize_registered_function_name(name: &str) -> String {
-    let mut sanitized = name.trim().to_string();
-    for suffix in [" [import]", " [export]"] {
-        if let Some(stripped) = sanitized.strip_suffix(suffix) {
-            sanitized = stripped.trim_end().to_string();
-        }
-    }
-
-    if sanitized.starts_with('{') {
-        return sanitized;
-    }
-
-    if let Some(paren) = sanitized.find('(') {
-        let prefix = sanitized[..paren].trim_end();
-        if !prefix.is_empty() {
-            sanitized = prefix
-                .split_whitespace()
-                .last()
-                .unwrap_or(prefix)
-                .to_string();
-        }
-    }
-
-    sanitized
-}
-
-#[cfg(feature = "native_decomp")]
-fn extract_struct_type_name(type_name: &str) -> Option<String> {
-    let mut cleaned = type_name.trim();
-    if cleaned.is_empty() {
-        return None;
-    }
-
-    while let Some(stripped) = cleaned.strip_suffix('*') {
-        cleaned = stripped.trim_end();
-    }
-    while let Some(stripped) = cleaned.strip_suffix('&') {
-        cleaned = stripped.trim_end();
-    }
-
-    let tokens: Vec<&str> = cleaned
-        .split_whitespace()
-        .filter(|token| !matches!(*token, "const" | "volatile" | "struct" | "class" | "enum"))
-        .collect();
-    if tokens.is_empty() {
-        return None;
-    }
-
-    Some(tokens.join(" "))
-}
-
-#[cfg(feature = "native_decomp")]
 fn prefer_function_name(candidate: &str, current: &str) -> bool {
     let candidate_is_sub = candidate.starts_with("sub_");
     let current_is_sub = current.starts_with("sub_");
@@ -189,7 +139,7 @@ fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary
     }
 
     for func in by_addr.values() {
-        let registered_name = sanitize_registered_function_name(&func.name);
+        let registered_name = sanitize_symbol_name(&func.name);
         if func.address != 0
             && !registered_name.is_empty()
             && let Err(e) = decomp.add_function(func.address, Some(&registered_name))
@@ -225,7 +175,7 @@ fn register_inferred_types_and_params(
 
     for (func_addr, func) in &binary.dwarf_functions {
         for (param_index, param) in func.params.iter().enumerate() {
-            let Some(struct_name) = extract_struct_type_name(&param.type_name) else {
+            let Some(struct_name) = normalize_named_type_identity(&param.type_name) else {
                 continue;
             };
             if !known_structs.contains(&struct_name) {

@@ -5,6 +5,10 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-fast-${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +21,7 @@ jobs:
   linux-fast-gate:
     name: Linux Fast Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
@@ -62,17 +67,18 @@ jobs:
             file
 
       - name: Check Formatting
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri -- -D warnings
+        run: cargo clippy --workspace --exclude fission-tauri --locked -- -D warnings
 
       - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --locked --verbose
 
   windows-build-test:
     name: Windows Build/Test
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -86,14 +92,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --release
+        run: cargo build -p fission-cli --locked --release
 
       - name: Run Windows core tests
-        run: cargo test -p fission-pcode -p fission-automation --release --verbose
+        run: cargo test -p fission-pcode -p fission-automation --locked --release --verbose
 
   macos-build-test:
     name: Build and Test (macOS)
     runs-on: macos-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -109,10 +116,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check Formatting
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri -- -D warnings
+        run: cargo clippy --workspace --exclude fission-tauri --locked -- -D warnings
 
       - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --locked --verbose

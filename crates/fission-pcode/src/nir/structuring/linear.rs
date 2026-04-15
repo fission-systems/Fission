@@ -220,7 +220,7 @@ impl<'a> PreviewBuilder<'a> {
                         continue;
                     }
                     let cases = if let Some(proof) = proof.as_ref()
-                        && proof_supports_direct_emit(proof)
+                        && EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
                     {
                         self.proof_payload_direct_emit_count += 1;
                         proof
@@ -282,10 +282,11 @@ impl<'a> PreviewBuilder<'a> {
         min_val: i64,
         proof: Option<&DispatcherProofUnit>,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof);
         let Some(proof) = proof else {
             return Ok(None);
         };
-        if !proof_supports_direct_emit(proof) {
+        if !emit_ready.emit_ready {
             return Ok(None);
         }
 
@@ -1695,6 +1696,7 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::LegacyScored,
             global_names: Default::default(),
             calling_convention: Default::default(),
         }

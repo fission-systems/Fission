@@ -4,7 +4,7 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use fission_decompiler_core::{
-    RustSleighDecompileConfig, decompile_with_rust_sleigh, fallback_reason_with_kind,
+    decompile_with_rust_sleigh, fallback_reason_with_kind, RustSleighDecompileConfig,
 };
 use fission_loader::loader::LoadedBinary;
 use std::time::Duration;

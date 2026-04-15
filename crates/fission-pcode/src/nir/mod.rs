@@ -85,7 +85,11 @@ pub fn render_mlil_preview_with_binary_and_context(
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::remove_file(format!("/tmp/fission_preview_{address:x}_unsupported.json"));
     }
-    if options.pe_x64_only && !options.is_supported_pe() {
+    let target_profile = options.target_profile();
+    if !target_profile.preview_eligible {
+        let mut stats = PreviewBuildStats::default();
+        stats.pe_admission_profile_mismatch_count = 1;
+        telemetry::store_preview_build_stats(stats);
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 

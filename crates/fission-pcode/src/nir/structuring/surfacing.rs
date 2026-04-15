@@ -17,3 +17,19 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 }
+
+pub(crate) fn surface_structure_graph(graph: StructureGraph) -> Vec<HirStmt> {
+    graph
+        .into_nodes()
+        .into_iter()
+        .flat_map(|node| {
+            if let Some(proof) = node.proof.as_ref() {
+                debug_assert!(
+                    matches!(node.kind, StructureNodeKind::Region(kind) if kind == proof.kind)
+                );
+                debug_assert_eq!(proof.follow, Some(node.skip_to));
+            }
+            node.statements.into_iter()
+        })
+        .collect()
+}

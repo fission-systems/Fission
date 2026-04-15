@@ -1,3 +1,4 @@
+use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
 use fission_pcode::{
@@ -163,19 +164,7 @@ fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirF
 }
 
 pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
-    let mut sanitized = name.trim().to_string();
-    if let Some((_, tail)) = sanitized.rsplit_once('!') {
-        sanitized = tail.trim().to_string();
-    }
-    if let Some(stripped) = sanitized.strip_prefix("__imp_") {
-        sanitized = stripped.trim().to_string();
-    }
-    for suffix in [" [import]", " [export]"] {
-        if let Some(stripped) = sanitized.strip_suffix(suffix) {
-            sanitized = stripped.trim_end().to_string();
-        }
-    }
-    sanitized
+    sanitize_symbol_name(name)
 }
 
 fn build_nir_call_param_rules(
@@ -186,7 +175,9 @@ fn build_nir_call_param_rules(
     let target_addresses_by_name = call_target_refs.iter().fold(
         HashMap::<String, Vec<u64>>::new(),
         |mut acc, (addr, target_ref)| {
-            acc.entry(target_ref.symbol.clone()).or_default().push(*addr);
+            acc.entry(target_ref.symbol.clone())
+                .or_default()
+                .push(*addr);
             acc
         },
     );
@@ -241,8 +232,11 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
         let Some(candidate) = type_name.strip_prefix(prefix) else {
             continue;
         };
-        if structures.get(candidate).is_some() {
-            return Some(candidate.to_string());
+        let Some(candidate) = normalize_named_type_identity(candidate) else {
+            continue;
+        };
+        if structures.get(&candidate).is_some() {
+            return Some(candidate);
         }
     }
     None

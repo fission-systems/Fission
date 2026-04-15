@@ -133,6 +133,26 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             "loop_control_rewrite_skipped_nested_scope_count",
             stats.loop_control_rewrite_skipped_nested_scope_count,
         ),
+        (
+            "region_proof_candidate_count",
+            stats.region_proof_candidate_count,
+        ),
+        (
+            "region_proof_completed_count",
+            stats.region_proof_completed_count,
+        ),
+        (
+            "region_emit_ready_failed_count",
+            stats.region_emit_ready_failed_count,
+        ),
+        (
+            "conditional_region_candidate_count",
+            stats.conditional_region_candidate_count,
+        ),
+        (
+            "conditional_region_promoted_count",
+            stats.conditional_region_promoted_count,
+        ),
         ("promotion_candidate_count", stats.promotion_candidate_count),
         ("promoted_region_count", stats.promoted_region_count),
         (
@@ -401,6 +421,10 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.dispatcher_shape_recovered_count,
         ),
         (
+            "switch_emit_ready_failed_count",
+            stats.switch_emit_ready_failed_count,
+        ),
+        (
             "structuring_reason_region_legality_count",
             stats.structuring_reason_region_legality_count,
         ),
@@ -492,6 +516,11 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
             "structuring".to_string(),
             stats.region_linearize_structuring_count
                 + stats.forced_linear_structuring_count
+                + stats.region_proof_candidate_count
+                + stats.region_proof_completed_count
+                + stats.region_emit_ready_failed_count
+                + stats.conditional_region_candidate_count
+                + stats.conditional_region_promoted_count
                 + stats.structuring_reason_region_legality_count
                 + stats.structuring_reason_follow_failure_count
                 + stats.structuring_reason_irreducible_count
@@ -504,6 +533,8 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
         (
             "dispatcher".to_string(),
             stats.dispatcher_shape_recovered_count
+                + stats.region_emit_ready_failed_count
+                + stats.switch_emit_ready_failed_count
                 + stats.unsupported_indirect_control_count
                 + stats.unsupported_external_target_count
                 + stats.indirect_surface_preserved_count,

@@ -3,13 +3,14 @@
 use crate::dto::*;
 use crate::error::CmdResult;
 use crate::state::AppState;
+use fission_ttd::TimelineDriver;
 use tauri::State;
 
 // ============================================================================
 // Private helpers
 // ============================================================================
 
-fn snapshot_to_dto(s: &fission_dynamic::debug::ttd::ExecutionSnapshot) -> TtdSnapshotDto {
+fn snapshot_to_dto(s: &fission_ttd::ExecutionSnapshot) -> TtdSnapshotDto {
     TtdSnapshotDto {
         step: s.step_index,
         thread_id: s.thread_id,
@@ -26,11 +27,11 @@ fn snapshot_to_dto(s: &fission_dynamic::debug::ttd::ExecutionSnapshot) -> TtdSna
     }
 }
 
-fn timeline_to_state_dto(tl: &fission_dynamic::debug::ttd::Timeline) -> TtdStateDto {
+fn timeline_to_state_dto(tl: &dyn TimelineDriver) -> TtdStateDto {
     let stats = tl.stats();
     let step_range = tl.step_range().map(|(a, b)| [a, b]);
     let current_step = tl.current_position();
-    let current_snapshot = tl.current_snapshot().map(snapshot_to_dto);
+    let current_snapshot = tl.current_snapshot_owned().as_ref().map(snapshot_to_dto);
     TtdStateDto {
         is_recording: tl.is_recording(),
         snapshot_count: stats.count as usize,
@@ -51,7 +52,7 @@ fn timeline_to_state_dto(tl: &fission_dynamic::debug::ttd::Timeline) -> TtdState
 pub async fn ttd_start(state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
     let mut tl = state.timeline.lock().await;
     tl.start_recording();
-    Ok(timeline_to_state_dto(&tl))
+    Ok(timeline_to_state_dto(&**tl))
 }
 
 /// Stop TTD recording and enter replay mode so the timeline can be seeked.
@@ -60,14 +61,14 @@ pub async fn ttd_stop(state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
     let mut tl = state.timeline.lock().await;
     tl.stop_recording();
     tl.enter_replay_mode();
-    Ok(timeline_to_state_dto(&tl))
+    Ok(timeline_to_state_dto(&**tl))
 }
 
 /// Return the current TTD timeline state without modifying it.
 #[tauri::command]
 pub async fn ttd_status(state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
     let tl = state.timeline.lock().await;
-    Ok(timeline_to_state_dto(&tl))
+    Ok(timeline_to_state_dto(&**tl))
 }
 
 /// Seek to a specific step index. Returns the updated timeline state including
@@ -75,8 +76,8 @@ pub async fn ttd_status(state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
 #[tauri::command]
 pub async fn ttd_seek(step: u64, state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
     let mut tl = state.timeline.lock().await;
-    let _ = tl.seek_to(step);
-    Ok(timeline_to_state_dto(&tl))
+    tl.seek_to(step);
+    Ok(timeline_to_state_dto(&**tl))
 }
 
 /// Step one position in the given `direction` (`"forward"` or `"rewind"`).
@@ -84,9 +85,9 @@ pub async fn ttd_seek(step: u64, state: State<'_, AppState>) -> CmdResult<TtdSta
 pub async fn ttd_step(direction: String, state: State<'_, AppState>) -> CmdResult<TtdStateDto> {
     let mut tl = state.timeline.lock().await;
     if direction == "rewind" {
-        let _ = tl.rewind(1);
+        tl.rewind(1);
     } else {
-        let _ = tl.forward(1);
+        tl.forward(1);
     }
-    Ok(timeline_to_state_dto(&tl))
+    Ok(timeline_to_state_dto(&**tl))
 }

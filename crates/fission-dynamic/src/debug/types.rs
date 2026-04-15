@@ -10,6 +10,7 @@
 //!
 //! These types are platform-agnostic and used by all debugger implementations.
 
+pub use fission_ttd::RegisterState;
 use std::collections::HashMap;
 
 /// Information about a running process
@@ -68,29 +69,6 @@ pub struct Breakpoint {
     pub original_byte: u8,
     /// Is this breakpoint enabled?
     pub enabled: bool,
-}
-
-/// CPU register state (x64)
-#[derive(Debug, Clone, Default)]
-pub struct RegisterState {
-    pub rax: u64,
-    pub rbx: u64,
-    pub rcx: u64,
-    pub rdx: u64,
-    pub rsi: u64,
-    pub rdi: u64,
-    pub rbp: u64,
-    pub rsp: u64,
-    pub r8: u64,
-    pub r9: u64,
-    pub r10: u64,
-    pub r11: u64,
-    pub r12: u64,
-    pub r13: u64,
-    pub r14: u64,
-    pub r15: u64,
-    pub rip: u64,
-    pub rflags: u64,
 }
 
 /// Debug state for GUI

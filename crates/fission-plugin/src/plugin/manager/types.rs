@@ -1,5 +1,5 @@
-use super::super::api::PluginInfo;
 use super::super::FissionPlugin;
+use super::super::api::PluginInfo;
 use crate::events::FissionEvent;
 
 pub type HookCallback = Box<dyn Fn(&FissionEvent) + Send + Sync>;

@@ -57,6 +57,13 @@ impl<'a> PreviewBuilder<'a> {
             loop_while_subgraph_lowered_count: self.loop_while_subgraph_lowered_count,
             loop_multi_exit_break_count: self.loop_multi_exit_break_count,
             loop_for_lowered_count: self.loop_for_lowered_count,
+            region_proof_candidate_count: self.region_proof_candidate_count,
+            region_proof_completed_count: self.region_proof_completed_count,
+            region_emit_ready_failed_count: self.region_emit_ready_failed_count,
+            conditional_region_candidate_count: self.conditional_region_candidate_count,
+            conditional_region_promoted_count: self.conditional_region_promoted_count,
+            guarded_tail_candidate_count: self.guarded_tail_candidate_count,
+            guarded_tail_promoted_count: self.guarded_tail_promoted_count,
             promotion_candidate_count: self.promotion_candidate_count,
             promoted_region_count: self.promoted_region_count,
             promotion_rejected_by_shape_count: self.promotion_rejected_by_shape_count,
@@ -67,6 +74,32 @@ impl<'a> PreviewBuilder<'a> {
             promotion_rejected_by_gate_count: self.promotion_rejected_by_gate_count,
             discovery_seen_guarded_tail_like_shape_count: self
                 .discovery_seen_guarded_tail_like_shape_count,
+            guarded_tail_rejected_missing_terminal_join_count: self
+                .guarded_tail_rejected_missing_terminal_join_count,
+            guarded_tail_rejected_side_entry_conflict_count: self
+                .guarded_tail_rejected_side_entry_conflict_count,
+            guarded_tail_rejected_alias_interleave_conflict_count: self
+                .guarded_tail_rejected_alias_interleave_conflict_count,
+            guarded_tail_rejected_ambiguous_follow_count: self
+                .guarded_tail_rejected_ambiguous_follow_count,
+            guarded_tail_replacement_plan_candidate_count: self
+                .guarded_tail_replacement_plan_candidate_count,
+            guarded_tail_replacement_plan_completed_count: self
+                .guarded_tail_replacement_plan_completed_count,
+            guarded_tail_replacement_plan_merge_created_count: self
+                .guarded_tail_replacement_plan_merge_created_count,
+            guarded_tail_replacement_plan_rejected_missing_merge_count: self
+                .guarded_tail_replacement_plan_rejected_missing_merge_count,
+            guarded_tail_replacement_plan_rejected_unstable_read_count: self
+                .guarded_tail_replacement_plan_rejected_unstable_read_count,
+            guarded_tail_exported_binding_count: self.guarded_tail_exported_binding_count,
+            guarded_tail_replacement_read_count: self.guarded_tail_replacement_read_count,
+            guarded_tail_replacement_read_rewritten_count: self
+                .guarded_tail_replacement_read_rewritten_count,
+            guarded_tail_replacement_read_rejected_nondominated_count: self
+                .guarded_tail_replacement_read_rejected_nondominated_count,
+            guarded_tail_replacement_read_rejected_nonremovable_op_count: self
+                .guarded_tail_replacement_read_rejected_nonremovable_op_count,
             discovery_rejected_noncanonical_layout_count: self
                 .discovery_rejected_noncanonical_layout_count,
             canonicalized_guarded_tail_shape_count: self.canonicalized_guarded_tail_shape_count,
@@ -155,6 +188,14 @@ impl<'a> PreviewBuilder<'a> {
             indirect_target_set_refined_count: self.indirect_target_set_refined_count,
             dispatcher_shape_recovered_count: self.dispatcher_shape_recovered_count,
             materialization_stabilized_count: self.materialization_stabilized_count,
+            replacement_plan_candidate_count: self.replacement_plan_candidate_count,
+            replacement_plan_completed_count: self.replacement_plan_completed_count,
+            replacement_plan_merge_binding_count: self.replacement_plan_merge_binding_count,
+            replacement_plan_rejected_alias_unsafe_count: self
+                .replacement_plan_rejected_alias_unsafe_count,
+            replacement_plan_rejected_missing_merge_count: self
+                .replacement_plan_rejected_missing_merge_count,
+            materialization_inline_suppressed_count: self.materialization_inline_suppressed_count,
             representative_downgrade_count: self.representative_downgrade_count,
             representative_downgrade_no_aliassafe_source_count: self
                 .representative_downgrade_no_aliassafe_source_count,
@@ -166,9 +207,11 @@ impl<'a> PreviewBuilder<'a> {
             dispatcher_proof_unit_count: self.dispatcher_proof_unit_count,
             dispatcher_proof_completed_count: self.dispatcher_proof_completed_count,
             dispatcher_proof_failed_count: self.dispatcher_proof_failed_count,
+            switch_emit_ready_failed_count: self.switch_emit_ready_failed_count,
             compare_chain_dispatcher_count: 0,
             candidate_scoped_jump_resolver_count: 0,
             sccp_skipped_by_admission_count: 0,
+            pe_admission_profile_mismatch_count: self.pe_admission_profile_mismatch_count,
             memory_fact_prefilter_skip_count: 0,
             aggregate_fields_skipped_by_admission_count: 0,
             memory_slot_cheap_exit_count: 0,

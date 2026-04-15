@@ -255,7 +255,6 @@ impl FactStore {
             pdb_info: self.pdb_functions.get(&address).cloned(),
         }
     }
-
 }
 
 pub fn log_type_diag(
@@ -505,5 +504,4 @@ mod tests {
         assert_eq!(snapshot.dwarf_type_fact_count(), 3);
         assert_eq!(snapshot.pdb_type_fact_count(), 0);
     }
-
 }

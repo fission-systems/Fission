@@ -1,6 +1,6 @@
-use fission_static::analysis::decomp::facts::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirRenderOptions, PcodeFunction};
+use fission_static::analysis::decomp::facts::FactStore;
 
 pub use crate::recovery::{PreviewRoutingDecision, PreviewSelection};
 pub use crate::routing::{
@@ -103,10 +103,10 @@ pub fn rescue_preview_output_with_facts<S: NirSource>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::facts::sanitize_nir_symbol_name;
     use crate::render::{build_nir_type_context_from_facts, make_nir_request};
     use crate::worker::nir_worker_timeout_ms;
-    use super::*;
     use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::types::{
         DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
@@ -139,6 +139,7 @@ mod tests {
                 region_linearize_structuring: false,
                 force_linear_structuring: false,
                 conservative_irreducible_fallback: false,
+                structuring_engine: StructuringEngineKind::LegacyScored,
                 global_names: Default::default(),
                 calling_convention: Default::default(),
             },
@@ -369,10 +370,7 @@ mod tests {
 
     #[test]
     fn sanitize_preview_symbol_name_strips_import_prefixes_and_suffixes() {
-        assert_eq!(
-            sanitize_nir_symbol_name("__imp_MessageBoxW"),
-            "MessageBoxW"
-        );
+        assert_eq!(sanitize_nir_symbol_name("__imp_MessageBoxW"), "MessageBoxW");
         assert_eq!(sanitize_nir_symbol_name("foo [import]"), "foo");
     }
 

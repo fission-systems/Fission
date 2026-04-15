@@ -1,4 +1,6 @@
-use crate::{DecompileEngineMode, DecompileRoutingDecision, DecompileSelection, PostProcessOptions};
+use crate::{
+    DecompileEngineMode, DecompileRoutingDecision, DecompileSelection, PostProcessOptions,
+};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction};
 use fission_static::analysis::decomp::facts::FactStore;
@@ -17,12 +19,14 @@ pub struct DecompileRequest<'a> {
 
 impl<'a> DecompileRequest<'a> {
     pub fn resolved_name(&self) -> String {
-        self.function_name.map(ToOwned::to_owned).unwrap_or_else(|| {
-            self.binary
-                .function_at(self.function_address)
-                .map(|func| func.name.clone())
-                .unwrap_or_else(|| format!("sub_{:x}", self.function_address))
-        })
+        self.function_name
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                self.binary
+                    .function_at(self.function_address)
+                    .map(|func| func.name.clone())
+                    .unwrap_or_else(|| format!("sub_{:x}", self.function_address))
+            })
     }
 
     pub fn resolved_render_options(&self) -> NirRenderOptions {

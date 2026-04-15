@@ -9,7 +9,11 @@ impl<'a> PreviewBuilder<'a> {
         let Some(parsed) = self.parse_switch_chain(idx)? else {
             return Ok(None);
         };
-        if !parsed.proof.proof_complete || parsed.proof.failure_family.is_some() {
+        let emit_ready = EmitReadyDecision::from_dispatcher_proof(Some(&parsed.proof));
+        if !emit_ready.emit_ready {
+            self.switch_emit_ready_failed_count += 1;
+            self.region_proof_candidate_count += 1;
+            self.region_emit_ready_failed_count += 1;
             return Ok(None);
         }
         if parsed.cases.len() < 2 {

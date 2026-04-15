@@ -21,3 +21,4 @@ fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, default-features = false }
+fission-ttd = { path = "../fission-ttd" }

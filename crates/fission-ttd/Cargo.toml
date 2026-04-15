@@ -1,0 +1,14 @@
+[package]
+name = "fission-ttd"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Fission time-travel debugging snapshots and recorder primitives"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["fission", "ttd", "debugger", "reverse-engineering"]
+categories = ["development-tools::debugging"]
+
+[dependencies]
+fission-core = { path = "../fission-core" }

@@ -49,15 +49,77 @@ impl<'a> PreviewBuilder<'a> {
         matches!(stmt, HirStmt::Expr(expr) if Self::expr_is_pure_value(expr))
     }
 
+    pub(super) fn stmt_is_pure_value_assign(stmt: &HirStmt) -> bool {
+        matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if Self::expr_is_pure_value(rhs)
+        )
+    }
+
+    fn stmt_is_alias_forward_safe(stmt: &HirStmt, label: &str, next_label: &str) -> bool {
+        if is_ignorable_discovery_stmt(stmt)
+            || Self::stmt_is_pure_value_expr(stmt)
+            || Self::stmt_is_pure_value_assign(stmt)
+        {
+            return true;
+        }
+
+        match stmt {
+            HirStmt::Goto(target) => target == next_label || target == label,
+            HirStmt::Block(body) => body
+                .iter()
+                .all(|stmt| Self::stmt_is_alias_forward_safe(stmt, label, next_label)),
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                Self::expr_is_pure_value(cond)
+                    && then_body
+                        .iter()
+                        .all(|stmt| Self::stmt_is_alias_forward_safe(stmt, label, next_label))
+                    && else_body
+                        .iter()
+                        .all(|stmt| Self::stmt_is_alias_forward_safe(stmt, label, next_label))
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn classify_external_alias_ref_sites(
         full_body: &[HirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
     ) -> (usize, usize, usize) {
+        let (top_level_before, nested_before, top_level_after, nested_after) =
+            Self::classify_external_alias_ref_sites_detailed(
+                full_body,
+                segment_start,
+                segment_end,
+                label,
+            );
+
+        (
+            top_level_before,
+            nested_before,
+            top_level_after + nested_after,
+        )
+    }
+
+    pub(super) fn classify_external_alias_ref_sites_detailed(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        segment_end: usize,
+        label: &str,
+    ) -> (usize, usize, usize, usize) {
         let mut top_level_before = 0usize;
         let mut nested_before = 0usize;
-        let mut refs_after = 0usize;
+        let mut top_level_after = 0usize;
+        let mut nested_after = 0usize;
 
         for (idx, stmt) in full_body.iter().enumerate() {
             if idx >= segment_start && idx < segment_end {
@@ -73,11 +135,19 @@ impl<'a> PreviewBuilder<'a> {
                     _ => nested_before += ref_count,
                 }
             } else {
-                refs_after += ref_count;
+                match stmt {
+                    HirStmt::Goto(target) if target == label => top_level_after += 1,
+                    _ => nested_after += ref_count,
+                }
             }
         }
 
-        (top_level_before, nested_before, refs_after)
+        (
+            top_level_before,
+            nested_before,
+            top_level_after,
+            nested_after,
+        )
     }
 
     pub(super) fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
@@ -189,15 +259,11 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
-            if is_ignorable_discovery_stmt(stmt) || Self::stmt_is_pure_value_expr(stmt) {
-                continue;
+            if matches!(stmt, HirStmt::Goto(target) if target == next_label) {
+                saw_forward_goto = true;
             }
-            match stmt {
-                HirStmt::Goto(target) if target == next_label => {
-                    saw_forward_goto = true;
-                }
-                HirStmt::Goto(target) if target == label => {}
-                _ => return false,
+            if !Self::stmt_is_alias_forward_safe(stmt, label, next_label) {
+                return false;
             }
         }
         saw_forward_goto
@@ -310,8 +376,7 @@ impl<'a> PreviewBuilder<'a> {
             let no_nonlocal_refs = referenced.get(&current).copied().unwrap_or(0) <= hop_ref_budget;
             if no_nonlocal_refs
                 && (Self::is_trivial_join_forward_segment(segment, next_label)
-                    || Self::is_trivial_join_forward_or_pure_segment(segment, next_label)
-                    || segment.iter().all(is_ignorable_discovery_stmt))
+                    || Self::is_trivial_join_forward_or_pure_segment(segment, next_label))
             {
                 current = next_label.clone();
                 rewrites += 1;
@@ -469,6 +534,40 @@ impl<'a> PreviewBuilder<'a> {
             return Some((next_label.clone(), next_label_idx));
         }
         None
+    }
+
+    pub(super) fn resolve_terminal_tail_exit_stmt(
+        body: &[HirStmt],
+        target_label: &str,
+    ) -> Option<HirStmt> {
+        let mut current = target_label.to_string();
+        let mut seen = HashSet::new();
+
+        loop {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+
+            let label_idx = body
+                .iter()
+                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &current))?;
+            let next_label_idx = body[label_idx + 1..]
+                .iter()
+                .position(|stmt| matches!(stmt, HirStmt::Label(_)))
+                .map(|offset| label_idx + 1 + offset)
+                .unwrap_or(body.len());
+            let retained: Vec<_> = body[label_idx + 1..next_label_idx]
+                .iter()
+                .filter(|stmt| !is_ignorable_discovery_stmt(stmt))
+                .cloned()
+                .collect();
+
+            match retained.as_slice() {
+                [HirStmt::Return(ret)] => return Some(HirStmt::Return(ret.clone())),
+                [HirStmt::Goto(next)] => current = next.clone(),
+                _ => return None,
+            }
+        }
     }
 
     pub(super) fn flatten_guarded_tail_segment(segment: &[HirStmt], out: &mut Vec<HirStmt>) {

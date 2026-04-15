@@ -19,7 +19,7 @@
 //! ├── windows/     # Windows-specific implementation
 //! ├── linux.rs     # Linux-specific implementation (ptrace)
 //! ├── macos.rs     # macOS-specific implementation (Mach API stub)
-//! ├── ttd/         # Time Travel Debugging (internal snapshots)
+//! ├── ttd.rs       # Time Travel Debugging facade over `fission-ttd`
 //! └── rr/          # RR debugger integration (Linux only)
 //! ```
 

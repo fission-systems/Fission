@@ -26,13 +26,14 @@ pub use pcode::*;
 
 // Re-export optimizer
 pub use nir::{
-    CallEdgeKind, CallSummary, CallTargetProvenance, CallTargetRef, CallingConvention, HirExpr,
-    HirFunction, HirStmt, IndirectControlClassification, MlilPreviewError, MlilPreviewOptions,
-    NirBindingOrigin, NirBlock, NirBuildStats, NirCallParamRule, NirFunction, NirFunctionHints,
-    NirHintStats, NirRenderOptions, NirTerminator, NirType, NirTypeContext, NirValueId,
-    PreviewBuildStats, PreviewCallParamRule, PreviewFunctionHints, PreviewHintStats,
-    PreviewTypeContext, RecoveryMode, StackSlotId, StructuringFailureKind, StructuringOutcome,
-    StructuringReasonFamily, parse_call_target_address, render_mlil_preview,
+    AdmissionClass, CallEdgeKind, CallSummary, CallTargetProvenance, CallTargetRef,
+    CallingConvention, FormatFamily, HirExpr, HirFunction, HirStmt, IndirectControlClassification,
+    MlilPreviewError, MlilPreviewOptions, NirAdmissionFacts, NirBindingOrigin, NirBlock,
+    NirBuildStats, NirCallParamRule, NirFunction, NirFunctionHints, NirHintStats, NirRenderOptions,
+    NirTerminator, NirType, NirTypeContext, NirValueId, PreviewBuildStats, PreviewCallParamRule,
+    PreviewFunctionHints, PreviewHintStats, PreviewTypeContext, RecoveryMode, StackSlotId,
+    StructuringBudgetClass, StructuringEngineKind, StructuringFailureKind, StructuringOutcome,
+    StructuringReasonFamily, TargetProfile, parse_call_target_address, render_mlil_preview,
     render_mlil_preview_with_binary_and_context, render_mlil_preview_with_context, render_nir,
     render_nir_with_binary_and_context, render_nir_with_context, structuring_outcome_for_signature,
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,

@@ -15,19 +15,19 @@ pub mod taxonomy;
 pub mod types;
 pub mod worker;
 
-pub use fission_static::utils;
 pub use adapters::{NativeDecompilerBackend, NativeDecompilerSource};
+pub use fission_static::utils;
 
 pub use engine::{
-    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
-    NirSurfaceKind, NirWorkerRequest, NirWorkerResponse, PreviewEngineMode,
-    PreviewRoutingDecision, PreviewRoutingResolver, PreviewSelection, PreviewSource,
-    PreviewSurfaceKind, PreviewWorkerRequest, PreviewWorkerResponse, auto_nir_admission_eligible,
-    auto_nir_eligible, classified_nir_error, classify_native_failure_kind,
-    classify_nir_failure, classify_nir_failure_refined, execute_nir_worker,
-    execute_preview_worker, fallback_reason_with_kind, native_failure_routing_decision,
-    nir_fallback_reason_with_kind, rescue_nir_output, rescue_nir_output_with_facts,
-    select_nir_output, select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
+    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
+    NirWorkerRequest, NirWorkerResponse, PreviewEngineMode, PreviewRoutingDecision,
+    PreviewRoutingResolver, PreviewSelection, PreviewSource, PreviewSurfaceKind,
+    PreviewWorkerRequest, PreviewWorkerResponse, auto_nir_admission_eligible, auto_nir_eligible,
+    classified_nir_error, classify_native_failure_kind, classify_nir_failure,
+    classify_nir_failure_refined, execute_nir_worker, execute_preview_worker,
+    fallback_reason_with_kind, native_failure_routing_decision, nir_fallback_reason_with_kind,
+    rescue_nir_output, rescue_nir_output_with_facts, select_nir_output,
+    select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
     select_nir_output_with_facts,
 };
 pub use postprocess::{PostProcessor, RustPostProcessOptions};

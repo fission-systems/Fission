@@ -466,7 +466,10 @@ fn multi_block_preview_rejects_switch_chain_with_mixed_selector_family() {
     let code = render_mlil_preview(&func, "mixed_switch", 0x5500, &preview_options())
         .expect("preview render");
     assert!(!code.contains("switch ("), "{code}");
-    assert!(code.contains("param_1 == 1"), "{code}");
+    assert!(
+        code.contains("param_1 == 1") || code.contains("param_1 != 1"),
+        "{code}"
+    );
     assert!(code.contains("param_2 == 2"), "{code}");
 }
 

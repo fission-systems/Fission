@@ -4,10 +4,10 @@ use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
 use crate::services::cross_image::{AutoRenameKind, PropagationReason};
-use fission_dynamic::debug::ttd::Timeline;
-use fission_plugin::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
+use fission_plugin::plugin::PluginManager;
 use fission_static::analysis::decomp::{FactProvenance, FactStore};
+use fission_ttd::TimelineDriver;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -97,7 +97,7 @@ pub struct AppState {
     pub plugin_manager: Mutex<PluginManager>,
 
     /// TTD (Time Travel Debugging) timeline — separate lock
-    pub timeline: Mutex<Timeline>,
+    pub timeline: Mutex<Box<dyn TimelineDriver>>,
 
     /// Native menu item handles for dynamic enable/disable
     pub menu_handles: std::sync::OnceLock<MenuHandles>,
@@ -115,7 +115,7 @@ impl Default for AppState {
             #[cfg(target_os = "windows")]
             debug_stop_tx: std::sync::Mutex::new(None),
             plugin_manager: Mutex::new(PluginManager::new()),
-            timeline: Mutex::new(Timeline::new()),
+            timeline: Mutex::new(Box::new(fission_dynamic::debug::ttd::Timeline::new())),
             menu_handles: std::sync::OnceLock::new(),
         }
     }

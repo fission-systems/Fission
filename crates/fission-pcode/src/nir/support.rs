@@ -296,17 +296,8 @@ pub(crate) fn recovered_switch_case_values(
 }
 
 pub(crate) fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
-    proof.proof_complete
-        && proof.failure_family.is_none()
-        && !proof.recovered_cases.is_empty()
-        && proof.selector_cardinality >= 2
+    crate::nir::structuring::EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
         && proof.recovered_cases.len() >= proof.selector_cardinality
-        && proof.legality_witness.as_ref().is_some_and(|legality| {
-            legality.valid
-                && legality.side_effect_free_selector
-                && legality.ordinal_domain_complete
-                && !legality.shared_tail_conflict
-        })
 }
 
 /// x64 calling convention used when identifying parameter registers.
@@ -515,5 +506,24 @@ mod tests {
             recovered_switch_case_values(&[0x1100, 0x1200], Some(0x1300), 7, Some(&proof));
         assert!(!used_proof_payload);
         assert_eq!(cases, vec![(7, 0x1100), (8, 0x1200)]);
+    }
+
+    #[test]
+    fn emit_ready_decision_requires_complete_proof() {
+        let proof = proof_with_cases(
+            vec![(0, 0x1100), (1, 0x1200)],
+            2,
+            false,
+            Some(ProofFailureFamily::MissingOrdinalCoverage),
+        );
+        let decision =
+            crate::nir::structuring::EmitReadyDecision::from_dispatcher_proof(Some(&proof));
+        assert!(decision.proof_present);
+        assert!(!decision.proof_complete);
+        assert!(!decision.emit_ready);
+        assert_eq!(
+            decision.failure,
+            Some(crate::nir::structuring::EmitReadyFailureFamily::ProofIncomplete)
+        );
     }
 }

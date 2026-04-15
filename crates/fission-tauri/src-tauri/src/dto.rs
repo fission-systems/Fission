@@ -669,8 +669,8 @@ pub struct FidResultDto {
 
 // ── Debug conversions ─────────────────────────────────────────────────────────
 
-impl From<fission_dynamic::debug::types::RegisterState> for RegisterStateDto {
-    fn from(r: fission_dynamic::debug::types::RegisterState) -> Self {
+impl From<fission_ttd::RegisterState> for RegisterStateDto {
+    fn from(r: fission_ttd::RegisterState) -> Self {
         Self {
             rax: r.rax,
             rbx: r.rbx,

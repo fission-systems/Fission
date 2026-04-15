@@ -22,6 +22,133 @@ pub(super) enum GuardedTailCanonicalizationFailure {
     PayloadCrossesJoin,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GuardedTailWitnessRejection {
+    MissingTerminalJoin,
+    SideEntryConflict,
+    AliasInterleaveConflict,
+    AmbiguousFollow,
+    NonCanonicalLayout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RegionShapeWitness {
+    pub(super) target_label: String,
+    pub(super) label_idx: usize,
+    pub(super) keep_middle_when_cond_true: bool,
+    pub(super) middle: Vec<HirStmt>,
+    pub(super) external_redirects: Vec<(String, String)>,
+    pub(super) terminal_join_present: bool,
+    pub(super) follow_witness: bool,
+    pub(super) side_entry_free: bool,
+    pub(super) alias_interleave_legal: bool,
+}
+
+impl RegionShapeWitness {
+    pub(super) fn is_complete(&self) -> bool {
+        self.terminal_join_present
+            && self.follow_witness
+            && self.side_entry_free
+            && self.alias_interleave_legal
+    }
+
+    pub(super) fn region_legality(&self) -> RegionLegality {
+        RegionLegality {
+            entry_unique: true,
+            terminal_join_present: self.terminal_join_present,
+            follow_witness: self.follow_witness,
+            postdom_witness: self.terminal_join_present && self.follow_witness,
+            side_entry_free: self.side_entry_free,
+            side_exit_legal: self.follow_witness,
+            alias_interleave_legal: self.alias_interleave_legal,
+            selector_side_effect_free: false,
+            ordinal_domain_complete: false,
+            shared_tail_conflict_free: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GuardedTailReadKind {
+    AssignRhs,
+    ConditionExpr,
+    ReturnExpr,
+    CallArg,
+    SwitchSelector,
+    NestedExpr,
+    JoinPhiLikeUse,
+    MiddleGoto,
+    ExternalForwardGoto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailReplacementRead {
+    pub(super) stmt_idx: usize,
+    pub(super) kind: GuardedTailReadKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailExportedBinding {
+    pub(super) def_stmt_idx: usize,
+    pub(super) binding_name: String,
+    pub(super) replacement_source: HirExpr,
+    pub(super) read_sites: Vec<GuardedTailReplacementRead>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailSyntheticMerge {
+    pub(super) binding_name: String,
+    pub(super) replacement_target: String,
+    pub(super) then_value: HirExpr,
+    pub(super) else_value: HirExpr,
+    pub(super) read_site_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailTrial {
+    pub(super) witness: RegionShapeWitness,
+    pub(super) follow_block: Option<String>,
+    pub(super) candidate_reads: Vec<GuardedTailReplacementRead>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GuardedTailExecutionRejection {
+    Witness(GuardedTailWitnessRejection),
+    ReplacementIncomplete,
+    MustEmitLabelConflict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailVerification {
+    pub(super) region_legality: RegionLegality,
+    pub(super) replacement_complete: bool,
+    pub(super) removable_ops_legal: bool,
+    pub(super) keep_join_label: bool,
+    pub(super) rewritten_middle: Vec<HirStmt>,
+    pub(super) exported_bindings: Vec<GuardedTailExportedBinding>,
+    pub(super) rejection_reason: Option<GuardedTailExecutionRejection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardedTailExecutionPlan {
+    pub(super) keep_join_label: bool,
+    pub(super) synthetic_merges: Vec<GuardedTailSyntheticMerge>,
+    pub(super) redirects: Vec<(String, String)>,
+    pub(super) rewritten_middle: Vec<HirStmt>,
+}
+
+impl From<GuardedTailWitnessRejection> for RegionRejectionReason {
+    fn from(value: GuardedTailWitnessRejection) -> Self {
+        match value {
+            GuardedTailWitnessRejection::MissingTerminalJoin => Self::MissingTerminalJoin,
+            GuardedTailWitnessRejection::SideEntryConflict => Self::SideEntryConflict,
+            GuardedTailWitnessRejection::AliasInterleaveConflict => Self::AliasInterleaveConflict,
+            GuardedTailWitnessRejection::AmbiguousFollow => Self::AmbiguousFollow,
+            GuardedTailWitnessRejection::NonCanonicalLayout => Self::NonCanonicalLayout,
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PromotionGateRejection {
@@ -56,6 +183,7 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::LegacyScored,
             global_names: Default::default(),
             calling_convention: Default::default(),
         }

@@ -1,9 +1,13 @@
-//! Timeline - Manages recorded history and navigation.
+//! Time-travel debugging facade.
+//!
+//! Snapshot and recorder primitives live in `fission-ttd`.
+//! `fission-dynamic` keeps the RR-aware timeline integration layer here.
 
-use super::recorder::TTDRecorder;
-use super::snapshot::{ExecutionSnapshot, SnapshotStats};
 #[cfg(target_os = "linux")]
 use crate::debug::rr::RRDebugger;
+use fission_ttd::{RegisterState, SnapshotStats, TTDRecorder, TimelineDriver};
+
+pub use fission_ttd::{ExecutionSnapshot, MemoryDelta, RecordingStatus};
 
 /// Timeline navigation result
 #[derive(Debug, Clone)]
@@ -139,11 +143,7 @@ impl Timeline {
         self.replay_mode
     }
 
-    pub fn record_step_internal(
-        &mut self,
-        registers: crate::debug::types::RegisterState,
-        thread_id: u32,
-    ) {
+    pub fn record_step_internal(&mut self, registers: RegisterState, thread_id: u32) {
         match &mut self.backend {
             Backend::Internal(rec) => {
                 rec.record_step(registers, thread_id);
@@ -175,7 +175,6 @@ impl Timeline {
                 if let Some(snapshot) = rec.get_snapshot(step_index) {
                     self.current_position = Some(step_index);
                     self.replay_mode = true;
-                    // We don't cache internal snapshots, they are memoized in recorder
                     SeekResult::Success(snapshot.clone())
                 } else {
                     SeekResult::OutOfBounds {
@@ -214,8 +213,7 @@ impl Timeline {
         }
 
         if let Some(pos) = self.current_position {
-            let target = pos.saturating_sub(steps);
-            self.seek_to(target)
+            self.seek_to(pos.saturating_sub(steps))
         } else {
             SeekResult::Empty
         }
@@ -237,8 +235,7 @@ impl Timeline {
         }
 
         if let Some(pos) = self.current_position {
-            let target = pos.saturating_add(steps);
-            self.seek_to(target)
+            self.seek_to(pos.saturating_add(steps))
         } else {
             SeekResult::Empty
         }
@@ -320,17 +317,65 @@ impl Timeline {
     }
 }
 
+impl TimelineDriver for Timeline {
+    fn start_recording(&mut self) {
+        Timeline::start_recording(self);
+    }
+
+    fn stop_recording(&mut self) {
+        Timeline::stop_recording(self);
+    }
+
+    fn enter_replay_mode(&mut self) {
+        Timeline::enter_replay_mode(self);
+    }
+
+    fn is_recording(&self) -> bool {
+        Timeline::is_recording(self)
+    }
+
+    fn stats(&self) -> SnapshotStats {
+        Timeline::stats(self)
+    }
+
+    fn step_range(&self) -> Option<(u64, u64)> {
+        Timeline::step_range(self)
+    }
+
+    fn current_position(&self) -> Option<u64> {
+        Timeline::current_position(self)
+    }
+
+    fn current_snapshot_owned(&self) -> Option<ExecutionSnapshot> {
+        Timeline::current_snapshot(self).cloned()
+    }
+
+    fn record_step(&mut self, registers: RegisterState, thread_id: u32) {
+        Timeline::record_step_internal(self, registers, thread_id);
+    }
+
+    fn seek_to(&mut self, step_index: u64) {
+        let _ = Timeline::seek_to(self, step_index);
+    }
+
+    fn rewind(&mut self, steps: u64) {
+        let _ = Timeline::rewind(self, steps);
+    }
+
+    fn forward(&mut self, steps: u64) {
+        let _ = Timeline::forward(self, steps);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::debug::types::RegisterState;
 
     #[test]
     fn test_timeline_basic() {
         let mut timeline = Timeline::new();
         timeline.start_recording();
 
-        // Record some steps
         for i in 0..5 {
             let mut regs = RegisterState::default();
             regs.rip = 0x401000 + i * 4;
@@ -339,11 +384,9 @@ mod tests {
 
         timeline.stop_recording();
 
-        // Check range
         assert_eq!(timeline.step_range(), Some((0, 4)));
         assert_eq!(timeline.snapshot_count(), 5);
 
-        // Seek to middle
         if let SeekResult::Success(snap) = timeline.seek_to(2) {
             assert_eq!(snap.step_index, 2);
             assert_eq!(snap.registers.rip, 0x401008);
@@ -351,14 +394,12 @@ mod tests {
             panic!("Seek failed");
         }
 
-        // Rewind
         if let SeekResult::Success(snap) = timeline.rewind(1) {
             assert_eq!(snap.step_index, 1);
         } else {
             panic!("Rewind failed");
         }
 
-        // Forward
         if let SeekResult::Success(snap) = timeline.forward(2) {
             assert_eq!(snap.step_index, 3);
         } else {

@@ -1358,6 +1358,7 @@ dependencies = [
  "fission-dynamic",
  "fission-loader",
  "fission-static",
+ "fission-ttd",
 ]
 
 [[package]]
@@ -1424,10 +1425,18 @@ dependencies = [
 name = "fission-decompiler-core"
 version = "0.1.0"
 dependencies = [
+ "fission-core",
  "fission-loader",
  "fission-pcode",
+ "fission-signatures",
  "fission-sleigh",
  "fission-static",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -1455,6 +1464,7 @@ dependencies = [
  "fission-loader",
  "fission-plugin",
  "fission-static",
+ "fission-ttd",
  "flate2",
  "hex",
  "iced-x86",
@@ -1622,6 +1632,7 @@ dependencies = [
  "fission-signatures",
  "fission-sleigh",
  "fission-static",
+ "fission-ttd",
  "iced-x86",
  "jemallocator",
  "mimalloc",
@@ -1633,6 +1644,13 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fission-ttd"
+version = "0.1.0"
+dependencies = [
+ "fission-core",
 ]
 
 [[package]]

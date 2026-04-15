@@ -1,4 +1,5 @@
 use super::cleanup::finalize_structured_body;
+use super::graph::StructureNodeKind;
 use super::irreducible::compute_node_splits;
 use super::*;
 
@@ -15,8 +16,7 @@ struct EdgeCutCost {
 
 #[derive(Debug, Clone)]
 struct StructuredRegionCandidate {
-    stmt: HirStmt,
-    skip_to: usize,
+    node: StructureNode,
     cost: EdgeCutCost,
 }
 
@@ -113,6 +113,36 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::Goto(_) => true,
+            HirStmt::Block(body) => body.iter().all(Self::is_switch_scaffold_stmt),
+            HirStmt::Label(_)
+            | HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::If { .. }
+            | HirStmt::Switch { .. }
+            | HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => false,
+        }
+    }
+
+    fn switch_stmt_has_scaffold_only_arms(stmt: &HirStmt) -> bool {
+        let HirStmt::Switch { cases, default, .. } = stmt else {
+            return false;
+        };
+        !cases.is_empty()
+            && cases
+                .iter()
+                .all(|case| case.body.iter().all(Self::is_switch_scaffold_stmt))
+            && default.iter().all(Self::is_switch_scaffold_stmt)
+    }
+
     fn score_structured_candidate(
         &self,
         start_idx: usize,
@@ -141,14 +171,95 @@ impl<'a> PreviewBuilder<'a> {
             _ => 0,
         };
         let loop_header_violation = usize::from(matches!(stmt, HirStmt::Goto(_)));
+        let switch_scaffold_only = Self::switch_stmt_has_scaffold_only_arms(stmt);
         EdgeCutCost {
             loop_header_violation,
             postdom_damage: internal_target_count,
             switch_fanout_damage: switch_damage,
             guard_chain_cut,
-            goto_introduction_count: Self::count_stmt_gotos(stmt),
-            label_churn: Self::count_stmt_labels(stmt),
+            goto_introduction_count: if switch_scaffold_only {
+                0
+            } else {
+                Self::count_stmt_gotos(stmt)
+            },
+            label_churn: if switch_scaffold_only {
+                0
+            } else {
+                Self::count_stmt_labels(stmt)
+            },
             span_penalty: 256usize.saturating_sub(span.min(256)),
+        }
+    }
+
+    fn region_kind_for_stmt(stmt: &HirStmt) -> Option<RegionKind> {
+        match stmt {
+            HirStmt::Switch { .. } => Some(RegionKind::Switch),
+            HirStmt::If { .. } => Some(RegionKind::Conditional),
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {
+                Some(RegionKind::Loop)
+            }
+            HirStmt::Block(_) => Some(RegionKind::Sequence),
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => None,
+        }
+    }
+
+    fn region_selector_or_condition(stmt: &HirStmt) -> Option<String> {
+        match stmt {
+            HirStmt::Switch { expr, .. } => Some(print_expr(expr)),
+            HirStmt::If { cond, .. }
+            | HirStmt::While { cond, .. }
+            | HirStmt::DoWhile { cond, .. } => Some(print_expr(cond)),
+            HirStmt::For { cond, .. } => cond.as_ref().map(print_expr),
+            HirStmt::Block(_)
+            | HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => None,
+        }
+    }
+
+    fn build_region_proof(
+        &self,
+        start_idx: usize,
+        skip_to: usize,
+        stmt: &HirStmt,
+    ) -> Option<RegionProof> {
+        let kind = Self::region_kind_for_stmt(stmt)?;
+        Some(RegionProof::structured(
+            kind,
+            start_idx,
+            skip_to,
+            Self::region_selector_or_condition(stmt),
+        ))
+    }
+
+    fn record_region_candidate(&mut self, proof: &RegionProof) {
+        self.region_proof_candidate_count += 1;
+        if proof.proof_complete {
+            self.region_proof_completed_count += 1;
+        }
+        if matches!(proof.kind, RegionKind::Conditional) {
+            self.conditional_region_candidate_count += 1;
+        }
+    }
+
+    fn record_selected_region(&mut self, node: &StructureNode) {
+        if matches!(
+            node.kind,
+            StructureNodeKind::Region(RegionKind::Conditional)
+        ) {
+            self.conditional_region_promoted_count += 1;
         }
     }
 
@@ -164,14 +275,34 @@ impl<'a> PreviewBuilder<'a> {
             Self::capture_structuring_failure(result, last_structuring_failure)?
             && self.accept_structured_region(start_idx, skip_to, targeted)
         {
+            let Some(proof) = self.build_region_proof(start_idx, skip_to, &stmt) else {
+                return Ok(());
+            };
+            self.record_region_candidate(&proof);
             let cost = self.score_structured_candidate(start_idx, skip_to, &stmt, targeted);
             candidates.push(StructuredRegionCandidate {
-                stmt,
-                skip_to,
+                node: StructureNode::region(usize::MAX, stmt, skip_to, proof),
                 cost,
             });
         }
         Ok(())
+    }
+
+    fn select_structured_candidate(
+        &self,
+        mut candidates: Vec<StructuredRegionCandidate>,
+    ) -> Option<StructuredRegionCandidate> {
+        match self.options.effective_structuring_engine() {
+            StructuringEngineKind::LegacyScored => {
+                candidates.sort_by(|lhs, rhs| {
+                    lhs.cost
+                        .cmp(&rhs.cost)
+                        .then_with(|| rhs.node.skip_to.cmp(&lhs.node.skip_to))
+                });
+                candidates.into_iter().next()
+            }
+            StructuringEngineKind::GraphCollapseV1 => candidates.into_iter().next(),
+        }
     }
 
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
@@ -298,7 +429,7 @@ impl<'a> PreviewBuilder<'a> {
             })
             .collect();
 
-        let mut body = Vec::new();
+        let mut graph = StructureGraph::default();
         let targeted = self.collect_jump_targets()?;
         let mut emitted_labels = HashSet::new();
         let mut last_structuring_failure = None;
@@ -511,14 +642,11 @@ impl<'a> PreviewBuilder<'a> {
                 &mut structured_candidates,
                 if_candidate,
             )?;
-            structured_candidates.sort_by(|lhs, rhs| {
-                lhs.cost
-                    .cmp(&rhs.cost)
-                    .then_with(|| rhs.skip_to.cmp(&lhs.skip_to))
-            });
-            if let Some(best) = structured_candidates.into_iter().next() {
-                body.push(best.stmt);
-                idx = best.skip_to;
+            if let Some(mut best) = self.select_structured_candidate(structured_candidates) {
+                self.record_selected_region(&best.node);
+                idx = best.node.skip_to;
+                best.node.id = graph.next_node_id();
+                graph.push(best.node);
                 last_structuring_failure = None;
                 continue;
             }
@@ -529,7 +657,12 @@ impl<'a> PreviewBuilder<'a> {
                     &targeted,
                     &mut emitted_labels,
                 )? {
-                    body.extend(recovered_body);
+                    let node_id = graph.next_node_id();
+                    graph.push(StructureNode::unstructured(
+                        node_id,
+                        recovered_body,
+                        skip_to,
+                    ));
                     idx = skip_to;
                     continue;
                 }
@@ -538,8 +671,10 @@ impl<'a> PreviewBuilder<'a> {
 
             let pcode_idx_fallback = self.pcode_block_idx(idx);
             let block = &self.pcode.blocks[pcode_idx_fallback];
+            let mut node_body = Vec::new();
+            let mut explicit_edge_surface = false;
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                body.push(HirStmt::Label(block_label(block_key)));
+                node_body.push(HirStmt::Label(block_label(block_key)));
             }
             if diag {
                 eprintln!(
@@ -549,7 +684,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            body.extend(self.lower_block_stmts(block)?);
+            node_body.extend(self.lower_block_stmts(block)?);
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} fallback=lower_block_terminator elapsed={:.3}s",
@@ -559,10 +694,11 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             match self.lower_block_terminator(pcode_idx_fallback)? {
-                LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
+                LoweredTerminator::Return(expr) => node_body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
                     if self.next_block_address(idx) != Some(target) {
-                        body.push(HirStmt::Goto(block_label(target)));
+                        node_body.push(HirStmt::Goto(block_label(target)));
+                        explicit_edge_surface = true;
                     }
                 }
                 LoweredTerminator::Cond {
@@ -582,11 +718,12 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         _ => Vec::new(),
                     };
-                    body.push(HirStmt::If {
+                    node_body.push(HirStmt::If {
                         cond,
                         then_body,
                         else_body,
                     });
+                    explicit_edge_surface = true;
                 }
                 LoweredTerminator::Fallthrough(_) => {}
                 LoweredTerminator::Unsupported {
@@ -603,7 +740,8 @@ impl<'a> PreviewBuilder<'a> {
                         false,
                         "hir_unsupported_emit",
                     );
-                    body.push(self.emit_unsupported_control_surface(evidence, target_expr));
+                    node_body.push(self.emit_unsupported_control_surface(evidence, target_expr));
+                    explicit_edge_surface = true;
                 }
                 LoweredTerminator::Switch {
                     expr,
@@ -613,7 +751,7 @@ impl<'a> PreviewBuilder<'a> {
                     proof,
                 } => {
                     let cases: Vec<HirSwitchCase> = if let Some(proof) = proof.as_ref() {
-                        if proof_supports_direct_emit(proof) {
+                        if EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready {
                             self.proof_payload_direct_emit_count += 1;
                             proof
                                 .recovered_cases
@@ -665,7 +803,7 @@ impl<'a> PreviewBuilder<'a> {
                             })
                             .collect()
                     };
-                    body.push(HirStmt::Switch {
+                    node_body.push(HirStmt::Switch {
                         expr,
                         cases,
                         default: default_target
@@ -674,7 +812,15 @@ impl<'a> PreviewBuilder<'a> {
                             .into_iter()
                             .collect(),
                     });
+                    explicit_edge_surface = true;
                 }
+            }
+            if explicit_edge_surface {
+                let node_id = graph.next_node_id();
+                graph.push(StructureNode::unstructured(node_id, node_body, idx + 1));
+            } else {
+                let node_id = graph.next_node_id();
+                graph.push(StructureNode::basic(node_id, node_body, idx + 1));
             }
             idx += 1;
         }
@@ -684,7 +830,7 @@ impl<'a> PreviewBuilder<'a> {
         // Any block with an irreducible exit fails linear structuring and falls back to `lower_block_terminator`,
         // which correctly emits the explicit `If { Goto }` or unconditional `Goto` since it reads from the unmasked p-code.
         // Thus, Phase 4 (Irreducible Goto Pass) is inherently satisfied by the existing fallback mechanisms!
-
+        let mut body = surface_structure_graph(graph);
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
         if diag {
@@ -756,6 +902,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::LegacyScored,
         global_names: Default::default(),
         calling_convention: Default::default(),
     };
@@ -781,10 +928,166 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::LegacyScored,
         global_names: Default::default(),
         calling_convention: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.discover_guarded_tail_candidates(body);
     builder.preview_build_stats()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EdgeCutCost, PreviewBuilder, StructuredRegionCandidate};
+    use crate::PcodeFunction;
+    use crate::nir::types::{
+        HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
+    };
+    use crate::nir::{RegionKind, RegionProof, StructureNode};
+
+    fn const_expr(value: i64) -> HirExpr {
+        HirExpr::Const(
+            value,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        )
+    }
+
+    #[test]
+    fn switch_scaffold_detection_accepts_goto_only_arms() {
+        let stmt = HirStmt::Switch {
+            expr: const_expr(0),
+            cases: vec![
+                HirSwitchCase {
+                    values: vec![0],
+                    body: vec![HirStmt::Goto("case_0".to_string())],
+                },
+                HirSwitchCase {
+                    values: vec![1],
+                    body: vec![HirStmt::Goto("case_1".to_string())],
+                },
+            ],
+            default: vec![HirStmt::Goto("default".to_string())],
+        };
+        assert!(PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
+    }
+
+    #[test]
+    fn switch_scaffold_detection_rejects_payload_arms() {
+        let stmt = HirStmt::Switch {
+            expr: const_expr(0),
+            cases: vec![HirSwitchCase {
+                values: vec![0],
+                body: vec![HirStmt::Expr(const_expr(1))],
+            }],
+            default: vec![],
+        };
+        assert!(!PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
+    }
+
+    fn test_builder_with_engine(engine: StructuringEngineKind) -> PreviewBuilder<'static> {
+        let dummy = Box::leak(Box::new(PcodeFunction { blocks: Vec::new() }));
+        let options = Box::leak(Box::new(MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0,
+            sections: Vec::new(),
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: engine,
+            global_names: Default::default(),
+            calling_convention: Default::default(),
+        }));
+        PreviewBuilder::new(dummy, options, None)
+    }
+
+    fn candidate(skip_to: usize, cost: EdgeCutCost) -> StructuredRegionCandidate {
+        StructuredRegionCandidate {
+            node: StructureNode::region(
+                usize::MAX,
+                HirStmt::If {
+                    cond: const_expr(1),
+                    then_body: vec![],
+                    else_body: vec![],
+                },
+                skip_to,
+                RegionProof::structured(RegionKind::Conditional, 0, skip_to, Some("cond".into())),
+            ),
+            cost,
+        }
+    }
+
+    #[test]
+    fn graph_collapse_v1_preserves_attempt_order() {
+        let builder = test_builder_with_engine(StructuringEngineKind::GraphCollapseV1);
+        let selected = builder
+            .select_structured_candidate(vec![
+                candidate(
+                    2,
+                    EdgeCutCost {
+                        loop_header_violation: 4,
+                        postdom_damage: 4,
+                        switch_fanout_damage: 4,
+                        guard_chain_cut: 4,
+                        goto_introduction_count: 4,
+                        label_churn: 4,
+                        span_penalty: 4,
+                    },
+                ),
+                candidate(
+                    8,
+                    EdgeCutCost {
+                        loop_header_violation: 0,
+                        postdom_damage: 0,
+                        switch_fanout_damage: 0,
+                        guard_chain_cut: 0,
+                        goto_introduction_count: 0,
+                        label_churn: 0,
+                        span_penalty: 0,
+                    },
+                ),
+            ])
+            .expect("graph candidate");
+        assert_eq!(selected.node.skip_to, 2);
+    }
+
+    #[test]
+    fn legacy_scored_prefers_lowest_cost_candidate() {
+        let builder = test_builder_with_engine(StructuringEngineKind::LegacyScored);
+        let selected = builder
+            .select_structured_candidate(vec![
+                candidate(
+                    2,
+                    EdgeCutCost {
+                        loop_header_violation: 4,
+                        postdom_damage: 4,
+                        switch_fanout_damage: 4,
+                        guard_chain_cut: 4,
+                        goto_introduction_count: 4,
+                        label_churn: 4,
+                        span_penalty: 4,
+                    },
+                ),
+                candidate(
+                    8,
+                    EdgeCutCost {
+                        loop_header_violation: 0,
+                        postdom_damage: 0,
+                        switch_fanout_damage: 0,
+                        guard_chain_cut: 0,
+                        goto_introduction_count: 0,
+                        label_churn: 0,
+                        span_penalty: 0,
+                    },
+                ),
+            ])
+            .expect("legacy candidate");
+        assert_eq!(selected.node.skip_to, 8);
+    }
 }

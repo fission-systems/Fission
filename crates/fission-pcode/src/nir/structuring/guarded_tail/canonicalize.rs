@@ -86,14 +86,19 @@ impl<'a> PreviewBuilder<'a> {
 
             if let Some(next_label) = next_redirect_label {
                 if external_ref_count > 0 {
-                    let (external_top_level_before, external_nested_before, external_refs_after) =
-                        Self::classify_external_alias_ref_sites(
-                            full_body,
-                            segment_start,
-                            segment_end,
-                            label,
-                        );
-                    if external_refs_after > 0 {
+                    let (
+                        external_top_level_before,
+                        external_nested_before,
+                        external_top_level_after,
+                        external_nested_after,
+                    ) = Self::classify_external_alias_ref_sites_detailed(
+                        full_body,
+                        segment_start,
+                        segment_end,
+                        label,
+                    );
+                    let external_refs_after = external_top_level_after + external_nested_after;
+                    if external_nested_after > 0 {
                         self.mark_alias_nonlocal_from_external_sites(
                             external_top_level_before,
                             external_nested_before,
@@ -101,7 +106,15 @@ impl<'a> PreviewBuilder<'a> {
                         );
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
-                    if external_top_level_before + external_nested_before != external_ref_count {
+                    if external_nested_before > 0 {
+                        self.mark_alias_nonlocal_from_external_sites(
+                            external_top_level_before,
+                            external_nested_before,
+                            external_refs_after,
+                        );
+                        return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
+                    }
+                    if external_top_level_before + external_top_level_after != external_ref_count {
                         self.mark_alias_nonlocal_external_before();
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
@@ -256,14 +269,9 @@ impl<'a> PreviewBuilder<'a> {
                             idx = next_idx;
                             continue;
                         }
-                        if (idx + 1..flattened.len())
-                            .any(|pos| matches!(flattened[pos], HirStmt::Label(_)))
-                        {
-                            self.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count += 1;
-                        } else {
-                            self.canonicalization_failed_interleaved_join_uses_no_next_label_count += 1;
-                        }
-                        return Err(GuardedTailCanonicalizationFailure::InterleavedJoinUses);
+                        canonical.push(stmt.clone());
+                        idx += 1;
+                        continue;
                     }
                     removed_any = true;
                     if saw_payload {
@@ -295,6 +303,13 @@ impl<'a> PreviewBuilder<'a> {
                         let HirStmt::Goto(target) = stmt else {
                             unreachable!();
                         };
+                        if let Some(return_stmt) =
+                            Self::resolve_terminal_tail_exit_stmt(full_body, target)
+                        {
+                            canonical.push(return_stmt);
+                            idx += 1;
+                            continue;
+                        }
                         if flattened[..idx]
                             .iter()
                             .any(|stmt| matches!(stmt, HirStmt::Label(_)))

@@ -7,6 +7,69 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-15 (latest)
+
+### Guarded-tail execute migration wave - Ghidra-style descendant replacement and guarded-tail diagnostics are now core-owned, but the real `putty` blocker remains pre-promotion legality
+
+This wave moved one more piece of guarded-tail ownership from “pretty shape promotion” to a Ghidra-style `ConditionalExecution` execute contract. The active work stayed inside `fission-pcode`: the guarded-tail owner now rewrites descendant reads from exported bindings, refuses fail-open merge synthesis, and emits explicit diagnostics for real-function rejection families. The semantic release owner did not move downstream.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now:
+  - rewrites descendant reads inside the promoted middle segment before splicing the final guarded-tail surface
+  - rejects exported-binding promotion when the else-side replacement source is not domination-proven
+  - removes the previous fail-open `else_value = Var(binding_name)` behavior for synthetic merge creation
+  - adds env-gated guarded-tail diagnostics under `FISSION_PREVIEW_DIAG=1` so trial/verify rejection buckets are visible on real functions
+- [`alias_refs.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/alias_refs.rs) broadens alias-forward-safe canonicalization to include:
+  - pure `Assign` bindings
+  - pure nested conditional forwarding
+  - terminal tail-exit resolution for `goto -> return-only label` chains
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs) now terminalizes return-only tail labels instead of rejecting them as `NestedTailEscape`, which moved the real `0x140006fe0` blocker one stage deeper into guarded-tail verification
+- [`structuring_guarded_tail.rs`](../../crates/fission-pcode/src/nir/tests/structuring_guarded_tail.rs) adds regression coverage for:
+  - descendant read rewrite with a dominating else-side source
+  - fail-closed rejection when no dominating else-side source exists
+  - pure top-level-after-label alias forwarding
+  - terminal tail-exit canonicalization
+
+Validation:
+
+- `cargo test -p fission-pcode structuring_guarded_tail -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_STRUCTURING_ENGINE=graph-collapse-v1 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile balanced --ghidra-compat`
+- `FISSION_STRUCTURING_ENGINE=graph-collapse-v1 python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --limit 50 --fission-bin target/debug/fission_cli --output-dir artifacts/batch_benchmark/putty-ghidra-guarded-tail-execute-wave-v8 --baseline-dir artifacts/batch_benchmark/putty-builder-provenance-wave`
+
+Artifacts:
+
+- [`putty-ghidra-guarded-tail-execute-wave-v7`](../../artifacts/batch_benchmark/putty-ghidra-guarded-tail-execute-wave-v7)
+- [`putty-ghidra-guarded-tail-execute-wave-v8`](../../artifacts/batch_benchmark/putty-ghidra-guarded-tail-execute-wave-v8)
+
+Observed quality state:
+
+- synthetic guarded-tail execute regressions are now covered and passing
+- `0x140006fe0` no longer stalls on exactly the same pre-candidate state:
+  - `promotion_candidate_count: 0 -> 1`
+  - `canonicalized_guarded_tail_shape_count: 0 -> 1`
+  - `canonicalization_failed_nested_tail_escape: 9 -> 6`
+  - `discovery_rejected_noncanonical_layout_count: 15 -> 12`
+- but the real row still does not promote:
+  - `guarded_tail_candidate_count: 0`
+  - `guarded_tail_promoted_count: 0`
+  - `guarded_tail_replacement_plan_completed_count: 0`
+- targeted `putty` 50-function benchmark in [`putty-ghidra-guarded-tail-execute-wave-v8`](../../artifacts/batch_benchmark/putty-ghidra-guarded-tail-execute-wave-v8) remains below the accepted baseline:
+  - `avg_normalized_similarity: 38.63`
+  - `0x140006fe0: 33.97`
+  - `0x140008900: 22.23`
+  - `0x140008090: 35.28`
+
+Diagnostic conclusion:
+
+- the execute-layer synthetic merge / descendant rewrite semantics are now stricter and more Ghidra-like
+- the remaining real blocker for `0x140006fe0` is not broad materialization anymore
+- the next owner is the guarded-tail verification boundary around:
+  - `effective_middle_refs`
+  - `execution_safe`
+  - `AliasNotFallthrough`
+  - `AliasHasNonlocalRef`
+- in other words, the next wave should target pre-promotion guarded-tail legality closure for the real `block_140007047` / `block_140007040` candidates, not downstream rendering
+
 ## 2026-04-14 (latest)
 
 ### Decompiler-core ownership cutover wave - `fission-decompiler-core` now owns orchestration while `fission-static` is reduced to facts/native services

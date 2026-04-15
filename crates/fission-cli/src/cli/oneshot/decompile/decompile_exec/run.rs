@@ -498,9 +498,8 @@ fn run_sequential_decompilation<'a>(
                     continue;
                 }
                 if effective_json {
-                    let routing = fission_decompiler_core::native_failure_routing_decision(
-                        &error_text,
-                    );
+                    let routing =
+                        fission_decompiler_core::native_failure_routing_decision(&error_text);
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,

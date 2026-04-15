@@ -10,7 +10,7 @@ impl IfLoweringBudget {
         label: &'static str,
     ) -> Self {
         Self {
-            enabled: !options.is_64bit && options.is_supported_pe(),
+            enabled: options.target_profile().if_lowering_budget_enabled(),
             start: Instant::now(),
             subcalls: 0,
             tripped: false,

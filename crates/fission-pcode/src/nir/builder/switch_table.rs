@@ -362,7 +362,7 @@ fn extract_const_address(expr: &HirExpr) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::NirRenderOptions;
+    use crate::nir::types::{NirRenderOptions, StructuringEngineKind};
 
     fn options_with_section(start: u64, end: u64) -> NirRenderOptions {
         NirRenderOptions {
@@ -375,6 +375,7 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::LegacyScored,
             global_names: Default::default(),
             calling_convention: Default::default(),
         }

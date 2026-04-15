@@ -7,8 +7,8 @@ use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
 use fission_decompiler_core::{
-    NativeDecompilerBackend, NativeDecompilerSource, NirEngineMode, NirSurfaceKind,
-    PostProcessor, auto_nir_eligible, classify_native_failure_kind, rescue_nir_output_with_facts,
+    NativeDecompilerBackend, NativeDecompilerSource, NirEngineMode, NirSurfaceKind, PostProcessor,
+    auto_nir_eligible, classify_native_failure_kind, rescue_nir_output_with_facts,
     select_nir_output_with_facts,
 };
 use fission_ffi::DecompilerNative;

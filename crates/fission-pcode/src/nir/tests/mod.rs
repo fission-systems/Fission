@@ -59,6 +59,7 @@ fn preview_options() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::LegacyScored,
         global_names: Default::default(),
         calling_convention: Default::default(),
     }
@@ -75,7 +76,44 @@ fn preview_options_x86() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::LegacyScored,
         global_names: Default::default(),
         calling_convention: Default::default(),
     }
+}
+
+#[test]
+fn target_profile_unifies_pe_x64_auto_gate() {
+    let options = preview_options();
+    let profile = options.target_profile();
+    let facts = NirAdmissionFacts {
+        block_count: 12,
+        op_count: 600,
+        max_multiequal_fanin: 4,
+    };
+
+    assert_eq!(profile.format_family, FormatFamily::Pe);
+    assert_eq!(profile.admission_class, AdmissionClass::PeX64Auto);
+    assert!(profile.preview_eligible);
+    assert!(profile.worker_eligible);
+    assert!(profile.auto_admission_eligible(facts));
+    assert!(!profile.if_lowering_budget_enabled());
+}
+
+#[test]
+fn target_profile_unifies_pe_x86_budget_without_auto_gate() {
+    let options = preview_options_x86();
+    let profile = options.target_profile();
+    let facts = NirAdmissionFacts {
+        block_count: 4,
+        op_count: 32,
+        max_multiequal_fanin: 1,
+    };
+
+    assert_eq!(profile.format_family, FormatFamily::Pe);
+    assert_eq!(profile.admission_class, AdmissionClass::PeX86PreviewOnly);
+    assert!(profile.preview_eligible);
+    assert!(!profile.worker_eligible);
+    assert!(!profile.auto_admission_eligible(facts));
+    assert!(profile.if_lowering_budget_enabled());
 }
