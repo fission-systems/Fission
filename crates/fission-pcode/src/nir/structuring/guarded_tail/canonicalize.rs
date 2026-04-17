@@ -74,15 +74,45 @@ impl<'a> PreviewBuilder<'a> {
                     nested_after_label_count;
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
-            let next_redirect_label = if let Some(next_label_idx) = next_label_idx
-                && let HirStmt::Label(next_label) = &body[next_label_idx]
-                && (Self::is_local_alias_forward_segment(segment, next_label)
-                    || allow_top_level_after_label_redirect)
+            
+            // Priority 1: If we have external refs with top-level-after-label + all top-level goto,
+            // try forward-chain resolution first (allow reaching beyond immediate next label)
+            let forward_chain_redirect = if allow_top_level_after_label_redirect
+                && external_ref_count > 0
+                && Self::are_all_external_refs_top_level_goto(full_body, segment_start, segment_end, label)
             {
-                Some(next_label.clone())
+                self.resolve_terminal_join_target(body, idx, label, referenced)
+                    .and_then(|(resolved_label, _)| {
+                        // Prefer forward-chain resolution if it goes beyond immediate next
+                        if let Some(next_label_idx) = next_label_idx {
+                            if let HirStmt::Label(next_label) = &body[next_label_idx] {
+                                if resolved_label != next_label.as_str() {
+                                    return Some(resolved_label);
+                                }
+                            }
+                        }
+                        None
+                    })
             } else {
                 None
             };
+            
+            // Priority 2: Try immediate next-label redirect (only if forward-chain didn't apply)
+            let immediate_next_redirect = if forward_chain_redirect.is_none() {
+                if let Some(next_label_idx) = next_label_idx
+                    && let HirStmt::Label(next_label) = &body[next_label_idx]
+                    && (Self::is_local_alias_forward_segment(segment, next_label)
+                        || allow_top_level_after_label_redirect)
+                {
+                    Some(next_label.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            let next_redirect_label = forward_chain_redirect.or(immediate_next_redirect);
 
             if let Some(next_label) = next_redirect_label {
                 if external_ref_count > 0 {

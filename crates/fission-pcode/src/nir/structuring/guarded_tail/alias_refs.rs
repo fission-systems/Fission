@@ -199,6 +199,22 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(super) fn are_all_external_refs_top_level_goto(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        segment_end: usize,
+        label: &str,
+    ) -> bool {
+        let (_, external_nested_before, _, external_nested_after) =
+            Self::classify_external_alias_ref_sites_detailed(
+                full_body,
+                segment_start,
+                segment_end,
+                label,
+            );
+        external_nested_before == 0 && external_nested_after == 0
+    }
+
     pub(super) fn classify_alias_ref_sites(
         body: &[HirStmt],
         label_idx: usize,
