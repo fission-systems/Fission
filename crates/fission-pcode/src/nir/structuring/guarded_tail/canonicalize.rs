@@ -61,6 +61,56 @@ impl<'a> PreviewBuilder<'a> {
         removed
     }
 
+    fn top_level_label_definition_count(body: &[HirStmt], label: &str) -> usize {
+        body.iter()
+            .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+            .count()
+    }
+
+    fn stmt_is_guard_prefix_safe(stmt: &HirStmt) -> bool {
+        is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Label(_))
+            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+            || Self::top_level_guard_goto_signature(stmt).is_some()
+    }
+
+    fn collapse_top_level_sink_to_return_goto_chain(
+        stmts: &mut [HirStmt],
+        full_body: &[HirStmt],
+    ) -> usize {
+        let mut rewritten = 0usize;
+
+        for idx in 0..stmts.len() {
+            let target = match &stmts[idx] {
+                HirStmt::Goto(target) => target.clone(),
+                _ => continue,
+            };
+
+            // Restrict to guard-only prefixes so we don't consume payload-tail
+            // exits that are already handled by canonical tail logic.
+            if !stmts[..idx].iter().all(Self::stmt_is_guard_prefix_safe) {
+                continue;
+            }
+
+            // Keep this narrow: collapse only when the target label is unique
+            // and the existing terminal-safe resolver proves a return sink.
+            if Self::top_level_label_definition_count(full_body, &target) != 1 {
+                continue;
+            }
+
+            let Some(HirStmt::Return(ret)) =
+                Self::resolve_terminal_tail_exit_stmt(full_body, &target)
+            else {
+                continue;
+            };
+
+            stmts[idx] = HirStmt::Return(ret);
+            rewritten += 1;
+        }
+
+        rewritten
+    }
+
     pub(super) fn canonicalize_interleaved_local_aliases(
         &mut self,
         body: &[HirStmt],
@@ -307,6 +357,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut flattened = Vec::new();
         Self::flatten_guarded_tail_segment(segment, &mut flattened);
         let collapsed_guards = Self::collapse_duplicate_top_level_guard_ladder(&mut flattened);
+        let collapsed_sink_returns =
+            Self::collapse_top_level_sink_to_return_goto_chain(&mut flattened, full_body);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {
             return Err(GuardedTailCanonicalizationFailure::NonterminalJoinLabel);
         };
@@ -320,8 +372,11 @@ impl<'a> PreviewBuilder<'a> {
         let mut canonical = Vec::new();
         let mut saw_payload = false;
         let mut saw_gap_after_payload = false;
-        let mut removed_any =
-            start > 0 || end < flattened.len() || flattened.len() != end - start || collapsed_guards > 0;
+        let mut removed_any = start > 0
+            || end < flattened.len()
+            || flattened.len() != end - start
+            || collapsed_guards > 0
+            || collapsed_sink_returns > 0;
         let mut payload_entry_count = 0usize;
         let segment_ref_counts = Self::goto_ref_counts(&flattened);
         let mut idx = 0usize;
@@ -636,5 +691,130 @@ mod tests {
 
         assert_eq!(removed, 0);
         assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_top_level_goto_to_return() {
+        let mut body = vec![
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 1);
+        assert!(matches!(&body[0], HirStmt::Return(None)));
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_allows_pure_gap_hop() {
+        let mut body = vec![
+            HirStmt::Goto("Lhop".to_string()),
+            HirStmt::Label("Lhop".to_string()),
+            HirStmt::Expr(HirExpr::Var("tmp".to_string())),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 1);
+        assert!(matches!(&body[0], HirStmt::Return(None)));
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_rejects_reentry() {
+        let mut body = vec![
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("Lret".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 0);
+        assert!(matches!(&body[0], HirStmt::Goto(label) if label == "Lret"));
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_rejects_ambiguous_target() {
+        let mut body = vec![
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 0);
+        assert!(matches!(&body[0], HirStmt::Goto(label) if label == "Lret"));
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_rejects_side_effectful_gap() {
+        let mut body = vec![
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Expr(HirExpr::Call {
+                target: "FUN_0x140001000".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 0);
+        assert!(matches!(&body[0], HirStmt::Goto(label) if label == "Lret"));
+    }
+
+    #[test]
+    fn collapse_sink_to_return_chain_rejects_loop_crossing() {
+        let mut body = vec![
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::While {
+                cond: HirExpr::Var("loop_c".to_string()),
+                body: vec![HirStmt::Break],
+            },
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let rewritten =
+            PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
+
+        assert_eq!(rewritten, 0);
+        assert!(matches!(&body[0], HirStmt::Goto(label) if label == "Lret"));
     }
 }
