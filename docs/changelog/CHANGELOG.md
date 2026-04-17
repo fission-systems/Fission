@@ -268,15 +268,61 @@ Targeted benchmark rerun:
 Observed target HIR status:
 
 - repeated guard pairs around `block_140007021` remained duplicated in this run output (`if (!xVar57) ...` x2, `if (!*xVar43) ...` x2), so the new collapse path is not yet hitting that concrete failing shape end-to-end.
-- `unsupported_indirect_control_count`: `1`
-- `avg_normalized_similarity`: `38.79`
-- key rows:
-  - `0x140001160`: `27.34`
-  - `0x140008900`: `20.68`
-  - `0x140007da0`: `34.45`
-  - `0x140008090`: `35.41`
 
-`nir-check` state remained stable:
+### Guarded-tail sink-to-return goto-chain collapse before canonicalization (5th wave)
+
+This wave adds a narrow sink-directed pre-normalization in guarded-tail canonicalization: top-level `goto` edges that provably flow through a terminal-safe label chain to `return` are collapsed early.
+
+Implementation:
+
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - added `collapse_top_level_sink_to_return_goto_chain(...)`
+  - inserted ordering in guarded-tail canonicalization:
+    - duplicate guard collapse
+    - sink-to-return goto-chain collapse
+    - alias/nested-tail canonicalization
+  - applied strict scope/bounds:
+    - only top-level `goto` statements in guard-only prefix
+    - target label must have a single definition in the enclosing body
+    - terminal proof is delegated to existing `resolve_terminal_tail_exit_stmt(...)`
+    - inherited guardrails from terminal proof: unique predecessor/no re-entry, ignorable/pure gap only, no loop/switch/break/continue crossing, no cycles
+- same file test module:
+  - positive: direct `goto -> return` sink, pure-gap hop chain to return sink
+  - negative: re-entry, ambiguous sink label ownership, side-effectful gap, loop crossing
+
+Validation:
+
+- `cargo test -p fission-pcode collapse_sink_to_return_chain_` → 6 passed
+- `cargo test -p fission-pcode guarded_tail` → 81 passed
+- `cargo test -p fission-pcode --lib` → 433 passed
+
+Targeted benchmark rerun:
+
+- artifact: [`putty-sink-return-wave-20260417`](../../artifacts/batch_benchmark/putty-sink-return-wave-20260417)
+- target row `0x140006fe0` counters (vs 4th-wave [`putty-duplicate-guard-wave-20260417`](../../artifacts/batch_benchmark/putty-duplicate-guard-wave-20260417)):
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3 -> 3`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2 -> 2`
+  - `canonicalization_failed_nested_tail_escape`: `7 -> 7`
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4 -> 4`
+  - `region_emit_ready_failed_count`: `5 -> 5`
+
+Observed target HIR status:
+
+- output window around `block_140007021` remains unchanged from 4th-wave run (duplicate guard pairs preserved; sink label still emitted as `block_140007047: return`).
+
+Result interpretation:
+
+- 5th-wave sink-chain rule is now implemented with strict proof boundaries and covered by dedicated positive/negative tests.
+- On the concrete blocker row (`0x140006fe0`), this bounded subcase did not move the remaining blocker counters yet; the failing shape is still outside the currently covered guarded-tail segment/path.
+- `unsupported_indirect_control_count`: `9`
+- `avg_normalized_similarity`: `37.09`
+- key rows:
+  - `0x140001160`: `32.39`
+  - `0x140008900`: `23.97`
+  - `0x140007da0`: `34.60`
+  - `0x140008090`: `35.28`
+
+Prior note from earlier cutover wave (`nir-check`):
 
 - `changed_rows=0`
 - dominant slow passes:
@@ -285,7 +331,7 @@ Observed target HIR status:
   - `aggregate_fields: 23.7ms`
   - `memory_slot_surfacing_full: 21.6ms`
 
-Decision/result:
+Prior architectural decision/result:
 
 - architectural ownership closure is complete for the decompiler application layer
 - `fission-static` no longer owns decompiler orchestration or postprocess implementation
