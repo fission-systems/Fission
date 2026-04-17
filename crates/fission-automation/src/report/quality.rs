@@ -539,6 +539,16 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
                 + stats.unsupported_external_target_count
                 + stats.indirect_surface_preserved_count,
         ),
+        (
+            "canonical_rewrite_conflict".to_string(),
+            stats.region_emit_ready_failed_count
+                + stats.switch_emit_ready_failed_count
+                + stats.guarded_tail_replacement_plan_rejected_missing_merge_count
+                + stats.guarded_tail_replacement_plan_rejected_unstable_read_count
+                + stats.guarded_tail_rejected_side_entry_conflict_count
+                + stats.guarded_tail_rejected_alias_interleave_conflict_count
+                + stats.guarded_tail_rejected_ambiguous_follow_count,
+        ),
         ("security".to_string(), stats.security_cookie_fold_count),
     ];
     families.retain(|(_, value)| *value > 0);

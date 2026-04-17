@@ -101,7 +101,7 @@ pub(super) struct GuardedTailSyntheticMerge {
     pub(super) replacement_target: String,
     pub(super) then_value: HirExpr,
     pub(super) else_value: HirExpr,
-    pub(super) read_site_count: usize,
+    pub(super) read_sites: Vec<GuardedTailReplacementRead>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +123,6 @@ pub(super) struct GuardedTailVerification {
     pub(super) region_legality: RegionLegality,
     pub(super) replacement_complete: bool,
     pub(super) removable_ops_legal: bool,
-    pub(super) keep_join_label: bool,
     pub(super) rewritten_middle: Vec<HirStmt>,
     pub(super) exported_bindings: Vec<GuardedTailExportedBinding>,
     pub(super) rejection_reason: Option<GuardedTailExecutionRejection>,
@@ -131,10 +130,14 @@ pub(super) struct GuardedTailVerification {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GuardedTailExecutionPlan {
-    pub(super) keep_join_label: bool,
     pub(super) synthetic_merges: Vec<GuardedTailSyntheticMerge>,
     pub(super) redirects: Vec<(String, String)>,
     pub(super) rewritten_middle: Vec<HirStmt>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct GuardedTailReplacementCache {
+    pub(super) else_sources: HashMap<String, HirExpr>,
 }
 
 impl From<GuardedTailWitnessRejection> for RegionRejectionReason {
@@ -183,7 +186,7 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
-            structuring_engine: StructuringEngineKind::LegacyScored,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
             calling_convention: Default::default(),
         }

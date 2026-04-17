@@ -59,7 +59,7 @@ fn preview_options() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
-        structuring_engine: StructuringEngineKind::LegacyScored,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
         global_names: Default::default(),
         calling_convention: Default::default(),
     }
@@ -76,7 +76,7 @@ fn preview_options_x86() -> MlilPreviewOptions {
         region_linearize_structuring: false,
         force_linear_structuring: false,
         conservative_irreducible_fallback: false,
-        structuring_engine: StructuringEngineKind::LegacyScored,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
         global_names: Default::default(),
         calling_convention: Default::default(),
     }

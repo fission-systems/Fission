@@ -375,7 +375,7 @@ mod tests {
             region_linearize_structuring: false,
             force_linear_structuring: false,
             conservative_irreducible_fallback: false,
-            structuring_engine: StructuringEngineKind::LegacyScored,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
             calling_convention: Default::default(),
         }

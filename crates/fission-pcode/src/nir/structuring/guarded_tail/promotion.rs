@@ -488,6 +488,22 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    fn resolve_guarded_tail_else_source(
+        body: &[HirStmt],
+        if_idx: usize,
+        binding_name: &str,
+        cache: &mut GuardedTailReplacementCache,
+    ) -> Option<HirExpr> {
+        if let Some(expr) = cache.else_sources.get(binding_name) {
+            return Some(expr.clone());
+        }
+        let expr = Self::find_guarded_tail_preexisting_source(body, if_idx, binding_name)?;
+        cache
+            .else_sources
+            .insert(binding_name.to_string(), expr.clone());
+        Some(expr)
+    }
+
     fn classify_stmt_read_kind(stmt: &HirStmt, name: &str) -> Option<GuardedTailReadKind> {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
@@ -850,15 +866,25 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 continue;
             };
-            let read_sites: Vec<_> = follow_tail
-                .iter()
-                .enumerate()
-                .filter_map(|(stmt_idx, stmt)| {
-                    Self::classify_stmt_read_kind(stmt, binding_name).map(|kind| {
-                        GuardedTailReplacementRead { stmt_idx, kind }
-                    })
-                })
-                .collect();
+            let mut read_sites = Vec::new();
+            let mut follow_redefined = false;
+            let mut nondominated_reads = 0usize;
+            for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
+                let reads_here = Self::classify_stmt_read_kind(stmt, binding_name);
+                let defs_here = Self::count_var_defs_stmt(stmt, binding_name);
+                if follow_redefined {
+                    if reads_here.is_some() {
+                        nondominated_reads += 1;
+                    }
+                    continue;
+                }
+                if let Some(kind) = reads_here {
+                    read_sites.push(GuardedTailReplacementRead { stmt_idx, kind });
+                }
+                if defs_here > 0 {
+                    follow_redefined = true;
+                }
+            }
             if read_sites.is_empty() {
                 continue;
             }
@@ -877,6 +903,11 @@ impl<'a> PreviewBuilder<'a> {
                 != 1
             {
                 self.guarded_tail_replacement_read_rejected_nondominated_count += read_sites.len();
+                return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
+            }
+            if nondominated_reads > 0 {
+                self.guarded_tail_replacement_read_rejected_nondominated_count +=
+                    read_sites.len() + nondominated_reads;
                 return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             }
 
@@ -1114,20 +1145,23 @@ impl<'a> PreviewBuilder<'a> {
         middle
     }
 
-    fn guarded_tail_middle_is_execution_safe(middle: &[HirStmt], label: &str) -> bool {
-        middle.iter().all(|stmt| match stmt {
-            HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Return(_) => true,
+    fn guarded_tail_stmt_is_execution_safe(stmt: &HirStmt, label: &str) -> bool {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } => Self::expr_is_pure_value(rhs),
+            HirStmt::VaStart { .. } => true,
+            HirStmt::Expr(expr) => Self::expr_is_pure_value(expr),
             HirStmt::Goto(target) => target == label,
             HirStmt::Block(body) => Self::guarded_tail_middle_is_execution_safe(body, label),
             HirStmt::If {
+                cond,
                 then_body,
                 else_body,
-                ..
             } => {
-                Self::guarded_tail_middle_is_execution_safe(then_body, label)
+                Self::expr_is_pure_value(cond)
+                    && Self::guarded_tail_middle_is_execution_safe(then_body, label)
                     && Self::guarded_tail_middle_is_execution_safe(else_body, label)
             }
             HirStmt::Label(_)
@@ -1135,8 +1169,16 @@ impl<'a> PreviewBuilder<'a> {
             | HirStmt::While { .. }
             | HirStmt::DoWhile { .. }
             | HirStmt::For { .. }
+            | HirStmt::Return(_)
             | HirStmt::Break
             | HirStmt::Continue => false,
+            HirStmt::Assign { .. } => false,
+        }
+    }
+
+    fn guarded_tail_middle_is_execution_safe(middle: &[HirStmt], label: &str) -> bool {
+        middle.iter().all(|stmt| match stmt {
+            _ => Self::guarded_tail_stmt_is_execution_safe(stmt, label),
         })
     }
 
@@ -1172,7 +1214,6 @@ impl<'a> PreviewBuilder<'a> {
                 region_legality: legality,
                 replacement_complete: false,
                 removable_ops_legal: false,
-                keep_join_label: false,
                 rewritten_middle: witness.middle.clone(),
                 exported_bindings: Vec::new(),
                 rejection_reason: Some(GuardedTailExecutionRejection::Witness(
@@ -1231,13 +1272,28 @@ impl<'a> PreviewBuilder<'a> {
                 region_legality: legality,
                 replacement_complete: false,
                 removable_ops_legal: false,
-                keep_join_label: false,
                 rewritten_middle: rewritten.stmts,
                 exported_bindings: Vec::new(),
                 rejection_reason: Some(GuardedTailExecutionRejection::MustEmitLabelConflict),
             };
         }
-        let keep_join_label = outside_refs > 0;
+        if outside_refs > 0 {
+            self.mark_promotion_gate_rejection(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[DIAG] guarded-tail verify idx={} label={} rejected=MustEmitLabelConflict(outside_refs={})",
+                    idx, witness.target_label, outside_refs
+                );
+            }
+            return GuardedTailVerification {
+                region_legality: legality,
+                replacement_complete: false,
+                removable_ops_legal: false,
+                rewritten_middle: rewritten.stmts,
+                exported_bindings: Vec::new(),
+                rejection_reason: Some(GuardedTailExecutionRejection::MustEmitLabelConflict),
+            };
+        }
         let removable_ops_legal = execution_safe
             && !has_top_level_label(&rewritten.stmts)
             && rewritten.unresolved_join_refs == 0;
@@ -1257,7 +1313,6 @@ impl<'a> PreviewBuilder<'a> {
                     region_legality: legality,
                     replacement_complete: false,
                     removable_ops_legal,
-                    keep_join_label,
                     rewritten_middle: rewritten.stmts,
                     exported_bindings: Vec::new(),
                     rejection_reason: Some(reason),
@@ -1298,7 +1353,6 @@ impl<'a> PreviewBuilder<'a> {
                 region_legality: legality,
                 replacement_complete: false,
                 removable_ops_legal,
-                keep_join_label,
                 rewritten_middle: rewritten.stmts,
                 exported_bindings,
                 rejection_reason: Some(GuardedTailExecutionRejection::ReplacementIncomplete),
@@ -1319,7 +1373,6 @@ impl<'a> PreviewBuilder<'a> {
                 region_legality: legality,
                 replacement_complete: true,
                 removable_ops_legal: true,
-                keep_join_label,
                 rewritten_middle: rewritten.stmts,
                 exported_bindings,
                 rejection_reason: None,
@@ -1348,7 +1401,6 @@ impl<'a> PreviewBuilder<'a> {
             region_legality: legality,
             replacement_complete,
             removable_ops_legal,
-            keep_join_label,
             rewritten_middle: rewritten.stmts,
             exported_bindings,
             rejection_reason: Some(if !removable_ops_legal {
@@ -1366,9 +1418,10 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         trial: &GuardedTailTrial,
         verification: &GuardedTailVerification,
-    ) -> GuardedTailExecutionPlan {
+    ) -> Result<GuardedTailExecutionPlan, GuardedTailExecutionRejection> {
         let mut rewritten_middle = verification.rewritten_middle.clone();
         let mut synthetic_merges = Vec::new();
+        let mut replacement_cache = GuardedTailReplacementCache::default();
         let mut exported_bindings = verification.exported_bindings.clone();
         exported_bindings.sort_by_key(|binding| binding.def_stmt_idx);
         let mut obsolete_defs = Vec::new();
@@ -1377,11 +1430,6 @@ impl<'a> PreviewBuilder<'a> {
             let binding_name = exported_bindings[binding_idx].binding_name.clone();
             let replacement_source = exported_bindings[binding_idx].replacement_source.clone();
             let def_stmt_idx = exported_bindings[binding_idx].def_stmt_idx;
-            let internal_rewrite_count = rewritten_middle
-                .iter()
-                .skip(def_stmt_idx.saturating_add(1))
-                .map(|stmt| Self::count_var_reads_stmt(stmt, &binding_name))
-                .sum::<usize>();
             for stmt in rewritten_middle
                 .iter_mut()
                 .skip(def_stmt_idx.saturating_add(1))
@@ -1403,10 +1451,18 @@ impl<'a> PreviewBuilder<'a> {
                 obsolete_defs.push(def_stmt_idx);
             }
 
-            let Some(else_value) =
-                Self::find_guarded_tail_preexisting_source(body, idx, &binding_name)
-            else {
+            let else_value = if exported_bindings[binding_idx].read_sites.is_empty() {
                 continue;
+            } else if let Some(expr) = Self::resolve_guarded_tail_else_source(
+                body,
+                idx,
+                &binding_name,
+                &mut replacement_cache,
+            ) {
+                expr
+            } else {
+                self.guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
+                return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             };
 
             let ty = expr_type(&replacement_source);
@@ -1427,8 +1483,7 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_target,
                 then_value: replacement_source,
                 else_value,
-                read_site_count: exported_bindings[binding_idx].read_sites.len()
-                    + internal_rewrite_count,
+                read_sites: exported_bindings[binding_idx].read_sites.clone(),
             });
         }
         obsolete_defs.sort_unstable();
@@ -1438,12 +1493,19 @@ impl<'a> PreviewBuilder<'a> {
                 rewritten_middle.remove(def_idx);
             }
         }
-        GuardedTailExecutionPlan {
-            keep_join_label: verification.keep_join_label,
+        Ok(GuardedTailExecutionPlan {
             synthetic_merges,
             redirects: trial.witness.external_redirects.clone(),
             rewritten_middle,
-        }
+        })
+    }
+
+    fn apply_guarded_tail_replacement_read(
+        stmt: &mut HirStmt,
+        merge: &GuardedTailSyntheticMerge,
+    ) {
+        let replacement_expr = HirExpr::Var(merge.replacement_target.clone());
+        Self::replace_var_in_stmt(stmt, &merge.binding_name, &replacement_expr);
     }
 
     fn execute_guarded_tail_plan(
@@ -1481,19 +1543,16 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         body[idx] = replacement;
-        let tail_start = if plan.keep_join_label {
-            body.drain(idx + 1..trial.witness.label_idx);
-            idx + 2
-        } else {
-            body.drain(idx + 1..=trial.witness.label_idx);
-            idx + 1
-        };
+        body.drain(idx + 1..=trial.witness.label_idx);
+        let tail_start = idx + 1;
         for merge in &plan.synthetic_merges {
-            let replacement_expr = HirExpr::Var(merge.replacement_target.clone());
-            for stmt in body.iter_mut().skip(tail_start) {
-                Self::replace_var_in_stmt(stmt, &merge.binding_name, &replacement_expr);
+            for read in &merge.read_sites {
+                let stmt_idx = tail_start + read.stmt_idx;
+                if let Some(stmt) = body.get_mut(stmt_idx) {
+                    Self::apply_guarded_tail_replacement_read(stmt, merge);
+                    self.guarded_tail_replacement_read_rewritten_count += 1;
+                }
             }
-            self.guarded_tail_replacement_read_rewritten_count += merge.read_site_count;
         }
         self.guarded_tail_promoted_count += 1;
         self.promoted_region_count += 1;
@@ -1556,7 +1615,14 @@ impl<'a> PreviewBuilder<'a> {
 
             self.guarded_tail_candidate_count += 1;
             self.promotion_candidate_count += 1;
-            let plan = self.build_guarded_tail_execution_plan(body, idx, &trial, &verification);
+            let plan = match self.build_guarded_tail_execution_plan(body, idx, &trial, &verification) {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    self.mark_guarded_tail_execution_rejection(reason);
+                    idx += 1;
+                    continue;
+                }
+            };
             self.execute_guarded_tail_plan(body, idx, trial, plan, cond.clone());
             changed = true;
             idx += 1;

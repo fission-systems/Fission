@@ -1453,8 +1453,8 @@ pub enum StructuringBudgetClass {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum StructuringEngineKind {
-    #[default]
     LegacyScored,
+    #[default]
     GraphCollapseV1,
 }
 
@@ -1639,7 +1639,7 @@ impl NirRenderOptions {
             sections,
             region_linearize_structuring: false,
             force_linear_structuring: false,
-            structuring_engine: StructuringEngineKind::LegacyScored,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
             conservative_irreducible_fallback: false,
             global_names,
             calling_convention,
@@ -1665,7 +1665,7 @@ impl NirRenderOptions {
             Some("legacy")
             | Some("legacyscored")
             | Some("legacy_scored")
-            | Some("legacy-scored") => StructuringEngineKind::LegacyScored,
+            | Some("legacy-scored") => StructuringEngineKind::GraphCollapseV1,
             _ => self.structuring_engine,
         }
     }

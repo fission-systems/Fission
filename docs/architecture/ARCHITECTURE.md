@@ -47,21 +47,26 @@ It consumes canonical semantic policy from `fission-pcode`. It does not redefine
 
 It does not own decompiler semantics, region legality, or postprocess policy.
 
-## Structuring Migration
+## Structuring Model
 
-The current migration path is dual-engine:
+The active structuring path is a hard-cutover Ghidra-style CFG owner model.
 
-- `LegacyScored`
-- `GraphCollapseV1`
+- `StructureGraph` is the internal collapsed overlay owner.
+- `CollapseDriver` applies deterministic collapse rules.
+- `RegionProof` and rewrite execution decide whether a region may be promoted.
+- `linear` is an explicit fallback surface, not a late semantic repair layer.
 
-`GraphCollapseV1` moves Fission toward a Ghidra-style CFG owner model:
+The implementation still parses legacy engine names for compatibility, but active execution resolves to the graph/collapse path.
 
-1. Build a `StructureGraph` from the CFG.
-2. Produce `RegionProof` values for candidate regions.
-3. Collapse only proof-complete and emit-ready regions.
+The active rule flow is:
+
+1. Build a `StructureGraph` from CFG/basic-block facts.
+2. Produce `RegionProof` and replacement/readiness evidence for candidate regions.
+3. Collapse only proof-complete, replacement-complete, emit-ready regions.
 4. Surface final HIR from the collapsed graph.
+5. Fall back to explicit unstructured or goto-based output when legality is incomplete.
 
-When legality is incomplete, the structuring layer must preserve explicit unstructured or goto-based output instead of relying on printer-side recovery.
+Printer and postprocess must not reconstruct structure after this point.
 
 ## Benchmark / Telemetry Contract
 
