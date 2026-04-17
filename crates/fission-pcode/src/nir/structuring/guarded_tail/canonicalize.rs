@@ -1,6 +1,66 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn top_level_guard_goto_signature(stmt: &HirStmt) -> Option<(&HirExpr, &str)> {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            return None;
+        };
+        if !else_body.is_empty() {
+            return None;
+        }
+        match then_body.as_slice() {
+            [HirStmt::Goto(label)] => Some((cond, label.as_str())),
+            _ => None,
+        }
+    }
+
+    fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<HirStmt>) -> usize {
+        let mut removed = 0usize;
+        let mut i = 0usize;
+
+        while i < stmts.len() {
+            let Some((cond_i, target_i)) = Self::top_level_guard_goto_signature(&stmts[i]) else {
+                i += 1;
+                continue;
+            };
+
+            // Keep this narrowly scoped: only allow empty blocks between duplicates.
+            // Crossing labels can change ownership/fallthrough interpretation.
+            let mut j = i + 1;
+            while j < stmts.len() {
+                match &stmts[j] {
+                    HirStmt::Block(body) if body.is_empty() => j += 1,
+                    _ => break,
+                }
+            }
+            if j >= stmts.len() {
+                i += 1;
+                continue;
+            }
+
+            let Some((cond_j, target_j)) = Self::top_level_guard_goto_signature(&stmts[j]) else {
+                i += 1;
+                continue;
+            };
+
+            if cond_i == cond_j && target_i == target_j {
+                stmts.remove(j);
+                removed += 1;
+                // Keep `i` to fold guard ladders of length >= 3.
+                continue;
+            }
+
+            i += 1;
+        }
+
+        removed
+    }
+
     pub(super) fn canonicalize_interleaved_local_aliases(
         &mut self,
         body: &[HirStmt],
@@ -246,6 +306,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<(Vec<HirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let mut flattened = Vec::new();
         Self::flatten_guarded_tail_segment(segment, &mut flattened);
+        let collapsed_guards = Self::collapse_duplicate_top_level_guard_ladder(&mut flattened);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {
             return Err(GuardedTailCanonicalizationFailure::NonterminalJoinLabel);
         };
@@ -259,7 +320,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut canonical = Vec::new();
         let mut saw_payload = false;
         let mut saw_gap_after_payload = false;
-        let mut removed_any = start > 0 || end < flattened.len() || flattened.len() != end - start;
+        let mut removed_any =
+            start > 0 || end < flattened.len() || flattened.len() != end - start || collapsed_guards > 0;
         let mut payload_entry_count = 0usize;
         let segment_ref_counts = Self::goto_ref_counts(&flattened);
         let mut idx = 0usize;
@@ -391,5 +453,188 @@ impl<'a> PreviewBuilder<'a> {
             self.canonicalized_guarded_tail_shape_count += 1;
         }
         Ok((canonical, external_redirects))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_identical_cond_target() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(None),
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 1);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_identical_deref_cond_target() {
+        let cond = HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("p".to_string())),
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Bool,
+        };
+        let mut body = vec![
+            HirStmt::If {
+                cond: cond.clone(),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond,
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(None),
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 1);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_allows_empty_block_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Block(Vec::new()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(None),
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 1);
+        assert_eq!(body.len(), 3);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_rejects_different_cond() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c1".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("c2".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 0);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_rejects_different_target() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L1".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L2".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 0);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_rejects_non_ignorable_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("p".to_string())),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("L".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 0);
+        assert_eq!(body.len(), 3);
+    }
+
+    #[test]
+    fn collapse_duplicate_guard_ladder_does_not_touch_nested_loop_body() {
+        let mut body = vec![
+            HirStmt::While {
+                cond: HirExpr::Var("loop_c".to_string()),
+                body: vec![
+                    HirStmt::If {
+                        cond: HirExpr::Var("c".to_string()),
+                        then_body: vec![HirStmt::Goto("L".to_string())],
+                        else_body: Vec::new(),
+                    },
+                    HirStmt::If {
+                        cond: HirExpr::Var("c".to_string()),
+                        then_body: vec![HirStmt::Goto("L".to_string())],
+                        else_body: Vec::new(),
+                    },
+                ],
+            },
+            HirStmt::Return(None),
+        ];
+
+        let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
+
+        assert_eq!(removed, 0);
+        assert_eq!(body.len(), 2);
     }
 }
