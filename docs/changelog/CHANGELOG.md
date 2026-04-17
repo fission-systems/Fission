@@ -148,6 +148,44 @@ Observed quality state after the structural cutover:
 - seeded shared coverage: `100.00%`
 - independent top-N coverage: `96.00%`
 - direct-success: `50/50`
+
+## 2026-04-17
+
+### Forward-chain alias canonicalization for external top-level-goto-only + top-level-after-label local refs
+
+This patch extends alias label canonicalization to support forward-chain terminal-join resolution when both conditions hold:
+1. Local alias refs are **top-level-after-label** only (post-segment forward gotos)
+2. External refs are **top-level Goto only** (no nested refs, no pre-segment refs)
+
+The redirect target is now resolved to the terminal join label in the forward chain (rather than only the immediate next label), reusing `resolve_terminal_join_target()` and trivial segment checks from `promotion_graph.rs`. This follows the same "forward chain → terminal join" semantics that promotion already uses for guarded-tail sequence folding.
+
+**Targets**: Preparation for safe alias-chain expansion targeting `0x140006fe0` (putty.exe) in the next patch.
+
+**Non-targets** (explicitly rejected to maintain soundness): 
+- nested-after-label cases (like `0x140008090`) remain rejected
+- pre-segment nested/nonlocal refs remain rejected
+- `payload_crosses_join` remains forbidden
+- `nested_tail_escape` heuristics unchanged
+
+**Implementation**:
+
+- [`alias_refs.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/alias_refs.rs): 
+  - New `are_all_external_refs_top_level_goto()` helper to verify external refs are pure top-level gotos
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs):
+  - Reordered redirect logic: forward-chain resolution now attempted **before** immediate-next redirect when top-level-after-label + external-top-level-goto conditions align
+  - Preserved immediate-next redirect as fallback for cases that don't qualify for forward-chain
+  - Reuse of `resolve_terminal_join_target()` ensures determinism and alignment with promotion semantics
+
+**Validation**:
+
+- `cargo test -p fission-pcode` (412 tests, all pass)
+- `cargo test guarded_tail` (60/60 tests, all pass)
+
+**Key design decisions**:
+
+1. **Priority**: Forward-chain over immediate-next when external top-level-goto is present, ensuring we don't leave legal redirection opportunities on the table for the target use case.
+2. **Reuse**: No new state machines or heuristics; borrowing promotion_graph's proven cycle-safe chain traversal and segment classification.
+3. **Safety**: Nested refs or pre-segment refs still trigger `AliasHasNonlocalRef` rejection; this patch only widens the **top-level-to-top-level** path.
 - `unsupported_indirect_control_count`: `1`
 - `avg_normalized_similarity`: `38.79`
 - key rows:
