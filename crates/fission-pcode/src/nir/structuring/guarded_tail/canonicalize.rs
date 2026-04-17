@@ -67,6 +67,70 @@ impl<'a> PreviewBuilder<'a> {
             .count()
     }
 
+    fn stmt_is_sink_safe_return_goto(stmt: &HirStmt, full_body: &[HirStmt]) -> bool {
+        let HirStmt::Goto(target) = stmt else {
+            return false;
+        };
+        if Self::top_level_label_definition_count(full_body, target) != 1 {
+            return false;
+        }
+        matches!(
+            Self::resolve_terminal_tail_exit_stmt(full_body, target),
+            Some(HirStmt::Return(_))
+        )
+    }
+
+    fn stmt_is_guard_cluster_trivial_gap(stmt: &HirStmt, full_body: &[HirStmt]) -> bool {
+        if matches!(stmt, HirStmt::Label(_)) {
+            return false;
+        }
+        is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+            || Self::stmt_is_sink_safe_return_goto(stmt, full_body)
+    }
+
+    fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+        stmts: &mut Vec<HirStmt>,
+        full_body: &[HirStmt],
+    ) -> usize {
+        let mut removed = 0usize;
+        let mut i = 0usize;
+
+        while i < stmts.len() {
+            let Some((cond_i, target_i)) = Self::top_level_guard_goto_signature(&stmts[i]) else {
+                i += 1;
+                continue;
+            };
+
+            let mut j = i + 1;
+            let mut duplicate_at = None;
+            while j < stmts.len() {
+                if let Some((cond_j, target_j)) = Self::top_level_guard_goto_signature(&stmts[j]) {
+                    if cond_i == cond_j && target_i == target_j {
+                        duplicate_at = Some(j);
+                    }
+                    break;
+                }
+                if Self::stmt_is_guard_cluster_trivial_gap(&stmts[j], full_body) {
+                    j += 1;
+                    continue;
+                }
+                break;
+            }
+
+            if let Some(j) = duplicate_at {
+                stmts.remove(j);
+                removed += 1;
+                // Keep `i` for chains with >= 3 same-family guards.
+                continue;
+            }
+
+            i += 1;
+        }
+
+        removed
+    }
+
     fn stmt_is_guard_prefix_safe(stmt: &HirStmt) -> bool {
         is_ignorable_discovery_stmt(stmt)
             || matches!(stmt, HirStmt::Label(_))
@@ -357,6 +421,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut flattened = Vec::new();
         Self::flatten_guarded_tail_segment(segment, &mut flattened);
         let collapsed_guards = Self::collapse_duplicate_top_level_guard_ladder(&mut flattened);
+        let factored_guard_clusters =
+            Self::factor_duplicate_top_level_guard_cluster_with_trivial_gap(&mut flattened, full_body);
         let collapsed_sink_returns =
             Self::collapse_top_level_sink_to_return_goto_chain(&mut flattened, full_body);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {
@@ -376,6 +442,7 @@ impl<'a> PreviewBuilder<'a> {
             || end < flattened.len()
             || flattened.len() != end - start
             || collapsed_guards > 0
+            || factored_guard_clusters > 0
             || collapsed_sink_returns > 0;
         let mut payload_entry_count = 0usize;
         let segment_ref_counts = Self::goto_ref_counts(&flattened);
@@ -816,5 +883,183 @@ mod tests {
 
         assert_eq!(rewritten, 0);
         assert!(matches!(&body[0], HirStmt::Goto(label) if label == "Lret"));
+    }
+
+    #[test]
+    fn collapse_guard_cluster_allows_sink_safe_trivial_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 1);
+        assert_eq!(
+            body.iter()
+                .filter(|stmt| matches!(stmt, HirStmt::If { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn collapse_guard_cluster_allows_empty_block_and_sink_safe_gaps() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Block(Vec::new()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Block(Vec::new()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 1);
+        assert_eq!(
+            body.iter()
+                .filter(|stmt| matches!(stmt, HirStmt::If { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn collapse_guard_cluster_rejects_side_effectful_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Call {
+                target: "FUN_0x140001000".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn collapse_guard_cluster_rejects_ambiguous_sink_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn collapse_guard_cluster_rejects_label_crossing_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("mid".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("A".to_string()),
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn collapse_guard_cluster_rejects_loop_crossing_sink_gap() {
+        let mut body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("Lloop".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("c".to_string()),
+                then_body: vec![HirStmt::Goto("A".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("Lloop".to_string()),
+            HirStmt::While {
+                cond: HirExpr::Var("loop_c".to_string()),
+                body: vec![HirStmt::Break],
+            },
+            HirStmt::Return(None),
+        ];
+        let full_body = body.clone();
+
+        let removed = PreviewBuilder::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+            &mut body, &full_body,
+        );
+
+        assert_eq!(removed, 0);
     }
 }
