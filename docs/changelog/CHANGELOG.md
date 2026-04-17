@@ -186,6 +186,48 @@ The redirect target is now resolved to the terminal join label in the forward ch
 1. **Priority**: Forward-chain over immediate-next when external top-level-goto is present, ensuring we don't leave legal redirection opportunities on the table for the target use case.
 2. **Reuse**: No new state machines or heuristics; borrowing promotion_graph's proven cycle-safe chain traversal and segment classification.
 3. **Safety**: Nested refs or pre-segment refs still trigger `AliasHasNonlocalRef` rejection; this patch only widens the **top-level-to-top-level** path.
+
+### Guarded-tail nested-tail terminal-safe subcase (3rd wave)
+
+This wave tightens the guarded-tail `NestedTailEscape` handling around one limited acceptance class: payload-following tail exits that can be proven terminal by a unique label chain to `return`.
+
+Implementation:
+
+- [`alias_refs.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/alias_refs.rs)
+  - expanded `resolve_terminal_tail_exit_stmt(...)` to accept only terminal-safe hops:
+    - ignorable statements
+    - pure expr / pure var-assign gap statements
+    - unique terminal `goto` chain ending in `return`
+  - preserved safety guardrails:
+    - no cycle
+    - no external re-entry into hop labels (single predecessor invariant)
+    - no loop/switch/break/continue crossing
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - reordered payload-following `goto` handling to attempt terminal-tail resolution before immediate `NestedTailEscape` rejection on trailing non-ignorable statements
+  - forward-chain alias redirect guard now rejects self-redirect (`resolved_label != label`)
+- [`structuring_guarded_tail.rs`](../../crates/fission-pcode/src/nir/tests/structuring_guarded_tail.rs)
+  - added nested-tail subcase regressions (positive 2, negative 4)
+  - restored forward-chain alias behavior guard tests (positive 1, negative 1)
+
+Validation:
+
+- `cargo test -p fission-pcode guarded_tail` → 68 passed
+- `cargo test -p fission-pcode --lib` → 420 passed
+
+Targeted benchmark rerun:
+
+- artifact: [`putty-nested-tail-wave-20260417`](../../artifacts/batch_benchmark/putty-nested-tail-wave-20260417)
+- target row `0x140006fe0` counters (vs prior [`putty-forward-chain-rerun-20260417`](../../artifacts/batch_benchmark/putty-forward-chain-rerun-20260417)):
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3 -> 3`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2 -> 2`
+  - `canonicalization_failed_nested_tail_escape`: `6 -> 9`
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4 -> 4`
+  - `region_emit_ready_failed_count`: `5 -> 5`
+
+Result interpretation:
+
+- The new terminal-safe nested-tail path is now covered by dedicated regressions and remains bounded by structural proof constraints.
+- On the target row (`0x140006fe0`), this wave did not reduce emit-ready blockers yet; follow-up narrowing is still needed on the concrete failing tail pattern.
 - `unsupported_indirect_control_count`: `1`
 - `avg_normalized_similarity`: `38.79`
 - key rows:
