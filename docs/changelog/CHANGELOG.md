@@ -228,6 +228,46 @@ Result interpretation:
 
 - The new terminal-safe nested-tail path is now covered by dedicated regressions and remains bounded by structural proof constraints.
 - On the target row (`0x140006fe0`), this wave did not reduce emit-ready blockers yet; follow-up narrowing is still needed on the concrete failing tail pattern.
+
+### Guarded-tail duplicate guard-ladder collapse before canonicalization (4th wave)
+
+This wave adds a narrow guarded-tail pre-normalization step to collapse duplicate top-level conditional-goto ladders before canonicalization.
+
+Implementation:
+
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - added `collapse_duplicate_top_level_guard_ladder(...)`
+  - applied collapse to flattened guarded-tail segment before trimming/canonicalization
+  - collapse conditions are intentionally strict:
+    - both statements are top-level `If`
+    - both have empty `else`
+    - both `then_body` are single `Goto` to the same label
+    - condition AST is identical
+    - only empty `Block` gap is allowed between duplicates
+    - no nested/loop/switch crossing
+- same file test module:
+  - positive: identical cond+target collapse, deref-guard collapse, empty-block-gap collapse
+  - negative: different cond, different target, non-ignorable gap, nested-loop body no-touch
+
+Validation:
+
+- `cargo test -p fission-pcode collapse_duplicate_guard_ladder_` → 7 passed
+- `cargo test -p fission-pcode guarded_tail` → 75 passed
+- `cargo test -p fission-pcode --lib` → 427 passed
+
+Targeted benchmark rerun:
+
+- artifact: [`putty-duplicate-guard-wave-20260417`](../../artifacts/batch_benchmark/putty-duplicate-guard-wave-20260417)
+- target row `0x140006fe0` counters:
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3` (no change)
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2` (no change)
+  - `canonicalization_failed_nested_tail_escape`: `9 -> 7` (improved vs 3rd-wave run)
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4` (no change)
+  - `region_emit_ready_failed_count`: `5` (no change)
+
+Observed target HIR status:
+
+- repeated guard pairs around `block_140007021` remained duplicated in this run output (`if (!xVar57) ...` x2, `if (!*xVar43) ...` x2), so the new collapse path is not yet hitting that concrete failing shape end-to-end.
 - `unsupported_indirect_control_count`: `1`
 - `avg_normalized_similarity`: `38.79`
 - key rows:
