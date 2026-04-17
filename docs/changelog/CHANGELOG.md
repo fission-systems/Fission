@@ -314,6 +314,59 @@ Result interpretation:
 
 - 5th-wave sink-chain rule is now implemented with strict proof boundaries and covered by dedicated positive/negative tests.
 - On the concrete blocker row (`0x140006fe0`), this bounded subcase did not move the remaining blocker counters yet; the failing shape is still outside the currently covered guarded-tail segment/path.
+
+### Guarded-tail duplicate conditional cluster factoring across sink-safe trivial gaps (6th wave)
+
+This wave extends 4th-wave duplicate-guard folding by adding a narrowly bounded cluster factoring step: identical top-level guard families may fold across trivial gaps only.
+
+Pre-check on target row `0x140006fe0`:
+
+- duplicate `if (!xVar57) goto block_140007047;` pair has no meaningful gap (adjacent; only brace lines between textual statements)
+- duplicate `if (!*xVar43) goto block_140007040;` pair also has no meaningful gap (adjacent; only brace lines between textual statements)
+
+Implementation:
+
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - added `factor_duplicate_top_level_guard_cluster_with_trivial_gap(...)`
+  - inserted ordering in guarded-tail canonicalization:
+    - duplicate guard collapse
+    - duplicate guard-cluster factoring across trivial gap
+    - sink-to-return goto-chain collapse
+    - alias/nested-tail canonicalization
+  - factoring rules are intentionally narrow:
+    - top-level only
+    - identical condition AST + identical goto target
+    - allowed gaps: ignorable, empty block, or sink-safe top-level goto proven by terminal-tail resolver
+    - forbidden: label crossing, side-effectful gaps, ambiguous sink label ownership, loop/switch/control crossing
+- same file test module:
+  - positive: sink-safe goto gap factoring, empty-block + sink-safe mixed gap factoring
+  - negative: side-effectful gap, ambiguous sink, label crossing, loop crossing
+
+Validation:
+
+- `cargo test -p fission-pcode collapse_guard_cluster_` → 6 passed
+- `cargo test -p fission-pcode collapse_sink_to_return_chain_` → 6 passed
+- `cargo test -p fission-pcode guarded_tail` → 87 passed
+- `cargo test -p fission-pcode --lib` → 439 passed
+
+Targeted benchmark rerun:
+
+- artifact: [`putty-guard-cluster-wave-20260417`](../../artifacts/batch_benchmark/putty-guard-cluster-wave-20260417)
+- target row `0x140006fe0` counters (vs 5th-wave [`putty-sink-return-wave-20260417`](../../artifacts/batch_benchmark/putty-sink-return-wave-20260417)):
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3 -> 3`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2 -> 2`
+  - `canonicalization_failed_nested_tail_escape`: `7 -> 7`
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4 -> 4`
+  - `region_emit_ready_failed_count`: `5 -> 5`
+
+Observed target HIR status:
+
+- output window around `block_140007021` remains unchanged from 5th-wave run (duplicate guard pairs preserved; helper/sink structure unchanged).
+
+Result interpretation:
+
+- 6th-wave cluster factoring is soundly integrated and regression-covered.
+- On the concrete blocker row (`0x140006fe0`), the extra trivial-gap factoring still does not move counters or emitted shape, indicating the remaining blocker likely sits before guarded-tail candidate shaping (or outside the currently canonicalized segment boundary).
 - `unsupported_indirect_control_count`: `9`
 - `avg_normalized_similarity`: `37.09`
 - key rows:
