@@ -86,7 +86,9 @@ impl<'a> PreviewBuilder<'a> {
                         // Prefer forward-chain resolution if it goes beyond immediate next
                         if let Some(next_label_idx) = next_label_idx {
                             if let HirStmt::Label(next_label) = &body[next_label_idx] {
-                                if resolved_label != next_label.as_str() {
+                                if resolved_label != *label
+                                    && resolved_label != next_label.as_str()
+                                {
                                     return Some(resolved_label);
                                 }
                             }
@@ -327,9 +329,6 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 HirStmt::Goto(_) => {
                     if saw_payload {
-                        if trailing_has_non_ignorable {
-                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
-                        }
                         let HirStmt::Goto(target) = stmt else {
                             unreachable!();
                         };
@@ -339,6 +338,9 @@ impl<'a> PreviewBuilder<'a> {
                             canonical.push(return_stmt);
                             idx += 1;
                             continue;
+                        }
+                        if trailing_has_non_ignorable {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                         }
                         if flattened[..idx]
                             .iter()

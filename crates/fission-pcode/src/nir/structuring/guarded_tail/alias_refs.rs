@@ -564,6 +564,16 @@ impl<'a> PreviewBuilder<'a> {
                 return None;
             }
 
+            // Safe subcase guard: no external re-entry into any hop label.
+            // The only allowed predecessor is the unique previous hop goto.
+            let ref_count = body
+                .iter()
+                .map(|stmt| Self::stmt_contains_goto_label(stmt, &current))
+                .sum::<usize>();
+            if ref_count != 1 {
+                return None;
+            }
+
             let label_idx = body
                 .iter()
                 .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &current))?;
@@ -572,17 +582,59 @@ impl<'a> PreviewBuilder<'a> {
                 .position(|stmt| matches!(stmt, HirStmt::Label(_)))
                 .map(|offset| label_idx + 1 + offset)
                 .unwrap_or(body.len());
-            let retained: Vec<_> = body[label_idx + 1..next_label_idx]
-                .iter()
-                .filter(|stmt| !is_ignorable_discovery_stmt(stmt))
-                .cloned()
-                .collect();
 
-            match retained.as_slice() {
-                [HirStmt::Return(ret)] => return Some(HirStmt::Return(ret.clone())),
-                [HirStmt::Goto(next)] => current = next.clone(),
-                _ => return None,
+            let mut terminal_return: Option<Option<HirExpr>> = None;
+            let mut terminal_goto: Option<String> = None;
+
+            for stmt in &body[label_idx + 1..next_label_idx] {
+                if is_ignorable_discovery_stmt(stmt)
+                    || Self::stmt_is_pure_value_expr(stmt)
+                    || Self::stmt_is_pure_value_assign(stmt)
+                {
+                    // Terminal exit must be the last meaningful statement in the hop.
+                    if terminal_return.is_some() || terminal_goto.is_some() {
+                        return None;
+                    }
+                    continue;
+                }
+
+                match stmt {
+                    HirStmt::Return(ret) => {
+                        if terminal_return.is_some() || terminal_goto.is_some() {
+                            return None;
+                        }
+                        terminal_return = Some(ret.clone());
+                    }
+                    HirStmt::Goto(next) => {
+                        if terminal_return.is_some() || terminal_goto.is_some() {
+                            return None;
+                        }
+                        terminal_goto = Some(next.clone());
+                    }
+                    // Keep nested/nonlocal control-flow crossing forbidden.
+                    HirStmt::Break
+                    | HirStmt::Continue
+                    | HirStmt::If { .. }
+                    | HirStmt::Switch { .. }
+                    | HirStmt::While { .. }
+                    | HirStmt::DoWhile { .. }
+                    | HirStmt::For { .. }
+                    | HirStmt::Block(_)
+                    | HirStmt::VaStart { .. }
+                    | HirStmt::Assign { .. }
+                    | HirStmt::Expr(_)
+                    | HirStmt::Label(_) => return None,
+                }
             }
+
+            if let Some(ret) = terminal_return {
+                return Some(HirStmt::Return(ret));
+            }
+            if let Some(next) = terminal_goto {
+                current = next;
+                continue;
+            }
+            return None;
         }
     }
 
