@@ -1222,67 +1222,51 @@ impl<'a> PreviewBuilder<'a> {
             };
         }
 
-        let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
-            body,
-            &witness.middle,
-            idx,
-            witness.label_idx,
-            &witness.target_label,
-        );
-        let effective_middle_refs = Self::effective_middle_refs_for_promotion(
-            &witness.middle,
-            &witness.target_label,
-            middle_refs,
-        );
         let rewritten = Self::rewrite_guarded_tail_sequence(
             &witness.middle,
             &witness.target_label,
             &[],
         );
+        let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
+            body,
+            &rewritten.stmts,
+            idx,
+            witness.label_idx,
+            &witness.target_label,
+        );
+        let effective_middle_refs = Self::effective_middle_refs_for_promotion(
+            &rewritten.stmts,
+            &witness.target_label,
+            middle_refs,
+        );
         let execution_safe =
             Self::guarded_tail_middle_is_execution_safe(&rewritten.stmts, &witness.target_label);
-        let post_label_refs: usize = body[witness.label_idx + 1..]
-            .iter()
-            .map(|stmt| Self::stmt_contains_goto_label(stmt, &witness.target_label))
-            .sum();
         if Self::guarded_tail_diag_enabled() {
             eprintln!(
-                "[DIAG] guarded-tail verify idx={} label={} outside_refs={} middle_refs={} effective_middle_refs={} post_label_refs={} unresolved_join_refs={} execution_safe={}",
+                "[DIAG] guarded-tail verify idx={} label={} outside_refs={} middle_refs={} effective_middle_refs={} unresolved_join_refs={} execution_safe={}",
                 idx,
                 witness.target_label,
                 outside_refs,
                 middle_refs,
                 effective_middle_refs,
-                post_label_refs,
                 rewritten.unresolved_join_refs,
                 execution_safe,
             );
         }
-        if post_label_refs > 0 {
-            self.mark_promotion_gate_rejection(
-                PromotionGateRejection::MustEmitLabelSurvivingExternalRef,
-            );
+        if let Some(rejection) = Self::classify_must_emit_label_rejection(
+            body,
+            &rewritten.stmts,
+            idx,
+            witness.label_idx,
+            &witness.target_label,
+            outside_refs,
+            middle_refs,
+        ) {
+            self.mark_promotion_gate_rejection(rejection);
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
-                    "[DIAG] guarded-tail verify idx={} label={} rejected=MustEmitLabelConflict(post_label_refs)",
-                    idx, witness.target_label
-                );
-            }
-            return GuardedTailVerification {
-                region_legality: legality,
-                replacement_complete: false,
-                removable_ops_legal: false,
-                rewritten_middle: rewritten.stmts,
-                exported_bindings: Vec::new(),
-                rejection_reason: Some(GuardedTailExecutionRejection::MustEmitLabelConflict),
-            };
-        }
-        if outside_refs > 0 {
-            self.mark_promotion_gate_rejection(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[DIAG] guarded-tail verify idx={} label={} rejected=MustEmitLabelConflict(outside_refs={})",
-                    idx, witness.target_label, outside_refs
+                    "[DIAG] guarded-tail verify idx={} label={} rejected=MustEmitLabelConflict({:?})",
+                    idx, witness.target_label, rejection
                 );
             }
             return GuardedTailVerification {

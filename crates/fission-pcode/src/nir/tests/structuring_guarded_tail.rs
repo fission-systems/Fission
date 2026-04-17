@@ -476,7 +476,7 @@ fn structuring_candidate_discovery_counts_internal_label_gate_rejection() {
 }
 
 #[test]
-fn structuring_candidate_discovery_rejects_rewritable_middle_join_ref_under_hard_cutover() {
+fn structuring_candidate_discovery_allows_rewritable_middle_join_ref_after_gate_alignment() {
     let body = vec![
         HirStmt::If {
             cond: HirExpr::Var("reg".to_string()),
@@ -495,9 +495,33 @@ fn structuring_candidate_discovery_rejects_rewritable_middle_join_ref_under_hard
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert_eq!(stats.promotion_candidate_count, 0, "{stats:#?}");
-    assert_eq!(stats.promoted_region_count, 0);
-    assert!(stats.promotion_rejected_by_shape_count + stats.promotion_rejected_by_gate_count >= 1);
+    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
+    assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
+    assert_eq!(stats.rejected_must_emit_label_surviving_middle_ref, 0, "{stats:#?}");
+}
+
+#[test]
+fn structuring_guarded_tail_promotes_rewritable_middle_join_ref_after_gate_alignment() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::If {
+            cond: HirExpr::Var("inner".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
+    assert_eq!(stats.rejected_must_emit_label_surviving_middle_ref, 0, "{stats:#?}");
 }
 
 #[test]
@@ -655,7 +679,7 @@ fn structuring_guarded_tail_rejects_replacement_reads_after_follow_redefinition(
 }
 
 #[test]
-fn structuring_candidate_discovery_rejects_single_forward_external_ref_under_hard_cutover() {
+fn structuring_candidate_discovery_allows_single_forward_external_ref_when_elidable() {
     let body = vec![
         HirStmt::Goto("block_tail".to_string()),
         HirStmt::If {
@@ -670,8 +694,9 @@ fn structuring_candidate_discovery_rejects_single_forward_external_ref_under_har
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert_eq!(stats.promotion_candidate_count, 0, "{stats:#?}");
-    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
+    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
+    assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
+    assert_eq!(stats.rejected_must_emit_label_surviving_external_ref, 0, "{stats:#?}");
 }
 
 #[test]
@@ -693,6 +718,29 @@ fn structuring_candidate_discovery_keeps_post_label_external_ref_rejected() {
     assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1);
     assert_eq!(stats.promoted_region_count, 0);
     assert!(stats.promotion_rejected_by_shape_count + stats.promotion_rejected_by_gate_count >= 1);
+}
+
+#[test]
+fn structuring_guarded_tail_promotion_keeps_post_label_external_ref_rejected() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        HirStmt::Goto("block_tail".to_string()),
+    ];
+    let original = body.clone();
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.guarded_tail_promoted_count, 0, "{stats:#?}");
+    assert!(stats.region_emit_ready_failed_count >= 1, "{stats:#?}");
+    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
+    assert_eq!(body, original);
 }
 
 #[test]
@@ -1558,7 +1606,7 @@ fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
 }
 
 #[test]
-fn structuring_candidate_discovery_rejects_nested_before_alias_ref_under_hard_cutover() {
+fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection_after_alignment() {
     let mut body = vec![
         HirStmt::If {
             cond: HirExpr::Var("reg".to_string()),
@@ -1582,8 +1630,8 @@ fn structuring_candidate_discovery_rejects_nested_before_alias_ref_under_hard_cu
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert_eq!(stats.promotion_candidate_count, 0, "{stats:#?}");
-    assert!(stats.promotion_rejected_by_shape_count + stats.promotion_rejected_by_gate_count >= 1);
+    assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
+    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
 }
 
 #[test]
