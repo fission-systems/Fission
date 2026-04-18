@@ -78,6 +78,20 @@ struct CrossBlockConsumerProvenance {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CrossBlockReplacementProof {
+    relation: CrossBlockConsumerRelation,
+    dominates_consumer: bool,
+    rhs_low_cost: bool,
+    preserve_materialization: bool,
+    no_redefinition_before_consumer: bool,
+    merge_phi: bool,
+    def_successor_count: usize,
+    consumer_predecessor_count: usize,
+    narrow_candidate: bool,
+    consumer_opcode: Option<PcodeOpcode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AliasUnsafeHazard {
     kind: AliasUnsafeHazardKind,
     use_stmt_idx: Option<usize>,
@@ -416,7 +430,7 @@ impl<'a> PreviewBuilder<'a> {
             detail.rhs_kind,
         ));
         if detail.relation == MalformedDefUseWindowRelation::ConsumerInDifferentBlock {
-            self.trace_cross_block_consumer_provenance(block, op_idx, output);
+            self.trace_cross_block_consumer_provenance(block, op_idx, output, rhs);
         }
     }
 
@@ -1557,6 +1571,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
+        rhs: &HirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1607,6 +1622,34 @@ impl<'a> PreviewBuilder<'a> {
             provenance.2.consumer_is_join,
             provenance.2.redefined_before_consumer,
         ));
+        if let Some(proof) = self.describe_cross_block_replacement_proof(block, op_idx, output, rhs) {
+            let consumer_block = provenance
+                .0
+                .map(|addr| format!("0x{addr:x}"))
+                .unwrap_or_else(|| "none".to_string());
+            let consumer_opcode = proof
+                .consumer_opcode
+                .map(|opcode| format!("{opcode:?}"))
+                .unwrap_or_else(|| "None".to_string());
+            self.emit_ready_trace(format!(
+                "cross-block-replacement-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} consumer_block={} relation={:?} def_successor_count={} consumer_predecessor_count={} dominates_consumer={} consumer_opcode={} rhs_low_cost={} preserve_materialization={} no_redefinition_before_consumer={} merge_phi={} narrow_candidate={}",
+                output.space_id,
+                output.offset,
+                output.size,
+                block.start_address,
+                consumer_block,
+                proof.relation,
+                proof.def_successor_count,
+                proof.consumer_predecessor_count,
+                proof.dominates_consumer,
+                consumer_opcode,
+                proof.rhs_low_cost,
+                proof.preserve_materialization,
+                proof.no_redefinition_before_consumer,
+                proof.merge_phi,
+                proof.narrow_candidate,
+            ));
+        }
     }
 
     fn describe_cross_block_consumer_provenance(
@@ -1668,6 +1711,48 @@ impl<'a> PreviewBuilder<'a> {
                 consumer_predecessor_count,
             },
         ))
+    }
+
+    fn describe_cross_block_replacement_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<CrossBlockReplacementProof> {
+        let (_, _, provenance) = self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let (consumer_block_addr, _, _) =
+            self.first_output_use_site_outside_block(block.start_address, output)?;
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let dominates_consumer = self.dom_tree.dominates(def_block_idx, consumer_block_idx);
+        let rhs_low_cost = Self::expr_is_low_cost_builder_inline_candidate(rhs);
+        let preserve_materialization = Self::should_preserve_materialized_expr(rhs);
+        let no_redefinition_before_consumer =
+            Self::first_output_redefinition_in_block(block, op_idx, output).is_none();
+        let narrow_candidate = matches!(
+            provenance.relation,
+            CrossBlockConsumerRelation::SuccessorBlock
+                | CrossBlockConsumerRelation::PostDominatorBlock
+                | CrossBlockConsumerRelation::OrdinaryDataConsumer
+        ) && provenance.def_successor_count == 1
+            && !provenance.consumer_is_multiequal
+            && rhs_low_cost
+            && !preserve_materialization
+            && no_redefinition_before_consumer
+            && dominates_consumer;
+        Some(CrossBlockReplacementProof {
+            relation: provenance.relation,
+            dominates_consumer,
+            rhs_low_cost,
+            preserve_materialization,
+            no_redefinition_before_consumer,
+            merge_phi: provenance.consumer_is_multiequal,
+            def_successor_count: provenance.def_successor_count,
+            consumer_predecessor_count: provenance.consumer_predecessor_count,
+            narrow_candidate,
+            consumer_opcode: provenance.consumer_opcode,
+        })
     }
 
     fn collect_output_use_sites_outside_block(
@@ -2402,6 +2487,7 @@ mod tests {
     #[test]
     fn cross_block_consumer_provenance_prefers_merge_phi_consumer() {
         let output = varnode(0x10);
+        let rhs = HirExpr::Const(1, int(32));
         let mut blocks = vec![
             block_at(0x1000, 0, vec![op(
                 0,
@@ -2433,11 +2519,17 @@ mod tests {
 
         assert_eq!(provenance.2.relation, CrossBlockConsumerRelation::MergePhiConsumer);
         assert!(provenance.2.consumer_is_multiequal);
+        let proof = builder
+            .describe_cross_block_replacement_proof(&blocks[0], 0, &output, &rhs)
+            .expect("cross-block proof");
+        assert!(!proof.narrow_candidate);
+        assert!(proof.merge_phi);
     }
 
     #[test]
     fn cross_block_consumer_provenance_marks_single_successor_data_consumer() {
         let output = varnode(0x10);
+        let rhs = HirExpr::Const(1, int(32));
         let mut blocks = vec![
             block_at(0x1000, 0, vec![op(
                 0,
@@ -2465,6 +2557,13 @@ mod tests {
         assert!(!provenance.2.consumer_is_multiequal);
         assert!(provenance.2.immediate_successor);
         assert!(!provenance.2.consumer_is_join);
+        let proof = builder
+            .describe_cross_block_replacement_proof(&blocks[0], 0, &output, &rhs)
+            .expect("cross-block proof");
+        assert!(proof.narrow_candidate);
+        assert!(proof.dominates_consumer);
+        assert!(proof.rhs_low_cost);
+        assert!(proof.no_redefinition_before_consumer);
     }
 
     #[test]

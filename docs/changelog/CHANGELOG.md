@@ -9,6 +9,49 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Cross-block replacement proof tracing
+
+This wave stayed diagnostic-only. It did not enable cross-block propagation, synthesize merge bindings, or relax malformed def/use handling. The goal was to layer a narrow replacement-proof trace on top of the existing `ConsumerInDifferentBlock` provenance so `0x140006c20` could be judged as a real single-successor candidate or rejected on explicit evidence.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a second trace for cross-block malformed windows:
+  - `cross-block-replacement-proof output=... def_block=... consumer_block=... relation=... def_successor_count=... consumer_predecessor_count=... dominates_consumer=... consumer_opcode=... rhs_low_cost=... preserve_materialization=... no_redefinition_before_consumer=... merge_phi=... narrow_candidate=...`
+- the new proof layer is still consumer-only. It does not change the replacement plan or alias safety decision.
+- unit coverage now pins the proof surface for two core fixtures:
+  - `MergePhiConsumer` stays `narrow_candidate=false`
+  - `SuccessorBlock` can be recognized as `narrow_candidate=true` in the synthetic single-successor case
+
+Validation:
+
+- `cargo test -p fission-pcode cross_block_consumer_provenance_prefers_merge_phi_consumer --lib -- --test-threads=1`
+- `cargo test -p fission-pcode cross_block_consumer_provenance_marks_single_successor_data_consumer --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140006c20` still has the same relation histogram inside `ConsumerInDifferentBlock`:
+  - `LoopBackedge = 156`
+  - `SuccessorBlock = 24`
+  - `PostDominatorBlock = 12`
+- however, the new proof layer shows that all currently observed cross-block cases remain non-accepting:
+  - `narrow_candidate=false = 192`
+  - no live `narrow_candidate=true` sites were observed in the targeted trace
+- the blocking proof fields are concrete, not heuristic:
+  - `def_successor_count=2` on the live `SuccessorBlock` cases
+  - `no_redefinition_before_consumer=false` on both `SuccessorBlock` and `PostDominatorBlock`
+  - representative examples:
+    - `consumer_opcode=IntNotEqual`, `relation=SuccessorBlock`, `rhs_low_cost=true`, `preserve_materialization=false`, `def_successor_count=2`, `no_redefinition_before_consumer=false`
+    - `consumer_opcode=BoolNegate`, `relation=PostDominatorBlock`, `rhs_low_cost=true`, `preserve_materialization=true`, `def_successor_count=2`, `no_redefinition_before_consumer=false`
+
+Conclusion:
+
+- `0x140006c20` is cleaner than `0x140008090`, but it is still not a real single-successor replacement candidate on the current owner boundary
+- the next owner is not broad cross-block propagation
+- if this row is pursued next, the likely split is:
+  - successor/postdom cases with redefinition-aware block splitting
+  - merge/loopback cases under merge-binding / CFG-boundary ownership
+
 ### Cross-block consumer materialization provenance
 
 This wave stayed diagnostic-only. It did not widen cross-block replacement, synthesize merge bindings, or relax alias safety. The goal was to split the dominant `ConsumerInDifferentBlock` slice of `UnknownMalformedDefUseWindow` into CFG-shaped provenance families so the next release wave can choose between single-successor replacement and merge/join handling on evidence instead of guesswork.
