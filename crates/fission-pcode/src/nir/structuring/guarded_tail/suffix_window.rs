@@ -557,39 +557,41 @@ impl<'a> PreviewBuilder<'a> {
             self.type_context
                 .and_then(|ctx| ctx.call_target_refs.get(&addr))
         });
-        let writes_memory = if Self::call_target_is_known_pure_helper(target) {
-            "false"
-        } else if Self::call_target_is_memory_mutating(target) {
-            "true"
-        } else {
-            "unknown"
-        };
-        let writes_global = if Self::call_target_is_known_pure_helper(target) {
-            "false"
-        } else {
-            "unknown"
-        };
-        let may_call_unknown = if summary_available { "false" } else { "true" };
-        let may_exit = if Self::call_target_is_control_effect(target) {
-            "true"
-        } else if summary_available {
-            "false"
-        } else {
-            "unknown"
-        };
+        let effect_summary = self
+            .type_context
+            .and_then(|ctx| ctx.call_effect_summaries.get(target));
+        let summary_available = effect_summary.is_some() || summary_available;
+        let writes_memory = effect_summary
+            .and_then(|summary| summary.writes_memory)
+            .map(|value| if value { "yes" } else { "no" })
+            .unwrap_or("unknown");
+        let writes_global = "unknown";
+        let may_call_unknown = effect_summary
+            .and_then(|summary| summary.may_call_unknown)
+            .map(|value| if value { "yes" } else { "no" })
+            .unwrap_or("unknown");
+        let may_exit = effect_summary
+            .and_then(|summary| summary.may_exit)
+            .map(|value| if value { "yes" } else { "no" })
+            .unwrap_or("unknown");
+        let effect_summary_source = effect_summary
+            .and_then(|summary| summary.source)
+            .map(|source| format!("{source:?}"))
+            .unwrap_or_else(|| "None".to_string());
 
         eprintln!(
             "[GT-TRACE] suffix-unknown-call-provenance stmt_idx={} target={} target_addr={:?} internal={} import={} summary_available={}",
             stmt_idx, target, target_addr, internal, import, summary_available
         );
         eprintln!(
-            "[GT-TRACE] suffix-unknown-call-summary target={} binary_function_present={} target_ref_present={} target_ref_provenance={} effect_summary_source=None",
+            "[GT-TRACE] suffix-unknown-call-summary target={} binary_function_present={} target_ref_present={} target_ref_provenance={} effect_summary_source={}",
             target,
             binary_function_present,
             target_ref.is_some(),
             target_ref
                 .map(|target_ref| format!("{:?}", target_ref.provenance))
                 .unwrap_or_else(|| "None".to_string()),
+            effect_summary_source,
         );
         eprintln!(
             "[GT-TRACE] suffix-unknown-call-effect target={} writes_memory={} writes_global={} may_call_unknown={} may_exit={} return_used={}",

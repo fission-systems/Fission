@@ -269,6 +269,23 @@ pub enum MemoryEffectRegion {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CallEffectSummarySource {
+    CallTargetRef,
+    ImportSignature,
+    FactStore,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirCallEffectSummary {
+    pub reads_memory: Option<bool>,
+    pub writes_memory: Option<bool>,
+    pub escapes_args: Option<bool>,
+    pub may_call_unknown: Option<bool>,
+    pub may_exit: Option<bool>,
+    pub source: Option<CallEffectSummarySource>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallEffectSummary {
     pub reads_memory: Option<bool>,
@@ -1566,6 +1583,7 @@ impl TargetProfile {
 pub struct NirTypeContext {
     pub call_targets: HashMap<u64, String>,
     pub call_target_refs: HashMap<u64, CallTargetRef>,
+    pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,
 }

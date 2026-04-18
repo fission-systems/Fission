@@ -146,6 +146,7 @@ mod tests {
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
                 call_target_refs: HashMap::new(),
+                call_effect_summaries: HashMap::new(),
                 call_param_rules: vec![PreviewCallParamRule {
                     callee_address: None,
                     callee_name: "MessageBoxW".to_string(),
@@ -339,6 +340,7 @@ mod tests {
         let type_context = NirTypeContext {
             call_targets: HashMap::from([(0x401000, "KnownName".to_string())]),
             call_target_refs: HashMap::new(),
+            call_effect_summaries: HashMap::new(),
             call_param_rules: vec![PreviewCallParamRule {
                 callee_address: None,
                 callee_name: "MessageBoxW".to_string(),

@@ -643,6 +643,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),

@@ -9,6 +9,52 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail `CallTargetRef` effect-summary lookup wiring
+
+This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to move the active `stmt_idx=154` path from “direct callee is visible but has no summary container” to “direct callee has a concrete summary source, even if every effect bit is still unknown”.
+
+- [`types.rs`](../../crates/fission-pcode/src/nir/types.rs) now adds a minimal guarded-tail-consumable callee summary contract:
+  - `CallEffectSummarySource`
+  - `NirCallEffectSummary`
+  - `NirTypeContext::call_effect_summaries`
+- [`lib.rs`](../../crates/fission-pcode/src/lib.rs) re-exports the new internal summary vocabulary for downstream context assembly
+- [`facts.rs`](../../crates/fission-decompiler-core/src/facts.rs) now builds a conservative summary map from `call_target_refs`:
+  - each direct call target gets a `NirCallEffectSummary`
+  - all effect bits remain `unknown`
+  - `source=CallTargetRef`
+- [`engine.rs`](../../crates/fission-decompiler-core/src/engine.rs) and targeted preview tests now initialize the new `call_effect_summaries` field on explicit `NirTypeContext` / `PreviewTypeContext` constructors
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now consumes `type_context.call_effect_summaries` inside `trace_suffix_unknown_call_provenance(&self, ...)`
+  - `summary_available` now becomes true on the active guarded-tail candidate path once a `CallTargetRef` summary exists
+  - `suffix-unknown-call-summary ... effect_summary_source=CallTargetRef` now distinguishes “summary source exists” from “all effect bits are still unknown”
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `stmt_idx=154` guarded-tail path now resolves a concrete summary source:
+  - `suffix-unknown-call-provenance stmt_idx=154 target=FUN_0x140043d30 target_addr=Some(5368986928) internal=true import=false summary_available=true`
+  - `suffix-unknown-call-summary target=FUN_0x140043d30 binary_function_present=true target_ref_present=true target_ref_provenance=Direct effect_summary_source=CallTargetRef`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=unknown writes_global=unknown may_call_unknown=unknown may_exit=unknown return_used=false`
+- this is still a fail-closed summary:
+  - no positive readonly / pure / no-exit proof exists yet
+  - the effect fields remain unknown until an interprocedural producer fills them
+- non-builder fallback traces can still show `effect_summary_source=None`; this wave only wires the active guarded-tail candidate path that already has `call_target_refs` and `type_context` visibility
+- the outer guarded-tail shell remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- the active blocker is no longer “missing summary container”
+- it is now specifically “summary source exists, but effect facts are still unknown”
+- the next wave should produce a real interprocedural callee-effect summary for `FUN_0x140043d30` instead of widening guarded-tail local call acceptance
+
 ### Guarded-tail callee summary source tracing for `FUN_0x140043d30`
 
 This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to distinguish “unknown call target” from “known internal direct callee that still lacks an effect-summary source” for the remaining `stmt_idx=154` blocker.

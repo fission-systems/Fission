@@ -2,8 +2,8 @@ use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
 use fission_pcode::{
-    CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallParamRule, NirFunctionHints,
-    NirTypeContext,
+    CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
+    NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext,
 };
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
@@ -96,9 +96,31 @@ pub(crate) fn build_nir_type_context(
     NirTypeContext {
         call_targets,
         call_target_refs: call_target_refs.clone(),
+        call_effect_summaries: build_nir_call_effect_summaries(&call_target_refs),
         call_param_rules: build_nir_call_param_rules(&call_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
     }
+}
+
+fn build_nir_call_effect_summaries(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> HashMap<String, NirCallEffectSummary> {
+    call_target_refs
+        .values()
+        .map(|target_ref| {
+            (
+                target_ref.symbol.clone(),
+                NirCallEffectSummary {
+                    reads_memory: None,
+                    writes_memory: None,
+                    escapes_args: None,
+                    may_call_unknown: None,
+                    may_exit: None,
+                    source: Some(CallEffectSummarySource::CallTargetRef),
+                },
+            )
+        })
+        .collect()
 }
 
 fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
