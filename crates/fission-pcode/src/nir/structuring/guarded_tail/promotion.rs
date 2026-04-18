@@ -13,6 +13,31 @@ struct ConditionAssumption {
     value: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SuffixTailRejection {
+    SuffixHasSideEffect { stmt_idx: usize },
+    SuffixHasNonTerminalGoto { stmt_idx: usize, target: String },
+    SuffixHasNestedOrNonlocalRef { stmt_idx: usize },
+    SuffixHasLabelCrossing { stmt_idx: usize, label: String },
+    SuffixHasExternalEntry { stmt_idx: usize, label: String },
+    SuffixHasLoopOrSwitchCrossing { stmt_idx: usize },
+    SuffixAliasRedirectUnresolved { stmt_idx: usize, label: String },
+}
+
+impl SuffixTailRejection {
+    fn stmt_idx(&self) -> usize {
+        match self {
+            Self::SuffixHasSideEffect { stmt_idx }
+            | Self::SuffixHasNestedOrNonlocalRef { stmt_idx }
+            | Self::SuffixHasLoopOrSwitchCrossing { stmt_idx } => *stmt_idx,
+            Self::SuffixHasNonTerminalGoto { stmt_idx, .. }
+            | Self::SuffixHasLabelCrossing { stmt_idx, .. }
+            | Self::SuffixHasExternalEntry { stmt_idx, .. }
+            | Self::SuffixAliasRedirectUnresolved { stmt_idx, .. } => *stmt_idx,
+        }
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn guarded_tail_diag_enabled() -> bool {
         std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
@@ -203,17 +228,56 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
-    fn stmt_is_nonowned_terminal_tail_gap(
+    fn suffix_stmt_has_nested_or_nonlocal_ref(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::If { .. } => true,
+            HirStmt::Block(inner) => !inner.is_empty(),
+            _ => false,
+        }
+    }
+
+    fn classify_suffix_stmt(
         stmt: &HirStmt,
         body: &[HirStmt],
+        stmt_idx: usize,
         next_label: &str,
-    ) -> bool {
-        is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
-            || Self::stmt_is_pure_value_expr(stmt)
-            || Self::stmt_is_pure_value_assign(stmt)
-            || matches!(stmt, HirStmt::Goto(target) if target == next_label)
-            || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
+    ) -> Result<(), SuffixTailRejection> {
+        if is_ignorable_discovery_stmt(stmt) || matches!(stmt, HirStmt::Block(inner) if inner.is_empty()) {
+            return Ok(());
+        }
+        if Self::stmt_is_pure_value_expr(stmt) || Self::stmt_is_pure_value_assign(stmt) {
+            return Ok(());
+        }
+        if let HirStmt::Goto(target) = stmt {
+            if target == next_label || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body) {
+                return Ok(());
+            }
+            if Self::top_level_label_definition_count_for_owned_tail(body, &target) != 1 {
+                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                    stmt_idx,
+                    label: target.clone(),
+                });
+            }
+            return Err(SuffixTailRejection::SuffixHasNonTerminalGoto {
+                stmt_idx,
+                target: target.clone(),
+            });
+        }
+        if matches!(
+            stmt,
+            HirStmt::Switch { .. }
+                | HirStmt::While { .. }
+                | HirStmt::DoWhile { .. }
+                | HirStmt::For { .. }
+                | HirStmt::Break
+                | HirStmt::Continue
+        ) {
+            return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
+        }
+        if Self::suffix_stmt_has_nested_or_nonlocal_ref(stmt) {
+            return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+        }
+        Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
     }
 
     fn suffix_is_nonowned_terminal_tail(
@@ -223,9 +287,12 @@ impl<'a> PreviewBuilder<'a> {
         start_label_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
-    ) -> bool {
+    ) -> Result<(), SuffixTailRejection> {
         if start_label_idx >= terminal_label_idx {
-            return false;
+            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: start_label_idx,
+                label: start_label.to_string(),
+            });
         }
 
         let mut current_label = start_label.to_string();
@@ -235,7 +302,10 @@ impl<'a> PreviewBuilder<'a> {
 
         while current_label_idx < terminal_label_idx {
             if !seen.insert(current_label.clone()) {
-                return false;
+                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
             }
 
             let top_level_window_refs = Self::count_top_level_goto_refs_in_range(
@@ -250,25 +320,35 @@ impl<'a> PreviewBuilder<'a> {
                 top_level_window_refs
             };
             if referenced.get(&current_label).copied().unwrap_or(0) > hop_ref_budget {
-                return false;
+                return Err(SuffixTailRejection::SuffixHasExternalEntry {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
             }
 
             let Some(next_label_idx) =
                 (current_label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
             else {
-                return false;
+                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
             };
             if next_label_idx > terminal_label_idx {
-                return false;
+                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: next_label_idx,
+                    label: current_label,
+                });
             }
             let HirStmt::Label(next_label) = &body[next_label_idx] else {
                 unreachable!();
             };
-            if !body[current_label_idx + 1..next_label_idx]
+            for (offset, stmt) in body[current_label_idx + 1..next_label_idx]
                 .iter()
-                .all(|stmt| Self::stmt_is_nonowned_terminal_tail_gap(stmt, body, next_label))
+                .enumerate()
             {
-                return false;
+                let stmt_idx = current_label_idx + 1 + offset;
+                Self::classify_suffix_stmt(stmt, body, stmt_idx, next_label)?;
             }
 
             current_label = next_label.clone();
@@ -276,7 +356,7 @@ impl<'a> PreviewBuilder<'a> {
             rewrites += 1;
         }
 
-        true
+        Ok(())
     }
 
     fn candidate_window_can_shrink_to_label(
@@ -286,10 +366,20 @@ impl<'a> PreviewBuilder<'a> {
         candidate_label_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
-    ) -> bool {
-        candidate_label_idx < terminal_label_idx
-            && has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx])
-            && Self::suffix_is_nonowned_terminal_tail(
+    ) -> Result<(), SuffixTailRejection> {
+        if candidate_label_idx >= terminal_label_idx {
+            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: candidate_label_idx,
+                label: candidate_label.to_string(),
+            });
+        }
+        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
+            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: candidate_label_idx,
+                label: candidate_label.to_string(),
+            });
+        }
+        Self::suffix_is_nonowned_terminal_tail(
                 body,
                 anchor_idx,
                 candidate_label,
@@ -304,6 +394,7 @@ impl<'a> PreviewBuilder<'a> {
         anchor_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
+        trace_enabled: bool,
     ) -> Option<(String, usize)> {
         if anchor_idx + 1 >= terminal_label_idx {
             return None;
@@ -314,7 +405,7 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             };
             let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
-            let suffix_safe = Self::suffix_is_nonowned_terminal_tail(
+            let suffix_result = Self::candidate_window_can_shrink_to_label(
                 body,
                 anchor_idx,
                 candidate_label,
@@ -322,6 +413,7 @@ impl<'a> PreviewBuilder<'a> {
                 terminal_label_idx,
                 referenced,
             );
+            let suffix_safe = suffix_result.is_ok();
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[DIAG] owned-join candidate anchor={} label={} label_idx={} terminal_idx={} payload_before={} suffix_safe={}",
@@ -331,6 +423,24 @@ impl<'a> PreviewBuilder<'a> {
                     terminal_label_idx,
                     has_payload,
                     suffix_safe
+                );
+            }
+            if trace_enabled
+                && anchor_idx == 35
+                && let Err(reason) = &suffix_result
+                && let Some(stmt) = body.get(reason.stmt_idx())
+            {
+                eprintln!(
+                    "[GT-TRACE] candidate={} join_label={} early_label={} first_fail={:?} stmt_idx={} first_fail_stmt={:?}",
+                    anchor_idx,
+                    match body.get(terminal_label_idx) {
+                        Some(HirStmt::Label(label)) => label.as_str(),
+                        _ => "<missing-terminal-label>",
+                    },
+                    candidate_label,
+                    reason,
+                    reason.stmt_idx(),
+                    stmt
                 );
             }
             if has_payload && suffix_safe {
@@ -1287,6 +1397,7 @@ impl<'a> PreviewBuilder<'a> {
             idx,
             resolved_label_idx,
             referenced,
+            self.guarded_tail_trace_enabled_for_current_fn(),
         )
         .unwrap_or_else(|| (resolved_target_label.clone(), resolved_label_idx));
         let target_label = resolved_target_label.clone();
@@ -2138,6 +2249,49 @@ mod owned_join_window_tests {
         }
     }
 
+    fn assert_suffix_rejection(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        start_label_idx: usize,
+        terminal_label_idx: usize,
+        expected: SuffixTailRejection,
+    ) {
+        let referenced = collect_referenced_label_counts(body);
+        let HirStmt::Label(start_label) = &body[start_label_idx] else {
+            panic!("expected start label at index {start_label_idx}");
+        };
+        let result = PreviewBuilder::suffix_is_nonowned_terminal_tail(
+            body,
+            anchor_idx,
+            start_label,
+            start_label_idx,
+            terminal_label_idx,
+            &referenced,
+        );
+        assert_eq!(result, Err(expected));
+    }
+
+    fn assert_suffix_accepts(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        start_label_idx: usize,
+        terminal_label_idx: usize,
+    ) {
+        let referenced = collect_referenced_label_counts(body);
+        let HirStmt::Label(start_label) = &body[start_label_idx] else {
+            panic!("expected start label at index {start_label_idx}");
+        };
+        let result = PreviewBuilder::suffix_is_nonowned_terminal_tail(
+            body,
+            anchor_idx,
+            start_label,
+            start_label_idx,
+            terminal_label_idx,
+            &referenced,
+        );
+        assert_eq!(result, Ok(()));
+    }
+
     #[test]
     fn earliest_owned_join_window_accepts_sink_safe_terminal_tail() {
         let body = vec![
@@ -2152,7 +2306,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 6, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 6, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -2170,7 +2325,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -2191,7 +2347,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 8, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 8, &referenced, false);
 
         assert_eq!(narrowed, Some(("join0".to_string(), 2)));
     }
@@ -2209,7 +2366,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -2227,7 +2385,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 1, 5, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 1, 5, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -2248,7 +2407,8 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 4, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 4, &referenced, false);
 
         assert_eq!(narrowed, None);
     }
@@ -2263,8 +2423,198 @@ mod owned_join_window_tests {
         ];
         let referenced = collect_referenced_label_counts(&body);
 
-        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 2, &referenced);
+        let narrowed =
+            PreviewBuilder::find_earliest_owned_join_label(&body, 0, 2, &referenced, false);
 
         assert_eq!(narrowed, None);
+    }
+
+    #[test]
+    fn suffix_accepts_ignorable_and_empty_block_only() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Block(Vec::new()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_accepts(&body, 0, 2, 5);
+    }
+
+    #[test]
+    fn suffix_rejects_side_effectful_stmt() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::VaStart {
+                va_list: HirExpr::Var("ap".to_string()),
+                last_named_param: "arg".to_string(),
+            },
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            5,
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 3 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_nonterminal_goto() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("other".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            HirStmt::Label("other".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("late".to_string()),
+                then_body: vec![HirStmt::Goto("sink".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            4,
+            SuffixTailRejection::SuffixHasNonTerminalGoto {
+                stmt_idx: 3,
+                target: "other".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_nested_nonlocal_ref() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("nested".to_string()),
+                then_body: vec![HirStmt::Goto("sink".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            4,
+            SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 3 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_label_crossing() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            4,
+            4,
+            SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: 4,
+                label: "sink".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_external_entry() {
+        let body = vec![
+            HirStmt::Goto("join0".to_string()),
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            1,
+            3,
+            5,
+            SuffixTailRejection::SuffixHasExternalEntry {
+                stmt_idx: 3,
+                label: "join0".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_loop_or_switch_crossing() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Switch {
+                expr: HirExpr::Var("selector".to_string()),
+                cases: vec![HirSwitchCase {
+                    values: vec![0],
+                    body: vec![HirStmt::Goto("sink".to_string())],
+                }],
+                default: vec![HirStmt::Goto("sink".to_string())],
+            },
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            4,
+            SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx: 3 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_unresolved_alias_redirect() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("missing".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            4,
+            SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                stmt_idx: 3,
+                label: "missing".to_string(),
+            },
+        );
     }
 }

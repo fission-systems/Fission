@@ -9,6 +9,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail suffix-safe rejection subtyping for `candidate 35`
+
+This wave did not broaden acceptance. It split `suffix_is_nonowned_terminal_tail(...)` into a diagnostic `Result` contract so the candidate-35 owned-window probe can report *why* `suffix_safe=false` instead of only reporting that it failed.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `SuffixTailRejection`
+  - stmt-index-carrying first-failure diagnostics for suffix-tail classification
+  - subtype helpers for nested/nonlocal ref, nonterminal goto, and per-statement suffix classification
+  - candidate-35 env-gated trace lines of the form:
+    - `candidate`
+    - `join_label`
+    - `early_label`
+    - `first_fail`
+    - `stmt_idx`
+    - `first_fail_stmt`
+- the same file now includes focused subtype coverage for:
+  - ignorable / empty-block acceptance
+  - side-effect rejection
+  - nonterminal goto rejection
+  - nested or nonlocal ref rejection
+  - label crossing rejection
+  - external entry rejection
+  - loop / switch crossing rejection
+  - unresolved alias redirect rejection
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state for `candidate 35`:
+
+- `join_label=block_140007047`
+- `raw_middle_len=121`
+- `first_reject=AliasNotFallthrough`
+- earlier owned-join labels now resolve to concrete suffix-failure families:
+  - `block_140007000` -> `SuffixHasSideEffect` at stmt `58`
+  - `block_14000701c` -> `SuffixHasNonTerminalGoto` at stmt `112`
+  - `block_140007021` -> `SuffixHasNestedOrNonlocalRef` at stmt `120`
+  - `block_140007040` -> `SuffixHasExternalEntry` at stmt `150`
+
+Interpretation:
+
+- candidate-35 failure is now structurally decomposed
+- the next owner is no longer “find an earlier join”
+- the next owner is whichever of the above suffix-tail families should be tightened or re-owned first
+
+Note:
+
+- `cargo test -p fission-pcode structuring_guarded_tail -- --nocapture` is already red on current `main` and on a clean detached worktree from `b473b72`, so it was not used as a new regression signal for this subtype-only wave
+
 ### Guarded-tail earliest-owned-join narrowing wave - owner window probing is in place, and `candidate 35` is now explicitly blocked by `suffix_safe=false`
 
 This wave targeted the remaining `0x140006fe0` bottleneck as an ownership-window problem, not as a broader acceptance relaxation. The guarded-tail owner now probes for an earlier top-level join label inside the current candidate window and only narrows the owned middle when the suffix up to the terminal join is proven to be a non-owned tail. The implementation stayed inside `fission-pcode`; downstream crates remain consume-only.
