@@ -18,6 +18,48 @@ impl<'a> PreviewBuilder<'a> {
         std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
     }
 
+    fn guarded_tail_function_address(&self) -> u64 {
+        self.pcode
+            .blocks
+            .first()
+            .map(|block| block.start_address)
+            .unwrap_or(0)
+    }
+
+    fn guarded_tail_trace_target_addr() -> Option<u64> {
+        let raw = std::env::var("FISSION_PREVIEW_DIAG_ADDR").ok()?;
+        let trimmed = raw.trim();
+        let hex = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed);
+        u64::from_str_radix(hex, 16).ok()
+    }
+
+    pub(super) fn guarded_tail_trace_enabled_for_current_fn(&self) -> bool {
+        let Some(target) = Self::guarded_tail_trace_target_addr() else {
+            return false;
+        };
+        self.guarded_tail_function_address() == target
+    }
+
+    pub(super) fn guarded_tail_trace_emit_snapshot(
+        prefix: &str,
+        stmts: &[HirStmt],
+        max_lines: usize,
+    ) {
+        let take_n = stmts.len().min(max_lines.max(1));
+        for (idx, stmt) in stmts.iter().take(take_n).enumerate() {
+            eprintln!("{prefix} [{idx:02}] {stmt:?}");
+        }
+        if stmts.len() > take_n {
+            eprintln!(
+                "{prefix} ... (truncated {} stmts)",
+                stmts.len().saturating_sub(take_n)
+            );
+        }
+    }
+
     fn map_guarded_tail_canonicalization_rejection(
         reason: GuardedTailCanonicalizationFailure,
     ) -> GuardedTailWitnessRejection {
@@ -925,6 +967,13 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         reason: GuardedTailCanonicalizationFailure,
     ) {
+        if self.guarded_tail_trace_enabled_for_current_fn() {
+            eprintln!(
+                "[GT-TRACE] fn=0x{:x} canonicalization_failure={:?}",
+                self.guarded_tail_function_address(),
+                reason
+            );
+        }
         self.mark_noncanonical_layout_rejection();
         match reason {
             GuardedTailCanonicalizationFailure::MultiplePayloadEntries => {
@@ -1010,6 +1059,21 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
         if !has_non_ignorable_payload(&body[idx + 1..original_label_idx]) {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    target_label,
+                    original_label_idx,
+                    GuardedTailWitnessRejection::NonCanonicalLayout
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &body[idx + 1..original_label_idx],
+                    20,
+                );
+            }
             self.mark_noncanonical_layout_rejection();
             return Some(Err(GuardedTailWitnessRejection::NonCanonicalLayout));
         }
@@ -1021,14 +1085,56 @@ impl<'a> PreviewBuilder<'a> {
                 .iter()
                 .all(is_ignorable_discovery_stmt)
         {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    target_label,
+                    original_label_idx,
+                    GuardedTailWitnessRejection::AmbiguousFollow
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &body[idx + 1..original_tail_end],
+                    20,
+                );
+            }
             return Some(Err(GuardedTailWitnessRejection::AmbiguousFollow));
         }
 
         let Some((target_label, label_idx)) =
             self.resolve_terminal_join_target(body, idx, &target_label, referenced)
         else {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    target_label,
+                    GuardedTailWitnessRejection::MissingTerminalJoin
+                );
+                let upper = body.len().min(idx + 1 + 20);
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &body[idx + 1..upper],
+                    20,
+                );
+            }
             return Some(Err(GuardedTailWitnessRejection::MissingTerminalJoin));
         };
+
+        if self.guarded_tail_trace_enabled_for_current_fn() {
+            let raw_middle = &body[idx + 1..label_idx];
+            eprintln!(
+                "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} raw_middle_len={}",
+                self.guarded_tail_function_address(),
+                idx,
+                target_label,
+                label_idx,
+                raw_middle.len()
+            );
+        }
 
         let (middle, external_redirects) = match self.canonicalize_guarded_tail_segment(
             &body[idx + 1..label_idx],
@@ -1038,6 +1144,21 @@ impl<'a> PreviewBuilder<'a> {
         ) {
             Ok(middle) => middle,
             Err(reason) => {
+                if self.guarded_tail_trace_enabled_for_current_fn() {
+                    eprintln!(
+                        "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                        self.guarded_tail_function_address(),
+                        idx,
+                        target_label,
+                        label_idx,
+                        reason
+                    );
+                    Self::guarded_tail_trace_emit_snapshot(
+                        "[GT-TRACE] reject_snapshot",
+                        &body[idx + 1..label_idx],
+                        20,
+                    );
+                }
                 self.mark_guarded_tail_canonicalization_failure(reason);
                 return Some(Err(Self::map_guarded_tail_canonicalization_rejection(
                     reason,
@@ -1045,16 +1166,58 @@ impl<'a> PreviewBuilder<'a> {
             }
         };
         if middle.is_empty() {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    target_label,
+                    label_idx,
+                    GuardedTailCanonicalizationFailure::InterleavedJoinUses
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &body[idx + 1..label_idx],
+                    20,
+                );
+            }
             self.mark_guarded_tail_canonicalization_failure(
                 GuardedTailCanonicalizationFailure::InterleavedJoinUses,
             );
             return Some(Err(GuardedTailWitnessRejection::AliasInterleaveConflict));
         }
 
+        if self.guarded_tail_trace_enabled_for_current_fn() {
+            eprintln!(
+                "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} canonical_middle_len={} external_redirects={:?}",
+                self.guarded_tail_function_address(),
+                idx,
+                target_label,
+                label_idx,
+                middle.len(),
+                external_redirects
+            );
+        }
+
         let tail_end = (label_idx + 1..body.len())
             .find(|pos| matches!(body.get(*pos), Some(HirStmt::Label(_))))
             .unwrap_or(body.len());
         if body[label_idx + 1..tail_end].is_empty() && label_idx + 1 != body.len() {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    target_label,
+                    label_idx,
+                    GuardedTailWitnessRejection::AmbiguousFollow
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &body[idx + 1..tail_end],
+                    20,
+                );
+            }
             return Some(Err(GuardedTailWitnessRejection::AmbiguousFollow));
         }
 
@@ -1210,6 +1373,21 @@ impl<'a> PreviewBuilder<'a> {
                     idx, witness.target_label
                 );
             }
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    witness.target_label,
+                    witness.label_idx,
+                    GuardedTailExecutionRejection::Witness(GuardedTailWitnessRejection::NonCanonicalLayout)
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &witness.middle,
+                    20,
+                );
+            }
             return GuardedTailVerification {
                 region_legality: legality,
                 replacement_complete: false,
@@ -1269,6 +1447,21 @@ impl<'a> PreviewBuilder<'a> {
                     idx, witness.target_label, rejection
                 );
             }
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject=MustEmitLabelConflict({:?})",
+                    self.guarded_tail_function_address(),
+                    idx,
+                    witness.target_label,
+                    witness.label_idx,
+                    rejection
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] reject_snapshot",
+                    &rewritten.stmts,
+                    20,
+                );
+            }
             return GuardedTailVerification {
                 region_legality: legality,
                 replacement_complete: false,
@@ -1291,6 +1484,21 @@ impl<'a> PreviewBuilder<'a> {
                     eprintln!(
                         "[DIAG] guarded-tail verify idx={} label={} exported_bindings_rejected={:?}",
                         idx, witness.target_label, reason
+                    );
+                }
+                if self.guarded_tail_trace_enabled_for_current_fn() {
+                    eprintln!(
+                        "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                        self.guarded_tail_function_address(),
+                        idx,
+                        witness.target_label,
+                        witness.label_idx,
+                        reason
+                    );
+                    Self::guarded_tail_trace_emit_snapshot(
+                        "[GT-TRACE] reject_snapshot",
+                        &rewritten.stmts,
+                        20,
                     );
                 }
                 return GuardedTailVerification {
@@ -1378,6 +1586,27 @@ impl<'a> PreviewBuilder<'a> {
                 },
                 removable_ops_legal,
                 effective_middle_refs
+            );
+        }
+
+        if self.guarded_tail_trace_enabled_for_current_fn() {
+            let reason = if !removable_ops_legal {
+                GuardedTailExecutionRejection::MustEmitLabelConflict
+            } else {
+                GuardedTailExecutionRejection::ReplacementIncomplete
+            };
+            eprintln!(
+                "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                self.guarded_tail_function_address(),
+                idx,
+                witness.target_label,
+                witness.label_idx,
+                reason
+            );
+            Self::guarded_tail_trace_emit_snapshot(
+                "[GT-TRACE] reject_snapshot",
+                &rewritten.stmts,
+                20,
             );
         }
 

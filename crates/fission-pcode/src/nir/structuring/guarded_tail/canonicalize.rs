@@ -290,6 +290,19 @@ impl<'a> PreviewBuilder<'a> {
             
             let next_redirect_label = forward_chain_redirect.or(immediate_next_redirect);
 
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] candidate={} alias_redirect label={} local_refs={} external_refs={} resolved={}",
+                    segment_start.saturating_sub(1),
+                    label,
+                    local_ref_count,
+                    external_ref_count,
+                    next_redirect_label
+                        .as_deref()
+                        .unwrap_or("<none>")
+                );
+            }
+
             if let Some(next_label) = next_redirect_label {
                 if external_ref_count > 0 {
                     let (
@@ -420,12 +433,29 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<(Vec<HirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let mut flattened = Vec::new();
         Self::flatten_guarded_tail_segment(segment, &mut flattened);
+        let flatten_before_len = flattened.len();
         let collapsed_guards = Self::collapse_duplicate_top_level_guard_ladder(&mut flattened);
         let factored_guard_clusters =
             Self::factor_duplicate_top_level_guard_cluster_with_trivial_gap(&mut flattened, full_body);
         let collapsed_sink_returns =
             Self::collapse_top_level_sink_to_return_goto_chain(&mut flattened, full_body);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {
+            if self.guarded_tail_trace_enabled_for_current_fn() {
+                eprintln!(
+                    "[GT-TRACE] candidate={} canonicalize flatten_before={} trim=<none> collapse_dup={} cluster={} sink={} first_reject={:?}",
+                    segment_start.saturating_sub(1),
+                    flatten_before_len,
+                    collapsed_guards,
+                    factored_guard_clusters,
+                    collapsed_sink_returns,
+                    GuardedTailCanonicalizationFailure::NonterminalJoinLabel
+                );
+                Self::guarded_tail_trace_emit_snapshot(
+                    "[GT-TRACE] canonicalize_snapshot",
+                    &flattened,
+                    20,
+                );
+            }
             return Err(GuardedTailCanonicalizationFailure::NonterminalJoinLabel);
         };
         let (flattened, external_redirects) = self.canonicalize_interleaved_local_aliases(
@@ -434,6 +464,21 @@ impl<'a> PreviewBuilder<'a> {
             segment_start,
             referenced,
         )?;
+
+        if self.guarded_tail_trace_enabled_for_current_fn() {
+            eprintln!(
+                "[GT-TRACE] candidate={} canonicalize flatten_before={} trim=[{}, {}) flatten_after={} collapse_dup={} cluster={} sink={} redirects={:?}",
+                segment_start.saturating_sub(1),
+                flatten_before_len,
+                start,
+                end,
+                flattened.len(),
+                collapsed_guards,
+                factored_guard_clusters,
+                collapsed_sink_returns,
+                external_redirects
+            );
+        }
 
         let mut canonical = Vec::new();
         let mut saw_payload = false;

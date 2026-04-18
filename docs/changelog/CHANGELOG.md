@@ -367,6 +367,58 @@ Result interpretation:
 
 - 6th-wave cluster factoring is soundly integrated and regression-covered.
 - On the concrete blocker row (`0x140006fe0`), the extra trivial-gap factoring still does not move counters or emitted shape, indicating the remaining blocker likely sits before guarded-tail candidate shaping (or outside the currently canonicalized segment boundary).
+
+### Guarded-tail first-reject trace patch (7th wave, env-gated single function)
+
+This wave adds diagnostics only (no semantic acceptance broadening): env-gated candidate trace for one function to capture first failing shape and snapshot.
+
+Instrumentation scope (all env-gated via `FISSION_PREVIEW_DIAG_ADDR=0x...`):
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs)
+  - `try_build_guarded_tail_witness(...)`: candidate header (`idx`, `join_label`, `label_idx`, raw middle length) and first reject snapshot (20 statements)
+  - `verify_guarded_tail_trial(...)`: first verification-stage reject reason + snapshot
+  - `mark_guarded_tail_canonicalization_failure(...)`: canonicalization failure reason log hook
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - `canonicalize_guarded_tail_segment(...)`: flatten pre/post lengths, trim bounds, and collapse counters
+    - duplicate-guard collapse
+    - guard-cluster factoring
+    - sink-return collapse
+  - `canonicalize_interleaved_local_aliases(...)`: alias redirect candidate label + resolved target tracing
+
+Validation:
+
+- `cargo test -p fission-pcode guarded_tail` → 87 passed
+- `cargo test -p fission-pcode --lib` → 439 passed
+
+Targeted benchmark rerun (trace enabled):
+
+- artifact: [`putty-guarded-tail-trace-wave-20260418`](../../artifacts/batch_benchmark/putty-guarded-tail-trace-wave-20260418)
+- trace file: [`fission_stderr.log`](../../artifacts/batch_benchmark/putty-guarded-tail-trace-wave-20260418/fission_stderr.log)
+- target row `0x140006fe0` counters (vs 6th-wave [`putty-guard-cluster-wave-20260417`](../../artifacts/batch_benchmark/putty-guard-cluster-wave-20260417)):
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3 -> 3`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2 -> 2`
+  - `canonicalization_failed_nested_tail_escape`: `7 -> 7`
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4 -> 4`
+  - `region_emit_ready_failed_count`: `5 -> 5`
+
+First-reject trace highlights for `0x140006fe0` (same pattern observed in discovery + promotion passes):
+
+- `candidate=35`, `join_label=block_140007047`, `label_idx=157`
+  - first reject: `AliasNotFallthrough`
+  - raw middle length: `121`
+- `candidate=70`, `join_label=block_140007021`, `label_idx=113`
+  - first reject: `AliasHasNonlocalRef`
+  - canonicalize stats: `flatten_before=42`, `flatten_after=42`, `collapse_dup=0`, `cluster=0`, `sink=0`
+- `candidate=120/128/149`, `join_label=block_140007047`
+  - first reject: `NestedTailEscape`
+  - canonicalize collapse counters remained `0`
+- `candidate=142/145`, `join_label=block_140007040`
+  - first reject: `MustEmitLabelConflict` (including `MustEmitLabelSurvivingExternalRef`)
+
+Result interpretation:
+
+- 7th-wave confirms the bottleneck is first-failing candidate classification/ownership, not missing local canonicalization transforms.
+- highest-priority failing shape is now concretely captured (`AliasNotFallthrough` on a large middle segment), which is the anchor for the next invariant-based shape-specific patch.
 - `unsupported_indirect_control_count`: `9`
 - `avg_normalized_similarity`: `37.09`
 - key rows:
