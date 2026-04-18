@@ -191,6 +191,7 @@ impl<'a> PreviewBuilder<'a> {
             guarded_tail_rejected_side_entry_conflict_count: 0,
             guarded_tail_rejected_alias_interleave_conflict_count: 0,
             guarded_tail_rejected_ambiguous_follow_count: 0,
+            guarded_tail_rejected_side_effectful_callee_count: 0,
             guarded_tail_replacement_plan_candidate_count: 0,
             guarded_tail_replacement_plan_completed_count: 0,
             guarded_tail_replacement_plan_merge_created_count: 0,

@@ -599,6 +599,20 @@ impl<'a> PreviewBuilder<'a> {
         );
     }
 
+    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String> {
+        let (target, _args, _return_used) = Self::suffix_call_expr(stmt)?;
+        let summary = self
+            .type_context
+            .and_then(|ctx| ctx.call_effect_summaries.get(target))?;
+        if summary.source != Some(CallEffectSummarySource::PreviewCalleeAnalysis) {
+            return None;
+        }
+        let unsafe_effect = summary.writes_memory == Some(true)
+            || summary.may_call_unknown == Some(true)
+            || summary.may_exit == Some(true);
+        unsafe_effect.then(|| target.to_string())
+    }
+
     fn resolve_suffix_redirect_to_terminal(
         body: &[HirStmt],
         target_label: &str,
@@ -801,7 +815,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn classify_suffix_stmt_with_diag(
-        &self,
+        &mut self,
         stmt: &HirStmt,
         body: &[HirStmt],
         stmt_idx: usize,
@@ -928,6 +942,17 @@ impl<'a> PreviewBuilder<'a> {
                         | SuffixCallEffectShapeKind::ReturnValueIgnoredCall
                         | SuffixCallEffectShapeKind::UnknownCallEffect
                 ) {
+                    if let Some(target) = self.suffix_call_uses_preview_unsafe_callee(stmt) {
+                        self.guarded_tail_rejected_side_effectful_callee_count += 1;
+                        eprintln!(
+                            "[GT-TRACE] suffix-side-effectful-callee-stop stmt_idx={} target={} source=PreviewCalleeAnalysis",
+                            stmt_idx, target
+                        );
+                        eprintln!(
+                            "[GT-TRACE] guarded-tail-rejection subtype=PreviewCalleeAnalysisUnsafe target={}",
+                            target
+                        );
+                    }
                     self.trace_suffix_unknown_call_provenance(stmt_idx, stmt);
                 }
             }
@@ -1758,7 +1783,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn suffix_is_nonowned_terminal_tail_with_diag(
-        &self,
+        &mut self,
         body: &[HirStmt],
         anchor_idx: usize,
         start_label: &str,
@@ -1914,7 +1939,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn candidate_window_can_shrink_to_label_with_diag(
-        &self,
+        &mut self,
         body: &[HirStmt],
         anchor_idx: usize,
         candidate_label: &str,
@@ -2007,7 +2032,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn find_earliest_owned_join_label_with_diag(
-        &self,
+        &mut self,
         body: &[HirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,

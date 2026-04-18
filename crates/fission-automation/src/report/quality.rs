@@ -153,6 +153,10 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             "conditional_region_promoted_count",
             stats.conditional_region_promoted_count,
         ),
+        (
+            "guarded_tail_rejected_side_effectful_callee_count",
+            stats.guarded_tail_rejected_side_effectful_callee_count,
+        ),
         ("promotion_candidate_count", stats.promotion_candidate_count),
         ("promoted_region_count", stats.promoted_region_count),
         (
@@ -545,6 +549,7 @@ pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)>
                 + stats.switch_emit_ready_failed_count
                 + stats.guarded_tail_replacement_plan_rejected_missing_merge_count
                 + stats.guarded_tail_replacement_plan_rejected_unstable_read_count
+                + stats.guarded_tail_rejected_side_effectful_callee_count
                 + stats.guarded_tail_rejected_side_entry_conflict_count
                 + stats.guarded_tail_rejected_alias_interleave_conflict_count
                 + stats.guarded_tail_rejected_ambiguous_follow_count,

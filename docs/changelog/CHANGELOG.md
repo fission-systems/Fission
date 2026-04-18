@@ -9,6 +9,53 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail side-effectful callee rejection finalization
+
+This wave did not widen guarded-tail acceptance. It finalized the current stop condition for call-bearing suffixes whose callee summary is already proven unsafe by `PreviewCalleeAnalysis`. The goal was to turn the current `0x140006fe0` `candidate 35` boundary into an explicit, canonical rejection subtype rather than leaving it as an undifferentiated generic side-effect bucket.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now recognizes the active guarded-tail stop condition directly on the live suffix path:
+  - `suffix-side-effectful-callee-stop`
+  - `guarded-tail-rejection subtype=PreviewCalleeAnalysisUnsafe`
+- the stop fires only when all of the following are true:
+  - the suffix statement is a call-bearing side-effect statement
+  - the call summary exists in `NirTypeContext`
+  - the summary source is `PreviewCalleeAnalysis`
+  - at least one unsafe effect bit is explicitly `yes`:
+    - `writes_memory`
+    - `may_call_unknown`
+    - `may_exit`
+- [`types.rs`](../../crates/fission-pcode/src/nir/types.rs) extends canonical telemetry with:
+  - `guarded_tail_rejected_side_effectful_callee_count`
+- [`builder/state.rs`](../../crates/fission-pcode/src/nir/builder/state.rs), [`builder/init.rs`](../../crates/fission-pcode/src/nir/builder/init.rs), and [`builder/stats.rs`](../../crates/fission-pcode/src/nir/builder/stats.rs) now carry the new canonical counter from preview builder state into `NirBuildStats`
+- [`quality.rs`](../../crates/fission-automation/src/report/quality.rs) now projects the new counter into automation quality rollups and folds it into the existing canonical rewrite-conflict family
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo check -p fission-automation`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `0x140006fe0` stopper now surfaces as an explicit canonical subtype:
+  - `suffix-side-effectful-callee-stop stmt_idx=154 target=FUN_0x140043d30 source=PreviewCalleeAnalysis`
+  - `guarded-tail-rejection subtype=PreviewCalleeAnalysisUnsafe target=FUN_0x140043d30`
+- the original guarded-tail shell still stays fail-closed:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `first_reject=AliasNotFallthrough`
+- the unsafe-callee stop is not specific to a single target:
+  - the same subtype also surfaces on earlier internal call-bearing suffix blockers such as `FUN_0x1400d23a0`
+
+Conclusion:
+
+- `candidate 35` is no longer just “generic side effect”; it is now an explicitly classified soundness-preserving stop
+- the next step should not widen local guarded-tail acceptance for this case
+- the next useful work item is either:
+  - corpus / benchmark remeasurement after the recent narrow internalization waves, or
+  - selecting a different active blocker whose stop reason is not already a proven unsafe callee summary
+
 ### Guarded-tail callee bounds and thunk-shape validation
 
 This wave stayed diagnostic-only. It did not widen guarded-tail acceptance or reinterpret the preview callee effect bits. The goal was to determine whether `FUN_0x140043d30` was being marked unsafe because of real callee behavior or because preview lift bounds / wrapper shape were over-approximated.

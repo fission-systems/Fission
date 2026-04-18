@@ -82,6 +82,8 @@ impl<'a> PreviewBuilder<'a> {
                 .guarded_tail_rejected_alias_interleave_conflict_count,
             guarded_tail_rejected_ambiguous_follow_count: self
                 .guarded_tail_rejected_ambiguous_follow_count,
+            guarded_tail_rejected_side_effectful_callee_count: self
+                .guarded_tail_rejected_side_effectful_callee_count,
             guarded_tail_replacement_plan_candidate_count: self
                 .guarded_tail_replacement_plan_candidate_count,
             guarded_tail_replacement_plan_completed_count: self

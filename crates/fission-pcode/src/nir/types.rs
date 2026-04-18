@@ -731,6 +731,8 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub guarded_tail_rejected_ambiguous_follow_count: usize,
     #[serde(default)]
+    pub guarded_tail_rejected_side_effectful_callee_count: usize,
+    #[serde(default)]
     pub guarded_tail_replacement_plan_candidate_count: usize,
     #[serde(default)]
     pub guarded_tail_replacement_plan_completed_count: usize,
@@ -1092,6 +1094,8 @@ impl NirBuildStats {
             other.guarded_tail_rejected_alias_interleave_conflict_count;
         self.guarded_tail_rejected_ambiguous_follow_count +=
             other.guarded_tail_rejected_ambiguous_follow_count;
+        self.guarded_tail_rejected_side_effectful_callee_count +=
+            other.guarded_tail_rejected_side_effectful_callee_count;
         self.guarded_tail_replacement_plan_candidate_count +=
             other.guarded_tail_replacement_plan_candidate_count;
         self.guarded_tail_replacement_plan_completed_count +=
@@ -1257,6 +1261,7 @@ impl NirBuildStats {
             + self.region_linearize_rejected_no_exit_count
             + self.region_linearize_rejected_body_lowering_unsupported_terminator_count
             + self.region_emit_ready_failed_count
+            + self.guarded_tail_rejected_side_effectful_callee_count
             + self.guarded_tail_rejected_missing_terminal_join_count
             + self.guarded_tail_rejected_alias_interleave_conflict_count
             + self.rejected_external_entry
