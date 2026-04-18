@@ -9,6 +9,64 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### MalformedDefUseWindow invariant tracing
+
+This wave stayed diagnostic-only. It did not relax alias safety, widen representative downgrade, or change the release path for `UnknownMalformedDefUseWindow`. The goal was to split that family into concrete def/use-window relations so the next policy wave can target a real owner instead of a catch-all label.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now adds a dedicated malformed-window trace:
+  - `malformed-def-use-window output=... def_block=... def_op_seq=... def_op_idx=... terminator_idx=... consumer_count=... first_consumer_block=... first_consumer_idx=... first_consumer_op_seq=... relation=... rhs_kind=...`
+- the trace classifies malformed windows into deterministic relations:
+  - `DefAfterTerminator`
+  - `ConsumerBeforeDef`
+  - `ConsumerAfterTerminator`
+  - `ConsumerInDifferentBlock`
+  - `TerminatorMissing`
+  - `OpIndexMissing`
+  - `BlockMismatch`
+  - `RedefinitionBeforeConsumer`
+  - `UnknownWindow`
+- the diagnostic path is builder-owned and only fires for the existing `AliasUnsafeHazardKind::UnknownMalformedDefUseWindow` family
+- unit coverage now fixes three core relation cases:
+  - `TerminatorMissing`
+  - `ConsumerInDifferentBlock`
+  - `RedefinitionBeforeConsumer`
+
+Validation:
+
+- `cargo test -p fission-pcode malformed_def_use_window_relation_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140008090` is not a single malformed family. The dominant owner is now explicit:
+  - `ConsumerInDifferentBlock = 1089`
+  - `RedefinitionBeforeConsumer = 293`
+  - `TerminatorMissing = 98`
+  - dominant RHS kinds inside this family:
+    - `Binary = 928`
+    - `Call = 250`
+    - `Const = 222`
+    - `Var = 80`
+- `0x140006c20` is simpler and does not currently show the missing-terminator variant:
+  - `ConsumerInDifferentBlock = 192`
+  - `RedefinitionBeforeConsumer = 144`
+  - dominant RHS kinds:
+    - `Binary = 204`
+    - `Call = 84`
+    - `Const = 48`
+- the practical owner conclusion is now clearer than before:
+  - both rows are primarily merge/cross-block def-use window problems, not generic malformed indexing
+  - only `0x140008090` still shows a secondary `TerminatorMissing` slice
+
+Conclusion:
+
+- `UnknownMalformedDefUseWindow` should not be treated as one policy family anymore
+- the next release owner should target `ConsumerInDifferentBlock` first, because it dominates both active rows and points at merge/dominance/materialization-window handling rather than broad alias relaxation
+- `TerminatorMissing` is a secondary builder indexing/boundary owner and should be handled separately after the cross-block family
+
 ### NoConsumer suppression regression attribution
 
 This wave changed the release path back to fail-closed while keeping the new regression-attribution diagnostics alive. The earlier `UnknownNoConsumerFound` suppression policy turned out to be too broad for release quality: it removed many dead-looking `UNIQUE` representatives, but same-axis `putty` limit50 still regressed and even pulled `0x140008900` into the failed row gate set. The active path now leaves those candidates materialized by default again unless an explicit env gate is enabled for experiment-only runs.

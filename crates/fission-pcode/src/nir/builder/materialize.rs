@@ -30,6 +30,31 @@ enum AliasUnsafeHazardKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MalformedDefUseWindowRelation {
+    DefAfterTerminator,
+    ConsumerBeforeDef,
+    ConsumerAfterTerminator,
+    ConsumerInDifferentBlock,
+    TerminatorMissing,
+    OpIndexMissing,
+    BlockMismatch,
+    RedefinitionBeforeConsumer,
+    UnknownWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MalformedDefUseWindowDetail {
+    relation: MalformedDefUseWindowRelation,
+    def_op_idx: usize,
+    terminator_idx: Option<usize>,
+    consumer_count: usize,
+    first_consumer_block: Option<u64>,
+    first_consumer_idx: Option<usize>,
+    first_consumer_op_seq: Option<u32>,
+    rhs_kind: NoConsumerSuppressionRhsKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AliasUnsafeHazard {
     kind: AliasUnsafeHazardKind,
     use_stmt_idx: Option<usize>,
@@ -192,6 +217,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
+        rhs: &HirExpr,
         hazard: AliasUnsafeHazard,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
@@ -229,7 +255,7 @@ impl<'a> PreviewBuilder<'a> {
                 | AliasUnsafeHazardKind::UnknownUnhandledConsumerKind
                 | AliasUnsafeHazardKind::UnknownMalformedDefUseWindow
         ) {
-            self.trace_alias_unsafe_unknown_shape(block_addr, op_seq, output, hazard);
+            self.trace_alias_unsafe_unknown_shape(block_addr, op_seq, output, rhs, hazard);
         }
     }
 
@@ -238,6 +264,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
+        rhs: &HirExpr,
         hazard: AliasUnsafeHazard,
     ) {
         let Some(block) = self.pcode.blocks.iter().find(|block| block.start_address == block_addr) else {
@@ -280,6 +307,9 @@ impl<'a> PreviewBuilder<'a> {
             first_consumer_relation,
             hazard.kind,
         ));
+        if hazard.kind == AliasUnsafeHazardKind::UnknownMalformedDefUseWindow {
+            self.trace_malformed_def_use_window(block, op_idx, output, rhs);
+        }
     }
 
     fn trace_no_consumer_materialization(
@@ -313,6 +343,54 @@ impl<'a> PreviewBuilder<'a> {
             profile.same_block_consumers,
             profile.cross_block_consumers,
             profile.rhs_side_effectful,
+        ));
+    }
+
+    fn trace_malformed_def_use_window(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let detail = self.describe_malformed_def_use_window(block, op_idx, output, rhs);
+        let terminator_idx = detail
+            .terminator_idx
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let first_consumer_block = detail
+            .first_consumer_block
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let first_consumer_idx = detail
+            .first_consumer_idx
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let first_consumer_op_seq = detail
+            .first_consumer_op_seq
+            .map(|seq| seq.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "malformed-def-use-window output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} def_op_idx={} terminator_idx={} consumer_count={} first_consumer_block={} first_consumer_idx={} first_consumer_op_seq={} relation={:?} rhs_kind={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops
+                .get(op_idx)
+                .map(|op| op.seq_num.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            detail.def_op_idx,
+            terminator_idx,
+            detail.consumer_count,
+            first_consumer_block,
+            first_consumer_idx,
+            first_consumer_op_seq,
+            detail.relation,
+            detail.rhs_kind,
         ));
     }
 
@@ -939,7 +1017,13 @@ impl<'a> PreviewBuilder<'a> {
         self.replacement_plan_rejected_alias_unsafe_count += 1;
         let hazard =
             Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);
-        self.trace_alias_unsafe_hazard(block.start_address, block.ops[op_idx].seq_num, output, hazard);
+        self.trace_alias_unsafe_hazard(
+            block.start_address,
+            block.ops[op_idx].seq_num,
+            output,
+            rhs,
+            hazard,
+        );
         ReplacementValuePlan::incomplete(
             ReplacementReadClass::SameBlockData,
             MaterializationRejectionReason::AliasUnsafe,
@@ -1306,6 +1390,140 @@ impl<'a> PreviewBuilder<'a> {
             .enumerate()
             .skip(op_idx + 1)
             .find(|(_, candidate)| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
+    }
+
+    fn collect_output_use_sites_in_block_unbounded<'b>(
+        block: &'b crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Vec<(usize, &'b PcodeOp)> {
+        let key = VarnodeKey::from(output);
+        block.ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .filter(|(_, candidate)| {
+                candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == key)
+            })
+            .collect()
+    }
+
+    fn first_output_use_site_outside_block(
+        &self,
+        current_block_addr: u64,
+        output: &Varnode,
+    ) -> Option<(u64, usize, u32)> {
+        let key = VarnodeKey::from(output);
+        self.pcode
+            .blocks
+            .iter()
+            .filter(|block| block.start_address != current_block_addr)
+            .find_map(|block| {
+                block.ops
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| {
+                        candidate
+                            .inputs
+                            .iter()
+                            .any(|input| VarnodeKey::from(input) == key)
+                    })
+                    .map(|(idx, op)| (block.start_address, idx, op.seq_num))
+            })
+    }
+
+    fn classify_malformed_def_use_window_relation(
+        def_op_idx: usize,
+        terminator_idx: Option<usize>,
+        first_same_block_consumer_idx: Option<usize>,
+        first_cross_block_consumer: Option<(u64, usize, u32)>,
+        block_index_present: bool,
+        has_redefinition: bool,
+    ) -> MalformedDefUseWindowRelation {
+        if !block_index_present {
+            return MalformedDefUseWindowRelation::BlockMismatch;
+        }
+        let Some(terminator_idx) = terminator_idx else {
+            return MalformedDefUseWindowRelation::TerminatorMissing;
+        };
+        if def_op_idx > terminator_idx {
+            return MalformedDefUseWindowRelation::DefAfterTerminator;
+        }
+        if let Some(consumer_idx) = first_same_block_consumer_idx {
+            if consumer_idx < def_op_idx {
+                return MalformedDefUseWindowRelation::ConsumerBeforeDef;
+            }
+            if consumer_idx > terminator_idx {
+                return MalformedDefUseWindowRelation::ConsumerAfterTerminator;
+            }
+        }
+        if first_cross_block_consumer.is_some() {
+            return MalformedDefUseWindowRelation::ConsumerInDifferentBlock;
+        }
+        if has_redefinition {
+            return MalformedDefUseWindowRelation::RedefinitionBeforeConsumer;
+        }
+        MalformedDefUseWindowRelation::UnknownWindow
+    }
+
+    fn describe_malformed_def_use_window(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> MalformedDefUseWindowDetail {
+        let rhs_kind = Self::classify_no_consumer_suppression_rhs_kind(rhs);
+        let terminator_idx = self.block_terminator_index(block);
+        let block_index_present = self.address_to_index.contains_key(&block.start_address);
+        if op_idx >= block.ops.len() {
+            return MalformedDefUseWindowDetail {
+                relation: MalformedDefUseWindowRelation::OpIndexMissing,
+                def_op_idx: op_idx,
+                terminator_idx,
+                consumer_count: 0,
+                first_consumer_block: None,
+                first_consumer_idx: None,
+                first_consumer_op_seq: None,
+                rhs_kind,
+            };
+        }
+        let same_block_consumers =
+            Self::collect_output_use_sites_in_block_unbounded(block, op_idx, output);
+        let first_same_block_consumer = same_block_consumers.first().copied();
+        let first_cross_block_consumer =
+            self.first_output_use_site_outside_block(block.start_address, output);
+        let relation = Self::classify_malformed_def_use_window_relation(
+            op_idx,
+            terminator_idx,
+            first_same_block_consumer.map(|(idx, _)| idx),
+            first_cross_block_consumer,
+            block_index_present,
+            Self::first_output_redefinition_in_block(block, op_idx, output).is_some(),
+        );
+        let consumer_count = same_block_consumers.len() + usize::from(first_cross_block_consumer.is_some());
+        let (first_consumer_block, first_consumer_idx, first_consumer_op_seq) =
+            if let Some((idx, op)) = first_same_block_consumer {
+                (Some(block.start_address), Some(idx), Some(op.seq_num))
+            } else if let Some((consumer_block, consumer_idx, consumer_op_seq)) = first_cross_block_consumer
+            {
+                (Some(consumer_block), Some(consumer_idx), Some(consumer_op_seq))
+            } else {
+                (None, None, None)
+            };
+        MalformedDefUseWindowDetail {
+            relation,
+            def_op_idx: op_idx,
+            terminator_idx,
+            consumer_count,
+            first_consumer_block,
+            first_consumer_idx,
+            first_consumer_op_seq,
+            rhs_kind,
+        }
     }
 
     fn collect_output_use_sites_outside_block(
@@ -1987,6 +2205,54 @@ mod tests {
         assert_eq!(hazard.use_stmt_idx, None);
         assert_eq!(hazard.hazard_stmt_idx, Some(1));
         assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::Copy));
+    }
+
+    #[test]
+    fn malformed_def_use_window_relation_marks_terminator_missing() {
+        let relation = PreviewBuilder::classify_malformed_def_use_window_relation(
+            0,
+            None,
+            None,
+            None,
+            true,
+            true,
+        );
+
+        assert_eq!(relation, MalformedDefUseWindowRelation::TerminatorMissing);
+    }
+
+    #[test]
+    fn malformed_def_use_window_relation_marks_cross_block_consumer() {
+        let relation = PreviewBuilder::classify_malformed_def_use_window_relation(
+            0,
+            Some(3),
+            None,
+            Some((0x2000, 1, 7)),
+            true,
+            true,
+        );
+
+        assert_eq!(
+            relation,
+            MalformedDefUseWindowRelation::ConsumerInDifferentBlock
+        );
+    }
+
+    #[test]
+    fn malformed_def_use_window_relation_marks_redefinition_before_consumer() {
+        let relation = PreviewBuilder::classify_malformed_def_use_window_relation(
+            0,
+            Some(3),
+            None,
+            None,
+            true,
+            true,
+        );
+
+        assert_eq!(
+            relation,
+            MalformedDefUseWindowRelation::RedefinitionBeforeConsumer
+        );
     }
 
     #[test]
