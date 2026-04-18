@@ -239,7 +239,9 @@ impl<'a> PreviewBuilder<'a> {
             HirStmt::Assign {
                 lhs: HirLValue::Var(name),
                 rhs,
-            } if Self::expr_contains_var(rhs, name) || matches!(rhs, HirExpr::AggregateCopy { .. }) => {
+            } if Self::expr_contains_var(rhs, name)
+                || matches!(rhs, HirExpr::AggregateCopy { .. }) =>
+            {
                 SuffixSideEffectShapeKind::CompoundAssignOrPhiLike
             }
             HirStmt::Expr(HirExpr::Call { .. }) | HirStmt::VaStart { .. } => {
@@ -258,16 +260,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn call_target_is_known_pure_helper(target: &str) -> bool {
-        matches!(
-            target,
-            "__popcount"
-                | "__popcount64"
-                | "__carry"
-                | "__scarry"
-                | "__sborrow"
-                | "__lzcnt"
-                | "__tzcnt"
-        )
+        matches!(target, "__popcount")
     }
 
     fn call_target_is_memory_mutating(target: &str) -> bool {
@@ -369,7 +362,11 @@ impl<'a> PreviewBuilder<'a> {
                 .iter()
                 .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)),
             HirStmt::VaStart { va_list, .. } => !Self::expr_contains_var(va_list, name),
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 !Self::expr_contains_var(expr, name)
                     && cases.iter().all(|case| {
                         case.body.iter().all(|stmt| {
@@ -397,12 +394,12 @@ impl<'a> PreviewBuilder<'a> {
                     && cond
                         .as_ref()
                         .is_none_or(|expr| !Self::expr_contains_var(expr, name))
-                    && update.iter().all(|stmt| {
-                        Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
-                    })
-                    && body.iter().all(|stmt| {
-                        Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
-                    })
+                    && update
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+                    && body
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
             }
             HirStmt::Return(Some(expr)) => !Self::expr_contains_var(expr, name),
             HirStmt::Label(_)
@@ -451,6 +448,46 @@ impl<'a> PreviewBuilder<'a> {
             .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0)
     }
 
+    fn suffix_known_pure_helper_call_is_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Assign {
+            lhs: HirLValue::Var(binding_name),
+            rhs: HirExpr::Call { target, args, .. },
+        }) = body.get(stmt_idx)
+        else {
+            return false;
+        };
+
+        if !Self::call_target_is_known_pure_helper(target)
+            || !args.iter().all(Self::expr_is_pure_value)
+        {
+            return false;
+        }
+
+        if body[stmt_idx + 1..]
+            .iter()
+            .map(|stmt| Self::count_var_defs_stmt(stmt, binding_name))
+            .sum::<usize>()
+            > 0
+        {
+            return false;
+        }
+
+        if body[stmt_idx + 1..terminal_label_idx]
+            .iter()
+            .any(|stmt| !Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name))
+        {
+            return false;
+        }
+
+        body[terminal_label_idx..]
+            .iter()
+            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0)
+    }
+
     fn resolve_suffix_redirect_to_terminal(
         body: &[HirStmt],
         target_label: &str,
@@ -462,9 +499,9 @@ impl<'a> PreviewBuilder<'a> {
         if Self::top_level_label_definition_count_for_owned_tail(body, target_label) != 1 {
             return false;
         }
-        let Some(mut current_idx) =
-            body.iter()
-                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == target_label))
+        let Some(mut current_idx) = body
+            .iter()
+            .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == target_label))
         else {
             return false;
         };
@@ -503,9 +540,9 @@ impl<'a> PreviewBuilder<'a> {
             if next_target == next_label {
                 return true;
             }
-            let Some(next_idx) =
-                body.iter()
-                    .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &next_target))
+            let Some(next_idx) = body
+                .iter()
+                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &next_target))
             else {
                 return false;
             };
@@ -524,14 +561,18 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         next_label: &str,
     ) -> Result<(), SuffixTailRejection> {
-        if is_ignorable_discovery_stmt(stmt) || matches!(stmt, HirStmt::Block(inner) if inner.is_empty()) {
+        if is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+        {
             return Ok(());
         }
         if Self::stmt_is_pure_value_expr(stmt) || Self::stmt_is_pure_value_assign(stmt) {
             return Ok(());
         }
         if let HirStmt::Goto(target) = stmt {
-            if target == next_label || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body) {
+            if target == next_label
+                || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
+            {
                 return Ok(());
             }
             if Self::top_level_label_definition_count_for_owned_tail(body, target) != 1 {
@@ -578,9 +619,7 @@ impl<'a> PreviewBuilder<'a> {
                 if Self::guarded_tail_diag_enabled() {
                     eprintln!(
                         "[GT-TRACE] nested-terminal-join-tail-internalized stmt_idx={} kind={:?} stmt={:?}",
-                        stmt_idx,
-                        kind,
-                        stmt
+                        stmt_idx, kind, stmt
                     );
                 }
                 return Ok(());
@@ -588,42 +627,56 @@ impl<'a> PreviewBuilder<'a> {
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[GT-TRACE] nested-suffix-shape stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx,
-                    kind,
-                    stmt
+                    stmt_idx, kind, stmt
                 );
             }
             return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
         }
         let side_effect_kind = Self::classify_suffix_side_effect_shape(stmt);
         if side_effect_kind == SuffixSideEffectShapeKind::MemoryReadOnlyAssign
-            && Self::suffix_memory_read_only_assign_is_owned_safe(body, stmt_idx, terminal_label_idx)
+            && Self::suffix_memory_read_only_assign_is_owned_safe(
+                body,
+                stmt_idx,
+                terminal_label_idx,
+            )
         {
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[GT-TRACE] suffix-memory-readonly-assign-internalized stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx,
-                    side_effect_kind,
-                    stmt
+                    stmt_idx, side_effect_kind, stmt
                 );
             }
             return Ok(());
+        }
+        if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
+            let call_kind = Self::classify_suffix_call_effect_shape(stmt);
+            if call_kind == SuffixCallEffectShapeKind::PureKnownHelperCall
+                && Self::suffix_known_pure_helper_call_is_owned_safe(
+                    body,
+                    stmt_idx,
+                    terminal_label_idx,
+                )
+            {
+                if Self::guarded_tail_diag_enabled() {
+                    eprintln!(
+                        "[GT-TRACE] suffix-known-pure-helper-call-internalized stmt_idx={} kind={:?} stmt={:?}",
+                        stmt_idx, call_kind, stmt
+                    );
+                }
+                return Ok(());
+            }
         }
         if Self::guarded_tail_diag_enabled() {
             if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
                 let call_kind = Self::classify_suffix_call_effect_shape(stmt);
                 eprintln!(
                     "[GT-TRACE] suffix-call-effect-shape stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx,
-                    call_kind,
-                    stmt
+                    stmt_idx, call_kind, stmt
                 );
             }
             eprintln!(
                 "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
-                stmt_idx,
-                side_effect_kind,
-                stmt
+                stmt_idx, side_effect_kind, stmt
             );
         }
         Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
@@ -714,7 +767,8 @@ impl<'a> PreviewBuilder<'a> {
             if next_label_idx > terminal_label_idx {
                 continue;
             }
-            if Self::suffix_stmt_is_terminal_join_owned_safe(body, stmt_idx, next_label_idx, label) {
+            if Self::suffix_stmt_is_terminal_join_owned_safe(body, stmt_idx, next_label_idx, label)
+            {
                 count += 1;
             }
         }
@@ -730,12 +784,13 @@ impl<'a> PreviewBuilder<'a> {
         raw_refs: usize,
         rewrites: usize,
     ) -> SuffixExternalEntryBudget {
-        let internal_candidate_refs = Self::count_candidate_internal_top_level_refs_in_suffix_window(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        );
+        let internal_candidate_refs =
+            Self::count_candidate_internal_top_level_refs_in_suffix_window(
+                body,
+                label,
+                anchor_idx,
+                terminal_label_idx,
+            );
         let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
             body,
             label,
@@ -755,8 +810,8 @@ impl<'a> PreviewBuilder<'a> {
         let effective_external_refs = raw_refs
             .saturating_sub(internal_top_level_refs)
             .saturating_sub(suffix_safe_refs);
-        let effective_external_refs = effective_external_refs
-            .saturating_sub(guard_family_internalized_refs);
+        let effective_external_refs =
+            effective_external_refs.saturating_sub(guard_family_internalized_refs);
         let allowed_external_refs = usize::from(rewrites == 0);
 
         SuffixExternalEntryBudget {
@@ -953,10 +1008,7 @@ impl<'a> PreviewBuilder<'a> {
             {
                 eprintln!(
                     "[GT-TRACE] nested-entry-probe label={} cond={:?} ref_stmt_idx={} internalized={}",
-                    label,
-                    cond,
-                    stmt_idx,
-                    internalized
+                    label, cond, stmt_idx, internalized
                 );
             }
             if !internalized {
@@ -970,9 +1022,7 @@ impl<'a> PreviewBuilder<'a> {
             {
                 eprintln!(
                     "[GT-TRACE] nested-entry-internalized label={} cond={:?} ref_stmt_idx={}",
-                    label,
-                    cond,
-                    stmt_idx
+                    label, cond, stmt_idx
                 );
             }
         }
@@ -1089,10 +1139,7 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     eprintln!(
                         "[GT-TRACE] suffix-external-entry label={} external_entry_kind={:?} ref_stmt_idx={} ref_stmt={:?}",
-                        current_label,
-                        kind,
-                        ref_stmt_idx,
-                        ref_stmt
+                        current_label, kind, ref_stmt_idx, ref_stmt
                     );
                 }
                 return Err(SuffixTailRejection::SuffixHasExternalEntry {
@@ -1101,8 +1148,8 @@ impl<'a> PreviewBuilder<'a> {
                 });
             }
 
-            let Some(next_label_idx) =
-                (current_label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            let Some(next_label_idx) = (current_label_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
             else {
                 return Err(SuffixTailRejection::SuffixHasLabelCrossing {
                     stmt_idx: current_label_idx,
@@ -1336,10 +1383,7 @@ mod tests {
         assert_eq!(kind, expected);
     }
 
-    fn assert_suffix_side_effect_shape_kind(
-        stmt: HirStmt,
-        expected: SuffixSideEffectShapeKind,
-    ) {
+    fn assert_suffix_side_effect_shape_kind(stmt: HirStmt, expected: SuffixSideEffectShapeKind) {
         let kind = PreviewBuilder::classify_suffix_side_effect_shape(&stmt);
         assert_eq!(kind, expected);
     }
@@ -2403,6 +2447,239 @@ mod tests {
     }
 
     #[test]
+    fn suffix_accepts_known_pure_helper_call_with_condition_use() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("count".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
+    }
+
+    #[test]
+    fn suffix_accepts_known_pure_helper_call_with_pure_expr_use() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Expr(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("count".to_string())),
+                rhs: Box::new(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
+    }
+
+    #[test]
+    fn suffix_rejects_known_pure_helper_call_with_unknown_target() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount64".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("count".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_known_pure_helper_call_with_call_arg() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Call {
+                        target: "value_provider".to_string(),
+                        args: vec![],
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    }],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("count".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_known_pure_helper_call_reused_in_return() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("count".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            2,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_known_pure_helper_call_with_memory_visible_alias_risk() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("count".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("count".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+                rhs: HirExpr::Var("value".to_string()),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_known_pure_helper_call_with_ignored_result() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Call {
+                target: "__popcount".to_string(),
+                args: vec![HirExpr::Var("value".to_string())],
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            2,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
     fn external_entry_kind_classifies_top_level_external_goto() {
         let body = vec![
             HirStmt::Goto("join0".to_string()),
@@ -2581,8 +2858,14 @@ mod tests {
             HirStmt::Expr(HirExpr::Var("payload".to_string())),
         ];
         let referenced = collect_referenced_label_counts(&body);
-        let result =
-            PreviewBuilder::candidate_window_can_shrink_to_label(&body, 0, "join0", 1, 1, &referenced);
+        let result = PreviewBuilder::candidate_window_can_shrink_to_label(
+            &body,
+            0,
+            "join0",
+            1,
+            1,
+            &referenced,
+        );
         assert_eq!(
             result,
             Err(SuffixTailRejection::SuffixHasLabelCrossing {
@@ -2602,8 +2885,14 @@ mod tests {
             HirStmt::Label("terminal".to_string()),
         ];
         let referenced = collect_referenced_label_counts(&body);
-        let result =
-            PreviewBuilder::candidate_window_can_shrink_to_label(&body, 1, "join0", 2, 4, &referenced);
+        let result = PreviewBuilder::candidate_window_can_shrink_to_label(
+            &body,
+            1,
+            "join0",
+            2,
+            4,
+            &referenced,
+        );
         assert_eq!(
             result,
             Err(SuffixTailRejection::SuffixHasExternalEntry {

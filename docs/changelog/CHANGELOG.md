@@ -9,6 +9,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail known-pure helper call suffix internalization for `__popcount`
+
+This wave kept the call-bearing suffix policy fail-closed for generic calls and only internalized the one traced safe subcase: a local binding assigned from `__popcount(...)` whose arguments are pure and whose result does not escape past the terminal join.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now narrows the active known-pure helper allowlist to:
+  - `__popcount`
+- guarded-tail suffix ownership now has a dedicated helper:
+  - `suffix_known_pure_helper_call_is_owned_safe(...)`
+- the new acceptance path is intentionally narrow:
+  - `HirStmt::Assign { lhs: Var(_), rhs: Call { target: "__popcount", .. } }`
+  - all call args must be pure
+  - the assigned binding must not be redefined
+  - all pre-terminal uses must stay in owned-safe contexts
+  - all terminal-and-after uses must be zero
+- focused synthetic coverage was added for:
+  - suffix-local condition use
+  - suffix-local pure expression use
+  - unknown helper targets
+  - nested call arguments
+  - return-path escape
+  - memory-visible alias risk
+  - ignored-result call forms
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_call_effect_shape_ -- --nocapture`
+- `cargo test -p fission-pcode known_pure_helper_call -- --nocapture`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed movement:
+
+- `stmt_idx=138` is now internalized directly:
+  - `suffix-known-pure-helper-call-internalized stmt_idx=138 kind=PureKnownHelperCall`
+- the earlier candidate-35 blocker moved inward:
+  - `early_label=block_14000701c first_fail=SuffixHasNestedOrNonlocalRef { stmt_idx: 142 }`
+  - `early_label=block_140007021 first_fail=SuffixHasNestedOrNonlocalRef { stmt_idx: 142 }`
+- the outer shell is still unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+- the upstream unknown call stays fail-closed:
+  - `suffix-call-effect-shape stmt_idx=58 kind=VoidUnknownCall`
+
+Conclusion:
+
+- the active owner is no longer the `__popcount` helper call at `stmt_idx=138`
+- the blocker moved to the nested/nonlocal shape at `stmt_idx=142`
+- this was a narrow suffix-owned safety closure, not a generic call-acceptance expansion
+
 ### Guarded-tail `promotion.rs` thin-façade refactor and module split
 
 This wave was a behavior-preserving refactor. The goal was to stop using [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) as a single dumping ground for suffix ownership, replacement helpers, execute semantics, and local tests.
