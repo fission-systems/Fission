@@ -108,6 +108,19 @@ impl SuffixTailRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn suffix_call_expr(stmt: &HirStmt) -> Option<(&str, &[HirExpr], bool)> {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs: HirExpr::Call { target, args, .. },
+            } => Some((target.as_str(), args.as_slice(), true)),
+            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+                Some((target.as_str(), args.as_slice(), false))
+            }
+            _ => None,
+        }
+    }
+
     fn top_level_label_definition_count_for_owned_tail(body: &[HirStmt], label: &str) -> usize {
         body.iter()
             .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
@@ -524,6 +537,48 @@ impl<'a> PreviewBuilder<'a> {
         result
     }
 
+    fn trace_suffix_unknown_call_provenance(stmt_idx: usize, stmt: &HirStmt) {
+        let Some((target, _args, return_used)) = Self::suffix_call_expr(stmt) else {
+            return;
+        };
+
+        let import = fission_signatures::win_api::WIN_API_DB.get(target).is_some();
+        let internal = !import && crate::nir::types::parse_call_target_address(target).is_some();
+        let summary_available = import
+            || Self::call_target_is_known_pure_helper(target)
+            || Self::call_target_is_memory_mutating(target)
+            || Self::call_target_is_control_effect(target);
+        let writes_memory = if Self::call_target_is_known_pure_helper(target) {
+            "false"
+        } else if Self::call_target_is_memory_mutating(target) {
+            "true"
+        } else {
+            "unknown"
+        };
+        let writes_global = if Self::call_target_is_known_pure_helper(target) {
+            "false"
+        } else {
+            "unknown"
+        };
+        let may_call_unknown = if summary_available { "false" } else { "true" };
+        let may_exit = if Self::call_target_is_control_effect(target) {
+            "true"
+        } else if summary_available {
+            "false"
+        } else {
+            "unknown"
+        };
+
+        eprintln!(
+            "[GT-TRACE] suffix-unknown-call-provenance stmt_idx={} target={} internal={} import={} summary_available={}",
+            stmt_idx, target, internal, import, summary_available
+        );
+        eprintln!(
+            "[GT-TRACE] suffix-unknown-call-effect target={} writes_memory={} writes_global={} may_call_unknown={} may_exit={} return_used={}",
+            target, writes_memory, writes_global, may_call_unknown, may_exit, return_used
+        );
+    }
+
     fn resolve_suffix_redirect_to_terminal(
         body: &[HirStmt],
         target_label: &str,
@@ -709,6 +764,15 @@ impl<'a> PreviewBuilder<'a> {
                     "[GT-TRACE] suffix-call-effect-shape stmt_idx={} kind={:?} stmt={:?}",
                     stmt_idx, call_kind, stmt
                 );
+                if matches!(
+                    call_kind,
+                    SuffixCallEffectShapeKind::VoidUnknownCall
+                        | SuffixCallEffectShapeKind::ReturnValueAssignedLocal
+                        | SuffixCallEffectShapeKind::ReturnValueIgnoredCall
+                        | SuffixCallEffectShapeKind::UnknownCallEffect
+                ) {
+                    Self::trace_suffix_unknown_call_provenance(stmt_idx, stmt);
+                }
             }
             eprintln!(
                 "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",

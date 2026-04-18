@@ -9,6 +9,47 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail unknown call provenance tracing for `FUN_0x140043d30`
+
+This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to turn the remaining `stmt_idx=154` call-bearing suffix blocker into a concrete provenance/effect boundary instead of another generic `VoidUnknownCall` bucket.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now adds:
+  - `suffix_call_expr(...)`
+  - `trace_suffix_unknown_call_provenance(...)`
+- guarded-tail suffix diagnostics now emit two additional traces for unknown call-bearing suffix statements:
+  - `suffix-unknown-call-provenance stmt_idx=... target=... internal=... import=... summary_available=...`
+  - `suffix-unknown-call-effect target=... writes_memory=... writes_global=... may_call_unknown=... may_exit=... return_used=...`
+- this remains fail-closed:
+  - no suffix budget math changed
+  - no known-pure helper allowlist changed
+  - no guarded-tail ownership acceptance changed
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `stmt_idx=154` blocker is now fixed as an internal unknown call boundary:
+  - `suffix-call-effect-shape stmt_idx=154 kind=VoidUnknownCall stmt=Expr(Call { target: "FUN_0x140043d30", args: [], ty: Unknown })`
+  - `suffix-unknown-call-provenance stmt_idx=154 target=FUN_0x140043d30 internal=true import=false summary_available=false`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=unknown writes_global=unknown may_call_unknown=true may_exit=unknown return_used=false`
+- the old known-pure helper path still does not apply:
+  - no `known-pure-helper-proof` trace fires for `FUN_0x140043d30`
+- the guarded-tail shell remains otherwise unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `stmt_idx=154` is not another allowlisted helper-call case
+- the remaining owner is a callee-provenance boundary, not a suffix-local helper proof miss
+- the next wave should source or derive call-effect summaries for `FUN_0x140043d30`, not broaden generic unknown-call acceptance
+
 ### Guarded-tail unknown call suffix diagnosis for `stmt_idx=154`
 
 This wave stayed diagnostic-only. It did not widen call-bearing suffix ownership. The goal was to classify the new `stmt_idx=154` blocker precisely and only emit proof-bit detail when the suffix call actually falls into the known-pure helper family.
