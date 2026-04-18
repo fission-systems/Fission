@@ -67,6 +67,17 @@ enum SuffixSideEffectShapeKind {
     UnknownSideEffect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuffixCallEffectShapeKind {
+    VoidUnknownCall,
+    ReturnValueIgnoredCall,
+    ReturnValueAssignedLocal,
+    PureKnownHelperCall,
+    MemoryMutatingCall,
+    ControlEffectCall,
+    UnknownCallEffect,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -433,6 +444,93 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn call_target_is_known_pure_helper(target: &str) -> bool {
+        matches!(
+            target,
+            "__popcount"
+                | "__popcount64"
+                | "__carry"
+                | "__scarry"
+                | "__sborrow"
+                | "__lzcnt"
+                | "__tzcnt"
+        )
+    }
+
+    fn call_target_is_memory_mutating(target: &str) -> bool {
+        let lowered = target.to_ascii_lowercase();
+        matches!(
+            lowered.as_str(),
+            "memcpy"
+                | "memmove"
+                | "memset"
+                | "strcpy"
+                | "strncpy"
+                | "strcat"
+                | "strncat"
+                | "wcscpy"
+                | "wcsncpy"
+                | "wmemcpy"
+                | "wmemmove"
+                | "wmemset"
+        )
+    }
+
+    fn call_target_is_control_effect(target: &str) -> bool {
+        let lowered = target.to_ascii_lowercase();
+        matches!(
+            lowered.as_str(),
+            "abort"
+                | "exit"
+                | "_exit"
+                | "panic"
+                | "__assert_fail"
+                | "longjmp"
+                | "_longjmp"
+                | "raiseexception"
+                | "__cxa_throw"
+        )
+    }
+
+    fn classify_suffix_call_effect_shape(stmt: &HirStmt) -> SuffixCallEffectShapeKind {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs:
+                    HirExpr::Call {
+                        target, args, ..
+                    },
+            }
+            | HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+                if Self::call_target_is_control_effect(target) {
+                    return SuffixCallEffectShapeKind::ControlEffectCall;
+                }
+                if Self::call_target_is_memory_mutating(target) {
+                    return SuffixCallEffectShapeKind::MemoryMutatingCall;
+                }
+                if Self::call_target_is_known_pure_helper(target)
+                    && args.iter().all(Self::expr_is_pure_value)
+                {
+                    return SuffixCallEffectShapeKind::PureKnownHelperCall;
+                }
+                match stmt {
+                    HirStmt::Assign { .. } => SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
+                    HirStmt::Expr(HirExpr::Call { ty, .. }) if matches!(ty, NirType::Unknown) => {
+                        SuffixCallEffectShapeKind::VoidUnknownCall
+                    }
+                    HirStmt::Expr(HirExpr::Call { .. }) => {
+                        SuffixCallEffectShapeKind::ReturnValueIgnoredCall
+                    }
+                    _ => SuffixCallEffectShapeKind::UnknownCallEffect,
+                }
+            }
+            HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => {
+                SuffixCallEffectShapeKind::UnknownCallEffect
+            }
+            _ => SuffixCallEffectShapeKind::UnknownCallEffect,
+        }
+    }
+
     fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str) -> bool {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
@@ -730,6 +828,15 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(());
         }
         if Self::guarded_tail_diag_enabled() {
+            if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
+                let call_kind = Self::classify_suffix_call_effect_shape(stmt);
+                eprintln!(
+                    "[GT-TRACE] suffix-call-effect-shape stmt_idx={} kind={:?} stmt={:?}",
+                    stmt_idx,
+                    call_kind,
+                    stmt
+                );
+            }
             eprintln!(
                 "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
                 stmt_idx,
@@ -3268,6 +3375,11 @@ mod owned_join_window_tests {
         assert_eq!(kind, expected);
     }
 
+    fn assert_suffix_call_effect_shape_kind(stmt: HirStmt, expected: SuffixCallEffectShapeKind) {
+        let kind = PreviewBuilder::classify_suffix_call_effect_shape(&stmt);
+        assert_eq!(kind, expected);
+    }
+
     fn assert_suffix_external_budget(
         body: &[HirStmt],
         label: &str,
@@ -3964,6 +4076,131 @@ mod owned_join_window_tests {
                 ty: NirType::Unknown,
             }),
             SuffixSideEffectShapeKind::CallExprSideEffect,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_void_unknown_call() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Call {
+                target: "helper".to_string(),
+                args: vec![],
+                ty: NirType::Unknown,
+            }),
+            SuffixCallEffectShapeKind::VoidUnknownCall,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_return_value_ignored_call() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Call {
+                target: "helper".to_string(),
+                args: vec![],
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }),
+            SuffixCallEffectShapeKind::ReturnValueIgnoredCall,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_return_value_assigned_local() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Call {
+                    target: "helper".to_string(),
+                    args: vec![HirExpr::Var("arg".to_string())],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_pure_known_helper_call() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__popcount".to_string(),
+                    args: vec![HirExpr::Var("value".to_string())],
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            SuffixCallEffectShapeKind::PureKnownHelperCall,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_memory_mutating_call() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Call {
+                target: "memcpy".to_string(),
+                args: vec![
+                    HirExpr::Var("dst".to_string()),
+                    HirExpr::Var("src".to_string()),
+                ],
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 8,
+                    signed: false,
+                })),
+            }),
+            SuffixCallEffectShapeKind::MemoryMutatingCall,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_control_effect_call() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Call {
+                target: "abort".to_string(),
+                args: vec![],
+                ty: NirType::Unknown,
+            }),
+            SuffixCallEffectShapeKind::ControlEffectCall,
+        );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_nested_call_as_unknown_effect() {
+        assert_suffix_call_effect_shape_kind(
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Call {
+                        target: "helper".to_string(),
+                        args: vec![],
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    }),
+                    rhs: Box::new(HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            SuffixCallEffectShapeKind::UnknownCallEffect,
         );
     }
 

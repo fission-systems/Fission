@@ -9,6 +9,57 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail call side-effect shape subtyping for `stmt_idx=138`
+
+This wave did not relax suffix ownership for calls. It only split the remaining `CallExprSideEffect` bucket into explicit call-effect families so the next owner can be chosen from a concrete call shape instead of a generic side-effect label.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `SuffixCallEffectShapeKind`
+  - `classify_suffix_call_effect_shape(...)`
+  - narrow target-family classifiers for:
+    - known pure helpers
+    - memory-mutating helpers
+    - control-effect helpers
+  - env-gated trace lines of the form:
+    - `suffix-call-effect-shape stmt_idx=... kind=... stmt={:?}`
+- focused synthetic coverage was added for:
+  - `VoidUnknownCall`
+  - `ReturnValueIgnoredCall`
+  - `ReturnValueAssignedLocal`
+  - `PureKnownHelperCall`
+  - `MemoryMutatingCall`
+  - `ControlEffectCall`
+  - `UnknownCallEffect`
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_call_effect_shape_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the current candidate-35 call blocker is now typed directly:
+  - `suffix-call-effect-shape stmt_idx=138 kind=PureKnownHelperCall`
+  - `stmt=Assign { lhs: Var("xVar124"), rhs: Call { target: "__popcount", args: [Var("xVar123")], ... } }`
+- the earlier prefix blocker is also separated from it:
+  - `suffix-call-effect-shape stmt_idx=58 kind=VoidUnknownCall`
+  - `stmt=Expr(Call { target: "FUN_0x1400d23a0", args: [], ty: Unknown })`
+- candidate 35 itself remains structurally unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+- the earlier-label blocker for the active suffix window still lands on the same call site:
+  - `early_label=block_14000701c first_fail=SuffixHasSideEffect { stmt_idx: 138 }`
+  - `early_label=block_140007021 first_fail=SuffixHasSideEffect { stmt_idx: 138 }`
+
+Conclusion:
+
+- `CallExprSideEffect` is no longer an opaque blocker family
+- the active call-bearing suffix owner is specifically a `PureKnownHelperCall` around `__popcount`, not an unknown mutating call
+- the next wave should decide whether a narrow known-pure-helper call can be internalized under suffix-owned constraints, not broaden generic call acceptance
+
 ### Guarded-tail read-only load/assign suffix internalization for `stmt_idx=130`
 
 This wave did not broaden generic side-effect acceptance. It only internalized one narrow suffix-owned subcase: a read-only load into a local variable can now remain inside the owned suffix window when its pointer is pure, its load type is known, and the resulting binding is only consumed in owned-safe contexts before the terminal join.
