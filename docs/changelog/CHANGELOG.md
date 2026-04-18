@@ -9,6 +9,49 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail suffix nonterminal-goto redirect closure for candidate-35 probing
+
+This wave targeted only `SuffixHasNonTerminalGoto`. It did not relax side effects, nested/nonlocal refs, or external-entry ownership. The guarded-tail suffix classifier now allows a very narrow redirect-closure subfamily: a top-level nonterminal `Goto(target)` may be treated as suffix-safe only when the target label is unique and its body closes through a trivial redirect chain to the next label or a terminal `return` sink.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `resolve_suffix_redirect_to_terminal(...)`
+  - a `classify_suffix_stmt(...)` fast path that accepts only:
+    - unique-label redirect chains
+    - ignorable / empty-block / pure-assign / pure-expr gaps
+    - a single trivial `goto` hop chain or terminal `return`
+  - continued fail-closed rejection for:
+    - side-effectful suffix payload
+    - nested or nonlocal ref shapes
+    - external-entry labels
+    - loop / switch / break / continue crossings
+- the same file adds focused coverage for:
+  - `goto -> trivial label hop -> next_label`
+  - `goto -> pure gap -> goto -> terminal return`
+  - unchanged negative coverage for ambiguous target, external entry, nested refs, and loop/switch crossings
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `cargo test -p fission-automation`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- synthetic suffix redirect-closure cases now pass
+- but real `candidate 35` does not move:
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+  - `block_14000701c` still reports `SuffixHasNonTerminalGoto { stmt_idx: 112, target: "block_140007047" }`
+- this means the earlier-label blocker is not “redirect closure missing” in the trivial sense; the offending goto already closes to the current terminal join and still does not make the suffix non-owned
+
+Conclusion:
+
+- the new redirect-closure helper is correct but not sufficient for `candidate 35`
+- the next owner is not generic nonterminal-goto acceptance
+- the next owner is the larger ownership proof around the terminal-join suffix for `block_140007047`
+
 ### Guarded-tail suffix-safe rejection subtyping for `candidate 35`
 
 This wave did not broaden acceptance. It split `suffix_is_nonowned_terminal_tail(...)` into a diagnostic `Result` contract so the candidate-35 owned-window probe can report *why* `suffix_safe=false` instead of only reporting that it failed.
