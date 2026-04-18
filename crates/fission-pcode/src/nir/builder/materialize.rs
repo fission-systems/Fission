@@ -92,6 +92,24 @@ struct CrossBlockReplacementProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CrossBlockRedefinitionRelation {
+    RedefinedInDefBlockAfterDef,
+    RedefinedOnEdge,
+    RedefinedInConsumerBlockBeforeUse,
+    RedefinedInSiblingPredecessor,
+    PhiRedefinition,
+    LoopCarriedRedefinition,
+    UnknownRedefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CrossBlockRedefinitionDetail {
+    relation: CrossBlockRedefinitionRelation,
+    redef_block_addr: u64,
+    redef_op_seq: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AliasUnsafeHazard {
     kind: AliasUnsafeHazardKind,
     use_stmt_idx: Option<usize>,
@@ -1424,11 +1442,19 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Option<(usize, &'b PcodeOp)> {
+        Self::first_output_redefinition_in_block_from(block, op_idx + 1, output)
+    }
+
+    fn first_output_redefinition_in_block_from<'b>(
+        block: &'b crate::pcode::PcodeBasicBlock,
+        start_idx: usize,
+        output: &Varnode,
+    ) -> Option<(usize, &'b PcodeOp)> {
         let key = VarnodeKey::from(output);
         block.ops
             .iter()
             .enumerate()
-            .skip(op_idx + 1)
+            .skip(start_idx)
             .find(|(_, candidate)| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
     }
 
@@ -1649,6 +1675,23 @@ impl<'a> PreviewBuilder<'a> {
                 proof.merge_phi,
                 proof.narrow_candidate,
             ));
+            if let Some(redef) =
+                self.describe_cross_block_redefinition_detail(block, op_idx, output, provenance.0)
+            {
+                self.emit_ready_trace(format!(
+                    "cross-block-redefinition output=space:{} off:0x{:x} size:{} def_block=0x{:x} consumer_block={} relation={:?} redef_block=0x{:x} redef_op_seq={} redef_relation={:?} consumer_op_seq={}",
+                    output.space_id,
+                    output.offset,
+                    output.size,
+                    block.start_address,
+                    consumer_block,
+                    proof.relation,
+                    redef.redef_block_addr,
+                    redef.redef_op_seq,
+                    redef.relation,
+                    consumer_op_seq,
+                ));
+            }
         }
     }
 
@@ -1753,6 +1796,149 @@ impl<'a> PreviewBuilder<'a> {
             narrow_candidate,
             consumer_opcode: provenance.consumer_opcode,
         })
+    }
+
+    fn describe_cross_block_redefinition_detail(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        consumer_block_addr: Option<u64>,
+    ) -> Option<CrossBlockRedefinitionDetail> {
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let consumer_block_addr = consumer_block_addr?;
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let (consumer_idx, consumer_op) = consumer_block
+            .ops
+            .iter()
+            .enumerate()
+            .find(|(_, candidate)| {
+                candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
+            })?;
+
+        if let Some((_, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output) {
+            return Some(CrossBlockRedefinitionDetail {
+                relation: CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef,
+                redef_block_addr: block.start_address,
+                redef_op_seq: redef_op.seq_num,
+            });
+        }
+
+        if let Some((redef_idx, redef_op)) =
+            Self::first_output_redefinition_in_block_from(consumer_block, 0, output)
+        {
+            if redef_idx < consumer_idx {
+                return Some(CrossBlockRedefinitionDetail {
+                    relation: CrossBlockRedefinitionRelation::RedefinedInConsumerBlockBeforeUse,
+                    redef_block_addr: consumer_block.start_address,
+                    redef_op_seq: redef_op.seq_num,
+                });
+            }
+        }
+
+        if consumer_op.opcode == PcodeOpcode::MultiEqual {
+            if let Some((pred_block_addr, redef_op_seq)) = self
+                .predecessors
+                .get(consumer_block_idx)
+                .into_iter()
+                .flat_map(|preds| preds.iter())
+                .filter(|pred_idx| **pred_idx != def_block_idx)
+                .find_map(|pred_idx| {
+                    self.pcode.blocks.get(*pred_idx).and_then(|pred_block| {
+                        Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                            .map(|(_, op)| (pred_block.start_address, op.seq_num))
+                    })
+                })
+            {
+                return Some(CrossBlockRedefinitionDetail {
+                    relation: CrossBlockRedefinitionRelation::PhiRedefinition,
+                    redef_block_addr: pred_block_addr,
+                    redef_op_seq,
+                });
+            }
+        }
+
+        if self.dom_tree.dominates(consumer_block_idx, def_block_idx) {
+            if let Some((redef_block_addr, redef_op_seq)) = self
+                .predecessors
+                .get(consumer_block_idx)
+                .into_iter()
+                .flat_map(|preds| preds.iter())
+                .find_map(|pred_idx| {
+                    self.pcode.blocks.get(*pred_idx).and_then(|pred_block| {
+                        Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                            .map(|(_, op)| (pred_block.start_address, op.seq_num))
+                    })
+                })
+            {
+                return Some(CrossBlockRedefinitionDetail {
+                    relation: CrossBlockRedefinitionRelation::LoopCarriedRedefinition,
+                    redef_block_addr,
+                    redef_op_seq,
+                });
+            }
+        }
+
+        if let Some((edge_block_addr, redef_op_seq)) = self
+            .successors
+            .get(def_block_idx)
+            .into_iter()
+            .flat_map(|succs| succs.iter())
+            .filter(|succ_idx| **succ_idx != consumer_block_idx)
+            .find_map(|succ_idx| {
+                self.pcode.blocks.get(*succ_idx).and_then(|succ_block| {
+                    Self::first_output_redefinition_in_block_from(succ_block, 0, output)
+                        .map(|(_, op)| (succ_block.start_address, op.seq_num))
+                })
+            })
+        {
+            return Some(CrossBlockRedefinitionDetail {
+                relation: CrossBlockRedefinitionRelation::RedefinedOnEdge,
+                redef_block_addr: edge_block_addr,
+                redef_op_seq,
+            });
+        }
+
+        if let Some((pred_block_addr, redef_op_seq)) = self
+            .predecessors
+            .get(consumer_block_idx)
+            .into_iter()
+            .flat_map(|preds| preds.iter())
+            .filter(|pred_idx| **pred_idx != def_block_idx)
+            .find_map(|pred_idx| {
+                self.pcode.blocks.get(*pred_idx).and_then(|pred_block| {
+                    Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                        .map(|(_, op)| (pred_block.start_address, op.seq_num))
+                })
+            })
+        {
+            return Some(CrossBlockRedefinitionDetail {
+                relation: CrossBlockRedefinitionRelation::RedefinedInSiblingPredecessor,
+                redef_block_addr: pred_block_addr,
+                redef_op_seq,
+            });
+        }
+
+        self.pcode
+            .blocks
+            .iter()
+            .filter(|candidate| {
+                candidate.start_address != block.start_address
+                    && candidate.start_address != consumer_block_addr
+            })
+            .find_map(|candidate| {
+                Self::first_output_redefinition_in_block_from(candidate, 0, output).map(|(_, op)| {
+                    CrossBlockRedefinitionDetail {
+                        relation: CrossBlockRedefinitionRelation::UnknownRedefinition,
+                        redef_block_addr: candidate.start_address,
+                        redef_op_seq: op.seq_num,
+                    }
+                })
+            })
     }
 
     fn collect_output_use_sites_outside_block(
@@ -2564,6 +2750,76 @@ mod tests {
         assert!(proof.dominates_consumer);
         assert!(proof.rhs_low_cost);
         assert!(proof.no_redefinition_before_consumer);
+    }
+
+    #[test]
+    fn cross_block_redefinition_marks_def_block_after_def() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(2, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
+            .expect("cross-block redefinition");
+
+        assert_eq!(
+            redef.relation,
+            CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef
+        );
+        assert_eq!(redef.redef_block_addr, 0x1000);
+        assert_eq!(redef.redef_op_seq, 1);
+    }
+
+    #[test]
+    fn cross_block_redefinition_marks_consumer_block_before_use() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)])],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
+                    op(2, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
+            .expect("cross-block redefinition");
+
+        assert_eq!(
+            redef.relation,
+            CrossBlockRedefinitionRelation::RedefinedInConsumerBlockBeforeUse
+        );
+        assert_eq!(redef.redef_block_addr, 0x1010);
+        assert_eq!(redef.redef_op_seq, 1);
     }
 
     #[test]

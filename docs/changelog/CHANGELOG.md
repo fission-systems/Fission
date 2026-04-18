@@ -9,6 +9,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Redefinition-aware cross-block provenance
+
+This wave stayed diagnostic-only. It did not widen cross-block replacement, relax redefinition guards, or synthesize merge bindings. The goal was to split `no_redefinition_before_consumer=false` into deterministic provenance families so `0x140006c20` could be judged on a concrete redefinition owner instead of a single boolean.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now adds a dedicated redefinition trace below the existing proof trace:
+  - `cross-block-redefinition output=... def_block=... consumer_block=... relation=... redef_block=... redef_op_seq=... redef_relation=... consumer_op_seq=...`
+- the redefinition vocabulary is now explicit:
+  - `RedefinedInDefBlockAfterDef`
+  - `RedefinedOnEdge`
+  - `RedefinedInConsumerBlockBeforeUse`
+  - `RedefinedInSiblingPredecessor`
+  - `PhiRedefinition`
+  - `LoopCarriedRedefinition`
+  - `UnknownRedefinition`
+- unit coverage now pins the two lowest-risk synthetic owners:
+  - def-block post-definition redefinition
+  - consumer-block pre-use redefinition
+
+Validation:
+
+- `cargo test -p fission-pcode cross_block_redefinition_marks_def_block_after_def --lib -- --test-threads=1`
+- `cargo test -p fission-pcode cross_block_redefinition_marks_consumer_block_before_use --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140006c20` no longer has an ambiguous redefinition owner:
+  - `RedefinedInDefBlockAfterDef = 192`
+  - no observed `RedefinedOnEdge`, `RedefinedInConsumerBlockBeforeUse`, `RedefinedInSiblingPredecessor`, `PhiRedefinition`, or `LoopCarriedRedefinition` cases in the targeted run
+- the outer cross-block families stay the same:
+  - `LoopBackedge = 156`
+  - `SuccessorBlock = 24`
+  - `PostDominatorBlock = 12`
+- but every live redefinition-backed case resolves to a same-block overwrite inside the defining block:
+  - `LoopBackedge x RedefinedInDefBlockAfterDef = 156`
+  - `SuccessorBlock x RedefinedInDefBlockAfterDef = 24`
+  - `PostDominatorBlock x RedefinedInDefBlockAfterDef = 12`
+- representative examples on `0x140006c20` are concrete:
+  - `relation=SuccessorBlock`, `redef_block=0x140006c40`, `redef_op_seq=25`, `redef_relation=RedefinedInDefBlockAfterDef`
+  - `relation=PostDominatorBlock`, `redef_block=0x140006c40`, `redef_op_seq=26`, `redef_relation=RedefinedInDefBlockAfterDef`
+  - `relation=SuccessorBlock`, `redef_block=0x140006c40`, `redef_op_seq=27`, `redef_relation=RedefinedInDefBlockAfterDef`
+
+Conclusion:
+
+- `0x140006c20` is not blocked by an edge/sibling/consumer-block ambiguity
+- the next owner is not broad cross-block acceptance
+- the real blocker is same-block overwrite inside the defining block, so the next algorithmic choice is:
+  - redefinition-aware block splitting / def-window refinement for `SuccessorBlock` and `PostDominatorBlock`
+  - or leaving these cases fail-closed and shifting focus to merge/loopback ownership elsewhere
+
 ### Cross-block replacement proof tracing
 
 This wave stayed diagnostic-only. It did not enable cross-block propagation, synthesize merge bindings, or relax malformed def/use handling. The goal was to layer a narrow replacement-proof trace on top of the existing `ConsumerInDifferentBlock` provenance so `0x140006c20` could be judged as a real single-successor candidate or rejected on explicit evidence.
