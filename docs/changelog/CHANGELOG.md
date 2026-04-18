@@ -9,6 +9,47 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail suffix side-effect shape subtyping for `stmt_idx=130`
+
+This wave did not broaden suffix ownership. It only split the remaining `SuffixHasSideEffect` bucket into explicit side-effect families so the next owner can be chosen from a concrete semantic shape instead of a generic side-effect label.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `SuffixSideEffectShapeKind`
+  - `classify_suffix_side_effect_shape(...)`
+  - env-gated trace lines of the form:
+    - `suffix-side-effect-shape stmt_idx=... kind=... stmt={:?}`
+- focused synthetic coverage was added for:
+  - `MemoryReadOnlyAssign`
+  - `CallExprSideEffect`
+  - `MemoryWrite`
+  - `VolatileOrUnknownLoad`
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_side_effect_shape_ -- --nocapture`
+- `cargo test -p fission-pcode nested_terminal_join_tail -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the current blocker for candidate 35 is now typed directly:
+  - `suffix-side-effect-shape stmt_idx=130 kind=MemoryReadOnlyAssign`
+  - `stmt=Assign { lhs: Var("xVar116"), rhs: Load { ptr: Var("xVar43"), ... } }`
+- the earlier side-effect blocker is also split:
+  - `suffix-side-effect-shape stmt_idx=58 kind=CallExprSideEffect`
+- the candidate shell still remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- the active owner is no longer generic side-effect classification
+- the next owner is a narrow read-only load/assign suffix segment around `stmt_idx=130`
+- the next wave should evaluate whether `MemoryReadOnlyAssign` can be internalized as suffix-owned under alias-safe, non-volatile constraints, not broaden generic side-effect acceptance
+
 ### Guarded-tail nested terminal-join tail internalization for `stmt_idx=120`
 
 This wave did not broaden generic nested conditional acceptance. It only internalized one narrow guarded-tail subtype: a single-branch nested `if` that jumps directly to the current terminal join can now be treated as suffix-owned when its guard belongs to the same terminal guard family already proven inside the suffix window.

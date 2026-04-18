@@ -55,6 +55,18 @@ enum NestedSuffixShapeKind {
     NestedUnknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuffixSideEffectShapeKind {
+    PureRegisterAssign,
+    PureTempAssign,
+    MemoryReadOnlyAssign,
+    CallExprSideEffect,
+    MemoryWrite,
+    VolatileOrUnknownLoad,
+    CompoundAssignOrPhiLike,
+    UnknownSideEffect,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -332,6 +344,95 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn expr_contains_load(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Load { .. } => true,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => Self::expr_contains_load(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_contains_load(lhs) || Self::expr_contains_load(rhs)
+            }
+            HirExpr::Call { args, .. } => args.iter().any(Self::expr_contains_load),
+            HirExpr::PtrOffset { base, .. } => Self::expr_contains_load(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_contains_load(base) || Self::expr_contains_load(index)
+            }
+            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
+    fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Call { .. } => true,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => Self::suffix_expr_contains_call(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::suffix_expr_contains_call(lhs) || Self::suffix_expr_contains_call(rhs)
+            }
+            HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+                Self::suffix_expr_contains_call(ptr)
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::suffix_expr_contains_call(base) || Self::suffix_expr_contains_call(index)
+            }
+            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
+    fn classify_suffix_side_effect_shape(stmt: &HirStmt) -> SuffixSideEffectShapeKind {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. } | HirLValue::Index { .. },
+                ..
+            } => SuffixSideEffectShapeKind::MemoryWrite,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if Self::expr_is_pure_value(rhs) => match rhs {
+                HirExpr::Var(_) => SuffixSideEffectShapeKind::PureTempAssign,
+                _ => SuffixSideEffectShapeKind::PureRegisterAssign,
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs:
+                    HirExpr::Load {
+                        ptr,
+                        ..
+                    },
+            } if Self::expr_is_pure_value(ptr) => SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if Self::suffix_expr_contains_call(rhs) => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if Self::expr_contains_load(rhs) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if Self::expr_contains_var(rhs, name) || matches!(rhs, HirExpr::AggregateCopy { .. }) => {
+                SuffixSideEffectShapeKind::CompoundAssignOrPhiLike
+            }
+            HirStmt::Expr(HirExpr::Call { .. }) | HirStmt::VaStart { .. } => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Expr(HirExpr::Load { .. }) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+            HirStmt::Expr(expr) if Self::suffix_expr_contains_call(expr) => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Expr(expr) if Self::expr_contains_load(expr) => {
+                SuffixSideEffectShapeKind::VolatileOrUnknownLoad
+            }
+            HirStmt::Assign { .. } => SuffixSideEffectShapeKind::UnknownSideEffect,
+            _ => SuffixSideEffectShapeKind::UnknownSideEffect,
+        }
+    }
+
     fn resolve_suffix_redirect_to_terminal(
         body: &[HirStmt],
         target_label: &str,
@@ -503,6 +604,15 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+        }
+        if Self::guarded_tail_diag_enabled() {
+            let kind = Self::classify_suffix_side_effect_shape(stmt);
+            eprintln!(
+                "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
+                stmt_idx,
+                kind,
+                stmt
+            );
         }
         Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
     }
@@ -3027,6 +3137,14 @@ mod owned_join_window_tests {
         assert_eq!(kind, expected);
     }
 
+    fn assert_suffix_side_effect_shape_kind(
+        stmt: HirStmt,
+        expected: SuffixSideEffectShapeKind,
+    ) {
+        let kind = PreviewBuilder::classify_suffix_side_effect_shape(&stmt);
+        assert_eq!(kind, expected);
+    }
+
     fn assert_suffix_external_budget(
         body: &[HirStmt],
         label: &str,
@@ -3694,6 +3812,73 @@ mod owned_join_window_tests {
             3,
             "next",
             SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_side_effect_shape_classifies_memory_read_only_assign() {
+        assert_suffix_side_effect_shape_kind(
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar116".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("xVar43".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
+        );
+    }
+
+    #[test]
+    fn suffix_side_effect_shape_classifies_call_expr_side_effect() {
+        assert_suffix_side_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Call {
+                target: "helper".to_string(),
+                args: vec![],
+                ty: NirType::Unknown,
+            }),
+            SuffixSideEffectShapeKind::CallExprSideEffect,
+        );
+    }
+
+    #[test]
+    fn suffix_side_effect_shape_classifies_memory_write() {
+        assert_suffix_side_effect_shape_kind(
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+                rhs: HirExpr::Var("value".to_string()),
+            },
+            SuffixSideEffectShapeKind::MemoryWrite,
+        );
+    }
+
+    #[test]
+    fn suffix_side_effect_shape_classifies_volatile_or_unknown_load() {
+        assert_suffix_side_effect_shape_kind(
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Call {
+                    target: "addr_provider".to_string(),
+                    args: vec![],
+                    ty: NirType::Ptr(Box::new(NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    })),
+                }),
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+            }),
+            SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
         );
     }
 
