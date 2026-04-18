@@ -107,6 +107,32 @@ struct CrossBlockRedefinitionDetail {
     relation: CrossBlockRedefinitionRelation,
     redef_block_addr: u64,
     redef_op_seq: u32,
+    redef_opcode: PcodeOpcode,
+    redef_rhs_kind: SameBlockOverwriteRhsKind,
+    overwrite_shape: SameBlockOverwriteShapeKind,
+    def_to_redef_gap: usize,
+    redef_to_terminator_gap: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SameBlockOverwriteShapeKind {
+    OverwriteBeforeBranch,
+    OverwriteAtPredicateProducer,
+    OverwriteAtLoopUpdate,
+    OverwriteAtCallResult,
+    OverwriteAtLoadResult,
+    OverwriteAtCopy,
+    OverwriteUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SameBlockOverwriteRhsKind {
+    CopyLike,
+    Predicate,
+    Arithmetic,
+    Load,
+    Call,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1679,17 +1705,29 @@ impl<'a> PreviewBuilder<'a> {
                 self.describe_cross_block_redefinition_detail(block, op_idx, output, provenance.0)
             {
                 self.emit_ready_trace(format!(
-                    "cross-block-redefinition output=space:{} off:0x{:x} size:{} def_block=0x{:x} consumer_block={} relation={:?} redef_block=0x{:x} redef_op_seq={} redef_relation={:?} consumer_op_seq={}",
+                    "cross-block-redefinition output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_block={} relation={:?} redef_block=0x{:x} redef_op_seq={} redef_opcode={:?} redef_rhs_kind={:?} overwrite_shape={:?} redef_relation={:?} consumer_op_seq={} terminator_idx={} def_to_redef_gap={} redef_to_terminator_gap={}",
                     output.space_id,
                     output.offset,
                     output.size,
                     block.start_address,
+                    block.ops[op_idx].seq_num,
                     consumer_block,
                     proof.relation,
                     redef.redef_block_addr,
                     redef.redef_op_seq,
+                    redef.redef_opcode,
+                    redef.redef_rhs_kind,
+                    redef.overwrite_shape,
                     redef.relation,
                     consumer_op_seq,
+                    self.block_terminator_index(block)
+                        .map(|idx| idx.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    redef.def_to_redef_gap,
+                    redef
+                        .redef_to_terminator_gap
+                        .map(|gap| gap.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
                 ));
             }
         }
@@ -1819,12 +1857,28 @@ impl<'a> PreviewBuilder<'a> {
                     .iter()
                     .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
             })?;
+        let consumer_relation = self
+            .describe_cross_block_consumer_provenance(block, op_idx, output)
+            .map(|(_, _, provenance)| provenance.relation)
+            .unwrap_or(CrossBlockConsumerRelation::UnreachableOrUnclassified);
 
-        if let Some((_, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output) {
+        let terminator_idx = self.block_terminator_index(block);
+
+        if let Some((redef_idx, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output) {
             return Some(CrossBlockRedefinitionDetail {
                 relation: CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef,
                 redef_block_addr: block.start_address,
                 redef_op_seq: redef_op.seq_num,
+                redef_opcode: redef_op.opcode,
+                redef_rhs_kind: Self::classify_same_block_overwrite_rhs_kind(redef_op.opcode),
+                overwrite_shape: Self::classify_same_block_overwrite_shape(
+                    consumer_relation,
+                    redef_idx,
+                    redef_op.opcode,
+                    terminator_idx,
+                ),
+                def_to_redef_gap: redef_idx.saturating_sub(op_idx),
+                redef_to_terminator_gap: terminator_idx.map(|term| term.saturating_sub(redef_idx)),
             });
         }
 
@@ -1836,6 +1890,13 @@ impl<'a> PreviewBuilder<'a> {
                     relation: CrossBlockRedefinitionRelation::RedefinedInConsumerBlockBeforeUse,
                     redef_block_addr: consumer_block.start_address,
                     redef_op_seq: redef_op.seq_num,
+                    redef_opcode: redef_op.opcode,
+                    redef_rhs_kind: Self::classify_same_block_overwrite_rhs_kind(redef_op.opcode),
+                    overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
+                    def_to_redef_gap: redef_idx,
+                    redef_to_terminator_gap: self
+                        .block_terminator_index(consumer_block)
+                        .map(|term| term.saturating_sub(redef_idx)),
                 });
             }
         }
@@ -1858,6 +1919,11 @@ impl<'a> PreviewBuilder<'a> {
                     relation: CrossBlockRedefinitionRelation::PhiRedefinition,
                     redef_block_addr: pred_block_addr,
                     redef_op_seq,
+                    redef_opcode: PcodeOpcode::MultiEqual,
+                    redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
+                    overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
+                    def_to_redef_gap: 0,
+                    redef_to_terminator_gap: None,
                 });
             }
         }
@@ -1879,6 +1945,11 @@ impl<'a> PreviewBuilder<'a> {
                     relation: CrossBlockRedefinitionRelation::LoopCarriedRedefinition,
                     redef_block_addr,
                     redef_op_seq,
+                    redef_opcode: PcodeOpcode::MultiEqual,
+                    redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
+                    overwrite_shape: SameBlockOverwriteShapeKind::OverwriteAtLoopUpdate,
+                    def_to_redef_gap: 0,
+                    redef_to_terminator_gap: None,
                 });
             }
         }
@@ -1900,6 +1971,11 @@ impl<'a> PreviewBuilder<'a> {
                 relation: CrossBlockRedefinitionRelation::RedefinedOnEdge,
                 redef_block_addr: edge_block_addr,
                 redef_op_seq,
+                redef_opcode: PcodeOpcode::Copy,
+                redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
+                overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
+                def_to_redef_gap: 0,
+                redef_to_terminator_gap: None,
             });
         }
 
@@ -1920,6 +1996,11 @@ impl<'a> PreviewBuilder<'a> {
                 relation: CrossBlockRedefinitionRelation::RedefinedInSiblingPredecessor,
                 redef_block_addr: pred_block_addr,
                 redef_op_seq,
+                redef_opcode: PcodeOpcode::Copy,
+                redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
+                overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
+                def_to_redef_gap: 0,
+                redef_to_terminator_gap: None,
             });
         }
 
@@ -1936,9 +2017,94 @@ impl<'a> PreviewBuilder<'a> {
                         relation: CrossBlockRedefinitionRelation::UnknownRedefinition,
                         redef_block_addr: candidate.start_address,
                         redef_op_seq: op.seq_num,
+                        redef_opcode: op.opcode,
+                        redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
+                        overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
+                        def_to_redef_gap: 0,
+                        redef_to_terminator_gap: None,
                     }
                 })
             })
+    }
+
+    fn classify_same_block_overwrite_rhs_kind(opcode: PcodeOpcode) -> SameBlockOverwriteRhsKind {
+        match opcode {
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt => SameBlockOverwriteRhsKind::CopyLike,
+            PcodeOpcode::Load => SameBlockOverwriteRhsKind::Load,
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                SameBlockOverwriteRhsKind::Call
+            }
+            PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor => SameBlockOverwriteRhsKind::Predicate,
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr => SameBlockOverwriteRhsKind::Arithmetic,
+            _ => SameBlockOverwriteRhsKind::Unknown,
+        }
+    }
+
+    fn classify_same_block_overwrite_shape(
+        consumer_relation: CrossBlockConsumerRelation,
+        redef_idx: usize,
+        redef_opcode: PcodeOpcode,
+        terminator_idx: Option<usize>,
+    ) -> SameBlockOverwriteShapeKind {
+        if consumer_relation == CrossBlockConsumerRelation::LoopBackedge {
+            return SameBlockOverwriteShapeKind::OverwriteAtLoopUpdate;
+        }
+        match redef_opcode {
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                return SameBlockOverwriteShapeKind::OverwriteAtCallResult;
+            }
+            PcodeOpcode::Load => return SameBlockOverwriteShapeKind::OverwriteAtLoadResult,
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt => return SameBlockOverwriteShapeKind::OverwriteAtCopy,
+            PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor => {
+                return SameBlockOverwriteShapeKind::OverwriteAtPredicateProducer;
+            }
+            _ => {}
+        }
+        if terminator_idx.is_some_and(|term_idx| redef_idx < term_idx) {
+            SameBlockOverwriteShapeKind::OverwriteBeforeBranch
+        } else {
+            SameBlockOverwriteShapeKind::OverwriteUnknown
+        }
     }
 
     fn collect_output_use_sites_outside_block(

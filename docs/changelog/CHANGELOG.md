@@ -9,6 +9,72 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Same-block overwrite window refinement
+
+This wave stayed diagnostic-only. It did not widen cross-block replacement, relax alias safety, or change the active materialization policy. The goal was to split the now-dominant `RedefinedInDefBlockAfterDef` family into concrete same-block overwrite shapes so `0x140006c20` could be judged on a real def-window owner instead of a single redefinition label.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now extends the existing `cross-block-redefinition` trace with overwrite-local detail:
+  - `def_op_seq`
+  - `redef_opcode`
+  - `redef_rhs_kind`
+  - `overwrite_shape`
+  - `terminator_idx`
+  - `def_to_redef_gap`
+  - `redef_to_terminator_gap`
+- same-block overwrite shape is now classified into a deterministic internal vocabulary:
+  - `OverwriteBeforeBranch`
+  - `OverwriteAtPredicateProducer`
+  - `OverwriteAtLoopUpdate`
+  - `OverwriteAtCallResult`
+  - `OverwriteAtLoadResult`
+  - `OverwriteAtCopy`
+  - `OverwriteUnknown`
+- overwrite RHS kind is now surfaced alongside the shape:
+  - `CopyLike`
+  - `Predicate`
+  - `Arithmetic`
+  - `Load`
+  - `Call`
+  - `Unknown`
+
+Validation:
+
+- `cargo test -p fission-pcode cross_block_redefinition_marks_def_block_after_def --lib -- --test-threads=1`
+- `cargo test -p fission-pcode cross_block_redefinition_marks_consumer_block_before_use --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140006c20` still resolves every live redefinition-backed cross-block case to the same owning family:
+  - `RedefinedInDefBlockAfterDef = 192`
+- but that family is no longer opaque. The same-block overwrite split is now explicit:
+  - `OverwriteAtLoopUpdate = 156`
+  - `OverwriteAtPredicateProducer = 24`
+  - `OverwriteAtCopy = 12`
+- the overwrite RHS split shows the same pattern from a second angle:
+  - `Predicate = 132`
+  - `Unknown = 48`
+  - `CopyLike = 12`
+- relation and overwrite shape now line up deterministically on the targeted row:
+  - `LoopBackedge x OverwriteAtLoopUpdate = 156`
+  - `SuccessorBlock x OverwriteAtPredicateProducer = 12`
+  - `SuccessorBlock x OverwriteAtCopy = 12`
+  - `PostDominatorBlock x OverwriteAtPredicateProducer = 12`
+- a representative successor case is now concrete instead of generic:
+  - `relation=SuccessorBlock`, `redef_opcode=Copy`, `redef_rhs_kind=CopyLike`, `overwrite_shape=OverwriteAtCopy`, `def_to_redef_gap=18`, `redef_to_terminator_gap=9`
+
+Conclusion:
+
+- `0x140006c20` is not primarily blocked by generic cross-block consumers anymore
+- the dominant owner is same-block overwrite inside the defining block
+- the next release owner is not broad cross-block replacement
+- the likely next algorithmic split is:
+  - loop-carried / merge-boundary ownership for `OverwriteAtLoopUpdate`
+  - predicate refresh / guard-boundary ownership for `OverwriteAtPredicateProducer`
+  - only after that, reconsider whether the small `OverwriteAtCopy` slice is a safe def-window refinement target
+
 ### Redefinition-aware cross-block provenance
 
 This wave stayed diagnostic-only. It did not widen cross-block replacement, relax redefinition guards, or synthesize merge bindings. The goal was to split `no_redefinition_before_consumer=false` into deterministic provenance families so `0x140006c20` could be judged on a concrete redefinition owner instead of a single boolean.
