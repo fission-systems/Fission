@@ -9,6 +9,73 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### NoConsumer suppression regression attribution
+
+This wave changed the release path back to fail-closed while keeping the new regression-attribution diagnostics alive. The earlier `UnknownNoConsumerFound` suppression policy turned out to be too broad for release quality: it removed many dead-looking `UNIQUE` representatives, but same-axis `putty` limit50 still regressed and even pulled `0x140008900` into the failed row gate set. The active path now leaves those candidates materialized by default again unless an explicit env gate is enabled for experiment-only runs.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now treats the no-consumer suppression policy as opt-in:
+  - `FISSION_ENABLE_NO_CONSUMER_SUPPRESSION=1|true|yes` is required to actually suppress
+  - default release-path behavior is to keep the binding and trace it as a suppression candidate
+- the builder now emits a dedicated attribution line for every release-path suppression candidate:
+  - `no-consumer-suppression-detail output=... rhs_kind=... block_position=... output_kind=... applied=...`
+- the keep vocabulary gained an explicit rollback reason:
+  - `SuppressionDisabled`
+- this preserves the regression triage surface without leaving the over-broad suppression policy active on `main`
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_ENABLE_NO_CONSUMER_SUPPRESSION=0 FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008900 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008900 --engine nir --profile nir --ghidra-compat`
+- `FISSION_ENABLE_NO_CONSUMER_SUPPRESSION=0 FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --limit 50 --pairwise-similarity-mode shared-full --fission-bin target/debug/fission_cli --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC --output-dir artifacts/batch_benchmark/putty-no-consumer-regression-attribution-limit50 --baseline-dir artifacts/batch_benchmark/putty-builder-provenance-wave`
+
+Observed state:
+
+- the active path is no longer suppressing `UnknownNoConsumerFound` residues by default:
+  - `0x140008900`:
+    - `suppression_candidate=1785`
+    - `no-consumer-suppression-detail=1785`
+    - `no-consumer-kept=2207`
+    - no live `no-consumer-suppressed` events on the default path
+  - `0x140008090`:
+    - `suppression_candidate=1686`
+    - `no-consumer-suppression-detail=1686`
+    - `no-consumer-kept=2137`
+    - no live `no-consumer-suppressed` events on the default path
+- the new regression-attribution dimensions show that the reverted suppression family is still dominated by trivial temp materialization, not named/local surfaced values:
+  - `0x140008900` suppression candidates:
+    - `rhs_kind`: `Const=1734`, `Var=43`, `Cast=8`
+    - `block_position`: `PreBranch=1621`, `PredicateAdjacent=98`, `MergeAdjacent=50`, `Local=16`
+    - `output_kind`: `TempOnly=1785`
+  - `0x140008090` suppression candidates:
+    - `rhs_kind`: `Const=1665`, `Var=21`
+    - `block_position`: `PreBranch=1588`, `PredicateAdjacent=56`, `MergeAdjacent=42`
+    - `output_kind`: `TempOnly=1686`
+
+Benchmark result:
+
+- same-axis `putty` limit50 remains below the accepted baseline, but the rollback does remove the extra `0x140008900` regression introduced by the broad suppression wave
+- current aggregate:
+  - `avg_normalized_similarity = 38.74` vs baseline `38.82`
+- row gate still fails for:
+  - `0x140008090 = 35.28` vs baseline `35.63`
+  - `0x140006c20` vs baseline `40.52`
+  - `0x140006fe0` vs baseline `34.76`
+- rows now back above baseline or non-worse on this axis include:
+  - `0x140001160 = 32.39`
+  - `0x140008900 = 23.97`
+  - `0x140007da0 = 34.60`
+- semantic guardrails stayed aligned with the accepted shape:
+  - `unsupported_indirect_control_count = 1`
+  - `dispatcher_shape_recovered_count = 12`
+
+Conclusion:
+
+- the broad `UnknownNoConsumerFound` suppression policy should remain off on the release path
+- its diagnostic surface is still useful, and the new attribution proves the dominant reverted family is mostly constant/temp-only pre-branch materialization
+- the next release owner is not broad no-consumer suppression; it is row-level representative/materialization stability on `0x140008090`, `0x140006c20`, and `0x140006fe0`
+
 ### NoConsumerFound dead materialization suppression
 
 This wave changed behavior. It no longer kept every `UnknownNoConsumerFound` representative materialized by default. The policy was narrowed to suppress only builder-local dead-ish residues whose replacement stop was already `AliasUnsafe`, but whose live diagnostic profile showed no same-block use, no cross-block use, no merge use, no debug use, no legacy-inline eligibility, no preservation requirement, no side-effectful RHS, and a `UNIQUE`-space output.

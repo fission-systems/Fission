@@ -114,6 +114,7 @@ enum NoConsumerMaterializationDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoConsumerMaterializationKeepReason {
     NotUnknownNoConsumerFound,
+    SuppressionDisabled,
     StateVisibleOutput,
     SameBlockConsumerPresent,
     CrossBlockConsumerPresent,
@@ -123,6 +124,36 @@ enum NoConsumerMaterializationKeepReason {
     LegacyInlineCandidate,
     PreserveMaterialization,
     RhsSideEffectful,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoConsumerSuppressionRhsKind {
+    Var,
+    Const,
+    Cast,
+    Unary,
+    Binary,
+    Load,
+    Call,
+    Aggregate,
+    PtrOffset,
+    Index,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoConsumerSuppressionBlockPosition {
+    Local,
+    PreBranch,
+    PredicateAdjacent,
+    ReturnAdjacent,
+    MergeAdjacent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoConsumerSuppressionOutputKind {
+    TempOnly,
+    RegisterVisible,
+    MemoryDerived,
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -318,6 +349,36 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    fn trace_no_consumer_suppression_detail(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+        applied: bool,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let rhs_kind = Self::classify_no_consumer_suppression_rhs_kind(rhs);
+        let output_kind = Self::classify_no_consumer_suppression_output_kind(output);
+        let block_position = self.classify_no_consumer_suppression_block_position(block, op_idx);
+        self.emit_ready_trace(format!(
+            "no-consumer-suppression-detail output=space:{} off:0x{:x} size:{} rhs={:?} rhs_kind={:?} block=0x{:x} op_seq={} block_position={:?} output_kind={:?} applied={} preserve=false unique={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            rhs,
+            rhs_kind,
+            block.start_address,
+            block.ops[op_idx].seq_num,
+            block_position,
+            output_kind,
+            applied,
+            output.space_id == UNIQUE_SPACE_ID && !output.is_constant,
+        ));
+    }
+
     fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Var(_) | HirExpr::Const(..) => false,
@@ -355,6 +416,13 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Var(_) | HirExpr::Const(..) => false,
         }
+    }
+
+    fn no_consumer_suppression_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_NO_CONSUMER_SUPPRESSION"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
     }
 
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
@@ -683,18 +751,39 @@ impl<'a> PreviewBuilder<'a> {
             no_consumer_profile,
         ) {
             NoConsumerMaterializationDecision::Suppress => {
+                let suppression_enabled = Self::no_consumer_suppression_enabled();
                 self.trace_no_consumer_materialization(
                     block_addr,
                     op.seq_num,
-                    "suppressed",
+                    if suppression_enabled {
+                        "suppressed"
+                    } else {
+                        "suppression_candidate"
+                    },
                     output,
                     &rhs,
                     Self::should_preserve_materialized_expr(&rhs),
                     legacy_inline_candidate,
                     no_consumer_profile,
                 );
-                self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
-                return Ok(None);
+                self.trace_no_consumer_suppression_detail(
+                    block,
+                    op_idx,
+                    output,
+                    &rhs,
+                    suppression_enabled,
+                );
+                if suppression_enabled {
+                    self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
+                    return Ok(None);
+                }
+                self.trace_no_consumer_kept(
+                    block_addr,
+                    op.seq_num,
+                    output,
+                    &rhs,
+                    NoConsumerMaterializationKeepReason::SuppressionDisabled,
+                );
             }
             NoConsumerMaterializationDecision::Keep(reason) => {
                 if reason != NoConsumerMaterializationKeepReason::NotUnknownNoConsumerFound {
@@ -1025,6 +1114,62 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         NoConsumerMaterializationDecision::Suppress
+    }
+
+    fn classify_no_consumer_suppression_rhs_kind(rhs: &HirExpr) -> NoConsumerSuppressionRhsKind {
+        match rhs {
+            HirExpr::Var(_) => NoConsumerSuppressionRhsKind::Var,
+            HirExpr::Const(..) => NoConsumerSuppressionRhsKind::Const,
+            HirExpr::Cast { .. } => NoConsumerSuppressionRhsKind::Cast,
+            HirExpr::Unary { .. } => NoConsumerSuppressionRhsKind::Unary,
+            HirExpr::Binary { .. } => NoConsumerSuppressionRhsKind::Binary,
+            HirExpr::Load { .. } => NoConsumerSuppressionRhsKind::Load,
+            HirExpr::Call { .. } => NoConsumerSuppressionRhsKind::Call,
+            HirExpr::AggregateCopy { .. } => NoConsumerSuppressionRhsKind::Aggregate,
+            HirExpr::PtrOffset { .. } => NoConsumerSuppressionRhsKind::PtrOffset,
+            HirExpr::Index { .. } => NoConsumerSuppressionRhsKind::Index,
+        }
+    }
+
+    fn classify_no_consumer_suppression_output_kind(
+        output: &Varnode,
+    ) -> NoConsumerSuppressionOutputKind {
+        if output.space_id == UNIQUE_SPACE_ID && !output.is_constant {
+            NoConsumerSuppressionOutputKind::TempOnly
+        } else if output.space_id == REGISTER_SPACE_ID {
+            NoConsumerSuppressionOutputKind::RegisterVisible
+        } else {
+            NoConsumerSuppressionOutputKind::MemoryDerived
+        }
+    }
+
+    fn classify_no_consumer_suppression_block_position(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> NoConsumerSuppressionBlockPosition {
+        if let Some(term_idx) = self.block_terminator_index(block) {
+            let term = &block.ops[term_idx];
+            if op_idx + 1 == term_idx {
+                return match term.opcode {
+                    PcodeOpcode::CBranch => NoConsumerSuppressionBlockPosition::PredicateAdjacent,
+                    PcodeOpcode::Return => NoConsumerSuppressionBlockPosition::ReturnAdjacent,
+                    _ => NoConsumerSuppressionBlockPosition::PreBranch,
+                };
+            }
+            if op_idx < term_idx {
+                return NoConsumerSuppressionBlockPosition::PreBranch;
+            }
+        }
+        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+            return NoConsumerSuppressionBlockPosition::Local;
+        };
+        if self.successors.get(block_idx).is_some_and(|succs| {
+            succs.iter().any(|succ| self.predecessors.get(*succ).is_some_and(|preds| preds.len() > 1))
+        }) {
+            return NoConsumerSuppressionBlockPosition::MergeAdjacent;
+        }
+        NoConsumerSuppressionBlockPosition::Local
     }
 
     fn classify_alias_unsafe_hazard(
