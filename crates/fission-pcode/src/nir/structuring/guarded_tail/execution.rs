@@ -401,7 +401,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(Err(GuardedTailWitnessRejection::MissingTerminalJoin));
         };
 
-        let (owned_join_label, label_idx) = Self::find_earliest_owned_join_label(
+        let (owned_join_label, label_idx) = self.find_earliest_owned_join_label_with_diag(
             body,
             idx,
             resolved_label_idx,

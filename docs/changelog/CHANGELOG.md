@@ -9,6 +9,56 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail callee summary source tracing for `FUN_0x140043d30`
+
+This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to distinguish “unknown call target” from “known internal direct callee that still lacks an effect-summary source” for the remaining `stmt_idx=154` blocker.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now adds builder-aware guarded-tail suffix diagnostics on the live execution path:
+  - `trace_suffix_unknown_call_provenance(&self, ...)`
+  - `classify_suffix_stmt_with_diag(...)`
+  - `suffix_is_nonowned_terminal_tail_with_diag(...)`
+  - `candidate_window_can_shrink_to_label_with_diag(...)`
+  - `find_earliest_owned_join_label_with_diag(...)`
+- [`execution.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/execution.rs) now routes live guarded-tail candidate narrowing through the new builder-aware diagnostic path
+- the new trace separates three different facts:
+  - target identity and address
+  - binary / type-context visibility
+  - effect-summary source availability
+- guarded-tail diagnostics now emit:
+  - `suffix-unknown-call-provenance stmt_idx=... target=... target_addr=... internal=... import=... summary_available=...`
+  - `suffix-unknown-call-summary target=... binary_function_present=... target_ref_present=... target_ref_provenance=... effect_summary_source=None`
+  - `suffix-unknown-call-effect target=... writes_memory=... writes_global=... may_call_unknown=... may_exit=... return_used=...`
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `stmt_idx=154` blocker is now fixed as a direct internal callee with no effect-summary source:
+  - `suffix-call-effect-shape stmt_idx=154 kind=VoidUnknownCall ...`
+  - `suffix-unknown-call-provenance stmt_idx=154 target=FUN_0x140043d30 target_addr=Some(5368986928) internal=true import=false summary_available=false`
+  - `suffix-unknown-call-summary target=FUN_0x140043d30 binary_function_present=true target_ref_present=true target_ref_provenance=Direct effect_summary_source=None`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=unknown writes_global=unknown may_call_unknown=true may_exit=unknown return_used=false`
+- this is no longer an unresolved symbol problem:
+  - the callee exists in the loaded binary
+  - the live preview path can resolve it through `call_target_refs`
+- the missing piece is now explicit:
+  - there is still no interprocedural effect summary source wired into guarded-tail suffix ownership for this direct internal callee
+- the outer guarded-tail shell remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `FUN_0x140043d30` is visible as a direct internal callee, not an import and not an unknown symbol
+- the remaining blocker is specifically “effect summary source missing”, not “target identity missing”
+- the next wave should connect a real interprocedural callee-effect summary source before any call-bearing suffix internalization is considered
+
 ### Guarded-tail unknown call provenance tracing for `FUN_0x140043d30`
 
 This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to turn the remaining `stmt_idx=154` call-bearing suffix blocker into a concrete provenance/effect boundary instead of another generic `VoidUnknownCall` bucket.
