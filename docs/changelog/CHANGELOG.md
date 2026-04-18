@@ -9,6 +9,52 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail callee bounds and thunk-shape validation
+
+This wave stayed diagnostic-only. It did not widen guarded-tail acceptance or reinterpret the preview callee effect bits. The goal was to determine whether `FUN_0x140043d30` was being marked unsafe because of real callee behavior or because preview lift bounds / wrapper shape were over-approximated.
+
+- [`facts.rs`](../../crates/fission-decompiler-core/src/facts.rs) now emits producer-side lift-bound and shape diagnostics alongside the existing first-cause detail trace:
+  - `callee-lift-bounds`
+  - `callee-shape`
+  - `callee-effect-first-op-detail`
+- the new trace records:
+  - `start`, `max_bytes`, `instruction_limit`, recorded `function_size`, and `next_function`
+  - whether the first `Store`, `Call`, and `CallOther` addresses are still inside the current function bounds
+  - preview-lifted `block_count`, `op_count`, `return_count`
+  - whether there is any decoded fallthrough past the first `Return`
+  - whether the callee looks like a trivial single-call-return wrapper
+- this remains producer-side validation only:
+  - no guarded-tail suffix ownership rule changed
+  - no callee summary bit changed
+  - no thunk normalization was applied
+
+Validation:
+
+- `cargo test -p fission-decompiler-core preview_callee_effect_summary -- --nocapture`
+- `cargo build -p fission-cli`
+- `cargo check -p fission-pcode`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the preview lift for `FUN_0x140043d30` is bounded by recorded function metadata, not a size-0 fallback:
+  - `callee-lift-bounds target=FUN_0x140043d30 start=0x140043d30 max_bytes=413 instruction_limit=103 function_size=413 next_function=Some("0x140043ed0")`
+- the preview-lifted body shape is not a thunk-like wrapper:
+  - `callee-shape target=FUN_0x140043d30 block_count=5 op_count=290 return_count=1 has_fallthrough_past_return=false single_call_return_wrapper=false`
+- the first unsafe causes are all still inside the function bounds:
+  - `callee-effect-first-op-detail target=FUN_0x140043d30 kind=Store addr=0x140043d30 within_function=true ...`
+  - `callee-effect-first-op-detail target=FUN_0x140043d30 kind=Call addr=0x140043d63 within_function=true ...`
+  - `callee-effect-first-op-detail target=FUN_0x140043d30 kind=CallOther addr=0x140043d70 within_function=true ...`
+- the guarded-tail consumer result on the active path remains unchanged:
+  - `suffix-unknown-call-summary target=FUN_0x140043d30 ... effect_summary_source=PreviewCalleeAnalysis`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=yes writes_global=unknown may_call_unknown=yes may_exit=yes return_used=false`
+
+Conclusion:
+
+- the current `PreviewCalleeAnalysis` verdict is not explained by obvious callee-bound overrun, fallthrough-past-return, or trivial thunk-wrapper shape
+- `FUN_0x140043d30` currently looks like a genuinely side-effectful internal callee under the active preview lift
+- the guarded-tail path should stay fail-closed here unless a later wave finds a more precise callee summarization or thunk-normalization source
+
 ### Guarded-tail callee effect detail tracing
 
 This wave stayed diagnostic-only. It did not widen guarded-tail acceptance. The goal was to expose the first concrete p-code causes behind the existing `PreviewCalleeAnalysis` verdict for the remaining `stmt_idx=154` call-bearing suffix blocker.

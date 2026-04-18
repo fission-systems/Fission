@@ -179,6 +179,7 @@ fn build_preview_callee_effect_summary(
     }
     let max_bytes = direct_callee_max_bytes(binary, target_addr)?;
     let instruction_limit = direct_callee_instruction_limit(max_bytes);
+    let next_function = binary.function_after(target_addr).map(|func| func.address);
     let pcode = decode_rust_sleigh_pcode(
         binary,
         target_name,
@@ -190,7 +191,16 @@ fn build_preview_callee_effect_summary(
     )
     .ok()?;
     let (summary, detail) = summarize_preview_callee_effects(&pcode);
-    trace_preview_callee_effect_detail(target_name, target_addr, &detail);
+    trace_preview_callee_effect_detail(
+        target_name,
+        target_addr,
+        function.size,
+        max_bytes,
+        instruction_limit,
+        next_function,
+        &pcode,
+        &detail,
+    );
     Some(summary)
 }
 
@@ -225,9 +235,15 @@ struct PreviewCalleeEffectDetail {
     callind_count: usize,
     callother_count: usize,
     return_count: usize,
+    block_count: usize,
+    op_count: usize,
     first_store: Option<(u64, PcodeOpcode)>,
     first_call: Option<(u64, Option<u64>, PcodeOpcode)>,
     first_callother: Option<(u64, PcodeOpcode)>,
+    first_return: Option<(u64, PcodeOpcode)>,
+    last_op_addr: Option<u64>,
+    has_fallthrough_past_return: bool,
+    is_single_call_return_wrapper: bool,
 }
 
 fn summarize_preview_callee_effects(
@@ -238,10 +254,15 @@ fn summarize_preview_callee_effects(
     let mut may_call_unknown = Some(false);
     let mut may_exit = None;
     let mut saw_return = false;
-    let mut detail = PreviewCalleeEffectDetail::default();
+    let mut detail = PreviewCalleeEffectDetail {
+        block_count: pcode.blocks.len(),
+        ..PreviewCalleeEffectDetail::default()
+    };
 
     for block in &pcode.blocks {
         for op in &block.ops {
+            detail.op_count += 1;
+            detail.last_op_addr = Some(op.address);
             match op.opcode {
                 PcodeOpcode::Load => {
                     reads_memory = Some(true);
@@ -275,11 +296,22 @@ fn summarize_preview_callee_effects(
                 PcodeOpcode::Return => {
                     saw_return = true;
                     detail.return_count += 1;
+                    detail.first_return.get_or_insert((op.address, op.opcode));
                 }
                 _ => {}
             }
         }
     }
+
+    if let (Some((return_addr, _)), Some(last_op_addr)) = (detail.first_return, detail.last_op_addr) {
+        detail.has_fallthrough_past_return = last_op_addr > return_addr;
+    }
+    detail.is_single_call_return_wrapper = detail.store_count == 0
+        && detail.callother_count == 0
+        && detail.callind_count == 0
+        && detail.call_count == 1
+        && detail.return_count == 1
+        && detail.op_count <= 3;
 
     if may_exit != Some(true) {
         may_exit = if saw_return && may_call_unknown == Some(false) {
@@ -305,11 +337,25 @@ fn summarize_preview_callee_effects(
 fn trace_preview_callee_effect_detail(
     target_name: &str,
     target_addr: u64,
+    function_size: u64,
+    max_bytes: usize,
+    instruction_limit: usize,
+    next_function: Option<u64>,
+    pcode: &PcodeFunction,
     detail: &PreviewCalleeEffectDetail,
 ) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_none() {
         return;
     }
+    eprintln!(
+        "[GT-TRACE] callee-lift-bounds target={} start=0x{:x} max_bytes={} instruction_limit={} function_size={} next_function={:?}",
+        target_name,
+        target_addr,
+        max_bytes,
+        instruction_limit,
+        function_size,
+        next_function.map(|addr| format!("0x{:x}", addr))
+    );
     eprintln!(
         "[GT-TRACE] callee-effect-detail target={} target_addr=0x{:x} store_count={} call_count={} callind_count={} callother_count={} return_count={}",
         target_name,
@@ -320,24 +366,76 @@ fn trace_preview_callee_effect_detail(
         detail.callother_count,
         detail.return_count
     );
+    eprintln!(
+        "[GT-TRACE] callee-shape target={} block_count={} op_count={} return_count={} has_fallthrough_past_return={} single_call_return_wrapper={}",
+        target_name,
+        detail.block_count,
+        detail.op_count,
+        detail.return_count,
+        detail.has_fallthrough_past_return,
+        detail.is_single_call_return_wrapper
+    );
     if let Some((address, opcode)) = detail.first_store {
+        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-store target={} addr=0x{:x} op={:?}",
             target_name, address, opcode
         );
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-op-detail target={} kind=Store addr=0x{:x} within_function={} block_count={} op_count={}",
+            target_name,
+            address,
+            within_function,
+            pcode.blocks.len(),
+            detail.op_count
+        );
     }
     if let Some((address, call_target, opcode)) = detail.first_call {
+        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-call target={} addr=0x{:x} call_target={:?} op={:?}",
             target_name, address, call_target, opcode
         );
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-op-detail target={} kind={:?} addr=0x{:x} within_function={} block_count={} op_count={}",
+            target_name,
+            opcode,
+            address,
+            within_function,
+            pcode.blocks.len(),
+            detail.op_count
+        );
     }
     if let Some((address, opcode)) = detail.first_callother {
+        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-callother target={} addr=0x{:x} op={:?}",
             target_name, address, opcode
         );
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-op-detail target={} kind=CallOther addr=0x{:x} within_function={} block_count={} op_count={}",
+            target_name,
+            address,
+            within_function,
+            pcode.blocks.len(),
+            detail.op_count
+        );
     }
+}
+
+fn addr_within_function_bounds(
+    address: u64,
+    start_addr: u64,
+    function_size: u64,
+    next_function: Option<u64>,
+) -> bool {
+    if function_size > 0 {
+        return address >= start_addr && address < start_addr.saturating_add(function_size);
+    }
+    if let Some(next_addr) = next_function {
+        return address >= start_addr && address < next_addr;
+    }
+    address >= start_addr
 }
 
 fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
