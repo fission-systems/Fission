@@ -105,6 +105,26 @@ struct NoConsumerMaterializationProfile {
     rhs_side_effectful: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoConsumerMaterializationDecision {
+    Suppress,
+    Keep(NoConsumerMaterializationKeepReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoConsumerMaterializationKeepReason {
+    NotUnknownNoConsumerFound,
+    StateVisibleOutput,
+    SameBlockConsumerPresent,
+    CrossBlockConsumerPresent,
+    LaterBlockUsePresent,
+    PhiMergeUsePresent,
+    DebugUsePresent,
+    LegacyInlineCandidate,
+    PreserveMaterialization,
+    RhsSideEffectful,
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn trace_materialization_plan(
         &self,
@@ -262,6 +282,39 @@ impl<'a> PreviewBuilder<'a> {
             profile.same_block_consumers,
             profile.cross_block_consumers,
             profile.rhs_side_effectful,
+        ));
+    }
+
+    fn trace_no_consumer_suppressed(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "no-consumer-suppressed output=space:{} off:0x{:x} size:{} def_block=0x{:x} op_seq={} rhs={:?}",
+            output.space_id, output.offset, output.size, block_addr, op_seq, rhs,
+        ));
+    }
+
+    fn trace_no_consumer_kept(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        output: &Varnode,
+        rhs: &HirExpr,
+        reason: NoConsumerMaterializationKeepReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "no-consumer-kept output=space:{} off:0x{:x} size:{} def_block=0x{:x} op_seq={} rhs={:?} reason={:?}",
+            output.space_id, output.offset, output.size, block_addr, op_seq, rhs, reason,
         ));
     }
 
@@ -606,6 +659,59 @@ impl<'a> PreviewBuilder<'a> {
             self.representative_downgrade_count += 1;
             return Ok(None);
         }
+        let no_consumer_profile =
+            self.analyze_no_consumer_materialization_profile(block, op_idx, output, &rhs);
+        let no_consumer_hazard = if replacement_plan.rejection_reason()
+            == Some(MaterializationRejectionReason::AliasUnsafe)
+        {
+            Some(Self::classify_alias_unsafe_hazard(
+                block,
+                op_idx,
+                terminator_index,
+                output,
+                &rhs,
+            ))
+        } else {
+            None
+        };
+        match Self::classify_no_consumer_materialization_decision(
+            output,
+            &rhs,
+            legacy_inline_candidate,
+            replacement_plan,
+            no_consumer_hazard,
+            no_consumer_profile,
+        ) {
+            NoConsumerMaterializationDecision::Suppress => {
+                self.trace_no_consumer_materialization(
+                    block_addr,
+                    op.seq_num,
+                    "suppressed",
+                    output,
+                    &rhs,
+                    Self::should_preserve_materialized_expr(&rhs),
+                    legacy_inline_candidate,
+                    no_consumer_profile,
+                );
+                self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
+                return Ok(None);
+            }
+            NoConsumerMaterializationDecision::Keep(reason) => {
+                if reason != NoConsumerMaterializationKeepReason::NotUnknownNoConsumerFound {
+                    self.trace_no_consumer_materialization(
+                        block_addr,
+                        op.seq_num,
+                        "kept",
+                        output,
+                        &rhs,
+                        Self::should_preserve_materialized_expr(&rhs),
+                        legacy_inline_candidate,
+                        no_consumer_profile,
+                    );
+                    self.trace_no_consumer_kept(block_addr, op.seq_num, output, &rhs, reason);
+                }
+            }
+        }
         if legacy_inline_candidate {
             self.materialization_inline_suppressed_count += 1;
             self.trace_materialization_plan(
@@ -616,17 +722,6 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_plan,
                 "inline_suppressed",
             );
-            self.trace_no_consumer_materialization_if_needed(
-                block,
-                op_idx,
-                terminator_index,
-                op,
-                output,
-                &rhs,
-                replacement_plan,
-                "inline_suppressed",
-                legacy_inline_candidate,
-            );
         } else {
             self.trace_materialization_plan(
                 block_addr,
@@ -635,17 +730,6 @@ impl<'a> PreviewBuilder<'a> {
                 &rhs,
                 replacement_plan,
                 "materialized_binding",
-            );
-            self.trace_no_consumer_materialization_if_needed(
-                block,
-                op_idx,
-                terminator_index,
-                op,
-                output,
-                &rhs,
-                replacement_plan,
-                "materialized_binding",
-                legacy_inline_candidate,
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
@@ -857,39 +941,6 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    fn trace_no_consumer_materialization_if_needed(
-        &self,
-        block: &crate::pcode::PcodeBasicBlock,
-        op_idx: usize,
-        terminator_index: Option<usize>,
-        op: &PcodeOp,
-        output: &Varnode,
-        rhs: &HirExpr,
-        plan: ReplacementValuePlan,
-        event: &str,
-        legacy_inline_candidate: bool,
-    ) {
-        if plan.rejection_reason() != Some(MaterializationRejectionReason::AliasUnsafe) {
-            return;
-        }
-        let hazard = Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);
-        if hazard.kind != AliasUnsafeHazardKind::UnknownNoConsumerFound {
-            return;
-        }
-        let preserve_materialization = Self::should_preserve_materialized_expr(rhs);
-        let profile = self.analyze_no_consumer_materialization_profile(block, op_idx, output, rhs);
-        self.trace_no_consumer_materialization(
-            block.start_address,
-            op.seq_num,
-            event,
-            output,
-            rhs,
-            preserve_materialization,
-            legacy_inline_candidate,
-            profile,
-        );
-    }
-
     fn analyze_no_consumer_materialization_profile(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -908,6 +959,72 @@ impl<'a> PreviewBuilder<'a> {
             has_debug_use: false,
             rhs_side_effectful: Self::expr_is_side_effectful_for_materialization_trace(rhs),
         }
+    }
+
+    fn classify_no_consumer_materialization_decision(
+        output: &Varnode,
+        rhs: &HirExpr,
+        legacy_inline_candidate: bool,
+        plan: ReplacementValuePlan,
+        hazard: Option<AliasUnsafeHazard>,
+        profile: NoConsumerMaterializationProfile,
+    ) -> NoConsumerMaterializationDecision {
+        if plan.rejection_reason() != Some(MaterializationRejectionReason::AliasUnsafe) {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::NotUnknownNoConsumerFound,
+            );
+        }
+        if hazard.map(|hazard| hazard.kind) != Some(AliasUnsafeHazardKind::UnknownNoConsumerFound) {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::NotUnknownNoConsumerFound,
+            );
+        }
+        if profile.same_block_consumers != 0 {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::SameBlockConsumerPresent,
+            );
+        }
+        if profile.cross_block_consumers != 0 {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::CrossBlockConsumerPresent,
+            );
+        }
+        if profile.has_later_block_use {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::LaterBlockUsePresent,
+            );
+        }
+        if profile.has_phi_merge_use {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::PhiMergeUsePresent,
+            );
+        }
+        if profile.has_debug_use {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::DebugUsePresent,
+            );
+        }
+        if legacy_inline_candidate {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::LegacyInlineCandidate,
+            );
+        }
+        if Self::should_preserve_materialized_expr(rhs) {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::PreserveMaterialization,
+            );
+        }
+        if profile.rhs_side_effectful {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::RhsSideEffectful,
+            );
+        }
+        if output.space_id != UNIQUE_SPACE_ID || output.is_constant {
+            return NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::StateVisibleOutput,
+            );
+        }
+        NoConsumerMaterializationDecision::Suppress
     }
 
     fn classify_alias_unsafe_hazard(
@@ -1851,5 +1968,109 @@ mod tests {
         assert!(profile.has_later_block_use);
         assert!(profile.has_phi_merge_use);
         assert!(!profile.has_debug_use);
+    }
+
+    #[test]
+    fn no_consumer_materialization_decision_suppresses_dead_unique_const() {
+        let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
+            &varnode(0x10),
+            &HirExpr::Const(1, int(32)),
+            false,
+            ReplacementValuePlan::incomplete(
+                ReplacementReadClass::SameBlockData,
+                MaterializationRejectionReason::AliasUnsafe,
+            ),
+            Some(AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::UnknownNoConsumerFound,
+                None,
+                None,
+                None,
+            )),
+            NoConsumerMaterializationProfile {
+                same_block_consumers: 0,
+                cross_block_consumers: 0,
+                has_later_block_use: false,
+                has_phi_merge_use: false,
+                has_debug_use: false,
+                rhs_side_effectful: false,
+            },
+        );
+
+        assert_eq!(decision, NoConsumerMaterializationDecision::Suppress);
+    }
+
+    #[test]
+    fn no_consumer_materialization_decision_keeps_preserved_rhs() {
+        let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
+            &varnode(0x10),
+            &HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(HirExpr::Const(0, int(32))),
+                ty: NirType::Bool,
+            },
+            false,
+            ReplacementValuePlan::incomplete(
+                ReplacementReadClass::SameBlockData,
+                MaterializationRejectionReason::AliasUnsafe,
+            ),
+            Some(AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::UnknownNoConsumerFound,
+                None,
+                None,
+                None,
+            )),
+            NoConsumerMaterializationProfile {
+                same_block_consumers: 0,
+                cross_block_consumers: 0,
+                has_later_block_use: false,
+                has_phi_merge_use: false,
+                has_debug_use: false,
+                rhs_side_effectful: false,
+            },
+        );
+
+        assert_eq!(
+            decision,
+            NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::PreserveMaterialization
+            )
+        );
+    }
+
+    #[test]
+    fn no_consumer_materialization_decision_keeps_non_unique_outputs() {
+        let mut output = varnode(0x10);
+        output.space_id = REGISTER_SPACE_ID;
+        let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
+            &output,
+            &HirExpr::Const(1, int(32)),
+            false,
+            ReplacementValuePlan::incomplete(
+                ReplacementReadClass::SameBlockData,
+                MaterializationRejectionReason::AliasUnsafe,
+            ),
+            Some(AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::UnknownNoConsumerFound,
+                None,
+                None,
+                None,
+            )),
+            NoConsumerMaterializationProfile {
+                same_block_consumers: 0,
+                cross_block_consumers: 0,
+                has_later_block_use: false,
+                has_phi_merge_use: false,
+                has_debug_use: false,
+                rhs_side_effectful: false,
+            },
+        );
+
+        assert_eq!(
+            decision,
+            NoConsumerMaterializationDecision::Keep(
+                NoConsumerMaterializationKeepReason::StateVisibleOutput
+            )
+        );
     }
 }

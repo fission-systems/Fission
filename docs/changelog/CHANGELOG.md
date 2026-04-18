@@ -9,6 +9,83 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### NoConsumerFound dead materialization suppression
+
+This wave changed behavior. It no longer kept every `UnknownNoConsumerFound` representative materialized by default. The policy was narrowed to suppress only builder-local dead-ish residues whose replacement stop was already `AliasUnsafe`, but whose live diagnostic profile showed no same-block use, no cross-block use, no merge use, no debug use, no legacy-inline eligibility, no preservation requirement, no side-effectful RHS, and a `UNIQUE`-space output.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now classifies `UnknownNoConsumerFound` into a policy decision:
+  - `Suppress`
+  - `Keep(<reason>)`
+- suppression is deliberately fail-closed and only happens when all of the following are true:
+  - `same_block_consumers == 0`
+  - `cross_block_consumers == 0`
+  - `has_later_block_use == false`
+  - `has_phi_merge_use == false`
+  - `has_debug_use == false`
+  - `legacy_inline_candidate == false`
+  - `preserve_materialization == false`
+  - `rhs_side_effectful == false`
+  - output is a non-constant `UNIQUE` temp
+- the trace vocabulary now distinguishes policy action:
+  - `no-consumer-suppressed ...`
+  - `no-consumer-kept ... reason=...`
+- the keep side is still explicit and deterministic:
+  - `PreserveMaterialization`
+  - `RhsSideEffectful`
+  - `StateVisibleOutput`
+  - and the other profile guards
+- unit coverage now fixes both directions:
+  - dead unique constant temp can be suppressed
+  - preserved expressions stay materialized
+  - non-`UNIQUE` outputs stay materialized
+
+Validation:
+
+- `cargo test -p fission-pcode no_consumer_materialization_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --limit 50 --pairwise-similarity-mode shared-full --fission-bin target/debug/fission_cli --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC --output-dir artifacts/batch_benchmark/putty-no-consumer-suppression-limit50 --baseline-dir artifacts/batch_benchmark/putty-builder-provenance-wave`
+
+Observed state:
+
+- targeted `UnknownNoConsumerFound` suppression did fire exactly on the intended profile:
+  - `0x140008090`:
+    - `UnknownNoConsumerFound=2137`
+    - `no-consumer-suppressed=1686`
+    - `no-consumer-kept=451`
+  - `0x140006c20`:
+    - `UnknownNoConsumerFound=834`
+    - `no-consumer-suppressed=622`
+    - `no-consumer-kept=212`
+- kept cases were dominated by explicit preservation requirements, e.g. compare/flag-like booleans and helper-call-derived booleans:
+  - `reason=PreserveMaterialization`
+- the suppress side remained mostly constant-valued `UNIQUE` temps with no proven downstream consumer
+
+Benchmark result:
+
+- same-axis `putty` limit50 acceptance still failed versus [`putty-builder-provenance-wave`](../../artifacts/batch_benchmark/putty-builder-provenance-wave)
+- current aggregate:
+  - `avg_normalized_similarity = 38.58` vs baseline `38.82`
+- row gate failed for:
+  - `0x140008900 = 20.86` vs baseline `23.62`
+  - `0x140008090 = 35.22` vs baseline `35.63`
+  - `0x140006c20 = 40.28` vs baseline `40.52`
+  - `0x140006fe0 = 33.47` vs baseline `34.76`
+- rows that stayed above baseline:
+  - `0x140001160 = 32.47`
+  - `0x140007da0 = 34.65`
+  - `0x140006ef0` remained non-worse in this run
+
+Conclusion:
+
+- the suppression policy itself is behaving as designed on the targeted owner family
+- but this wave is not an acceptance win: same-axis `putty` limit50 still regressed versus the accepted baseline
+- the next owner should not widen suppression further blindly; it should either:
+  - narrow the suppression family further based on row-level regressions, or
+  - move to the next major owner family (`MalformedDefUseWindow`) if this dead-residue closure is not the dominant release blocker
+
 ### NoConsumerFound materialization suppression trace
 
 This wave stayed diagnostic-only. It did not suppress dead-ish representatives, widen representative downgrade, or relax alias safety. The goal was to determine whether the dominant `UnknownNoConsumerFound` family on `0x140008090` / `0x140006c20` is a real consumer-scanner blind spot or a builder-owned bookkeeping/materialization residue.
