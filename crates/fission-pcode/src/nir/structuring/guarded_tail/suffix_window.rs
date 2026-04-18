@@ -77,6 +77,21 @@ struct NestedEntryBoundaryContext {
     external_entry_ref_stmt_idx: Option<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NestedBoundaryRefTrace {
+    stmt_idx: usize,
+    kind: ExternalEntryRefKind,
+    cond: Option<HirExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NestedBoundaryPairTrace {
+    ref_count: usize,
+    same_guard_family: bool,
+    relation_reason: Option<&'static str>,
+    conds: Vec<HirExpr>,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -1093,6 +1108,33 @@ impl<'a> PreviewBuilder<'a> {
                     boundary.external_entry_kind,
                     boundary.external_entry_ref_stmt_idx,
                 );
+                let boundary_refs = Self::collect_nested_boundary_ref_traces(
+                    body,
+                    label,
+                    anchor_idx,
+                    terminal_label_idx,
+                );
+                for boundary_ref in &boundary_refs {
+                    if let Some(stmt) = body.get(boundary_ref.stmt_idx) {
+                        eprintln!(
+                            "[GT-TRACE] nested-boundary-ref label={} ref_idx={} kind={:?} cond={:?} stmt={:?}",
+                            label,
+                            boundary_ref.stmt_idx,
+                            boundary_ref.kind,
+                            boundary_ref.cond,
+                            stmt
+                        );
+                    }
+                }
+                let pair_trace = Self::build_nested_boundary_pair_trace(&boundary_refs);
+                eprintln!(
+                    "[GT-TRACE] nested-boundary-pair label={} count={} same_guard_family={} relation_reason={:?} conds={:?}",
+                    label,
+                    pair_trace.ref_count,
+                    pair_trace.same_guard_family,
+                    pair_trace.relation_reason,
+                    pair_trace.conds,
+                );
             }
         }
         result
@@ -1147,6 +1189,62 @@ impl<'a> PreviewBuilder<'a> {
                 .saturating_sub(internal_candidate_refs),
             external_entry_kind,
             external_entry_ref_stmt_idx,
+        }
+    }
+
+    fn collect_nested_boundary_ref_traces(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+    ) -> Vec<NestedBoundaryRefTrace> {
+        let mut refs = Vec::new();
+        for (stmt_idx, stmt) in body.iter().enumerate() {
+            if Self::stmt_contains_goto_label(stmt, label) == 0 {
+                continue;
+            }
+            if stmt_idx > anchor_idx
+                && stmt_idx < terminal_label_idx
+                && matches!(stmt, HirStmt::Goto(target) if target == label)
+            {
+                continue;
+            }
+            refs.push(NestedBoundaryRefTrace {
+                stmt_idx,
+                kind: Self::classify_external_entry_ref_kind_for_stmt(stmt, label),
+                cond: Self::stmt_is_single_branch_if_to_label(stmt, label).cloned(),
+            });
+        }
+        refs
+    }
+
+    fn build_nested_boundary_pair_trace(
+        refs: &[NestedBoundaryRefTrace],
+    ) -> NestedBoundaryPairTrace {
+        let conds = refs
+            .iter()
+            .filter_map(|entry| entry.cond.clone())
+            .collect::<Vec<_>>();
+        let pair = refs.len() == 2
+            && refs
+                .iter()
+                .all(|entry| entry.kind == ExternalEntryRefKind::NestedConditionalGoto)
+            && conds.len() == 2;
+        let (same_guard_family, relation_reason) = if pair {
+            let reason = Self::guard_family_match_reason(&conds[0], &conds[1]);
+            (
+                Self::exprs_share_guard_family(&conds[0], &conds[1]),
+                Some(reason),
+            )
+        } else {
+            (false, None)
+        };
+
+        NestedBoundaryPairTrace {
+            ref_count: refs.len(),
+            same_guard_family,
+            relation_reason,
+            conds,
         }
     }
 

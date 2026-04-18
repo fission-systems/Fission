@@ -9,6 +9,49 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail paired nested-boundary tracing for `block_140007040`
+
+This wave stayed diagnostic-only. It did not widen guarded-tail ownership. The goal was to stop treating `block_140007040` as a one-ref mystery and instead show the full two-entry nested boundary that still keeps the suffix window fail-closed.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now adds:
+  - `NestedBoundaryRefTrace`
+  - `NestedBoundaryPairTrace`
+  - `collect_nested_boundary_ref_traces(...)`
+  - `build_nested_boundary_pair_trace(...)`
+- the nested-entry proof miss path now emits:
+  - `nested-boundary-ref ...`
+  - `nested-boundary-pair ...`
+- no acceptance logic changed:
+  - this wave only expands trace coverage around the existing `nested-entry-boundary` miss
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active nested boundary now surfaces both true refs, not just the first one:
+  - `nested-boundary-ref label=block_140007040 ref_idx=142 kind=NestedConditionalGoto ...`
+  - `nested-boundary-ref label=block_140007040 ref_idx=145 kind=NestedConditionalGoto ...`
+- the pair-level trace shows that the two refs are structurally aligned:
+  - `nested-boundary-pair label=block_140007040 count=2 same_guard_family=true relation_reason=Some("ExactExpr") ...`
+- the existing miss still remains unchanged:
+  - `guard-family-match-miss ... terminal_label=block_140007047 candidate_count=0`
+  - `nested-entry-guard-family-proof label=block_140007040 ... matched_cond=None result=false`
+- the ownership budget also remains unchanged:
+  - `raw_refs=2`
+  - `internal_candidate_refs=0`
+  - `effective_external=2`
+  - `allowed_external=1`
+
+Conclusion:
+
+- `block_140007040` is now confirmed as a paired nested-conditional boundary, not a single stray nested entry
+- the two external refs belong to the same guard family and are exact duplicates
+- the next owner is therefore a narrow paired-boundary ownership proof, not generic nested-tail acceptance
+
 ### Guarded-tail nested-entry boundary tracing for `block_140007040`
 
 This wave stayed diagnostic-only. It did not widen nested suffix acceptance. The goal was to decide whether the remaining `stmt_idx=142` blocker was a missed same-family guard or an actual external-owner boundary around `block_140007040`.
