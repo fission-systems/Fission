@@ -9,6 +9,47 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail unknown call suffix diagnosis for `stmt_idx=154`
+
+This wave stayed diagnostic-only. It did not widen call-bearing suffix ownership. The goal was to classify the new `stmt_idx=154` blocker precisely and only emit proof-bit detail when the suffix call actually falls into the known-pure helper family.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now expands `suffix_known_pure_helper_call_is_owned_safe(...)` into named proof bits:
+  - `args_pure`
+  - `target_known_pure`
+  - `no_redefine`
+  - `pre_terminal_owned_safe`
+  - `no_terminal_escape`
+- the known-pure helper path now emits:
+  - `known-pure-helper-proof stmt_idx=... target=... args_pure=... no_redefine=... pre_terminal_owned_safe=... no_terminal_escape=... result=...`
+- this trace remains gated to the actual known-pure helper path:
+  - it does not fire for generic unknown calls
+  - it does not change suffix acceptance or budgeting
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the current active blocker is now fixed as an unknown call-bearing suffix segment:
+  - `suffix-call-effect-shape stmt_idx=154 kind=VoidUnknownCall stmt=Expr(Call { target: "FUN_0x140043d30", args: [], ty: Unknown })`
+  - `suffix-side-effect-shape stmt_idx=154 kind=CallExprSideEffect ...`
+- no known-pure helper proof trace fires for `stmt_idx=154`:
+  - the target does not enter the allowlisted known-pure helper path
+- the guarded-tail shell remains otherwise unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `stmt_idx=154` is not another `__popcount`-style helper case
+- the current owner is an unknown side-effect call boundary, so fail-closed behavior remains correct
+- the next wave should diagnose or prove the semantics of `FUN_0x140043d30`, not broaden generic call acceptance
+
 ### Guarded-tail paired same-guard nested boundary internalization for `block_140007040`
 
 This wave moved from diagnosis to a narrow acceptance patch. It does not broaden generic nested-tail ownership. It only internalizes the exact paired-boundary case that the prior traces proved: two duplicate nested conditional entries with the same target label and the same guard expression family.

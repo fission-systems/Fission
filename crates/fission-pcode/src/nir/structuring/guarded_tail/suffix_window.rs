@@ -489,31 +489,39 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         };
 
-        if !Self::call_target_is_known_pure_helper(target)
-            || !args.iter().all(Self::expr_is_pure_value)
-        {
-            return false;
-        }
-
-        if body[stmt_idx + 1..]
+        let args_pure = args.iter().all(Self::expr_is_pure_value);
+        let target_known_pure = Self::call_target_is_known_pure_helper(target);
+        let no_redefine = body[stmt_idx + 1..]
             .iter()
             .map(|stmt| Self::count_var_defs_stmt(stmt, binding_name))
             .sum::<usize>()
-            > 0
-        {
-            return false;
+            == 0;
+        let pre_terminal_owned_safe = body[stmt_idx + 1..terminal_label_idx]
+            .iter()
+            .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name));
+        let no_terminal_escape = body[terminal_label_idx..]
+            .iter()
+            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0);
+        let result = target_known_pure
+            && args_pure
+            && no_redefine
+            && pre_terminal_owned_safe
+            && no_terminal_escape;
+
+        if Self::guarded_tail_diag_enabled() && target_known_pure && args_pure {
+            eprintln!(
+                "[GT-TRACE] known-pure-helper-proof stmt_idx={} target={} args_pure={} no_redefine={} pre_terminal_owned_safe={} no_terminal_escape={} result={}",
+                stmt_idx,
+                target,
+                args_pure,
+                no_redefine,
+                pre_terminal_owned_safe,
+                no_terminal_escape,
+                result
+            );
         }
 
-        if body[stmt_idx + 1..terminal_label_idx]
-            .iter()
-            .any(|stmt| !Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name))
-        {
-            return false;
-        }
-
-        body[terminal_label_idx..]
-            .iter()
-            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0)
+        result
     }
 
     fn resolve_suffix_redirect_to_terminal(
