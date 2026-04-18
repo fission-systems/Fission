@@ -24,6 +24,15 @@ enum SuffixTailRejection {
     SuffixAliasRedirectUnresolved { stmt_idx: usize, label: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SuffixExternalEntryBudget {
+    raw_refs: usize,
+    internal_top_level_refs: usize,
+    suffix_safe_refs: usize,
+    effective_external_refs: usize,
+    allowed_external_refs: usize,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -423,6 +432,87 @@ impl<'a> PreviewBuilder<'a> {
         true
     }
 
+    fn count_candidate_internal_top_level_refs_in_suffix_window(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+    ) -> usize {
+        if anchor_idx + 1 >= terminal_label_idx {
+            return 0;
+        }
+        body[anchor_idx + 1..terminal_label_idx]
+            .iter()
+            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
+            .count()
+    }
+
+    fn count_suffix_safe_self_terminal_refs_in_suffix_window(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+    ) -> usize {
+        if anchor_idx + 1 >= terminal_label_idx {
+            return 0;
+        }
+
+        let mut count = 0usize;
+        for stmt_idx in anchor_idx + 1..terminal_label_idx {
+            if !matches!(body.get(stmt_idx), Some(HirStmt::Goto(target)) if target == label) {
+                continue;
+            }
+            let Some(next_label_idx) =
+                (stmt_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            else {
+                continue;
+            };
+            if next_label_idx > terminal_label_idx {
+                continue;
+            }
+            if Self::suffix_stmt_is_terminal_join_owned_safe(body, stmt_idx, next_label_idx, label) {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    fn compute_suffix_external_entry_budget(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        raw_refs: usize,
+        rewrites: usize,
+    ) -> SuffixExternalEntryBudget {
+        let internal_candidate_refs = Self::count_candidate_internal_top_level_refs_in_suffix_window(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        );
+        let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        )
+        .min(internal_candidate_refs);
+        let internal_top_level_refs = internal_candidate_refs.saturating_sub(suffix_safe_refs);
+        let effective_external_refs = raw_refs
+            .saturating_sub(internal_top_level_refs)
+            .saturating_sub(suffix_safe_refs);
+        let allowed_external_refs = usize::from(rewrites == 0);
+
+        SuffixExternalEntryBudget {
+            raw_refs,
+            internal_top_level_refs,
+            suffix_safe_refs,
+            effective_external_refs,
+            allowed_external_refs,
+        }
+    }
+
     fn suffix_is_nonowned_terminal_tail(
         body: &[HirStmt],
         anchor_idx: usize,
@@ -451,18 +541,27 @@ impl<'a> PreviewBuilder<'a> {
                 });
             }
 
-            let top_level_window_refs = Self::count_top_level_goto_refs_in_range(
+            let raw_refs = referenced.get(&current_label).copied().unwrap_or(0);
+            let budget = Self::compute_suffix_external_entry_budget(
                 body,
                 &current_label,
                 anchor_idx,
-                current_label_idx,
+                terminal_label_idx,
+                raw_refs,
+                rewrites,
             );
-            let hop_ref_budget = if rewrites == 0 {
-                top_level_window_refs + 1
-            } else {
-                top_level_window_refs
-            };
-            if referenced.get(&current_label).copied().unwrap_or(0) > hop_ref_budget {
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} effective_external={} allowed_external={}",
+                    current_label,
+                    budget.raw_refs,
+                    budget.internal_top_level_refs,
+                    budget.suffix_safe_refs,
+                    budget.effective_external_refs,
+                    budget.allowed_external_refs,
+                );
+            }
+            if budget.effective_external_refs > budget.allowed_external_refs {
                 return Err(SuffixTailRejection::SuffixHasExternalEntry {
                     stmt_idx: current_label_idx,
                     label: current_label,
@@ -2454,6 +2553,27 @@ mod owned_join_window_tests {
         assert_eq!(result, Ok(()));
     }
 
+    fn assert_suffix_external_budget(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        rewrites: usize,
+        expected: SuffixExternalEntryBudget,
+    ) {
+        let referenced = collect_referenced_label_counts(body);
+        let raw_refs = referenced.get(label).copied().unwrap_or(0);
+        let budget = PreviewBuilder::compute_suffix_external_entry_budget(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+            raw_refs,
+            rewrites,
+        );
+        assert_eq!(budget, expected);
+    }
+
     #[test]
     fn earliest_owned_join_window_accepts_sink_safe_terminal_tail() {
         let body = vec![
@@ -2656,6 +2776,64 @@ mod owned_join_window_tests {
         ];
 
         assert_suffix_accepts(&body, 0, 2, 9);
+    }
+
+    #[test]
+    fn suffix_budget_counts_candidate_internal_top_level_refs_inside_window() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("join0".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            4,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 1,
+                effective_external_refs: 1,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_keeps_nested_candidate_ref_external() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("nested".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            4,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                effective_external_refs: 2,
+                allowed_external_refs: 1,
+            },
+        );
     }
 
     #[test]
