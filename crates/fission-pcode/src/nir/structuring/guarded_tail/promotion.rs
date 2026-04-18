@@ -184,6 +184,163 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn top_level_label_definition_count_for_owned_tail(body: &[HirStmt], label: &str) -> usize {
+        body.iter()
+            .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+            .count()
+    }
+
+    fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &HirStmt, body: &[HirStmt]) -> bool {
+        let HirStmt::Goto(target) = stmt else {
+            return false;
+        };
+        if Self::top_level_label_definition_count_for_owned_tail(body, target) != 1 {
+            return false;
+        }
+        matches!(
+            Self::resolve_terminal_tail_exit_stmt(body, target),
+            Some(HirStmt::Return(_))
+        )
+    }
+
+    fn stmt_is_nonowned_terminal_tail_gap(
+        stmt: &HirStmt,
+        body: &[HirStmt],
+        next_label: &str,
+    ) -> bool {
+        is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+            || Self::stmt_is_pure_value_expr(stmt)
+            || Self::stmt_is_pure_value_assign(stmt)
+            || matches!(stmt, HirStmt::Goto(target) if target == next_label)
+            || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
+    }
+
+    fn suffix_is_nonowned_terminal_tail(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        start_label: &str,
+        start_label_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> bool {
+        if start_label_idx >= terminal_label_idx {
+            return false;
+        }
+
+        let mut current_label = start_label.to_string();
+        let mut current_label_idx = start_label_idx;
+        let mut rewrites = 0usize;
+        let mut seen = HashSet::new();
+
+        while current_label_idx < terminal_label_idx {
+            if !seen.insert(current_label.clone()) {
+                return false;
+            }
+
+            let top_level_window_refs = Self::count_top_level_goto_refs_in_range(
+                body,
+                &current_label,
+                anchor_idx,
+                current_label_idx,
+            );
+            let hop_ref_budget = if rewrites == 0 {
+                top_level_window_refs + 1
+            } else {
+                top_level_window_refs
+            };
+            if referenced.get(&current_label).copied().unwrap_or(0) > hop_ref_budget {
+                return false;
+            }
+
+            let Some(next_label_idx) =
+                (current_label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            else {
+                return false;
+            };
+            if next_label_idx > terminal_label_idx {
+                return false;
+            }
+            let HirStmt::Label(next_label) = &body[next_label_idx] else {
+                unreachable!();
+            };
+            if !body[current_label_idx + 1..next_label_idx]
+                .iter()
+                .all(|stmt| Self::stmt_is_nonowned_terminal_tail_gap(stmt, body, next_label))
+            {
+                return false;
+            }
+
+            current_label = next_label.clone();
+            current_label_idx = next_label_idx;
+            rewrites += 1;
+        }
+
+        true
+    }
+
+    fn candidate_window_can_shrink_to_label(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        candidate_label: &str,
+        candidate_label_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> bool {
+        candidate_label_idx < terminal_label_idx
+            && has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx])
+            && Self::suffix_is_nonowned_terminal_tail(
+                body,
+                anchor_idx,
+                candidate_label,
+                candidate_label_idx,
+                terminal_label_idx,
+                referenced,
+            )
+    }
+
+    fn find_earliest_owned_join_label(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> Option<(String, usize)> {
+        if anchor_idx + 1 >= terminal_label_idx {
+            return None;
+        }
+
+        for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
+            let HirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
+                continue;
+            };
+            let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
+            let suffix_safe = Self::suffix_is_nonowned_terminal_tail(
+                body,
+                anchor_idx,
+                candidate_label,
+                candidate_label_idx,
+                terminal_label_idx,
+                referenced,
+            );
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[DIAG] owned-join candidate anchor={} label={} label_idx={} terminal_idx={} payload_before={} suffix_safe={}",
+                    anchor_idx,
+                    candidate_label,
+                    candidate_label_idx,
+                    terminal_label_idx,
+                    has_payload,
+                    suffix_safe
+                );
+            }
+            if has_payload && suffix_safe {
+                return Some((candidate_label.clone(), candidate_label_idx));
+            }
+        }
+
+        None
+    }
+
     fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
         match expr {
             HirExpr::Var(var) => var == name,
@@ -1040,7 +1197,7 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
 
-        let (target_label, keep_middle_when_cond_true) = if else_body.is_empty() {
+        let (initial_target_label, keep_middle_when_cond_true) = if else_body.is_empty() {
             let Some(label) = single_goto_target(then_body) else {
                 return None;
             };
@@ -1054,7 +1211,8 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
 
-        let Some(original_label_idx) = Self::find_top_level_label_after(body, idx, &target_label)
+        let Some(original_label_idx) =
+            Self::find_top_level_label_after(body, idx, &initial_target_label)
         else {
             return None;
         };
@@ -1064,7 +1222,7 @@ impl<'a> PreviewBuilder<'a> {
                     "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
                     self.guarded_tail_function_address(),
                     idx,
-                    target_label,
+                    initial_target_label,
                     original_label_idx,
                     GuardedTailWitnessRejection::NonCanonicalLayout
                 );
@@ -1090,7 +1248,7 @@ impl<'a> PreviewBuilder<'a> {
                     "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
                     self.guarded_tail_function_address(),
                     idx,
-                    target_label,
+                    initial_target_label,
                     original_label_idx,
                     GuardedTailWitnessRejection::AmbiguousFollow
                 );
@@ -1103,15 +1261,15 @@ impl<'a> PreviewBuilder<'a> {
             return Some(Err(GuardedTailWitnessRejection::AmbiguousFollow));
         }
 
-        let Some((target_label, label_idx)) =
-            self.resolve_terminal_join_target(body, idx, &target_label, referenced)
+        let Some((resolved_target_label, resolved_label_idx)) =
+            self.resolve_terminal_join_target(body, idx, &initial_target_label, referenced)
         else {
             if self.guarded_tail_trace_enabled_for_current_fn() {
                 eprintln!(
                     "[GT-TRACE] fn=0x{:x} candidate={} join_label={} first_reject={:?}",
                     self.guarded_tail_function_address(),
                     idx,
-                    target_label,
+                    initial_target_label,
                     GuardedTailWitnessRejection::MissingTerminalJoin
                 );
                 let upper = body.len().min(idx + 1 + 20);
@@ -1123,6 +1281,27 @@ impl<'a> PreviewBuilder<'a> {
             }
             return Some(Err(GuardedTailWitnessRejection::MissingTerminalJoin));
         };
+
+        let (owned_join_label, label_idx) = Self::find_earliest_owned_join_label(
+            body,
+            idx,
+            resolved_label_idx,
+            referenced,
+        )
+        .unwrap_or_else(|| (resolved_target_label.clone(), resolved_label_idx));
+        let target_label = resolved_target_label.clone();
+
+        if self.guarded_tail_trace_enabled_for_current_fn() && label_idx != resolved_label_idx {
+            eprintln!(
+                "[GT-TRACE] fn=0x{:x} candidate={} owned_join_narrowed from={}({}) to={}({})",
+                self.guarded_tail_function_address(),
+                idx,
+                resolved_target_label,
+                resolved_label_idx,
+                owned_join_label,
+                label_idx
+            );
+        }
 
         if self.guarded_tail_trace_enabled_for_current_fn() {
             let raw_middle = &body[idx + 1..label_idx];
@@ -1944,5 +2123,148 @@ impl<'a> PreviewBuilder<'a> {
             self.promoted_region_count += 1;
         }
         accepted
+    }
+}
+
+#[cfg(test)]
+mod owned_join_window_tests {
+    use super::*;
+
+    fn test_if_goto(label: &str) -> HirStmt {
+        HirStmt::If {
+            cond: HirExpr::Var("cond".to_string()),
+            then_body: vec![HirStmt::Goto(label.to_string())],
+            else_body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn earliest_owned_join_window_accepts_sink_safe_terminal_tail() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("join1".to_string()),
+            HirStmt::Label("join1".to_string()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 6, &referenced);
+
+        assert_eq!(narrowed, Some(("join0".to_string(), 2)));
+    }
+
+    #[test]
+    fn earliest_owned_join_window_accepts_empty_block_alias_tail() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Block(Vec::new()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced);
+
+        assert_eq!(narrowed, Some(("join0".to_string(), 2)));
+    }
+
+    #[test]
+    fn earliest_owned_join_window_accepts_alias_redirect_only_suffix() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("join1".to_string()),
+            HirStmt::Label("join1".to_string()),
+            HirStmt::Goto("join2".to_string()),
+            HirStmt::Label("join2".to_string()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 8, &referenced);
+
+        assert_eq!(narrowed, Some(("join0".to_string(), 2)));
+    }
+
+    #[test]
+    fn earliest_owned_join_window_rejects_side_effectful_suffix() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("not_safe".to_string())),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 5, &referenced);
+
+        assert_eq!(narrowed, None);
+    }
+
+    #[test]
+    fn earliest_owned_join_window_rejects_external_entry_in_suffix() {
+        let body = vec![
+            HirStmt::Goto("join0".to_string()),
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("sink".to_string()),
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 1, 5, &referenced);
+
+        assert_eq!(narrowed, None);
+    }
+
+    #[test]
+    fn earliest_owned_join_window_rejects_nested_nonlocal_suffix_ref() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("nested".to_string()),
+                then_body: vec![HirStmt::Goto("sink".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("sink".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 4, &referenced);
+
+        assert_eq!(narrowed, None);
+    }
+
+    #[test]
+    fn earliest_owned_join_window_rejects_when_terminal_join_is_already_owned() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let referenced = collect_referenced_label_counts(&body);
+
+        let narrowed = PreviewBuilder::find_earliest_owned_join_label(&body, 0, 2, &referenced);
+
+        assert_eq!(narrowed, None);
     }
 }

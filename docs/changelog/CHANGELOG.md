@@ -7,6 +7,53 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-18 (latest)
+
+### Guarded-tail earliest-owned-join narrowing wave - owner window probing is in place, and `candidate 35` is now explicitly blocked by `suffix_safe=false`
+
+This wave targeted the remaining `0x140006fe0` bottleneck as an ownership-window problem, not as a broader acceptance relaxation. The guarded-tail owner now probes for an earlier top-level join label inside the current candidate window and only narrows the owned middle when the suffix up to the terminal join is proven to be a non-owned tail. The implementation stayed inside `fission-pcode`; downstream crates remain consume-only.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - earliest owned-join window probing before canonical guarded-tail middle slicing
+  - `suffix_is_nonowned_terminal_tail(...)` and related owner-window checks
+  - env-gated diagnostics for each earlier join candidate:
+    - `payload_before`
+    - `suffix_safe`
+    - final `owned_join_narrowed` trace when a window can actually shrink
+- the same file also adds synthetic unit coverage for:
+  - sink-safe terminal tail acceptance
+  - empty-block alias tails
+  - alias-redirect-only suffixes
+  - rejection on non-owned payload suffixes
+  - rejection on external entry and nested suffix control flow
+
+Validation:
+
+- `cargo test -p fission-pcode structuring_guarded_tail -- --nocapture`
+- `cargo test -p fission-pcode`
+- `cargo test -p fission-automation`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the new owner-window probing is active
+- but `candidate 35` still does not narrow:
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+- the new diagnostics show why:
+  - `block_140007000`: `payload_before=true`, `suffix_safe=false`
+  - `block_14000701c`: `payload_before=true`, `suffix_safe=false`
+  - `block_140007021`: `payload_before=true`, `suffix_safe=false`
+  - `block_140007040`: `payload_before=true`, `suffix_safe=false`
+
+Diagnostic conclusion:
+
+- the current blocker is no longer “do we have an earlier owned join candidate”
+- the blocker is the proof for `suffix_is_nonowned_terminal_tail(...)`
+- the next owner is the specific suffix-safe rejection family inside the candidate-35 window, not broader guarded-tail acceptance or generic materialization tuning
+
 ## 2026-04-09
 
 ### Guarded-tail join-glue bookkeeping for `effective_middle_refs`
