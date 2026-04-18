@@ -1,6 +1,4 @@
-use crate::facts::{
-    build_nir_type_context, refine_nir_type_context_with_callee_effect_summaries,
-};
+use crate::facts::{build_nir_type_context, refine_nir_type_context_with_callee_effect_summaries};
 use crate::routing::auto_nir_admission_eligible;
 use crate::types::NirWorkerRequest;
 use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};

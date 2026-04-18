@@ -278,20 +278,26 @@ fn summarize_preview_callee_effects(
                     detail.call_count += 1;
                     detail.first_call.get_or_insert((
                         op.address,
-                        op.inputs.first().and_then(|input| input.is_constant.then_some(input.offset)),
+                        op.inputs
+                            .first()
+                            .and_then(|input| input.is_constant.then_some(input.offset)),
                         op.opcode,
                     ));
                 }
                 PcodeOpcode::CallInd => {
                     may_call_unknown = Some(true);
                     detail.callind_count += 1;
-                    detail.first_call.get_or_insert((op.address, None, op.opcode));
+                    detail
+                        .first_call
+                        .get_or_insert((op.address, None, op.opcode));
                 }
                 PcodeOpcode::CallOther => {
                     may_call_unknown = Some(true);
                     may_exit = Some(true);
                     detail.callother_count += 1;
-                    detail.first_callother.get_or_insert((op.address, op.opcode));
+                    detail
+                        .first_callother
+                        .get_or_insert((op.address, op.opcode));
                 }
                 PcodeOpcode::Return => {
                     saw_return = true;
@@ -303,7 +309,8 @@ fn summarize_preview_callee_effects(
         }
     }
 
-    if let (Some((return_addr, _)), Some(last_op_addr)) = (detail.first_return, detail.last_op_addr) {
+    if let (Some((return_addr, _)), Some(last_op_addr)) = (detail.first_return, detail.last_op_addr)
+    {
         detail.has_fallthrough_past_return = last_op_addr > return_addr;
     }
     detail.is_single_call_return_wrapper = detail.store_count == 0
@@ -376,7 +383,8 @@ fn trace_preview_callee_effect_detail(
         detail.is_single_call_return_wrapper
     );
     if let Some((address, opcode)) = detail.first_store {
-        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
+        let within_function =
+            addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-store target={} addr=0x{:x} op={:?}",
             target_name, address, opcode
@@ -391,7 +399,8 @@ fn trace_preview_callee_effect_detail(
         );
     }
     if let Some((address, call_target, opcode)) = detail.first_call {
-        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
+        let within_function =
+            addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-call target={} addr=0x{:x} call_target={:?} op={:?}",
             target_name, address, call_target, opcode
@@ -407,7 +416,8 @@ fn trace_preview_callee_effect_detail(
         );
     }
     if let Some((address, opcode)) = detail.first_callother {
-        let within_function = addr_within_function_bounds(address, target_addr, function_size, next_function);
+        let within_function =
+            addr_within_function_bounds(address, target_addr, function_size, next_function);
         eprintln!(
             "[GT-TRACE] callee-effect-first-callother target={} addr=0x{:x} op={:?}",
             target_name, address, opcode

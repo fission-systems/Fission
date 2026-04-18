@@ -407,14 +407,15 @@ impl<'a> PreviewBuilder<'a> {
             return Some(Err(GuardedTailWitnessRejection::MissingTerminalJoin));
         };
 
-        let (owned_join_label, label_idx) = self.find_earliest_owned_join_label_with_diag(
-            body,
-            idx,
-            resolved_label_idx,
-            referenced,
-            self.guarded_tail_trace_enabled_for_current_fn(),
-        )
-        .unwrap_or_else(|| (resolved_target_label.clone(), resolved_label_idx));
+        let (owned_join_label, label_idx) = self
+            .find_earliest_owned_join_label_with_diag(
+                body,
+                idx,
+                resolved_label_idx,
+                referenced,
+                self.guarded_tail_trace_enabled_for_current_fn(),
+            )
+            .unwrap_or_else(|| (resolved_target_label.clone(), resolved_label_idx));
         let target_label = resolved_target_label.clone();
 
         if self.guarded_tail_trace_enabled_for_current_fn() && label_idx != resolved_label_idx {

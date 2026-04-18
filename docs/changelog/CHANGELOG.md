@@ -9,6 +9,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### AliasUnsafe first-hazard tracing
+
+This wave stayed diagnostic-only. It did not widen builder materialization acceptance, add new merge synthesis, or retune representative policy. The goal was to split the very large `AliasUnsafe` bucket on the active `0x140008090` / `0x140006c20` path into concrete same-block hazard families, so the next patch can target one owner instead of the whole rejection class.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated `EMIT-TRACE` subtype line whenever builder replacement falls back with `reason=AliasUnsafe`:
+  - `alias-unsafe-shape output=... def_block=... use_block=... first_alias_hazard=... hazard_stmt=... hazard_op=...`
+- the new builder-local hazard family is intentionally narrow and same-block focused:
+  - `MultipleSameBlockConsumers`
+  - `DisallowedSingleConsumer`
+  - `CallBetweenDefUse`
+  - `LoadAfterStore`
+  - `SameBlockStore`
+  - `Unknown`
+- cross-block drift was intentionally left out of this family because that path is already owned by `MissingMergeBinding` / `Merge`, not `AliasUnsafe`
+- builder-local unit coverage now fixes the classifier contract for:
+  - `CallBetweenDefUse`
+  - `LoadAfterStore`
+  - `MultipleSameBlockConsumers`
+  - `DisallowedSingleConsumer`
+
+Validation:
+
+- `cargo test -p fission-pcode alias_unsafe_hazard --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140008090` no longer reports `AliasUnsafe` as a single opaque family; the live trace split as:
+  - `Unknown=3617`
+  - `DisallowedSingleConsumer=1560`
+  - `MultipleSameBlockConsumers=581`
+  - `SameBlockStore=49`
+- `0x140006c20` showed the same active family shape with smaller volume:
+  - `Unknown=1170`
+  - `DisallowedSingleConsumer=515`
+  - `MultipleSameBlockConsumers=160`
+- no live `CallBetweenDefUse` or `LoadAfterStore` owner surfaced on the targeted rows in this wave; those shapes are covered synthetically but are not the dominant current row owners
+- the practical live signal moved away from a generic alias bucket and toward two builder-owned same-block families:
+  - repeated same-block consumers
+  - single-use consumers whose opcode or inline contract still rejects representative replacement
+
+Conclusion:
+
+- the next owner is still builder/materialization representative stability rather than guarded-tail widening
+- the highest-value follow-up is not a generic alias relaxation; it is one of:
+  - `Unknown` same-block fallback subtyping
+  - `DisallowedSingleConsumer` proof narrowing
+  - `MultipleSameBlockConsumers` same-block reuse closure
+
 ### Emit-ready materialization owner tracing
 
 This wave stayed diagnostic-only. It did not widen guarded-tail acceptance, alter emit legality, or retune materialization policy. The goal was to identify the active owner behind the remaining row-gate regressions on `0x140008090` and `0x140006c20` after `0x140006fe0 candidate 35` had already been finalized as a soundness-preserving unsafe-callee stop.

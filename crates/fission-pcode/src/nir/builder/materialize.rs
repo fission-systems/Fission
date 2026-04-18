@@ -17,6 +17,40 @@ enum MaterializationRejectionReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AliasUnsafeHazardKind {
+    MultipleSameBlockConsumers,
+    DisallowedSingleConsumer,
+    CallBetweenDefUse,
+    LoadAfterStore,
+    SameBlockStore,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AliasUnsafeHazard {
+    kind: AliasUnsafeHazardKind,
+    use_stmt_idx: Option<usize>,
+    hazard_stmt_idx: Option<usize>,
+    hazard_opcode: Option<PcodeOpcode>,
+}
+
+impl AliasUnsafeHazard {
+    fn new(
+        kind: AliasUnsafeHazardKind,
+        use_stmt_idx: Option<usize>,
+        hazard_stmt_idx: Option<usize>,
+        hazard_opcode: Option<PcodeOpcode>,
+    ) -> Self {
+        Self {
+            kind,
+            use_stmt_idx,
+            hazard_stmt_idx,
+            hazard_opcode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReplacementCompleteness {
     Complete,
     Incomplete(MaterializationRejectionReason),
@@ -79,6 +113,41 @@ impl<'a> PreviewBuilder<'a> {
             plan.dominant_read,
             reason,
             rhs,
+        ));
+    }
+
+    fn trace_alias_unsafe_hazard(
+        &self,
+        block_addr: u64,
+        output: &Varnode,
+        hazard: AliasUnsafeHazard,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let use_stmt_idx = hazard
+            .use_stmt_idx
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let hazard_stmt_idx = hazard
+            .hazard_stmt_idx
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let hazard_op = hazard
+            .hazard_opcode
+            .map(|opcode| format!("{opcode:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "alias-unsafe-shape output=space:{} off:0x{:x} size:{} def_block=0x{:x} use_block=0x{:x} first_alias_hazard={:?} use_stmt_idx={} hazard_stmt={} hazard_op={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block_addr,
+            block_addr,
+            hazard.kind,
+            use_stmt_idx,
+            hazard_stmt_idx,
+            hazard_op,
         ));
     }
 
@@ -534,6 +603,8 @@ impl<'a> PreviewBuilder<'a> {
             return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
         }
         self.replacement_plan_rejected_alias_unsafe_count += 1;
+        let hazard = Self::classify_alias_unsafe_hazard(block, op_idx, output, rhs);
+        self.trace_alias_unsafe_hazard(block.start_address, output, hazard);
         ReplacementValuePlan::incomplete(
             ReplacementReadClass::SameBlockData,
             MaterializationRejectionReason::AliasUnsafe,
@@ -622,6 +693,113 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         false
+    }
+
+    fn classify_alias_unsafe_hazard(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> AliasUnsafeHazard {
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses) {
+            return hazard;
+        }
+        if uses.len() > 1 {
+            let second_use = uses.get(1).or_else(|| uses.first());
+            return AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::MultipleSameBlockConsumers,
+                second_use.map(|(idx, _)| *idx),
+                second_use.map(|(idx, _)| *idx),
+                second_use.map(|(_, op)| op.opcode),
+            );
+        }
+        if let Some((use_idx, use_op)) = uses.first().copied() {
+            let passthrough_required = Self::expr_requires_passthrough_single_use_inline(rhs);
+            let consumer_allows_inline = if passthrough_required {
+                Self::use_opcode_allows_passthrough_single_use_builder_inline(use_op.opcode)
+            } else {
+                Self::use_opcode_allows_single_use_builder_inline(use_op.opcode)
+            };
+            if !Self::expr_is_low_cost_builder_inline_candidate(rhs) || !consumer_allows_inline {
+                return AliasUnsafeHazard::new(
+                    AliasUnsafeHazardKind::DisallowedSingleConsumer,
+                    Some(use_idx),
+                    Some(use_idx),
+                    Some(use_op.opcode),
+                );
+            }
+        }
+        AliasUnsafeHazard::new(AliasUnsafeHazardKind::Unknown, None, None, None)
+    }
+
+    fn first_intervening_alias_unsafe_hazard(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        uses: &[(usize, &PcodeOp)],
+    ) -> Option<AliasUnsafeHazard> {
+        let first_use_idx = uses.first().map(|(idx, _)| *idx)?;
+        let mut first_store: Option<(usize, PcodeOpcode)> = None;
+        for (candidate_idx, candidate) in block
+            .ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .take(first_use_idx.saturating_sub(op_idx + 1))
+        {
+            match candidate.opcode {
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                    return Some(AliasUnsafeHazard::new(
+                        AliasUnsafeHazardKind::CallBetweenDefUse,
+                        Some(first_use_idx),
+                        Some(candidate_idx),
+                        Some(candidate.opcode),
+                    ));
+                }
+                PcodeOpcode::Load if first_store.is_some() => {
+                    return Some(AliasUnsafeHazard::new(
+                        AliasUnsafeHazardKind::LoadAfterStore,
+                        Some(first_use_idx),
+                        Some(candidate_idx),
+                        Some(candidate.opcode),
+                    ));
+                }
+                PcodeOpcode::Store => {
+                    first_store.get_or_insert((candidate_idx, candidate.opcode));
+                }
+                _ => {}
+            }
+        }
+        first_store.map(|(store_idx, store_opcode)| {
+            AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::SameBlockStore,
+                Some(first_use_idx),
+                Some(store_idx),
+                Some(store_opcode),
+            )
+        })
+    }
+
+    fn collect_output_use_sites_in_block<'b>(
+        block: &'b crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Vec<(usize, &'b PcodeOp)> {
+        let key = VarnodeKey::from(output);
+        let mut uses = Vec::new();
+        for (idx, candidate) in block.ops.iter().enumerate().skip(op_idx + 1) {
+            if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                break;
+            }
+            if candidate
+                .inputs
+                .iter()
+                .any(|input| VarnodeKey::from(input) == key)
+            {
+                uses.push((idx, candidate));
+            }
+        }
+        uses
     }
 
     fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
@@ -764,21 +942,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Vec<(usize, &'b PcodeOp)> {
-        let key = VarnodeKey::from(output);
-        let mut uses = Vec::new();
-        for (idx, candidate) in block.ops.iter().enumerate().skip(op_idx + 1) {
-            if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
-                break;
-            }
-            if candidate
-                .inputs
-                .iter()
-                .any(|input| VarnodeKey::from(input) == key)
-            {
-                uses.push((idx, candidate));
-            }
-        }
-        uses
+        Self::collect_output_use_sites_in_block(block, op_idx, output)
     }
 
     fn output_used_only_by_single_store(
@@ -841,6 +1005,45 @@ mod tests {
         NirType::Int {
             bits,
             signed: false,
+        }
+    }
+
+    fn varnode(offset: u64) -> Varnode {
+        Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn constant(value: i64) -> Varnode {
+        Varnode::constant(value, 8)
+    }
+
+    fn op(
+        seq_num: u32,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address: 0x1000 + u64::from(seq_num),
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    fn block(ops: Vec<PcodeOp>) -> crate::pcode::PcodeBasicBlock {
+        crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: Vec::new(),
+            ops,
         }
     }
 
@@ -1021,5 +1224,151 @@ mod tests {
                 "tmp_1".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn alias_unsafe_hazard_prefers_call_between_def_and_use() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            ),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        );
+
+        assert_eq!(hazard.kind, AliasUnsafeHazardKind::CallBetweenDefUse);
+        assert_eq!(hazard.use_stmt_idx, Some(2));
+        assert_eq!(hazard.hazard_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::Call));
+    }
+
+    #[test]
+    fn alias_unsafe_hazard_detects_load_after_store_chain() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Store,
+                None,
+                vec![varnode(0x30), varnode(0x31), constant(0)],
+            ),
+            op(
+                2,
+                PcodeOpcode::Load,
+                Some(varnode(0x40)),
+                vec![varnode(0x30)],
+            ),
+            op(
+                3,
+                PcodeOpcode::Copy,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            ),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        );
+
+        assert_eq!(hazard.kind, AliasUnsafeHazardKind::LoadAfterStore);
+        assert_eq!(hazard.use_stmt_idx, Some(3));
+        assert_eq!(hazard.hazard_stmt_idx, Some(2));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::Load));
+    }
+
+    #[test]
+    fn alias_unsafe_hazard_falls_back_to_multiple_consumers() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(varnode(0x30)),
+                vec![output.clone(), constant(1)],
+            ),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        );
+
+        assert_eq!(
+            hazard.kind,
+            AliasUnsafeHazardKind::MultipleSameBlockConsumers
+        );
+        assert_eq!(hazard.use_stmt_idx, Some(2));
+        assert_eq!(hazard.hazard_stmt_idx, Some(2));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntAdd));
+    }
+
+    #[test]
+    fn alias_unsafe_hazard_marks_disallowed_single_consumer() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        );
+
+        assert_eq!(hazard.kind, AliasUnsafeHazardKind::DisallowedSingleConsumer);
+        assert_eq!(hazard.use_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
     }
 }

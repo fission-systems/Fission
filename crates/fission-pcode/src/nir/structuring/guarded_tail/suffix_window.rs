@@ -543,7 +543,9 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         let target_addr = crate::nir::types::parse_call_target_address(target);
-        let import = fission_signatures::win_api::WIN_API_DB.get(target).is_some();
+        let import = fission_signatures::win_api::WIN_API_DB
+            .get(target)
+            .is_some();
         let internal = !import && target_addr.is_some();
         let summary_available = import
             || Self::call_target_is_known_pure_helper(target)
@@ -1222,9 +1224,7 @@ impl<'a> PreviewBuilder<'a> {
         if Self::guarded_tail_diag_enabled() {
             eprintln!(
                 "[GT-TRACE] guard-family-match-scan entry_cond={:?} terminal_label={} excluded_stmt_idx={:?}",
-                entry_cond,
-                terminal_label,
-                excluded_stmt_idx
+                entry_cond, terminal_label, excluded_stmt_idx
             );
         }
 
@@ -1237,7 +1237,8 @@ impl<'a> PreviewBuilder<'a> {
             if excluded_stmt_idx == Some(absolute_idx) {
                 continue;
             }
-            let Some(suffix_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
+            let Some(suffix_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label)
+            else {
                 continue;
             };
             candidate_count += 1;
@@ -1246,10 +1247,7 @@ impl<'a> PreviewBuilder<'a> {
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[GT-TRACE] guard-family-match-candidate stmt_idx={} suffix_cond={:?} shares={} reason={}",
-                    absolute_idx,
-                    suffix_cond,
-                    shares,
-                    reason
+                    absolute_idx, suffix_cond, shares, reason
                 );
             }
             if shares {
@@ -1260,9 +1258,7 @@ impl<'a> PreviewBuilder<'a> {
         if Self::guarded_tail_diag_enabled() {
             eprintln!(
                 "[GT-TRACE] guard-family-match-miss entry_cond={:?} terminal_label={} candidate_count={}",
-                entry_cond,
-                terminal_label,
-                candidate_count
+                entry_cond, terminal_label, candidate_count
             );
         }
         None
@@ -1310,11 +1306,7 @@ impl<'a> PreviewBuilder<'a> {
         if Self::guarded_tail_diag_enabled() {
             eprintln!(
                 "[GT-TRACE] nested-terminal-join-proof stmt_idx={} terminal_label={} entry_cond={:?} matched_cond={:?} result={}",
-                stmt_idx,
-                terminal_label,
-                entry_cond,
-                matched_cond,
-                result
+                stmt_idx, terminal_label, entry_cond, matched_cond, result
             );
         }
         result
@@ -1348,11 +1340,7 @@ impl<'a> PreviewBuilder<'a> {
         if Self::guarded_tail_diag_enabled() {
             eprintln!(
                 "[GT-TRACE] nested-entry-guard-family-proof label={} ref_stmt_idx={} entry_cond={:?} matched_cond={:?} result={}",
-                label,
-                stmt_idx,
-                entry_cond,
-                matched_cond,
-                result
+                label, stmt_idx, entry_cond, matched_cond, result
             );
             if !result {
                 let boundary = Self::nested_entry_boundary_context(
@@ -1418,15 +1406,15 @@ impl<'a> PreviewBuilder<'a> {
         let label_idx = body
             .iter()
             .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
-        let label_in_current_suffix_window = label_idx.is_some_and(|idx| {
-            idx >= current_label_idx && idx < terminal_label_idx
-        });
-        let internal_candidate_refs = Self::count_candidate_internal_top_level_refs_in_suffix_window(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        );
+        let label_in_current_suffix_window =
+            label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx);
+        let internal_candidate_refs =
+            Self::count_candidate_internal_top_level_refs_in_suffix_window(
+                body,
+                label,
+                anchor_idx,
+                terminal_label_idx,
+            );
         let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
             body,
             label,
@@ -1451,8 +1439,7 @@ impl<'a> PreviewBuilder<'a> {
             raw_refs,
             internal_candidate_refs,
             suffix_safe_refs,
-            external_pre_guard_internalization: raw_refs
-                .saturating_sub(internal_candidate_refs),
+            external_pre_guard_internalization: raw_refs.saturating_sub(internal_candidate_refs),
             external_entry_kind,
             external_entry_ref_stmt_idx,
         }
@@ -1532,12 +1519,8 @@ impl<'a> PreviewBuilder<'a> {
             return 0;
         }
 
-        let refs = Self::collect_nested_boundary_ref_traces(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        );
+        let refs =
+            Self::collect_nested_boundary_ref_traces(body, label, anchor_idx, terminal_label_idx);
         let pair_trace = Self::build_nested_boundary_pair_trace(&refs);
         if pair_trace.ref_count != 2
             || !pair_trace.same_guard_family
