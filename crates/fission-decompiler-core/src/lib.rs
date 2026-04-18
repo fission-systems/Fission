@@ -124,7 +124,7 @@ fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usi
     if safe == 0 { None } else { Some(safe) }
 }
 
-fn decode_rust_sleigh_pcode(
+pub(crate) fn decode_rust_sleigh_pcode(
     binary: &LoadedBinary,
     name: &str,
     entry_address: u64,

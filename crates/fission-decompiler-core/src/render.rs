@@ -1,4 +1,6 @@
-use crate::facts::build_nir_type_context;
+use crate::facts::{
+    build_nir_type_context, refine_nir_type_context_with_callee_effect_summaries,
+};
 use crate::routing::auto_nir_admission_eligible;
 use crate::types::NirWorkerRequest;
 use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};
@@ -103,7 +105,7 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
     name: &str,
     enforce_auto_gate: bool,
     _timeout_ms: Option<u64>,
-    type_context: NirTypeContext,
+    mut type_context: NirTypeContext,
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
@@ -117,6 +119,7 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
         region_linearize_structuring,
         force_linear_structuring,
     );
+    refine_nir_type_context_with_callee_effect_summaries(binary, pcode, &mut type_context);
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = serde_json::to_string_pretty(pcode).map(|json| {
             std::fs::write(
@@ -335,7 +338,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
     name: &str,
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
-    type_context: NirTypeContext,
+    mut type_context: NirTypeContext,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
@@ -354,6 +357,7 @@ pub(crate) fn render_nir_from_json_with_type_context(
         region_linearize_structuring,
         force_linear_structuring,
     );
+    refine_nir_type_context_with_callee_effect_summaries(binary, &pcode, &mut type_context);
     let should_use_worker =
         options.target_profile().worker_eligible && !enforce_auto_gate && !auto_gate_eligible;
     let request = make_nir_request(pcode_json, address, name, options, type_context);

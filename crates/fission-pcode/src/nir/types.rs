@@ -274,6 +274,7 @@ pub enum CallEffectSummarySource {
     CallTargetRef,
     ImportSignature,
     FactStore,
+    PreviewCalleeAnalysis,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

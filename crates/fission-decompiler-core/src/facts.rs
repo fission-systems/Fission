@@ -1,14 +1,16 @@
+use crate::decode_rust_sleigh_pcode;
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
 use fission_pcode::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
-    NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext,
+    NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext, PcodeFunction,
+    PcodeOpcode,
 };
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
 use fission_static::analysis::decomp::facts::FactStore;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
@@ -121,6 +123,147 @@ fn build_nir_call_effect_summaries(
             )
         })
         .collect()
+}
+
+pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
+    binary: &LoadedBinary,
+    pcode: &PcodeFunction,
+    type_context: &mut NirTypeContext,
+) {
+    let direct_callees = collect_direct_internal_callee_targets(pcode);
+    for target_addr in direct_callees {
+        let Some(target_ref) = type_context.call_target_refs.get(&target_addr) else {
+            continue;
+        };
+        if matches!(target_ref.provenance, CallTargetProvenance::Import) {
+            continue;
+        }
+        let Some(summary) =
+            build_preview_callee_effect_summary(binary, target_addr, &target_ref.symbol)
+        else {
+            continue;
+        };
+        type_context
+            .call_effect_summaries
+            .insert(target_ref.symbol.clone(), summary);
+    }
+}
+
+fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64> {
+    let mut callees = BTreeSet::new();
+    for block in &pcode.blocks {
+        for op in &block.ops {
+            if op.opcode != PcodeOpcode::Call {
+                continue;
+            }
+            let Some(target) = op.inputs.first() else {
+                continue;
+            };
+            if !target.is_constant {
+                continue;
+            }
+            callees.insert(target.offset);
+        }
+    }
+    callees
+}
+
+fn build_preview_callee_effect_summary(
+    binary: &LoadedBinary,
+    target_addr: u64,
+    target_name: &str,
+) -> Option<NirCallEffectSummary> {
+    let function = binary.function_at_exact(target_addr)?;
+    if function.is_import {
+        return None;
+    }
+    let max_bytes = direct_callee_max_bytes(binary, target_addr)?;
+    let instruction_limit = direct_callee_instruction_limit(max_bytes);
+    let pcode = decode_rust_sleigh_pcode(
+        binary,
+        target_name,
+        target_addr,
+        max_bytes,
+        instruction_limit,
+        true,
+        true,
+    )
+    .ok()?;
+    Some(summarize_preview_callee_effects(&pcode))
+}
+
+fn direct_callee_max_bytes(binary: &LoadedBinary, target_addr: u64) -> Option<usize> {
+    let function = binary.function_at_exact(target_addr)?;
+    const DEFAULT_BYTES: usize = 0x400;
+    const MAX_BYTES_CAP: usize = 0x4000;
+
+    if function.size > 0 {
+        return Some((function.size as usize).min(MAX_BYTES_CAP).max(1));
+    }
+
+    if let Some(next) = binary.function_after(target_addr)
+        && next.address > target_addr
+    {
+        let distance = (next.address - target_addr) as usize;
+        return Some(distance.min(MAX_BYTES_CAP).max(1));
+    }
+
+    Some(DEFAULT_BYTES)
+}
+
+fn direct_callee_instruction_limit(max_bytes: usize) -> usize {
+    let estimated = (max_bytes / 4).clamp(32, 512);
+    estimated.max(32)
+}
+
+fn summarize_preview_callee_effects(pcode: &PcodeFunction) -> NirCallEffectSummary {
+    let mut reads_memory = Some(false);
+    let mut writes_memory = Some(false);
+    let mut may_call_unknown = Some(false);
+    let mut may_exit = None;
+    let mut saw_return = false;
+
+    for block in &pcode.blocks {
+        for op in &block.ops {
+            match op.opcode {
+                PcodeOpcode::Load => {
+                    reads_memory = Some(true);
+                }
+                PcodeOpcode::Store => {
+                    reads_memory = Some(true);
+                    writes_memory = Some(true);
+                }
+                PcodeOpcode::Call | PcodeOpcode::CallInd => {
+                    may_call_unknown = Some(true);
+                }
+                PcodeOpcode::CallOther => {
+                    may_call_unknown = Some(true);
+                    may_exit = Some(true);
+                }
+                PcodeOpcode::Return => {
+                    saw_return = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if may_exit != Some(true) {
+        may_exit = if saw_return && may_call_unknown == Some(false) {
+            Some(false)
+        } else {
+            None
+        };
+    }
+
+    NirCallEffectSummary {
+        reads_memory,
+        writes_memory,
+        escapes_args: None,
+        may_call_unknown,
+        may_exit,
+        source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+    }
 }
 
 fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
@@ -262,4 +405,68 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_preview_callee_effects;
+    use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    fn op(seq_num: u32, opcode: PcodeOpcode) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address: 0x401000 + seq_num as u64,
+            output: None,
+            inputs: Vec::new(),
+            asm_mnemonic: None,
+        }
+    }
+
+    fn constant_call_op(seq_num: u32, target: u64) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode: PcodeOpcode::Call,
+            address: 0x401000 + seq_num as u64,
+            output: None,
+            inputs: vec![Varnode::constant(target as i64, 8)],
+            asm_mnemonic: None,
+        }
+    }
+
+    fn test_pcode(ops: Vec<PcodeOp>) -> PcodeFunction {
+        PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: Vec::new(),
+                ops,
+            }],
+        }
+    }
+
+    #[test]
+    fn preview_callee_effect_summary_marks_leaf_return_as_non_exiting() {
+        let pcode = test_pcode(vec![op(0, PcodeOpcode::Copy), op(1, PcodeOpcode::Return)]);
+        let summary = summarize_preview_callee_effects(&pcode);
+        assert_eq!(summary.reads_memory, Some(false));
+        assert_eq!(summary.writes_memory, Some(false));
+        assert_eq!(summary.may_call_unknown, Some(false));
+        assert_eq!(summary.may_exit, Some(false));
+    }
+
+    #[test]
+    fn preview_callee_effect_summary_marks_store_and_nested_call_as_unsafe() {
+        let pcode = test_pcode(vec![
+            op(0, PcodeOpcode::Load),
+            op(1, PcodeOpcode::Store),
+            constant_call_op(2, 0x500000),
+            op(3, PcodeOpcode::Return),
+        ]);
+        let summary = summarize_preview_callee_effects(&pcode);
+        assert_eq!(summary.reads_memory, Some(true));
+        assert_eq!(summary.writes_memory, Some(true));
+        assert_eq!(summary.may_call_unknown, Some(true));
+        assert_eq!(summary.may_exit, None);
+    }
 }

@@ -9,6 +9,61 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail intraprocedural callee effect summary producer
+
+This wave added the first real callee-effect producer for guarded-tail call-bearing suffix diagnostics. It still did not widen guarded-tail acceptance. The goal was to replace the active `stmt_idx=154` state from “summary source exists but effect bits are unknown” with a conservative intraprocedural effect summary derived from the direct internal callee body itself.
+
+- [`types.rs`](../../crates/fission-pcode/src/nir/types.rs) extends `CallEffectSummarySource` with `PreviewCalleeAnalysis`
+- [`lib.rs`](../../crates/fission-decompiler-core/src/lib.rs) promotes `decode_rust_sleigh_pcode(...)` to `pub(crate)` so decompiler-core context assembly can reuse the existing Rust-Sleigh lift path for direct internal callees
+- [`facts.rs`](../../crates/fission-decompiler-core/src/facts.rs) now owns the first intraprocedural producer:
+  - `refine_nir_type_context_with_callee_effect_summaries(...)`
+  - `collect_direct_internal_callee_targets(...)`
+  - `build_preview_callee_effect_summary(...)`
+  - `summarize_preview_callee_effects(...)`
+- the producer is intentionally narrow and fail-closed:
+  - only direct callee targets actually present in the current function's p-code are considered
+  - only direct internal callees are lifted
+  - `STORE` marks `writes_memory=yes`
+  - `CALL` / `CALLIND` mark `may_call_unknown=yes`
+  - `CALLOTHER` marks `may_call_unknown=yes` and `may_exit=yes`
+  - leaf `RETURN`-only callees can produce `may_exit=no`
+  - unresolved fields remain unknown
+- [`render.rs`](../../crates/fission-decompiler-core/src/render.rs) now refines `NirTypeContext` with callee-effect summaries before both:
+  - in-process NIR render
+  - worker request construction
+- [`engine.rs`](../../crates/fission-decompiler-core/src/engine.rs) test imports were updated to keep decompiler-core test coverage compiling with the current `StructuringEngineKind` usage
+
+Validation:
+
+- `cargo test -p fission-decompiler-core preview_callee_effect_summary -- --nocapture`
+- `cargo check -p fission-decompiler-core`
+- `cargo build -p fission-cli`
+- `cargo check -p fission-pcode`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `stmt_idx=154` guarded-tail path now reads a real producer-backed summary:
+  - `suffix-unknown-call-provenance stmt_idx=154 target=FUN_0x140043d30 target_addr=Some(5368986928) internal=true import=false summary_available=true`
+  - `suffix-unknown-call-summary target=FUN_0x140043d30 binary_function_present=true target_ref_present=true target_ref_provenance=Direct effect_summary_source=PreviewCalleeAnalysis`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=yes writes_global=unknown may_call_unknown=yes may_exit=yes return_used=false`
+- this means the active blocker is no longer “missing producer” and no longer “all effect bits unknown”
+- instead, the producer now says the callee is unsafe for guarded-tail suffix internalization on the current conservative rules:
+  - it writes memory
+  - it may call unknown code
+  - it may exit
+- the outer guarded-tail shell is still unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `FUN_0x140043d30` is no longer blocked by missing provenance or missing summary plumbing
+- the current producer actively classifies it as unsafe
+- the next wave should decide whether that callee summary is precise enough, not widen guarded-tail local call acceptance
+
 ### Guarded-tail `CallTargetRef` effect-summary lookup wiring
 
 This wave stayed diagnostic-only. It did not widen guarded-tail call acceptance. The goal was to move the active `stmt_idx=154` path from “direct callee is visible but has no summary container” to “direct callee has a concrete summary source, even if every effect bit is still unknown”.

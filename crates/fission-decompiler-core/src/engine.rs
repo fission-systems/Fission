@@ -112,7 +112,10 @@ mod tests {
         DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
     };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
-    use fission_pcode::{NirRenderOptions, NirTypeContext, PcodeFunction, PreviewCallParamRule};
+    use fission_pcode::{
+        NirRenderOptions, NirTypeContext, PcodeFunction, PreviewCallParamRule,
+        StructuringEngineKind,
+    };
     use std::collections::HashMap;
 
     struct MockNirSource;
