@@ -7,8 +7,11 @@ use super::*;
 
 mod alias_refs;
 mod canonicalize;
+mod execution;
 mod promotion;
 mod promotion_graph;
+mod replacement;
+mod suffix_window;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GuardedTailCanonicalizationFailure {

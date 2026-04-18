@@ -9,6 +9,62 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail `promotion.rs` thin-façade refactor and module split
+
+This wave was a behavior-preserving refactor. The goal was to stop using [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) as a single dumping ground for suffix ownership, replacement helpers, execute semantics, and local tests.
+
+- [`mod.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/mod.rs) now declares the split sibling modules:
+  - [`execution.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/execution.rs)
+  - [`replacement.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/replacement.rs)
+  - [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs)
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) is now reduced to:
+  - trace/diagnostic entrypoints
+  - canonical rejection/telemetry mapping
+  - top-level guarded-tail orchestration
+- [`replacement.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/replacement.rs) now owns:
+  - `ConditionAssumption`
+  - read/def counting helpers
+  - `replace_var_in_expr(...)`, `replace_var_in_stmt(...)`
+  - guarded-tail else-source and read-kind classification helpers
+- [`execution.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/execution.rs) now owns:
+  - guarded-tail `trial -> verify -> execute`
+  - exported binding collection
+  - rewrite / replacement-plan construction
+  - candidate discovery recursion
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now owns:
+  - suffix-window ownership diagnostics
+  - owned-join narrowing
+  - external-entry budget logic
+  - nested/side-effect/call subtype classifiers
+  - the moved helper-local test block
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo test -p fission-pcode suffix_side_effect_shape_ -- --nocapture`
+- `cargo test -p fission-pcode suffix_call_effect_shape_ -- --nocapture`
+- `cargo test -p fission-pcode memory_read_only_assign -- --nocapture`
+- `cargo test -p fission-pcode nested_terminal_join_tail -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed parity:
+
+- `stmt_idx=130` remains internalized:
+  - `suffix-memory-readonly-assign-internalized stmt_idx=130 kind=MemoryReadOnlyAssign`
+- `stmt_idx=138` remains classified the same:
+  - `suffix-call-effect-shape stmt_idx=138 kind=PureKnownHelperCall`
+- the live blocker shell is unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `early_label=block_14000701c first_fail=SuffixHasSideEffect { stmt_idx: 138 }`
+
+Broader suite status:
+
+- `cargo test -p fission-pcode structuring_guarded_tail -- --nocapture` remains red
+- the failing area stays concentrated in the pre-existing alias/candidate-discovery family, so this refactor was not treated as a semantic acceptance wave
+
 ### Guarded-tail call side-effect shape subtyping for `stmt_idx=138`
 
 This wave did not relax suffix ownership for calls. It only split the remaining `CallExprSideEffect` bucket into explicit call-effect families so the next owner can be chosen from a concrete call shape instead of a generic side-effect label.
