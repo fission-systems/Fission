@@ -9,6 +9,53 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail nested terminal-join tail internalization for `stmt_idx=120`
+
+This wave did not broaden generic nested conditional acceptance. It only internalized one narrow guarded-tail subtype: a single-branch nested `if` that jumps directly to the current terminal join can now be treated as suffix-owned when its guard belongs to the same terminal guard family already proven inside the suffix window.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `nested_terminal_join_tail_is_guard_family_owned_safe(...)`
+  - `suffix_window_has_terminal_guard_family_match_excluding(...)`
+  - env-gated trace lines of the form:
+    - `nested-terminal-join-tail-internalized stmt_idx=... kind=... stmt={:?}`
+- focused synthetic coverage was added for:
+  - same-family `then -> goto terminal`
+  - negated-family `else -> goto terminal`
+  - continued rejection for:
+    - different guard family
+    - non-terminal target
+    - non-empty else payload
+    - side-effectful branch payload
+
+Validation:
+
+- `cargo test -p fission-pcode nested_terminal_join_tail -- --nocapture`
+- `cargo test -p fission-pcode suffix_nested_shape_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the former blocker is now internalized directly:
+  - `nested-terminal-join-tail-internalized stmt_idx=120 kind=NestedCrossesTerminalJoin`
+- the same family also internalizes a second terminal-join-crossing nested tail:
+  - `nested-terminal-join-tail-internalized stmt_idx=128 kind=NestedCrossesTerminalJoin`
+- candidate 35 moved inward:
+  - before: `early_label=block_14000701c first_fail=SuffixHasNestedOrNonlocalRef { stmt_idx: 120 }`
+  - after: `early_label=block_14000701c first_fail=SuffixHasSideEffect { stmt_idx: 130 }`
+  - and `early_label=block_140007021` moves to the same `stmt_idx=130` blocker
+- the outer candidate shell still remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- terminal-join-crossing nested single-goto tails are no longer the active owner
+- the next owner is the side-effect classification around `stmt_idx=130`, not nested guard-family ownership
+- the next wave should focus on whether that load/assign segment is actually side-effectful for suffix ownership, not broaden nested terminal-join acceptance further
+
 ### Guarded-tail nested suffix shape subtyping for `stmt_idx=120`
 
 This wave did not broaden nested guarded-tail acceptance. It only split the remaining `SuffixHasNestedOrNonlocalRef` bucket into explicit nested suffix-shape subtypes so the next owner can be chosen from a traced structural family instead of a generic nested/nonlocal label.

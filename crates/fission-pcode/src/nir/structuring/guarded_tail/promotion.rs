@@ -469,14 +469,32 @@ impl<'a> PreviewBuilder<'a> {
             return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
         }
         if Self::suffix_stmt_has_nested_or_nonlocal_ref(stmt) {
-            if Self::guarded_tail_diag_enabled() {
-                let kind = Self::classify_nested_suffix_shape(
-                    stmt,
+            let kind = Self::classify_nested_suffix_shape(
+                stmt,
+                body,
+                current_label_idx,
+                terminal_label_idx,
+                next_label,
+            );
+            if kind == NestedSuffixShapeKind::NestedCrossesTerminalJoin
+                && Self::nested_terminal_join_tail_is_guard_family_owned_safe(
                     body,
+                    stmt_idx,
                     current_label_idx,
                     terminal_label_idx,
-                    next_label,
-                );
+                )
+            {
+                if Self::guarded_tail_diag_enabled() {
+                    eprintln!(
+                        "[GT-TRACE] nested-terminal-join-tail-internalized stmt_idx={} kind={:?} stmt={:?}",
+                        stmt_idx,
+                        kind,
+                        stmt
+                    );
+                }
+                return Ok(());
+            }
+            if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[GT-TRACE] nested-suffix-shape stmt_idx={} kind={:?} stmt={:?}",
                     stmt_idx,
@@ -697,11 +715,12 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    fn suffix_window_has_terminal_guard_family_match(
+    fn suffix_window_has_terminal_guard_family_match_excluding(
         body: &[HirStmt],
         current_label_idx: usize,
         terminal_label_idx: usize,
         entry_cond: &HirExpr,
+        excluded_stmt_idx: Option<usize>,
     ) -> bool {
         let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
             return false;
@@ -711,8 +730,52 @@ impl<'a> PreviewBuilder<'a> {
         }
         body[current_label_idx + 1..terminal_label_idx]
             .iter()
-            .filter_map(|stmt| Self::stmt_is_single_branch_if_to_label(stmt, terminal_label))
+            .enumerate()
+            .filter(|(offset, _)| {
+                let absolute_idx = current_label_idx + 1 + offset;
+                excluded_stmt_idx != Some(absolute_idx)
+            })
+            .filter_map(|(_, stmt)| Self::stmt_is_single_branch_if_to_label(stmt, terminal_label))
             .any(|suffix_cond| Self::exprs_share_guard_family(entry_cond, suffix_cond))
+    }
+
+    fn suffix_window_has_terminal_guard_family_match(
+        body: &[HirStmt],
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        entry_cond: &HirExpr,
+    ) -> bool {
+        Self::suffix_window_has_terminal_guard_family_match_excluding(
+            body,
+            current_label_idx,
+            terminal_label_idx,
+            entry_cond,
+            None,
+        )
+    }
+
+    fn nested_terminal_join_tail_is_guard_family_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+            return false;
+        };
+        let Some(stmt) = body.get(stmt_idx) else {
+            return false;
+        };
+        let Some(entry_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
+            return false;
+        };
+        Self::suffix_window_has_terminal_guard_family_match_excluding(
+            body,
+            current_label_idx,
+            terminal_label_idx,
+            entry_cond,
+            Some(stmt_idx),
+        )
     }
 
     fn nested_conditional_entry_is_guard_family_internal(
@@ -2925,6 +2988,26 @@ mod owned_join_window_tests {
         assert_eq!(result, Ok(()));
     }
 
+    fn assert_classify_suffix_stmt_rejection(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        next_label: &str,
+        expected: SuffixTailRejection,
+    ) {
+        let stmt = &body[stmt_idx];
+        let result = PreviewBuilder::classify_suffix_stmt(
+            stmt,
+            body,
+            stmt_idx,
+            current_label_idx,
+            terminal_label_idx,
+            next_label,
+        );
+        assert_eq!(result, Err(expected));
+    }
+
     fn assert_nested_suffix_shape_kind(
         body: &[HirStmt],
         stmt_idx: usize,
@@ -3425,6 +3508,192 @@ mod owned_join_window_tests {
             4,
             "next",
             NestedSuffixShapeKind::NestedCrossesTerminalJoin,
+        );
+    }
+
+    #[test]
+    fn suffix_accepts_nested_terminal_join_tail_same_guard_family_then_branch() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 4, "next");
+    }
+
+    #[test]
+    fn suffix_accepts_nested_terminal_join_tail_negated_guard_match_else_branch() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: Vec::new(),
+                else_body: vec![HirStmt::Goto("terminal".to_string())],
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 4, "next");
+    }
+
+    #[test]
+    fn suffix_rejects_nested_terminal_join_tail_different_guard_family() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("other".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            4,
+            "next",
+            SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_nested_terminal_join_tail_nonterminal_target() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("next".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("next".to_string()),
+            HirStmt::Expr(HirExpr::Var("after".to_string())),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            4,
+            "next",
+            SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_nested_terminal_join_tail_with_nonempty_else_payload() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: vec![HirStmt::Expr(HirExpr::Var("payload".to_string()))],
+            },
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_nested_terminal_join_tail_with_side_effectful_branch() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![
+                    HirStmt::Expr(HirExpr::Call {
+                        target: "helper".to_string(),
+                        args: vec![],
+                        ty: NirType::Unknown,
+                    }),
+                    HirStmt::Goto("terminal".to_string()),
+                ],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx: 1 },
         );
     }
 
