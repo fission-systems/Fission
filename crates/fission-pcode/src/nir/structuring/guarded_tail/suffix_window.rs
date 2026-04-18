@@ -892,18 +892,18 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    fn suffix_window_has_terminal_guard_family_match_excluding(
+    fn find_terminal_guard_family_match_excluding(
         body: &[HirStmt],
         current_label_idx: usize,
         terminal_label_idx: usize,
         entry_cond: &HirExpr,
         excluded_stmt_idx: Option<usize>,
-    ) -> bool {
+    ) -> Option<HirExpr> {
         let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
-            return false;
+            return None;
         };
         if current_label_idx + 1 >= terminal_label_idx {
-            return false;
+            return None;
         }
         body[current_label_idx + 1..terminal_label_idx]
             .iter()
@@ -913,7 +913,8 @@ impl<'a> PreviewBuilder<'a> {
                 excluded_stmt_idx != Some(absolute_idx)
             })
             .filter_map(|(_, stmt)| Self::stmt_is_single_branch_if_to_label(stmt, terminal_label))
-            .any(|suffix_cond| Self::exprs_share_guard_family(entry_cond, suffix_cond))
+            .find(|suffix_cond| Self::exprs_share_guard_family(entry_cond, suffix_cond))
+            .cloned()
     }
 
     fn suffix_window_has_terminal_guard_family_match(
@@ -922,13 +923,14 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         entry_cond: &HirExpr,
     ) -> bool {
-        Self::suffix_window_has_terminal_guard_family_match_excluding(
+        Self::find_terminal_guard_family_match_excluding(
             body,
             current_label_idx,
             terminal_label_idx,
             entry_cond,
             None,
         )
+        .is_some()
     }
 
     fn nested_terminal_join_tail_is_guard_family_owned_safe(
@@ -946,13 +948,25 @@ impl<'a> PreviewBuilder<'a> {
         let Some(entry_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
             return false;
         };
-        Self::suffix_window_has_terminal_guard_family_match_excluding(
+        let matched_cond = Self::find_terminal_guard_family_match_excluding(
             body,
             current_label_idx,
             terminal_label_idx,
             entry_cond,
             Some(stmt_idx),
-        )
+        );
+        let result = matched_cond.is_some();
+        if Self::guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] nested-terminal-join-proof stmt_idx={} terminal_label={} entry_cond={:?} matched_cond={:?} result={}",
+                stmt_idx,
+                terminal_label,
+                entry_cond,
+                matched_cond,
+                result
+            );
+        }
+        result
     }
 
     fn nested_conditional_entry_is_guard_family_internal(
@@ -972,12 +986,25 @@ impl<'a> PreviewBuilder<'a> {
         let Some(entry_cond) = Self::stmt_is_single_goto_then_if_to_label(stmt, label) else {
             return false;
         };
-        Self::suffix_window_has_terminal_guard_family_match(
+        let matched_cond = Self::find_terminal_guard_family_match_excluding(
             body,
             current_label_idx,
             terminal_label_idx,
             entry_cond,
-        )
+            None,
+        );
+        let result = matched_cond.is_some();
+        if Self::guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] nested-entry-guard-family-proof label={} ref_stmt_idx={} entry_cond={:?} matched_cond={:?} result={}",
+                label,
+                stmt_idx,
+                entry_cond,
+                matched_cond,
+                result
+            );
+        }
+        result
     }
 
     fn count_internalized_guard_family_nested_conditional_entries(

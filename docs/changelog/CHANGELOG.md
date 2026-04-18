@@ -9,6 +9,48 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail nested suffix proof tracing for `stmt_idx=142`
+
+This wave did not widen suffix ownership. It only made the remaining nested/nonlocal blocker explicit enough to choose the next owner without guessing.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now promotes guard-family matching from a boolean-only helper to a traceable proof input:
+  - `find_terminal_guard_family_match_excluding(...)`
+- the nested proof paths now emit env-gated traces for both families:
+  - `nested-terminal-join-proof ... entry_cond=... matched_cond=... result=...`
+  - `nested-entry-guard-family-proof ... entry_cond=... matched_cond=... result=...`
+- no acceptance policy changed:
+  - generic nested suffix ownership is still fail-closed
+  - the change is diagnostic only
+
+Validation:
+
+- `cargo test -p fission-pcode nested_terminal_join_tail -- --nocapture`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active blocker is now fixed precisely:
+  - `nested-suffix-shape stmt_idx=142 kind=NestedSingleGotoThen`
+- the proof failure is also explicit:
+  - `nested-entry-guard-family-proof label=block_140007040 ref_stmt_idx=142 ... matched_cond=None result=false`
+- previously recovered guard-family cases still show positive proof:
+  - `nested-entry-guard-family-proof label=block_140007021 ... matched_cond=Some(...) result=true`
+  - `nested-terminal-join-proof stmt_idx=120 ... matched_cond=Some(...) result=true`
+  - `nested-terminal-join-proof stmt_idx=128 ... matched_cond=Some(...) result=true`
+- the outer shell remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- the next owner is not a generic nested-tail acceptance patch
+- the blocker is specifically a `NestedSingleGotoThen` into `block_140007040` with no matching guard-family witness in the current suffix window
+- the next semantic wave should decide whether that guard family needs normalization or whether `block_140007040` remains an external owner boundary
+
 ### Guarded-tail known-pure helper call suffix internalization for `__popcount`
 
 This wave kept the call-bearing suffix policy fail-closed for generic calls and only internalized the one traced safe subcase: a local binding assigned from `__popcount(...)` whose arguments are pure and whose result does not escape past the terminal join.
