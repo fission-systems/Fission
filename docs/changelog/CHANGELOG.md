@@ -9,6 +9,46 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guard-family miss candidate tracing for `block_140007040`
+
+This wave stayed diagnostic-only and did not widen guarded-tail acceptance. The goal was to decide whether the remaining `stmt_idx=142` blocker was a guard normalization miss or a true external owner boundary.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now adds guard-family scan traces inside:
+  - `find_terminal_guard_family_match_excluding(...)`
+- the scan emits:
+  - `guard-family-match-scan`
+  - `guard-family-match-candidate`
+  - `guard-family-match-miss`
+- candidate-level reasons are now explicit:
+  - `ExactExpr`
+  - `EntryNegatesCandidate`
+  - `CandidateNegatesEntry`
+  - `NoGuardFamilyRelation`
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- recovered paths still prove normally:
+  - `stmt_idx=120` and `stmt_idx=128` keep `shares=true` with exact or negated-family matches
+- the active blocker remains:
+  - `nested-suffix-shape stmt_idx=142 kind=NestedSingleGotoThen`
+- for the `block_140007021` window, the terminal join scan still sees candidates and can match:
+  - candidates at `stmt_idx=120`, `stmt_idx=128`, and `stmt_idx=149`
+- for the `block_140007040` path, the decisive trace is:
+  - `guard-family-match-miss ... terminal_label=block_140007047 candidate_count=0`
+  - `nested-entry-guard-family-proof label=block_140007040 ref_stmt_idx=142 ... matched_cond=None result=false`
+
+Conclusion:
+
+- the remaining `stmt_idx=142` blocker is not currently a same-family guard that the matcher merely failed to normalize
+- for `block_140007040`, the current suffix window has no comparable terminal-branch witness at all
+- the next owner is therefore closer to an external owner-boundary / window-ownership decision than to a simple guard normalization patch
+
 ### Guarded-tail nested suffix proof tracing for `stmt_idx=142`
 
 This wave did not widen suffix ownership. It only made the remaining nested/nonlocal blocker explicit enough to choose the next owner without guessing.

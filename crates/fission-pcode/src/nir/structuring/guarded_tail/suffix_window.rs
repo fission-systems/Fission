@@ -892,6 +892,27 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
+    fn guard_family_match_reason(lhs: &HirExpr, rhs: &HirExpr) -> &'static str {
+        if lhs == rhs {
+            return "ExactExpr";
+        }
+        match lhs {
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr,
+                ..
+            } if expr.as_ref() == rhs => "EntryNegatesCandidate",
+            _ => match rhs {
+                HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr,
+                    ..
+                } if expr.as_ref() == lhs => "CandidateNegatesEntry",
+                _ => "NoGuardFamilyRelation",
+            },
+        }
+    }
+
     fn find_terminal_guard_family_match_excluding(
         body: &[HirStmt],
         current_label_idx: usize,
@@ -905,16 +926,53 @@ impl<'a> PreviewBuilder<'a> {
         if current_label_idx + 1 >= terminal_label_idx {
             return None;
         }
-        body[current_label_idx + 1..terminal_label_idx]
+        if Self::guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] guard-family-match-scan entry_cond={:?} terminal_label={} excluded_stmt_idx={:?}",
+                entry_cond,
+                terminal_label,
+                excluded_stmt_idx
+            );
+        }
+
+        let mut candidate_count = 0usize;
+        for (offset, stmt) in body[current_label_idx + 1..terminal_label_idx]
             .iter()
             .enumerate()
-            .filter(|(offset, _)| {
-                let absolute_idx = current_label_idx + 1 + offset;
-                excluded_stmt_idx != Some(absolute_idx)
-            })
-            .filter_map(|(_, stmt)| Self::stmt_is_single_branch_if_to_label(stmt, terminal_label))
-            .find(|suffix_cond| Self::exprs_share_guard_family(entry_cond, suffix_cond))
-            .cloned()
+        {
+            let absolute_idx = current_label_idx + 1 + offset;
+            if excluded_stmt_idx == Some(absolute_idx) {
+                continue;
+            }
+            let Some(suffix_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
+                continue;
+            };
+            candidate_count += 1;
+            let shares = Self::exprs_share_guard_family(entry_cond, suffix_cond);
+            let reason = Self::guard_family_match_reason(entry_cond, suffix_cond);
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] guard-family-match-candidate stmt_idx={} suffix_cond={:?} shares={} reason={}",
+                    absolute_idx,
+                    suffix_cond,
+                    shares,
+                    reason
+                );
+            }
+            if shares {
+                return Some(suffix_cond.clone());
+            }
+        }
+
+        if Self::guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] guard-family-match-miss entry_cond={:?} terminal_label={} candidate_count={}",
+                entry_cond,
+                terminal_label,
+                candidate_count
+            );
+        }
+        None
     }
 
     fn suffix_window_has_terminal_guard_family_match(
