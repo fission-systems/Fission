@@ -65,6 +65,18 @@ enum SuffixCallEffectShapeKind {
     UnknownCallEffect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NestedEntryBoundaryContext {
+    label_idx: Option<usize>,
+    label_in_current_suffix_window: bool,
+    raw_refs: usize,
+    internal_candidate_refs: usize,
+    suffix_safe_refs: usize,
+    external_pre_guard_internalization: usize,
+    external_entry_kind: Option<ExternalEntryRefKind>,
+    external_entry_ref_stmt_idx: Option<usize>,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -1061,8 +1073,81 @@ impl<'a> PreviewBuilder<'a> {
                 matched_cond,
                 result
             );
+            if !result {
+                let boundary = Self::nested_entry_boundary_context(
+                    body,
+                    label,
+                    anchor_idx,
+                    current_label_idx,
+                    terminal_label_idx,
+                );
+                eprintln!(
+                    "[GT-TRACE] nested-entry-boundary label={} label_idx={:?} in_current_suffix_window={} raw_refs={} internal_candidate_refs={} suffix_safe_refs={} external_pre_guard_internalization={} external_entry_kind={:?} external_ref_stmt_idx={:?}",
+                    label,
+                    boundary.label_idx,
+                    boundary.label_in_current_suffix_window,
+                    boundary.raw_refs,
+                    boundary.internal_candidate_refs,
+                    boundary.suffix_safe_refs,
+                    boundary.external_pre_guard_internalization,
+                    boundary.external_entry_kind,
+                    boundary.external_entry_ref_stmt_idx,
+                );
+            }
         }
         result
+    }
+
+    fn nested_entry_boundary_context(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+    ) -> NestedEntryBoundaryContext {
+        let referenced = collect_referenced_label_counts(body);
+        let raw_refs = referenced.get(label).copied().unwrap_or(0);
+        let label_idx = body
+            .iter()
+            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
+        let label_in_current_suffix_window = label_idx.is_some_and(|idx| {
+            idx >= current_label_idx && idx < terminal_label_idx
+        });
+        let internal_candidate_refs = Self::count_candidate_internal_top_level_refs_in_suffix_window(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        );
+        let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        )
+        .min(internal_candidate_refs);
+        let (external_entry_kind, external_entry_ref_stmt_idx) =
+            match Self::classify_external_entry_ref_kind(
+                body,
+                label,
+                anchor_idx,
+                terminal_label_idx,
+            ) {
+                Some((kind, stmt_idx)) => (Some(kind), Some(stmt_idx)),
+                None => (None, None),
+            };
+
+        NestedEntryBoundaryContext {
+            label_idx,
+            label_in_current_suffix_window,
+            raw_refs,
+            internal_candidate_refs,
+            suffix_safe_refs,
+            external_pre_guard_internalization: raw_refs
+                .saturating_sub(internal_candidate_refs),
+            external_entry_kind,
+            external_entry_ref_stmt_idx,
+        }
     }
 
     fn count_internalized_guard_family_nested_conditional_entries(

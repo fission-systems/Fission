@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail nested-entry boundary tracing for `block_140007040`
+
+This wave stayed diagnostic-only. It did not widen nested suffix acceptance. The goal was to decide whether the remaining `stmt_idx=142` blocker was a missed same-family guard or an actual external-owner boundary around `block_140007040`.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now adds:
+  - `NestedEntryBoundaryContext`
+  - `nested_entry_boundary_context(...)`
+- the nested-entry proof miss path now emits:
+  - `nested-entry-boundary label=... label_idx=... in_current_suffix_window=... raw_refs=... internal_candidate_refs=... suffix_safe_refs=... external_pre_guard_internalization=... external_entry_kind=... external_entry_ref_stmt_idx=...`
+- no guarded-tail acceptance logic changed:
+  - the change only augments the existing `nested-entry-guard-family-proof` trace
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active nested blocker is still:
+  - `nested-suffix-shape stmt_idx=142 kind=NestedSingleGotoThen`
+- the guard-family scan still misses any terminal witness:
+  - `guard-family-match-miss ... terminal_label=block_140007047 candidate_count=0`
+- the new boundary trace shows why this remains external-owner shaped:
+  - `nested-entry-boundary label=block_140007040 label_idx=Some(150) in_current_suffix_window=true raw_refs=2 internal_candidate_refs=0 suffix_safe_refs=0 external_pre_guard_internalization=2 external_entry_kind=Some(NestedConditionalGoto) external_entry_ref_stmt_idx=Some(142)`
+- the existing suffix budget agrees with the same diagnosis:
+  - `suffix-budget label=block_140007040 raw_refs=2 internal_refs=0 suffix_safe_refs=0 guard_family_internalized_refs=0 effective_external=2 allowed_external=1`
+
+Conclusion:
+
+- `block_140007040` is not currently blocked by a simple same-family guard normalization miss
+- inside the current suffix window there are no internal top-level ownership candidates for that label
+- the remaining owner is an external nested-conditional boundary decision, not a generic nested-tail widening
+
 ### Guard-family miss candidate tracing for `block_140007040`
 
 This wave stayed diagnostic-only and did not widen guarded-tail acceptance. The goal was to decide whether the remaining `stmt_idx=142` blocker was a guard normalization miss or a true external owner boundary.
