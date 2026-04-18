@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guard-family nested conditional entry internalization for `block_140007021`
+
+This wave did not broaden generic nested `if` acceptance. It only internalized a very narrow guarded-tail subfamily: a single-goto nested conditional entry can be subtracted from the suffix external-entry budget when it belongs to the same guard family as the target suffix's terminal-join guard.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `guard_family_internalized_refs` to `SuffixExternalEntryBudget`
+  - guard-family matching helpers for:
+    - single-goto nested entry probes
+    - single-branch terminal-join guards in the target suffix
+    - exact / negated guard-family equivalence
+  - env-gated trace lines of the form:
+    - `nested-entry-probe label=... cond=... ref_stmt_idx=... internalized=...`
+    - `nested-entry-internalized label=... cond=... ref_stmt_idx=...`
+- focused synthetic coverage was added for:
+  - internalizing a same-family nested conditional entry
+  - refusing a different guard-family nested entry
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the remaining `block_140007021` external entry is now internalized:
+  - `nested-entry-probe label=block_140007021 cond=Var("xVar57") ref_stmt_idx=70 internalized=true`
+  - `nested-entry-internalized label=block_140007021 cond=Var("xVar57") ref_stmt_idx=70`
+  - `suffix-budget label=block_140007021 raw_refs=1 internal_refs=0 suffix_safe_refs=0 guard_family_internalized_refs=1 effective_external=0 allowed_external=0`
+- for `candidate 35`, the earlier-label blocker moved:
+  - before: `early_label=block_14000701c first_fail=SuffixHasExternalEntry { label: "block_140007021" }`
+  - after: `early_label=block_14000701c first_fail=SuffixHasNestedOrNonlocalRef { stmt_idx: 120 }`
+- the outer canonical blocker still remains:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- external-entry arithmetic for `block_140007021` is no longer the active owner
+- the next owner is the nested/nonlocal `xVar57`-guard shape inside the suffix itself
+- the next wave should target that guarded nested-tail ownership directly, not broaden nested-entry internalization again
+
 ### Guarded-tail external-entry kind diagnostics for candidate-35 probing
 
 This wave did not relax `AliasNotFallthrough` or broaden guarded-tail acceptance. It only classified the remaining true external-entry ref shape after the suffix budget refinement proved that `block_140007021` was still externally entered for real.

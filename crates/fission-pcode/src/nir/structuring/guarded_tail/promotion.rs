@@ -29,6 +29,7 @@ struct SuffixExternalEntryBudget {
     raw_refs: usize,
     internal_top_level_refs: usize,
     suffix_safe_refs: usize,
+    guard_family_internalized_refs: usize,
     effective_external_refs: usize,
     allowed_external_refs: usize,
 }
@@ -490,6 +491,7 @@ impl<'a> PreviewBuilder<'a> {
         body: &[HirStmt],
         label: &str,
         anchor_idx: usize,
+        current_label_idx: usize,
         terminal_label_idx: usize,
         raw_refs: usize,
         rewrites: usize,
@@ -507,19 +509,195 @@ impl<'a> PreviewBuilder<'a> {
             terminal_label_idx,
         )
         .min(internal_candidate_refs);
+        let guard_family_internalized_refs =
+            Self::count_internalized_guard_family_nested_conditional_entries(
+                body,
+                label,
+                anchor_idx,
+                current_label_idx,
+                terminal_label_idx,
+            );
         let internal_top_level_refs = internal_candidate_refs.saturating_sub(suffix_safe_refs);
         let effective_external_refs = raw_refs
             .saturating_sub(internal_top_level_refs)
             .saturating_sub(suffix_safe_refs);
+        let effective_external_refs = effective_external_refs
+            .saturating_sub(guard_family_internalized_refs);
         let allowed_external_refs = usize::from(rewrites == 0);
 
         SuffixExternalEntryBudget {
             raw_refs,
             internal_top_level_refs,
             suffix_safe_refs,
+            guard_family_internalized_refs,
             effective_external_refs,
             allowed_external_refs,
         }
+    }
+
+    fn stmt_is_single_goto_then_if_to_label<'b>(
+        stmt: &'b HirStmt,
+        label: &str,
+    ) -> Option<&'b HirExpr> {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            return None;
+        };
+        if !else_body.is_empty() {
+            return None;
+        }
+        matches!(single_goto_target(then_body), Some(target) if target == label).then_some(cond)
+    }
+
+    fn stmt_is_single_branch_if_to_label<'b>(
+        stmt: &'b HirStmt,
+        label: &str,
+    ) -> Option<&'b HirExpr> {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            return None;
+        };
+        if matches!(single_goto_target(then_body), Some(target) if target == label)
+            && else_body.is_empty()
+        {
+            return Some(cond);
+        }
+        if matches!(single_goto_target(else_body), Some(target) if target == label)
+            && then_body.is_empty()
+        {
+            return Some(cond);
+        }
+        None
+    }
+
+    fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
+        if lhs == rhs {
+            return true;
+        }
+        if let HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } = lhs
+            && expr.as_ref() == rhs
+        {
+            return true;
+        }
+        if let HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } = rhs
+            && expr.as_ref() == lhs
+        {
+            return true;
+        }
+        false
+    }
+
+    fn suffix_window_has_terminal_guard_family_match(
+        body: &[HirStmt],
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        entry_cond: &HirExpr,
+    ) -> bool {
+        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+            return false;
+        };
+        if current_label_idx + 1 >= terminal_label_idx {
+            return false;
+        }
+        body[current_label_idx + 1..terminal_label_idx]
+            .iter()
+            .filter_map(|stmt| Self::stmt_is_single_branch_if_to_label(stmt, terminal_label))
+            .any(|suffix_cond| Self::exprs_share_guard_family(entry_cond, suffix_cond))
+    }
+
+    fn nested_conditional_entry_is_guard_family_internal(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        stmt_idx: usize,
+    ) -> bool {
+        if stmt_idx <= anchor_idx || stmt_idx >= current_label_idx {
+            return false;
+        }
+        let Some(stmt) = body.get(stmt_idx) else {
+            return false;
+        };
+        let Some(entry_cond) = Self::stmt_is_single_goto_then_if_to_label(stmt, label) else {
+            return false;
+        };
+        Self::suffix_window_has_terminal_guard_family_match(
+            body,
+            current_label_idx,
+            terminal_label_idx,
+            entry_cond,
+        )
+    }
+
+    fn count_internalized_guard_family_nested_conditional_entries(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+    ) -> usize {
+        if anchor_idx + 1 >= current_label_idx {
+            return 0;
+        }
+
+        let mut count = 0usize;
+        for stmt_idx in anchor_idx + 1..current_label_idx {
+            let internalized = Self::nested_conditional_entry_is_guard_family_internal(
+                body,
+                label,
+                anchor_idx,
+                current_label_idx,
+                terminal_label_idx,
+                stmt_idx,
+            );
+            if Self::guarded_tail_diag_enabled()
+                && let Some(cond) = body
+                    .get(stmt_idx)
+                    .and_then(|stmt| Self::stmt_is_single_goto_then_if_to_label(stmt, label))
+            {
+                eprintln!(
+                    "[GT-TRACE] nested-entry-probe label={} cond={:?} ref_stmt_idx={} internalized={}",
+                    label,
+                    cond,
+                    stmt_idx,
+                    internalized
+                );
+            }
+            if !internalized {
+                continue;
+            }
+            count += 1;
+            if Self::guarded_tail_diag_enabled()
+                && let Some(cond) = body
+                    .get(stmt_idx)
+                    .and_then(|stmt| Self::stmt_is_single_goto_then_if_to_label(stmt, label))
+            {
+                eprintln!(
+                    "[GT-TRACE] nested-entry-internalized label={} cond={:?} ref_stmt_idx={}",
+                    label,
+                    cond,
+                    stmt_idx
+                );
+            }
+        }
+        count
     }
 
     fn classify_external_entry_ref_kind_for_stmt(
@@ -607,17 +785,19 @@ impl<'a> PreviewBuilder<'a> {
                 body,
                 &current_label,
                 anchor_idx,
+                current_label_idx,
                 terminal_label_idx,
                 raw_refs,
                 rewrites,
             );
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
-                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} effective_external={} allowed_external={}",
+                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} guard_family_internalized_refs={} effective_external={} allowed_external={}",
                     current_label,
                     budget.raw_refs,
                     budget.internal_top_level_refs,
                     budget.suffix_safe_refs,
+                    budget.guard_family_internalized_refs,
                     budget.effective_external_refs,
                     budget.allowed_external_refs,
                 );
@@ -2635,6 +2815,7 @@ mod owned_join_window_tests {
         body: &[HirStmt],
         label: &str,
         anchor_idx: usize,
+        current_label_idx: usize,
         terminal_label_idx: usize,
         rewrites: usize,
         expected: SuffixExternalEntryBudget,
@@ -2645,6 +2826,7 @@ mod owned_join_window_tests {
             body,
             label,
             anchor_idx,
+            current_label_idx,
             terminal_label_idx,
             raw_refs,
             rewrites,
@@ -2887,12 +3069,14 @@ mod owned_join_window_tests {
             &body,
             "join0",
             0,
+            2,
             4,
             0,
             SuffixExternalEntryBudget {
                 raw_refs: 2,
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 1,
+                guard_family_internalized_refs: 0,
                 effective_external_refs: 1,
                 allowed_external_refs: 1,
             },
@@ -2918,12 +3102,96 @@ mod owned_join_window_tests {
             &body,
             "join0",
             0,
+            2,
             4,
             0,
             SuffixExternalEntryBudget {
                 raw_refs: 2,
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 0,
+                guard_family_internalized_refs: 0,
+                effective_external_refs: 2,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_internalizes_same_guard_family_nested_conditional_entry() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            test_if_goto("join0"),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            3,
+            6,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                guard_family_internalized_refs: 1,
+                effective_external_refs: 1,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_does_not_internalize_different_guard_family_nested_entry() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("other_cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            3,
+            6,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                guard_family_internalized_refs: 0,
                 effective_external_refs: 2,
                 allowed_external_refs: 1,
             },
