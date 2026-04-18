@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Copy overwrite def-window restart tracing
+
+This wave stayed diagnostic-only. It did not restart replacement windows, relax malformed def/use handling, or widen cross-block replacement. The goal was to prove whether the narrow `OverwriteAtCopy = 12` slice on `0x140006c20` is a real def-window restart candidate or just another unsafe overwrite family.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated trace for the `OverwriteAtCopy` subset:
+  - `overwrite-copy-proof output=... def_op_seq=... redef_op_seq=... redef_rhs=... consumer_block=... consumer_op_seq=... same_value=... redef_dominates_consumer=... old_def_has_pre_redef_use=...`
+- the proof is intentionally narrow and builder-local:
+  - it only fires for `RedefinedInDefBlockAfterDef + OverwriteAtCopy`
+  - it checks whether the redef is a copylike equivalent representative, whether the redef still dominates the cross-block consumer, and whether the original def had any use before the overwrite
+- unit coverage now fixes the basic synthetic restart shape:
+  - a copy overwrite with no pre-redef use and a downstream cross-block consumer produces `same_value=true`, `redef_dominates_consumer=true`, `old_def_has_pre_redef_use=false`
+
+Validation:
+
+- `cargo test -p fission-pcode copy_overwrite_restart_proof_marks_same_value_and_no_pre_redef_use --lib -- --test-threads=1`
+- `cargo test -p fission-pcode cross_block_redefinition_marks_def_block_after_def --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the `OverwriteAtCopy` family is no longer just "copy-shaped". On the targeted row it is fully uniform:
+  - `count = 12`
+  - `same_value = true` for all 12
+  - `redef_dominates_consumer = true` for all 12
+  - `old_def_has_pre_redef_use = false` for all 12
+- the concrete live shape is stable across every observed sample:
+  - `def_block = 0x140006c40`
+  - `def_op_seq = 7`
+  - `redef_op_seq = 25`
+  - `redef_rhs = [const(0x0:s1)]`
+  - `consumer_block = 0x140006c55`
+  - `consumer_op_seq = 13`
+- this means the entire `OverwriteAtCopy` slice on `0x140006c20` is currently behaving like a restartable shadowed-def family, not like a loop-carried or merge-boundary value family
+
+Conclusion:
+
+- `OverwriteAtCopy = 12` is now the narrowest credible release-safe policy target on `0x140006c20`
+- the next algorithmic step is no longer more tracing for this slice
+- the likely next patch is a narrow def-window restart policy for pure copy overwrite, while:
+  - `OverwriteAtPredicateProducer = 24` remains a predicate refresh owner
+  - `OverwriteAtLoopUpdate = 156` remains a loop-carried / merge-boundary owner
+
 ### Same-block overwrite window refinement
 
 This wave stayed diagnostic-only. It did not widen cross-block replacement, relax alias safety, or change the active materialization policy. The goal was to split the now-dominant `RedefinedInDefBlockAfterDef` family into concrete same-block overwrite shapes so `0x140006c20` could be judged on a real def-window owner instead of a single redefinition label.

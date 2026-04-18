@@ -106,12 +106,23 @@ enum CrossBlockRedefinitionRelation {
 struct CrossBlockRedefinitionDetail {
     relation: CrossBlockRedefinitionRelation,
     redef_block_addr: u64,
+    redef_op_idx: usize,
     redef_op_seq: u32,
     redef_opcode: PcodeOpcode,
     redef_rhs_kind: SameBlockOverwriteRhsKind,
     overwrite_shape: SameBlockOverwriteShapeKind,
     def_to_redef_gap: usize,
     redef_to_terminator_gap: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyOverwriteRestartProof {
+    redef_rhs: String,
+    same_value: bool,
+    redef_dominates_consumer: bool,
+    old_def_has_pre_redef_use: bool,
+    consumer_block_addr: u64,
+    consumer_op_seq: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +487,36 @@ impl<'a> PreviewBuilder<'a> {
         if detail.relation == MalformedDefUseWindowRelation::ConsumerInDifferentBlock {
             self.trace_cross_block_consumer_provenance(block, op_idx, output, rhs);
         }
+    }
+
+    fn trace_copy_overwrite_restart_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_copy_overwrite_restart_proof(block, op_idx, output, redef) else {
+            return;
+        };
+        self.emit_ready_trace(format!(
+            "overwrite-copy-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} redef_rhs={} consumer_block=0x{:x} consumer_op_seq={} same_value={} redef_dominates_consumer={} old_def_has_pre_redef_use={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops[op_idx].seq_num,
+            redef.redef_op_seq,
+            proof.redef_rhs,
+            proof.consumer_block_addr,
+            proof.consumer_op_seq,
+            proof.same_value,
+            proof.redef_dominates_consumer,
+            proof.old_def_has_pre_redef_use,
+        ));
     }
 
     fn trace_no_consumer_suppressed(
@@ -1729,6 +1770,9 @@ impl<'a> PreviewBuilder<'a> {
                         .map(|gap| gap.to_string())
                         .unwrap_or_else(|| "none".to_string()),
                 ));
+                if redef.overwrite_shape == SameBlockOverwriteShapeKind::OverwriteAtCopy {
+                    self.trace_copy_overwrite_restart_proof(block, op_idx, output, &redef);
+                }
             }
         }
     }
@@ -1868,6 +1912,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(CrossBlockRedefinitionDetail {
                 relation: CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef,
                 redef_block_addr: block.start_address,
+                redef_op_idx: redef_idx,
                 redef_op_seq: redef_op.seq_num,
                 redef_opcode: redef_op.opcode,
                 redef_rhs_kind: Self::classify_same_block_overwrite_rhs_kind(redef_op.opcode),
@@ -1889,6 +1934,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(CrossBlockRedefinitionDetail {
                     relation: CrossBlockRedefinitionRelation::RedefinedInConsumerBlockBeforeUse,
                     redef_block_addr: consumer_block.start_address,
+                    redef_op_idx: redef_idx,
                     redef_op_seq: redef_op.seq_num,
                     redef_opcode: redef_op.opcode,
                     redef_rhs_kind: Self::classify_same_block_overwrite_rhs_kind(redef_op.opcode),
@@ -1918,6 +1964,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(CrossBlockRedefinitionDetail {
                     relation: CrossBlockRedefinitionRelation::PhiRedefinition,
                     redef_block_addr: pred_block_addr,
+                    redef_op_idx: 0,
                     redef_op_seq,
                     redef_opcode: PcodeOpcode::MultiEqual,
                     redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
@@ -1944,6 +1991,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(CrossBlockRedefinitionDetail {
                     relation: CrossBlockRedefinitionRelation::LoopCarriedRedefinition,
                     redef_block_addr,
+                    redef_op_idx: 0,
                     redef_op_seq,
                     redef_opcode: PcodeOpcode::MultiEqual,
                     redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
@@ -1970,6 +2018,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(CrossBlockRedefinitionDetail {
                 relation: CrossBlockRedefinitionRelation::RedefinedOnEdge,
                 redef_block_addr: edge_block_addr,
+                redef_op_idx: 0,
                 redef_op_seq,
                 redef_opcode: PcodeOpcode::Copy,
                 redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
@@ -1995,6 +2044,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(CrossBlockRedefinitionDetail {
                 relation: CrossBlockRedefinitionRelation::RedefinedInSiblingPredecessor,
                 redef_block_addr: pred_block_addr,
+                redef_op_idx: 0,
                 redef_op_seq,
                 redef_opcode: PcodeOpcode::Copy,
                 redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
@@ -2016,6 +2066,7 @@ impl<'a> PreviewBuilder<'a> {
                     CrossBlockRedefinitionDetail {
                         relation: CrossBlockRedefinitionRelation::UnknownRedefinition,
                         redef_block_addr: candidate.start_address,
+                        redef_op_idx: 0,
                         redef_op_seq: op.seq_num,
                         redef_opcode: op.opcode,
                         redef_rhs_kind: SameBlockOverwriteRhsKind::Unknown,
@@ -2025,6 +2076,80 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 })
             })
+    }
+
+    fn describe_copy_overwrite_restart_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+    ) -> Option<CopyOverwriteRestartProof> {
+        if redef.relation != CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef
+            || redef.overwrite_shape != SameBlockOverwriteShapeKind::OverwriteAtCopy
+        {
+            return None;
+        }
+        let redef_op = block.ops.get(redef.redef_op_idx)?;
+        let (consumer_block_addr, _, _) =
+            self.first_output_use_site_outside_block(block.start_address, output)?;
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let (_consumer_idx, consumer_op) = consumer_block
+            .ops
+            .iter()
+            .enumerate()
+            .find(|(_, candidate)| {
+                candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
+            })?;
+        let def_op = block.ops.get(op_idx)?;
+        let old_def_has_pre_redef_use = !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let redef_dominates_consumer = self.dom_tree.dominates(def_block_idx, consumer_block_idx)
+            && self
+                .block_terminator_index(block)
+                .is_some_and(|term_idx| redef.redef_op_idx < term_idx);
+        Some(CopyOverwriteRestartProof {
+            redef_rhs: Self::format_copy_overwrite_inputs(&redef_op.inputs),
+            same_value: Self::ops_share_copylike_value(def_op, redef_op),
+            redef_dominates_consumer,
+            old_def_has_pre_redef_use,
+            consumer_block_addr,
+            consumer_op_seq: consumer_op.seq_num,
+        })
+    }
+
+    fn ops_share_copylike_value(def_op: &PcodeOp, redef_op: &PcodeOp) -> bool {
+        matches!(
+            redef_op.opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::Piece
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+        ) && def_op.opcode == redef_op.opcode
+            && def_op.inputs == redef_op.inputs
+    }
+
+    fn format_copy_overwrite_inputs(inputs: &[Varnode]) -> String {
+        let formatted = inputs
+            .iter()
+            .map(Self::format_copy_overwrite_varnode)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{formatted}]")
+    }
+
+    fn format_copy_overwrite_varnode(vn: &Varnode) -> String {
+        if vn.is_constant {
+            format!("const(0x{:x}:s{})", vn.offset, vn.size)
+        } else {
+            format!("space:{}:0x{:x}:s{}", vn.space_id, vn.offset, vn.size)
+        }
     }
 
     fn classify_same_block_overwrite_rhs_kind(opcode: PcodeOpcode) -> SameBlockOverwriteRhsKind {
@@ -2986,6 +3111,47 @@ mod tests {
         );
         assert_eq!(redef.redef_block_addr, 0x1010);
         assert_eq!(redef.redef_op_seq, 1);
+    }
+
+    #[test]
+    fn copy_overwrite_restart_proof_marks_same_value_and_no_pre_redef_use() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
+            .expect("cross-block redefinition");
+        assert_eq!(redef.overwrite_shape, SameBlockOverwriteShapeKind::OverwriteAtCopy);
+
+        let proof = builder
+            .describe_copy_overwrite_restart_proof(&blocks[0], 0, &output, &redef)
+            .expect("copy overwrite proof");
+
+        assert!(proof.same_value);
+        assert!(proof.redef_dominates_consumer);
+        assert!(!proof.old_def_has_pre_redef_use);
+        assert_eq!(proof.consumer_block_addr, 0x1010);
+        assert_eq!(proof.consumer_op_seq, 3);
+        assert_eq!(proof.redef_rhs, "[const(0x1:s8)]");
     }
 
     #[test]
