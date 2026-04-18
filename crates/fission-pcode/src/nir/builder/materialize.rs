@@ -117,6 +117,8 @@ struct CrossBlockRedefinitionDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CopyOverwriteRestartProof {
+    consumer_relation: CrossBlockConsumerRelation,
+    redef_op_seq: u32,
     redef_rhs: String,
     same_value: bool,
     redef_dominates_consumer: bool,
@@ -628,6 +630,13 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    fn copy_overwrite_restart_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_COPY_OVERWRITE_RESTART"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
+    }
+
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
         let Some(asm) = op.asm_mnemonic.as_deref() else {
             return false;
@@ -1108,6 +1117,30 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
         self.replacement_plan_candidate_count += 1;
+        if Self::copy_overwrite_restart_enabled() {
+            if let Some(proof) = self
+                .can_restart_def_window_at_copy_overwrite(block, op_idx, terminator_index, output)
+            {
+                self.emit_ready_trace(format!(
+                    "def-window-restarted-at-copy-overwrite output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} consumer_block=0x{:x} consumer_op_seq={} relation={:?} redef_rhs={} same_value={} redef_dominates_consumer={} old_def_has_pre_redef_use={}",
+                    output.space_id,
+                    output.offset,
+                    output.size,
+                    block.start_address,
+                    block.ops[op_idx].seq_num,
+                    proof.redef_op_seq,
+                    proof.consumer_block_addr,
+                    proof.consumer_op_seq,
+                    proof.consumer_relation,
+                    proof.redef_rhs,
+                    proof.same_value,
+                    proof.redef_dominates_consumer,
+                    proof.old_def_has_pre_redef_use,
+                ));
+                self.replacement_plan_completed_count += 1;
+                return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
+            }
+        }
         if self.output_has_nonlocal_use(block, op_idx, output) {
             self.replacement_plan_rejected_missing_merge_count += 1;
             return ReplacementValuePlan::incomplete(
@@ -1153,6 +1186,72 @@ impl<'a> PreviewBuilder<'a> {
             ReplacementReadClass::SameBlockData,
             MaterializationRejectionReason::AliasUnsafe,
         )
+    }
+
+    fn can_restart_def_window_at_copy_overwrite(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+    ) -> Option<CopyOverwriteRestartProof> {
+        let (consumer_block_addr, _consumer_op_seq, provenance) =
+            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+        if !matches!(
+            provenance.relation,
+            CrossBlockConsumerRelation::SuccessorBlock | CrossBlockConsumerRelation::PostDominatorBlock
+        ) || provenance.consumer_is_multiequal
+            || provenance.relation == CrossBlockConsumerRelation::LoopBackedge
+        {
+            return None;
+        }
+        let redef = self.describe_cross_block_redefinition_detail(block, op_idx, output, consumer_block_addr)?;
+        let proof = self.describe_copy_overwrite_restart_proof(block, op_idx, output, &redef)?;
+        if !proof.same_value || !proof.redef_dominates_consumer || proof.old_def_has_pre_redef_use {
+            return None;
+        }
+        if !Self::copy_overwrite_rhs_is_pure_restart_candidate(&redef) {
+            return None;
+        }
+        if !Self::no_alias_hazard_between_redef_and_terminator(
+            block,
+            redef.redef_op_idx,
+            terminator_index,
+        ) {
+            return None;
+        }
+        Some(CopyOverwriteRestartProof {
+            consumer_relation: provenance.relation,
+            ..proof
+        })
+    }
+
+    fn copy_overwrite_rhs_is_pure_restart_candidate(redef: &CrossBlockRedefinitionDetail) -> bool {
+        matches!(redef.redef_rhs_kind, SameBlockOverwriteRhsKind::CopyLike)
+            && matches!(redef.overwrite_shape, SameBlockOverwriteShapeKind::OverwriteAtCopy)
+    }
+
+    fn no_alias_hazard_between_redef_and_terminator(
+        block: &crate::pcode::PcodeBasicBlock,
+        redef_idx: usize,
+        terminator_index: Option<usize>,
+    ) -> bool {
+        let Some(term_idx) = terminator_index else {
+            return false;
+        };
+        if redef_idx >= term_idx {
+            return false;
+        }
+        !block.ops[redef_idx + 1..term_idx].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+                    | PcodeOpcode::Store
+                    | PcodeOpcode::Load
+            )
+        })
     }
 
     fn classify_terminator_sensitive_output_use(
@@ -2113,6 +2212,8 @@ impl<'a> PreviewBuilder<'a> {
                 .block_terminator_index(block)
                 .is_some_and(|term_idx| redef.redef_op_idx < term_idx);
         Some(CopyOverwriteRestartProof {
+            consumer_relation: CrossBlockConsumerRelation::UnreachableOrUnclassified,
+            redef_op_seq: redef.redef_op_seq,
             redef_rhs: Self::format_copy_overwrite_inputs(&redef_op.inputs),
             same_value: Self::ops_share_copylike_value(def_op, redef_op),
             redef_dominates_consumer,
@@ -3152,6 +3253,167 @@ mod tests {
         assert_eq!(proof.consumer_block_addr, 0x1010);
         assert_eq!(proof.consumer_op_seq, 3);
         assert_eq!(proof.redef_rhs, "[const(0x1:s8)]");
+    }
+
+    #[test]
+    fn def_window_restart_proves_copy_overwrite_successor_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
+            .expect("restart proof");
+
+        assert_eq!(proof.consumer_relation, CrossBlockConsumerRelation::SuccessorBlock);
+        assert!(proof.same_value);
+        assert!(proof.redef_dominates_consumer);
+        assert!(!proof.old_def_has_pre_redef_use);
+    }
+
+    #[test]
+    fn def_window_restart_applies_for_copy_overwrite_postdominator_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1008)]),
+                ],
+            ),
+            block_at(0x1008, 1, vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)])]),
+            block_at(
+                0x1010,
+                2,
+                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![2];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
+            .expect("restart proof");
+
+        assert_eq!(proof.consumer_relation, CrossBlockConsumerRelation::PostDominatorBlock);
+        assert!(proof.same_value);
+        assert!(proof.redef_dominates_consumer);
+        assert!(!proof.old_def_has_pre_redef_use);
+    }
+
+    #[test]
+    fn def_window_restart_rejects_pre_redef_use() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
+                    op(2, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x30)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder
+            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
+            .is_none());
+    }
+
+    #[test]
+    fn def_window_restart_rejects_impure_copy_overwrite_rhs() {
+        let output = varnode(0x10);
+        let ptr = varnode(0x11);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Load, Some(output.clone()), vec![constant(0), ptr.clone()]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder
+            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
+            .is_none());
+    }
+
+    #[test]
+    fn def_window_restart_rejects_alias_hazard_after_redef() {
+        let output = varnode(0x10);
+        let ptr = varnode(0x11);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(2, PcodeOpcode::Load, Some(varnode(0x20)), vec![constant(0), ptr.clone()]),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x30)), vec![output.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder
+            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
+            .is_none());
     }
 
     #[test]

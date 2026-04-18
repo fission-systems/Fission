@@ -9,6 +9,49 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Copy overwrite def-window restart rollback to env-gated experiment
+
+This wave did implement the narrow `OverwriteAtCopy = 12` restart policy on `0x140006c20`, but it did not hold up against the same-axis `putty limit50` quality gate. The policy now remains available only as an opt-in experiment while the proof and trace infrastructure stay in the default path.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) still carries the narrow restart proof and trace vocabulary:
+  - `overwrite-copy-proof ...`
+  - `def-window-restarted-at-copy-overwrite ...`
+- the active restart policy is now gated behind:
+  - `FISSION_ENABLE_COPY_OVERWRITE_RESTART=1|true|yes`
+- default release behavior no longer restarts the replacement window at copy overwrite
+- this keeps the mechanical proof available for future narrowing, while removing the release-path regression risk
+
+Validation:
+
+- `cargo test -p fission-pcode def_window_restart_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode copy_overwrite_restart_proof_marks_same_value_and_no_pre_redef_use --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --ghidra-dir vendor/ghidra/ghidra-Ghidra_11.4.2_build --fission-bin target/debug/fission_cli --output-dir artifacts/batch_benchmark/putty-copy-overwrite-restart-env-default-limit50 --baseline-dir artifacts/batch_benchmark/putty-builder-provenance-wave --limit 50 --pairwise-similarity-mode shared-full --ghidra-cache-dir artifacts/ghidra_cache_copy_overwrite --use-ghidra-cache`
+
+Observed state:
+
+- with the restart policy enabled, the targeted `OverwriteAtCopy` slice did fire and downgraded the old def in all 12 observed cases on `0x140006c20`
+- but the same-axis `putty limit50` run did not improve release quality:
+  - `avg_normalized_similarity: 38.82 -> 38.74`
+  - row gate remained failed for:
+    - `0x140008090`
+    - `0x140006c20`
+    - `0x140006fe0`
+  - `0x140006c20` specifically moved from `40.52` to `40.40`
+- because the patch was mechanically correct but not release-positive, the restart path is now treated like the earlier broad no-consumer suppression experiment:
+  - proof kept
+  - trace kept
+  - default-off in release path
+
+Conclusion:
+
+- `OverwriteAtCopy = 12` is still a real, narrow proof family, but not yet a release-safe active policy
+- the next owner remains:
+  - `OverwriteAtPredicateProducer = 24` for predicate refresh
+  - `OverwriteAtLoopUpdate = 156` for loop-carried / merge-boundary handling
+- any future return to copy-overwrite restart should be driven by a tighter acceptance slice, not by re-enabling the current broad `OverwriteAtCopy` path in default builds
+
 ### Copy overwrite def-window restart tracing
 
 This wave stayed diagnostic-only. It did not restart replacement windows, relax malformed def/use handling, or widen cross-block replacement. The goal was to prove whether the narrow `OverwriteAtCopy = 12` slice on `0x140006c20` is a real def-window restart candidate or just another unsafe overwrite family.
