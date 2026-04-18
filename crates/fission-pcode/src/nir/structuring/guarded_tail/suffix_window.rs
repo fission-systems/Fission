@@ -17,6 +17,7 @@ struct SuffixExternalEntryBudget {
     internal_top_level_refs: usize,
     suffix_safe_refs: usize,
     guard_family_internalized_refs: usize,
+    paired_nested_boundary_refs: usize,
     effective_external_refs: usize,
     allowed_external_refs: usize,
 }
@@ -833,12 +834,22 @@ impl<'a> PreviewBuilder<'a> {
                 current_label_idx,
                 terminal_label_idx,
             );
+        let paired_nested_boundary_refs = Self::count_internalized_paired_nested_boundary_refs(
+            body,
+            label,
+            anchor_idx,
+            current_label_idx,
+            terminal_label_idx,
+            raw_refs,
+        );
         let internal_top_level_refs = internal_candidate_refs.saturating_sub(suffix_safe_refs);
         let effective_external_refs = raw_refs
             .saturating_sub(internal_top_level_refs)
             .saturating_sub(suffix_safe_refs);
         let effective_external_refs =
             effective_external_refs.saturating_sub(guard_family_internalized_refs);
+        let effective_external_refs =
+            effective_external_refs.saturating_sub(paired_nested_boundary_refs);
         let allowed_external_refs = usize::from(rewrites == 0);
 
         SuffixExternalEntryBudget {
@@ -846,6 +857,7 @@ impl<'a> PreviewBuilder<'a> {
             internal_top_level_refs,
             suffix_safe_refs,
             guard_family_internalized_refs,
+            paired_nested_boundary_refs,
             effective_external_refs,
             allowed_external_refs,
         }
@@ -1248,6 +1260,52 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn count_internalized_paired_nested_boundary_refs(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        raw_refs: usize,
+    ) -> usize {
+        if raw_refs != 2 {
+            return 0;
+        }
+        let label_idx = body
+            .iter()
+            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
+        if !label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx) {
+            return 0;
+        }
+
+        let refs = Self::collect_nested_boundary_ref_traces(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        );
+        let pair_trace = Self::build_nested_boundary_pair_trace(&refs);
+        if pair_trace.ref_count != 2
+            || !pair_trace.same_guard_family
+            || pair_trace.relation_reason != Some("ExactExpr")
+            || !refs
+                .iter()
+                .all(|entry| entry.kind == ExternalEntryRefKind::NestedConditionalGoto)
+        {
+            return 0;
+        }
+
+        if Self::guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] paired-nested-boundary-internalized label={} refs={:?} relation={}",
+                label,
+                refs.iter().map(|entry| entry.stmt_idx).collect::<Vec<_>>(),
+                pair_trace.relation_reason.unwrap_or("Unknown"),
+            );
+        }
+        2
+    }
+
     fn count_internalized_guard_family_nested_conditional_entries(
         body: &[HirStmt],
         label: &str,
@@ -1385,12 +1443,13 @@ impl<'a> PreviewBuilder<'a> {
             );
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
-                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} guard_family_internalized_refs={} effective_external={} allowed_external={}",
+                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} guard_family_internalized_refs={} paired_nested_boundary_refs={} effective_external={} allowed_external={}",
                     current_label,
                     budget.raw_refs,
                     budget.internal_top_level_refs,
                     budget.suffix_safe_refs,
                     budget.guard_family_internalized_refs,
+                    budget.paired_nested_boundary_refs,
                     budget.effective_external_refs,
                     budget.allowed_external_refs,
                 );
@@ -1927,6 +1986,7 @@ mod tests {
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 1,
                 guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 0,
                 effective_external_refs: 1,
                 allowed_external_refs: 1,
             },
@@ -1960,6 +2020,7 @@ mod tests {
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 0,
                 guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 0,
                 effective_external_refs: 2,
                 allowed_external_refs: 1,
             },
@@ -1999,6 +2060,7 @@ mod tests {
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 0,
                 guard_family_internalized_refs: 1,
+                paired_nested_boundary_refs: 0,
                 effective_external_refs: 1,
                 allowed_external_refs: 1,
             },
@@ -2042,6 +2104,123 @@ mod tests {
                 internal_top_level_refs: 0,
                 suffix_safe_refs: 0,
                 guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 0,
+                effective_external_refs: 2,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_internalizes_paired_same_guard_nested_boundary() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("body".to_string())),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            3,
+            6,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 2,
+                effective_external_refs: 0,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_does_not_internalize_paired_nested_boundary_with_guard_mismatch() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("other".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("body".to_string())),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            3,
+            6,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 0,
+                effective_external_refs: 2,
+                allowed_external_refs: 1,
+            },
+        );
+    }
+
+    #[test]
+    fn suffix_budget_does_not_internalize_paired_boundary_when_ref_kind_is_not_nested() {
+        let body = vec![
+            HirStmt::Goto("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("body".to_string())),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_external_budget(
+            &body,
+            "join0",
+            0,
+            3,
+            6,
+            0,
+            SuffixExternalEntryBudget {
+                raw_refs: 2,
+                internal_top_level_refs: 0,
+                suffix_safe_refs: 0,
+                guard_family_internalized_refs: 0,
+                paired_nested_boundary_refs: 0,
                 effective_external_refs: 2,
                 allowed_external_refs: 1,
             },

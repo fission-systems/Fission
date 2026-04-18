@@ -9,6 +9,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail paired same-guard nested boundary internalization for `block_140007040`
+
+This wave moved from diagnosis to a narrow acceptance patch. It does not broaden generic nested-tail ownership. It only internalizes the exact paired-boundary case that the prior traces proved: two duplicate nested conditional entries with the same target label and the same guard expression family.
+
+- [`suffix_window.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/suffix_window.rs) now extends `SuffixExternalEntryBudget` with:
+  - `paired_nested_boundary_refs`
+- guarded-tail suffix budgeting now adds:
+  - `count_internalized_paired_nested_boundary_refs(...)`
+- the new acceptance is intentionally strict:
+  - raw refs must be exactly `2`
+  - both refs must be `NestedConditionalGoto`
+  - both refs must target the same current suffix-window label
+  - both conditions must be the same exact guard-family relation:
+    - currently narrowed to `ExactExpr`
+  - partial subtraction is forbidden:
+    - the helper returns `2` or `0`, never `1`
+- focused synthetic coverage was added for:
+  - exact duplicate paired nested boundary acceptance
+  - guard mismatch rejection
+  - mixed top-level / nested ref rejection
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_budget_internalizes_paired_same_guard_nested_boundary -- --nocapture`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed movement:
+
+- the paired-boundary trace still proves the exact duplicate family:
+  - `nested-boundary-pair label=block_140007040 count=2 same_guard_family=true relation_reason=Some("ExactExpr")`
+- the new internalization now fires directly:
+  - `paired-nested-boundary-internalized label=block_140007040 refs=[142, 145] relation=ExactExpr`
+- the suffix budget now closes the previous external-entry blocker:
+  - `raw_refs=2`
+  - `paired_nested_boundary_refs=2`
+  - `effective_external=0`
+  - `allowed_external=1`
+- the earlier-label blocker moved inward:
+  - `early_label=block_140007040 first_fail=SuffixHasSideEffect { stmt_idx: 154 }`
+- the outer shell still remains:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `block_140007040` is no longer the active external-entry owner
+- the paired nested boundary has been reclassified into the owned suffix budget
+- the next owner is now the call-bearing suffix segment at `stmt_idx=154`, not the old paired nested boundary
+
 ### Guarded-tail paired nested-boundary tracing for `block_140007040`
 
 This wave stayed diagnostic-only. It did not widen guarded-tail ownership. The goal was to stop treating `block_140007040` as a one-ref mystery and instead show the full two-entry nested boundary that still keeps the suffix window fail-closed.
