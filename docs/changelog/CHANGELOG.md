@@ -9,6 +9,65 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### AliasUnsafe Unknown subtyping
+
+This wave stayed diagnostic-only. It did not widen builder replacement, add merge synthesis, or relax alias safety. The goal was to replace the residual same-block `Unknown` fallback on the active `0x140008090` / `0x140006c20` path with concrete blind-spot subtypes, so the next patch can target one materialization owner instead of a generic catch-all.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now splits builder-local `AliasUnsafe::Unknown` into explicit same-block fallback families:
+  - `UnknownNoConsumerFound`
+  - `UnknownConsumerAfterTerminator`
+  - `UnknownUnhandledConsumerKind`
+  - `UnknownMalformedDefUseWindow`
+- the `EMIT-TRACE` channel now carries a dedicated subtype line when one of those fallback paths fires:
+  - `alias-unsafe-unknown-shape output=... def_block=... op_seq=... terminator_idx=... consumer_count=... same_block_consumers=... first_consumer_stmt=... first_consumer_op=... first_consumer_relation=... reason=...`
+- the classifier stays intentionally conservative:
+  - no acceptance logic changed
+  - no representative downgrade policy changed
+  - no merge binding policy changed
+- builder-local unit coverage now fixes the subtype contract for:
+  - dead-ish no-consumer windows
+  - redefinition-before-consumer malformed windows
+  - allowed-but-unhandled single-consumer opcodes
+  - after-terminator single-consumer windows
+
+Validation:
+
+- `cargo test -p fission-pcode alias_unsafe_unknown_subtyping --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140008090` no longer carries a live generic `Unknown` bucket. The rebuilt trace split as:
+  - `UnknownNoConsumerFound=2137`
+  - `UnknownMalformedDefUseWindow=1480`
+  - `UnknownUnhandledConsumerKind=7`
+  - `DisallowedSingleConsumer=1553`
+  - `MultipleSameBlockConsumers=581`
+  - `SameBlockStore=49`
+- `0x140006c20` showed the same dominant blind spots with smaller volume:
+  - `UnknownNoConsumerFound=834`
+  - `UnknownMalformedDefUseWindow=336`
+  - `DisallowedSingleConsumer=515`
+  - `MultipleSameBlockConsumers=160`
+- no live `UnknownConsumerAfterTerminator` surfaced on the targeted rows in this wave; that path is covered synthetically but is not a current row owner
+- representative sample traces show the two dominant same-block fallback families are structurally different:
+  - `UnknownNoConsumerFound`: `consumer_count=0`, no same-block consumer discovered at all
+  - `UnknownMalformedDefUseWindow`: `consumer_count=0`, but the output is redefined before any consumer can be proven
+  - `UnknownUnhandledConsumerKind`: rare single-consumer cases such as `IntZExt` that are same-block and between def/use, but still fall outside the current low-cost inline contract
+
+Conclusion:
+
+- the next owner is no longer generic `AliasUnsafe`; it is one of two concrete same-block fallback families:
+  - `UnknownNoConsumerFound`
+  - `UnknownMalformedDefUseWindow`
+- `DisallowedSingleConsumer` remains a secondary owner, but the current release-weighted blind spot is the large no-consumer / malformed-window pair rather than predicate-sensitive or after-terminator cases
+- the highest-value next wave is not an alias relaxation. It is either:
+  - dead-ish representative suppression / downgrade closure for `UnknownNoConsumerFound`
+  - def-use window refinement for `UnknownMalformedDefUseWindow`
+
 ### AliasUnsafe first-hazard tracing
 
 This wave stayed diagnostic-only. It did not widen builder materialization acceptance, add new merge synthesis, or retune representative policy. The goal was to split the very large `AliasUnsafe` bucket on the active `0x140008090` / `0x140006c20` path into concrete same-block hazard families, so the next patch can target one owner instead of the whole rejection class.

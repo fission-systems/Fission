@@ -23,7 +23,10 @@ enum AliasUnsafeHazardKind {
     CallBetweenDefUse,
     LoadAfterStore,
     SameBlockStore,
-    Unknown,
+    UnknownNoConsumerFound,
+    UnknownConsumerAfterTerminator,
+    UnknownUnhandledConsumerKind,
+    UnknownMalformedDefUseWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +122,7 @@ impl<'a> PreviewBuilder<'a> {
     fn trace_alias_unsafe_hazard(
         &self,
         block_addr: u64,
+        op_seq: u32,
         output: &Varnode,
         hazard: AliasUnsafeHazard,
     ) {
@@ -138,16 +142,75 @@ impl<'a> PreviewBuilder<'a> {
             .map(|opcode| format!("{opcode:?}"))
             .unwrap_or_else(|| "None".to_string());
         self.emit_ready_trace(format!(
-            "alias-unsafe-shape output=space:{} off:0x{:x} size:{} def_block=0x{:x} use_block=0x{:x} first_alias_hazard={:?} use_stmt_idx={} hazard_stmt={} hazard_op={}",
+            "alias-unsafe-shape output=space:{} off:0x{:x} size:{} def_block=0x{:x} op_seq={} use_block=0x{:x} first_alias_hazard={:?} use_stmt_idx={} hazard_stmt={} hazard_op={}",
             output.space_id,
             output.offset,
             output.size,
             block_addr,
+            op_seq,
             block_addr,
             hazard.kind,
             use_stmt_idx,
             hazard_stmt_idx,
             hazard_op,
+        ));
+        if matches!(
+            hazard.kind,
+            AliasUnsafeHazardKind::UnknownNoConsumerFound
+                | AliasUnsafeHazardKind::UnknownConsumerAfterTerminator
+                | AliasUnsafeHazardKind::UnknownUnhandledConsumerKind
+                | AliasUnsafeHazardKind::UnknownMalformedDefUseWindow
+        ) {
+            self.trace_alias_unsafe_unknown_shape(block_addr, op_seq, output, hazard);
+        }
+    }
+
+    fn trace_alias_unsafe_unknown_shape(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        output: &Varnode,
+        hazard: AliasUnsafeHazard,
+    ) {
+        let Some(block) = self.pcode.blocks.iter().find(|block| block.start_address == block_addr) else {
+            return;
+        };
+        let Some(op_idx) = block.ops.iter().position(|op| op.seq_num == op_seq) else {
+            return;
+        };
+        let terminator_index = self.block_terminator_index(block);
+        let same_block_consumers = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let consumer_count = same_block_consumers.len();
+        let first_consumer = same_block_consumers.first().copied();
+        let first_consumer_stmt = first_consumer
+            .map(|(idx, _)| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let first_consumer_op = first_consumer
+            .map(|(_, op)| format!("{:?}", op.opcode))
+            .unwrap_or_else(|| "None".to_string());
+        let first_consumer_relation = match (first_consumer, terminator_index) {
+            (Some((idx, _)), Some(term_idx)) if idx > term_idx => "AfterTerminator",
+            (Some(_), _) => "BetweenDefAndTerminator",
+            (None, Some(term_idx)) if op_idx > term_idx => "BeforeDef",
+            (None, _) => "None",
+        };
+        let terminator_idx = terminator_index
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "alias-unsafe-unknown-shape output=space:{} off:0x{:x} size:{} def_block=0x{:x} op_seq={} terminator_idx={} consumer_count={} same_block_consumers={} first_consumer_stmt={} first_consumer_op={} first_consumer_relation={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block_addr,
+            op_seq,
+            terminator_idx,
+            consumer_count,
+            consumer_count,
+            first_consumer_stmt,
+            first_consumer_op,
+            first_consumer_relation,
+            hazard.kind,
         ));
     }
 
@@ -603,8 +666,9 @@ impl<'a> PreviewBuilder<'a> {
             return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
         }
         self.replacement_plan_rejected_alias_unsafe_count += 1;
-        let hazard = Self::classify_alias_unsafe_hazard(block, op_idx, output, rhs);
-        self.trace_alias_unsafe_hazard(block.start_address, output, hazard);
+        let hazard =
+            Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);
+        self.trace_alias_unsafe_hazard(block.start_address, block.ops[op_idx].seq_num, output, hazard);
         ReplacementValuePlan::incomplete(
             ReplacementReadClass::SameBlockData,
             MaterializationRejectionReason::AliasUnsafe,
@@ -698,6 +762,7 @@ impl<'a> PreviewBuilder<'a> {
     fn classify_alias_unsafe_hazard(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
+        terminator_index: Option<usize>,
         output: &Varnode,
         rhs: &HirExpr,
     ) -> AliasUnsafeHazard {
@@ -723,14 +788,29 @@ impl<'a> PreviewBuilder<'a> {
             };
             if !Self::expr_is_low_cost_builder_inline_candidate(rhs) || !consumer_allows_inline {
                 return AliasUnsafeHazard::new(
-                    AliasUnsafeHazardKind::DisallowedSingleConsumer,
+                    if terminator_index.is_some_and(|term_idx| use_idx > term_idx) {
+                        AliasUnsafeHazardKind::UnknownConsumerAfterTerminator
+                    } else if consumer_allows_inline {
+                        AliasUnsafeHazardKind::UnknownUnhandledConsumerKind
+                    } else {
+                        AliasUnsafeHazardKind::DisallowedSingleConsumer
+                    },
                     Some(use_idx),
                     Some(use_idx),
                     Some(use_op.opcode),
                 );
             }
         }
-        AliasUnsafeHazard::new(AliasUnsafeHazardKind::Unknown, None, None, None)
+        if let Some((redef_idx, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output)
+        {
+            return AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::UnknownMalformedDefUseWindow,
+                None,
+                Some(redef_idx),
+                Some(redef_op.opcode),
+            );
+        }
+        AliasUnsafeHazard::new(AliasUnsafeHazardKind::UnknownNoConsumerFound, None, None, None)
     }
 
     fn first_intervening_alias_unsafe_hazard(
@@ -800,6 +880,19 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         uses
+    }
+
+    fn first_output_redefinition_in_block<'b>(
+        block: &'b crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<(usize, &'b PcodeOp)> {
+        let key = VarnodeKey::from(output);
+        block.ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .find(|(_, candidate)| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
     }
 
     fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
@@ -1248,6 +1341,7 @@ mod tests {
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
             &block,
             0,
+            None,
             &output,
             &HirExpr::Var("tmp_1".to_string()),
         );
@@ -1291,6 +1385,7 @@ mod tests {
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
             &block,
             0,
+            None,
             &output,
             &HirExpr::Var("tmp_1".to_string()),
         );
@@ -1328,6 +1423,7 @@ mod tests {
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
             &block,
             0,
+            None,
             &output,
             &HirExpr::Var("tmp_1".to_string()),
         );
@@ -1362,6 +1458,7 @@ mod tests {
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
             &block,
             0,
+            None,
             &output,
             &HirExpr::Var("tmp_1".to_string()),
         );
@@ -1369,6 +1466,109 @@ mod tests {
         assert_eq!(hazard.kind, AliasUnsafeHazardKind::DisallowedSingleConsumer);
         assert_eq!(hazard.use_stmt_idx, Some(1));
         assert_eq!(hazard.hazard_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
+    }
+
+    #[test]
+    fn alias_unsafe_unknown_subtyping_marks_no_consumer_found() {
+        let output = varnode(0x10);
+        let block = block(vec![op(
+            0,
+            PcodeOpcode::Copy,
+            Some(output.clone()),
+            vec![constant(1)],
+        )]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            None,
+            &output,
+            &HirExpr::Const(1, int(32)),
+        );
+
+        assert_eq!(hazard.kind, AliasUnsafeHazardKind::UnknownNoConsumerFound);
+        assert_eq!(hazard.use_stmt_idx, None);
+        assert_eq!(hazard.hazard_stmt_idx, None);
+    }
+
+    #[test]
+    fn alias_unsafe_unknown_subtyping_marks_redefinition_before_consumer() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            None,
+            &output,
+            &HirExpr::Const(1, int(32)),
+        );
+
+        assert_eq!(
+            hazard.kind,
+            AliasUnsafeHazardKind::UnknownMalformedDefUseWindow
+        );
+        assert_eq!(hazard.use_stmt_idx, None);
+        assert_eq!(hazard.hazard_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::Copy));
+    }
+
+    #[test]
+    fn alias_unsafe_unknown_subtyping_marks_allowed_consumer_but_non_low_cost_rhs() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            None,
+            &output,
+            &HirExpr::Call {
+                target: "helper".to_string(),
+                args: vec![HirExpr::Var("tmp_1".to_string())],
+                ty: int(32),
+            },
+        );
+
+        assert_eq!(
+            hazard.kind,
+            AliasUnsafeHazardKind::UnknownUnhandledConsumerKind
+        );
+        assert_eq!(hazard.use_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_stmt_idx, Some(1));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::Copy));
+    }
+
+    #[test]
+    fn alias_unsafe_unknown_subtyping_marks_after_terminator_single_consumer() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
+            op(2, PcodeOpcode::IntEqual, Some(varnode(0x20)), vec![output.clone(), constant(0)]),
+        ]);
+
+        let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
+            &block,
+            0,
+            Some(1),
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        );
+
+        assert_eq!(
+            hazard.kind,
+            AliasUnsafeHazardKind::UnknownConsumerAfterTerminator
+        );
+        assert_eq!(hazard.use_stmt_idx, Some(2));
+        assert_eq!(hazard.hazard_stmt_idx, Some(2));
         assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
     }
 }
