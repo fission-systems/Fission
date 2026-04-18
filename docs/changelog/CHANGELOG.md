@@ -9,6 +9,56 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail read-only load/assign suffix internalization for `stmt_idx=130`
+
+This wave did not broaden generic side-effect acceptance. It only internalized one narrow suffix-owned subcase: a read-only load into a local variable can now remain inside the owned suffix window when its pointer is pure, its load type is known, and the resulting binding is only consumed in owned-safe contexts before the terminal join.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `suffix_memory_read_only_assign_is_owned_safe(...)`
+  - `stmt_reads_binding_only_in_owned_safe_context(...)`
+  - env-gated trace lines of the form:
+    - `suffix-memory-readonly-assign-internalized stmt_idx=... kind=MemoryReadOnlyAssign stmt={:?}`
+- focused synthetic coverage was added for:
+  - pure `var = *ptr` with later condition use
+  - pure `var = *(base + offset)` materialization
+  - continued rejection for:
+    - unknown load type
+    - return-path reuse
+    - pointer expressions containing calls
+    - memory-visible alias-risk reuse
+
+Validation:
+
+- `cargo test -p fission-pcode memory_read_only_assign -- --nocapture`
+- `cargo test -p fission-pcode suffix_side_effect_shape_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `cargo test -p fission-automation`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+- `cargo test -p fission-pcode structuring_guarded_tail -- --nocapture`
+  - this broader suite remains red on `main` in the same guarded-tail discovery families and is not used as the wave acceptance signal yet
+
+Observed state:
+
+- `stmt_idx=130` is now internalized directly:
+  - `suffix-memory-readonly-assign-internalized stmt_idx=130 kind=MemoryReadOnlyAssign`
+- candidate 35 moves past the former blocker:
+  - before: `early_label=block_14000701c first_fail=SuffixHasSideEffect { stmt_idx: 130 }`
+  - after: `early_label=block_14000701c first_fail=SuffixHasSideEffect { stmt_idx: 138 }`
+  - and `early_label=block_140007021` moves to the same `stmt_idx=138` blocker
+- the next blocking side-effect family is now typed explicitly:
+  - `suffix-side-effect-shape stmt_idx=138 kind=CallExprSideEffect`
+- the outer candidate shell still remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- `MemoryReadOnlyAssign` is no longer the active owner for candidate 35
+- the next owner is the call-bearing side-effect at `stmt_idx=138`, not generic load materialization
+- the remaining top-level blocker is still the same broad candidate shell around `AliasNotFallthrough`, but this wave successfully removed one concrete suffix-owned load/assign obstacle without widening generic side-effect acceptance
+
 ### Guarded-tail suffix side-effect shape subtyping for `stmt_idx=130`
 
 This wave did not broaden suffix ownership. It only split the remaining `SuffixHasSideEffect` bucket into explicit side-effect families so the next owner can be chosen from a concrete semantic shape instead of a generic side-effect label.

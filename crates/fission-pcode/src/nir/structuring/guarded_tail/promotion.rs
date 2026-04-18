@@ -433,6 +433,116 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str) -> bool {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                if Self::lvalue_contains_var(lhs, name) {
+                    return false;
+                }
+                !Self::expr_contains_var(rhs, name) || Self::expr_is_pure_value(rhs)
+            }
+            HirStmt::Expr(expr) => {
+                !Self::expr_contains_var(expr, name) || Self::expr_is_pure_value(expr)
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                (!Self::expr_contains_var(cond, name) || Self::expr_is_pure_value(cond))
+                    && then_body
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+                    && else_body
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::Block(stmts) => stmts
+                .iter()
+                .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)),
+            HirStmt::VaStart { va_list, .. } => !Self::expr_contains_var(va_list, name),
+            HirStmt::Switch { expr, cases, default } => {
+                !Self::expr_contains_var(expr, name)
+                    && cases.iter().all(|case| {
+                        case.body.iter().all(|stmt| {
+                            Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
+                        })
+                    })
+                    && default
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+                !Self::expr_contains_var(cond, name)
+                    && body
+                        .iter()
+                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                init.iter().all(|stmt| {
+                    Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
+                }) && cond
+                    .as_ref()
+                    .is_none_or(|expr| !Self::expr_contains_var(expr, name))
+                    && update.iter().all(|stmt| {
+                        Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
+                    })
+                    && body.iter().all(|stmt| {
+                        Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
+                    })
+            }
+            HirStmt::Return(Some(expr)) => !Self::expr_contains_var(expr, name),
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => true,
+        }
+    }
+
+    fn suffix_memory_read_only_assign_is_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Assign {
+            lhs: HirLValue::Var(binding_name),
+            rhs: HirExpr::Load { ptr, ty },
+        }) = body.get(stmt_idx)
+        else {
+            return false;
+        };
+
+        if !Self::expr_is_pure_value(ptr) || matches!(ty, NirType::Unknown) {
+            return false;
+        }
+
+        if body[stmt_idx + 1..]
+            .iter()
+            .map(|stmt| Self::count_var_defs_stmt(stmt, binding_name))
+            .sum::<usize>()
+            > 0
+        {
+            return false;
+        }
+
+        if body[stmt_idx + 1..terminal_label_idx]
+            .iter()
+            .any(|stmt| !Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name))
+        {
+            return false;
+        }
+
+        body[terminal_label_idx..]
+            .iter()
+            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0)
+    }
+
     fn resolve_suffix_redirect_to_terminal(
         body: &[HirStmt],
         target_label: &str,
@@ -605,12 +715,25 @@ impl<'a> PreviewBuilder<'a> {
             }
             return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
         }
+        let side_effect_kind = Self::classify_suffix_side_effect_shape(stmt);
+        if side_effect_kind == SuffixSideEffectShapeKind::MemoryReadOnlyAssign
+            && Self::suffix_memory_read_only_assign_is_owned_safe(body, stmt_idx, terminal_label_idx)
+        {
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] suffix-memory-readonly-assign-internalized stmt_idx={} kind={:?} stmt={:?}",
+                    stmt_idx,
+                    side_effect_kind,
+                    stmt
+                );
+            }
+            return Ok(());
+        }
         if Self::guarded_tail_diag_enabled() {
-            let kind = Self::classify_suffix_side_effect_shape(stmt);
             eprintln!(
                 "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
                 stmt_idx,
-                kind,
+                side_effect_kind,
                 stmt
             );
         }
@@ -3879,6 +4002,197 @@ mod owned_join_window_tests {
                 },
             }),
             SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+        );
+    }
+
+    #[test]
+    fn suffix_accepts_memory_read_only_assign_with_condition_use() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("loaded".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
+    }
+
+    #[test]
+    fn suffix_accepts_memory_read_only_assign_with_pure_ptroffset() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("base".to_string())),
+                        offset: 8,
+                    }),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Expr(HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("loaded".to_string())),
+                ty: NirType::Bool,
+            }),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
+    }
+
+    #[test]
+    fn suffix_rejects_memory_read_only_assign_with_unknown_load_type() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: NirType::Unknown,
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("loaded".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_memory_read_only_assign_reused_in_return() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("loaded".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            2,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_memory_read_only_assign_when_ptr_contains_call() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Call {
+                        target: "ptr_source".to_string(),
+                        args: vec![],
+                        ty: NirType::Ptr(Box::new(NirType::Int {
+                            bits: 8,
+                            signed: false,
+                        })),
+                    }),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("loaded".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
+        );
+    }
+
+    #[test]
+    fn suffix_rejects_memory_read_only_assign_with_memory_visible_alias_risk() {
+        let body = vec![
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded".to_string()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("loaded".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+                rhs: HirExpr::Var("value".to_string()),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_classify_suffix_stmt_rejection(
+            &body,
+            1,
+            0,
+            3,
+            "next",
+            SuffixTailRejection::SuffixHasSideEffect { stmt_idx: 1 },
         );
     }
 
