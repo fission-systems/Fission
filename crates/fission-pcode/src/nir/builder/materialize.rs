@@ -962,9 +962,9 @@ mod tests {
 
         assert!(PreviewBuilder::same_block_replacement_requires_stable_representative(&expr));
         assert!(
-            !PreviewBuilder::same_block_replacement_requires_stable_representative(
-                &HirExpr::Var("tmp_1".to_string())
-            )
+            !PreviewBuilder::same_block_replacement_requires_stable_representative(&HirExpr::Var(
+                "tmp_1".to_string()
+            ))
         );
     }
 }

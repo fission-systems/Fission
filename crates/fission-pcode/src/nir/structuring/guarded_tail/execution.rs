@@ -138,15 +138,21 @@ impl<'a> PreviewBuilder<'a> {
                         expr: cond.clone(),
                         value: true,
                     });
-                    let then_rewritten =
-                        Self::rewrite_guarded_tail_sequence(then_body, join_label, &then_assumptions);
+                    let then_rewritten = Self::rewrite_guarded_tail_sequence(
+                        then_body,
+                        join_label,
+                        &then_assumptions,
+                    );
                     let mut else_assumptions = assumptions.to_vec();
                     else_assumptions.push(ConditionAssumption {
                         expr: cond.clone(),
                         value: false,
                     });
-                    let else_rewritten =
-                        Self::rewrite_guarded_tail_sequence(else_body, join_label, &else_assumptions);
+                    let else_rewritten = Self::rewrite_guarded_tail_sequence(
+                        else_body,
+                        join_label,
+                        &else_assumptions,
+                    );
 
                     if then_rewritten.exits_to_join || else_rewritten.exits_to_join {
                         let rest = Self::rewrite_guarded_tail_sequence(
@@ -581,7 +587,10 @@ impl<'a> PreviewBuilder<'a> {
                     witness.middle.len(),
                     witness.external_redirects.len(),
                 ),
-                Err(reason) => eprintln!("[DIAG] guarded-tail trial idx={} rejected={:?}", idx, reason),
+                Err(reason) => eprintln!(
+                    "[DIAG] guarded-tail trial idx={} rejected={:?}",
+                    idx, reason
+                ),
             }
         }
         Some(witness.map(|witness| GuardedTailTrial {
@@ -691,7 +700,8 @@ impl<'a> PreviewBuilder<'a> {
             };
         }
 
-        let rewritten = Self::rewrite_guarded_tail_sequence(&witness.middle, &witness.target_label, &[]);
+        let rewritten =
+            Self::rewrite_guarded_tail_sequence(&witness.middle, &witness.target_label, &[]);
         let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
             body,
             &rewritten.stmts,
@@ -758,43 +768,45 @@ impl<'a> PreviewBuilder<'a> {
                 rejection_reason: Some(GuardedTailExecutionRejection::MustEmitLabelConflict),
             };
         }
-        let removable_ops_legal =
-            execution_safe && !has_top_level_label(&rewritten.stmts) && rewritten.unresolved_join_refs == 0;
-        let exported_bindings =
-            match self.collect_guarded_tail_exported_bindings(&rewritten.stmts, follow_tail) {
-                Ok(bindings) => bindings,
-                Err(reason) => {
-                    if Self::guarded_tail_diag_enabled() {
-                        eprintln!(
-                            "[DIAG] guarded-tail verify idx={} label={} exported_bindings_rejected={:?}",
-                            idx, witness.target_label, reason
-                        );
-                    }
-                    if self.guarded_tail_trace_enabled_for_current_fn() {
-                        eprintln!(
-                            "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
-                            self.guarded_tail_function_address(),
-                            idx,
-                            witness.target_label,
-                            witness.label_idx,
-                            reason
-                        );
-                        Self::guarded_tail_trace_emit_snapshot(
-                            "[GT-TRACE] reject_snapshot",
-                            &rewritten.stmts,
-                            20,
-                        );
-                    }
-                    return GuardedTailVerification {
-                        region_legality: legality,
-                        replacement_complete: false,
-                        removable_ops_legal,
-                        rewritten_middle: rewritten.stmts,
-                        exported_bindings: Vec::new(),
-                        rejection_reason: Some(reason),
-                    };
+        let removable_ops_legal = execution_safe
+            && !has_top_level_label(&rewritten.stmts)
+            && rewritten.unresolved_join_refs == 0;
+        let exported_bindings = match self
+            .collect_guarded_tail_exported_bindings(&rewritten.stmts, follow_tail)
+        {
+            Ok(bindings) => bindings,
+            Err(reason) => {
+                if Self::guarded_tail_diag_enabled() {
+                    eprintln!(
+                        "[DIAG] guarded-tail verify idx={} label={} exported_bindings_rejected={:?}",
+                        idx, witness.target_label, reason
+                    );
                 }
-            };
+                if self.guarded_tail_trace_enabled_for_current_fn() {
+                    eprintln!(
+                        "[GT-TRACE] fn=0x{:x} candidate={} join_label={} label_idx={} first_reject={:?}",
+                        self.guarded_tail_function_address(),
+                        idx,
+                        witness.target_label,
+                        witness.label_idx,
+                        reason
+                    );
+                    Self::guarded_tail_trace_emit_snapshot(
+                        "[GT-TRACE] reject_snapshot",
+                        &rewritten.stmts,
+                        20,
+                    );
+                }
+                return GuardedTailVerification {
+                    region_legality: legality,
+                    replacement_complete: false,
+                    removable_ops_legal,
+                    rewritten_middle: rewritten.stmts,
+                    exported_bindings: Vec::new(),
+                    rejection_reason: Some(reason),
+                };
+            }
+        };
         let replacement_complete = removable_ops_legal && effective_middle_refs == 0;
 
         if replacement_complete
@@ -927,7 +939,10 @@ impl<'a> PreviewBuilder<'a> {
             let binding_name = exported_bindings[binding_idx].binding_name.clone();
             let replacement_source = exported_bindings[binding_idx].replacement_source.clone();
             let def_stmt_idx = exported_bindings[binding_idx].def_stmt_idx;
-            for stmt in rewritten_middle.iter_mut().skip(def_stmt_idx.saturating_add(1)) {
+            for stmt in rewritten_middle
+                .iter_mut()
+                .skip(def_stmt_idx.saturating_add(1))
+            {
                 Self::replace_var_in_stmt(stmt, &binding_name, &replacement_source);
             }
             for later_binding in exported_bindings.iter_mut().skip(binding_idx + 1) {

@@ -430,8 +430,11 @@ impl<'a> PreviewBuilder<'a> {
                     &mut emitted_labels,
                 )? {
                     let node_id = graph.next_node_id();
-                    let node_id =
-                        graph.push(StructureNode::unstructured(node_id, recovered_body, skip_to));
+                    let node_id = graph.push(StructureNode::unstructured(
+                        node_id,
+                        recovered_body,
+                        skip_to,
+                    ));
                     if let Some(prev) = previous_node_id {
                         graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
                     }

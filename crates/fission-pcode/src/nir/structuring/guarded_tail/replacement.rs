@@ -80,7 +80,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::replace_var_in_lvalue(lhs, name, replacement);
                 Self::replace_var_in_expr(rhs, name, replacement);
             }
-            HirStmt::VaStart { va_list, .. } => Self::replace_var_in_expr(va_list, name, replacement),
+            HirStmt::VaStart { va_list, .. } => {
+                Self::replace_var_in_expr(va_list, name, replacement)
+            }
             HirStmt::Expr(expr) => Self::replace_var_in_expr(expr, name, replacement),
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
@@ -118,10 +120,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             HirStmt::For {
-                init,
-                cond,
-                update,
-                ..
+                init, cond, update, ..
             } => {
                 if let Some(init_stmt) = init {
                     Self::replace_var_in_stmt(init_stmt, name, replacement);
@@ -183,10 +182,7 @@ impl<'a> PreviewBuilder<'a> {
                         .sum::<usize>()
             }
             HirStmt::For {
-                init,
-                update,
-                body,
-                ..
+                init, update, body, ..
             } => {
                 init.iter()
                     .map(|stmt| Self::count_var_defs_stmt(stmt, target))
@@ -433,8 +429,15 @@ impl<'a> PreviewBuilder<'a> {
                         .filter(|expr| Self::expr_contains_var(expr, name))
                         .map(|_| GuardedTailReadKind::ConditionExpr)
                 })
-                .or_else(|| update.iter().find_map(|stmt| Self::classify_stmt_read_kind(stmt, name)))
-                .or_else(|| body.iter().find_map(|stmt| Self::classify_stmt_read_kind(stmt, name))),
+                .or_else(|| {
+                    update
+                        .iter()
+                        .find_map(|stmt| Self::classify_stmt_read_kind(stmt, name))
+                })
+                .or_else(|| {
+                    body.iter()
+                        .find_map(|stmt| Self::classify_stmt_read_kind(stmt, name))
+                }),
             HirStmt::VaStart { va_list, .. } if Self::expr_contains_var(va_list, name) => {
                 Some(GuardedTailReadKind::NestedExpr)
             }

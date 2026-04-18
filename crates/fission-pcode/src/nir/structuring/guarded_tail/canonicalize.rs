@@ -94,7 +94,9 @@ impl<'a> PreviewBuilder<'a> {
         full_body: &[HirStmt],
         sink_return: &Option<HirExpr>,
     ) -> bool {
-        if is_ignorable_discovery_stmt(stmt) || matches!(stmt, HirStmt::Block(body) if body.is_empty()) {
+        if is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+        {
             return true;
         }
         let HirStmt::Goto(target) = stmt else {
@@ -138,7 +140,9 @@ impl<'a> PreviewBuilder<'a> {
 
         body[after_label_pos + 1..next_label_idx]
             .iter()
-            .all(|stmt| Self::stmt_is_sink_equivalent_after_label_gap(stmt, full_body, &sink_return))
+            .all(|stmt| {
+                Self::stmt_is_sink_equivalent_after_label_gap(stmt, full_body, &sink_return)
+            })
     }
 
     fn count_sink_equivalent_top_level_after_label_refs(
@@ -158,11 +162,7 @@ impl<'a> PreviewBuilder<'a> {
             .copied()
             .filter(|pos| {
                 Self::local_after_label_ref_is_sink_equivalent(
-                    body,
-                    full_body,
-                    label,
-                    label_idx,
-                    *pos,
+                    body, full_body, label, label_idx, *pos,
                 )
             })
             .count()
@@ -354,20 +354,23 @@ impl<'a> PreviewBuilder<'a> {
                     nested_after_label_count;
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
-            
+
             // Priority 1: If we have external refs with top-level-after-label + all top-level goto,
             // try forward-chain resolution first (allow reaching beyond immediate next label)
             let forward_chain_redirect = if allow_top_level_after_label_redirect
                 && external_ref_count > 0
-                && Self::are_all_external_refs_top_level_goto(full_body, segment_start, segment_end, label)
-            {
+                && Self::are_all_external_refs_top_level_goto(
+                    full_body,
+                    segment_start,
+                    segment_end,
+                    label,
+                ) {
                 self.resolve_terminal_join_target(body, idx, label, referenced)
                     .and_then(|(resolved_label, _)| {
                         // Prefer forward-chain resolution if it goes beyond immediate next
                         if let Some(next_label_idx) = next_label_idx {
                             if let HirStmt::Label(next_label) = &body[next_label_idx] {
-                                if resolved_label != *label
-                                    && resolved_label != next_label.as_str()
+                                if resolved_label != *label && resolved_label != next_label.as_str()
                                 {
                                     return Some(resolved_label);
                                 }
@@ -378,7 +381,7 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 None
             };
-            
+
             // Priority 2: Try immediate next-label redirect (only if forward-chain didn't apply)
             let immediate_next_redirect = if forward_chain_redirect.is_none() {
                 if let Some(next_label_idx) = next_label_idx
@@ -393,7 +396,7 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 None
             };
-            
+
             let next_redirect_label = forward_chain_redirect.or(immediate_next_redirect);
 
             if self.guarded_tail_trace_enabled_for_current_fn() {
@@ -403,9 +406,7 @@ impl<'a> PreviewBuilder<'a> {
                     label,
                     local_ref_count,
                     external_ref_count,
-                    next_redirect_label
-                        .as_deref()
-                        .unwrap_or("<none>")
+                    next_redirect_label.as_deref().unwrap_or("<none>")
                 );
             }
 
@@ -542,7 +543,10 @@ impl<'a> PreviewBuilder<'a> {
         let flatten_before_len = flattened.len();
         let collapsed_guards = Self::collapse_duplicate_top_level_guard_ladder(&mut flattened);
         let factored_guard_clusters =
-            Self::factor_duplicate_top_level_guard_cluster_with_trivial_gap(&mut flattened, full_body);
+            Self::factor_duplicate_top_level_guard_cluster_with_trivial_gap(
+                &mut flattened,
+                full_body,
+            );
         let collapsed_sink_returns =
             Self::collapse_top_level_sink_to_return_goto_chain(&mut flattened, full_body);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {

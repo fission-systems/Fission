@@ -193,7 +193,10 @@ fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutove
     assert_eq!(stats.promoted_region_count, 0, "{stats:#?}");
     assert_eq!(stats.guarded_tail_promoted_count, 0, "{stats:#?}");
     assert!(stats.region_emit_ready_failed_count >= 1, "{stats:#?}");
-    assert_eq!(stats.guarded_tail_rejected_alias_interleave_conflict_count, 0);
+    assert_eq!(
+        stats.guarded_tail_rejected_alias_interleave_conflict_count,
+        0
+    );
     assert_eq!(body, original);
 }
 
@@ -279,7 +282,11 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
                 rhs: HirExpr::Var(else_rhs),
             }),
             Some(HirStmt::Return(Some(HirExpr::Var(ret_name)))),
-        ) if then_rhs == "probe" && else_rhs == "seed" && then_name == else_name && then_name == ret_name => {
+        ) if then_rhs == "probe"
+            && else_rhs == "seed"
+            && then_name == else_name
+            && then_name == ret_name =>
+        {
             then_name.clone()
         }
         _ => panic!("expected synthetic merge surface, got {body:#?}"),
@@ -329,7 +336,10 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
 
     assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
-    assert!(stats.guarded_tail_replacement_plan_completed_count >= 1, "{stats:#?}");
+    assert!(
+        stats.guarded_tail_replacement_plan_completed_count >= 1,
+        "{stats:#?}"
+    );
     assert!(matches!(
         body.first(),
         Some(HirStmt::Expr(HirExpr::Const(
@@ -384,7 +394,10 @@ fn structuring_guarded_tail_execute_rewrite_survives_forwarding_tail_label_chain
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
 
     assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
-    assert!(stats.guarded_tail_replacement_plan_completed_count >= 1, "{stats:#?}");
+    assert!(
+        stats.guarded_tail_replacement_plan_completed_count >= 1,
+        "{stats:#?}"
+    );
     let merge_name = extract_promoted_guarded_tail_merge_name(&body).expect("{body:#?}");
     assert_ne!(merge_name, "tmp");
 }
@@ -421,7 +434,10 @@ fn structuring_guarded_tail_execute_rewrite_survives_padded_middle_depth() {
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
 
     assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
-    assert!(stats.guarded_tail_replacement_plan_completed_count >= 1, "{stats:#?}");
+    assert!(
+        stats.guarded_tail_replacement_plan_completed_count >= 1,
+        "{stats:#?}"
+    );
     let merge_name = extract_promoted_guarded_tail_merge_name(&body).expect("{body:#?}");
     assert_ne!(merge_name, "tmp");
 }
@@ -495,9 +511,15 @@ fn structuring_candidate_discovery_allows_rewritable_middle_join_ref_after_gate_
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
+    assert!(
+        stats.discovery_seen_guarded_tail_like_shape_count >= 1,
+        "{stats:#?}"
+    );
     assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
-    assert_eq!(stats.rejected_must_emit_label_surviving_middle_ref, 0, "{stats:#?}");
+    assert_eq!(
+        stats.rejected_must_emit_label_surviving_middle_ref, 0,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -521,7 +543,10 @@ fn structuring_guarded_tail_promotes_rewritable_middle_join_ref_after_gate_align
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
 
     assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
-    assert_eq!(stats.rejected_must_emit_label_surviving_middle_ref, 0, "{stats:#?}");
+    assert_eq!(
+        stats.rejected_must_emit_label_surviving_middle_ref, 0,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -615,7 +640,10 @@ fn structuring_candidate_discovery_rejects_same_owner_forward_refs_under_hard_cu
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
     assert_eq!(stats.promotion_candidate_count, 0, "{stats:#?}");
-    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
+    assert!(
+        stats.rejected_must_emit_label_surviving_external_ref >= 1,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -674,7 +702,10 @@ fn structuring_guarded_tail_rejects_replacement_reads_after_follow_redefinition(
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
 
     assert_eq!(stats.guarded_tail_promoted_count, 0, "{stats:#?}");
-    assert!(stats.guarded_tail_replacement_read_rejected_nondominated_count >= 1, "{stats:#?}");
+    assert!(
+        stats.guarded_tail_replacement_read_rejected_nondominated_count >= 1,
+        "{stats:#?}"
+    );
     assert_eq!(body, original);
 }
 
@@ -694,9 +725,15 @@ fn structuring_candidate_discovery_allows_single_forward_external_ref_when_elida
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
+    assert!(
+        stats.discovery_seen_guarded_tail_like_shape_count >= 1,
+        "{stats:#?}"
+    );
     assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
-    assert_eq!(stats.rejected_must_emit_label_surviving_external_ref, 0, "{stats:#?}");
+    assert_eq!(
+        stats.rejected_must_emit_label_surviving_external_ref, 0,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -739,7 +776,10 @@ fn structuring_guarded_tail_promotion_keeps_post_label_external_ref_rejected() {
 
     assert_eq!(stats.guarded_tail_promoted_count, 0, "{stats:#?}");
     assert!(stats.region_emit_ready_failed_count >= 1, "{stats:#?}");
-    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
+    assert!(
+        stats.rejected_must_emit_label_surviving_external_ref >= 1,
+        "{stats:#?}"
+    );
     assert_eq!(body, original);
 }
 
@@ -1024,8 +1064,14 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_gap() {
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
-    assert_eq!(stats.canonicalization_failed_nested_tail_escape, 0, "{stats:#?}");
+    assert!(
+        stats.discovery_seen_guarded_tail_like_shape_count >= 1,
+        "{stats:#?}"
+    );
+    assert_eq!(
+        stats.canonicalization_failed_nested_tail_escape, 0,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -1055,8 +1101,14 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_return_h
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
-    assert_eq!(stats.canonicalization_failed_nested_tail_escape, 0, "{stats:#?}");
+    assert!(
+        stats.discovery_seen_guarded_tail_like_shape_count >= 1,
+        "{stats:#?}"
+    );
+    assert_eq!(
+        stats.canonicalization_failed_nested_tail_escape, 0,
+        "{stats:#?}"
+    );
 }
 
 #[test]
@@ -1219,7 +1271,10 @@ fn structuring_candidate_discovery_rejects_goto_to_return_only_tail_label_under_
 
     assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
     assert_eq!(stats.region_emit_ready_failed_count, 1, "{stats:#?}");
-    assert_eq!(stats.guarded_tail_replacement_plan_candidate_count, 1, "{stats:#?}");
+    assert_eq!(
+        stats.guarded_tail_replacement_plan_candidate_count, 1,
+        "{stats:#?}"
+    );
     assert!(
         stats.guarded_tail_replacement_plan_rejected_unstable_read_count >= 1,
         "{stats:#?}"
@@ -1543,22 +1598,23 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_top_l
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
-    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1, "{stats:#?}");
-    assert_eq!(
-        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
-        0,
+    assert!(
+        stats.discovery_seen_guarded_tail_like_shape_count >= 1,
         "{stats:#?}"
     );
     assert_eq!(
-        stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
-        0,
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count, 0,
+        "{stats:#?}"
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count, 0,
         "{stats:#?}"
     );
 }
 
 #[test]
 fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_nested_post_ref_rejected()
-{
+ {
     let body = vec![
         HirStmt::If {
             cond: HirExpr::Var("reg".to_string()),
@@ -1905,7 +1961,10 @@ fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
     assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
-    assert!(stats.rejected_must_emit_label_surviving_external_ref >= 1, "{stats:#?}");
+    assert!(
+        stats.rejected_must_emit_label_surviving_external_ref >= 1,
+        "{stats:#?}"
+    );
 }
 
 #[test]

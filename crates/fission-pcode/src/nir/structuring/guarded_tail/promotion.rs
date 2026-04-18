@@ -77,11 +77,8 @@ impl<'a> PreviewBuilder<'a> {
         outside_refs: usize,
         middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
-        let effective_middle_refs = PreviewBuilder::effective_middle_refs_for_promotion(
-            middle,
-            label,
-            middle_refs,
-        );
+        let effective_middle_refs =
+            PreviewBuilder::effective_middle_refs_for_promotion(middle, label, middle_refs);
         if effective_middle_refs > 0 {
             return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
         }
@@ -273,14 +270,15 @@ impl<'a> PreviewBuilder<'a> {
 
             self.guarded_tail_candidate_count += 1;
             self.promotion_candidate_count += 1;
-            let plan = match self.build_guarded_tail_execution_plan(body, idx, &trial, &verification) {
-                Ok(plan) => plan,
-                Err(reason) => {
-                    self.mark_guarded_tail_execution_rejection(reason);
-                    idx += 1;
-                    continue;
-                }
-            };
+            let plan =
+                match self.build_guarded_tail_execution_plan(body, idx, &trial, &verification) {
+                    Ok(plan) => plan,
+                    Err(reason) => {
+                        self.mark_guarded_tail_execution_rejection(reason);
+                        idx += 1;
+                        continue;
+                    }
+                };
             self.execute_guarded_tail_plan(body, idx, trial, plan, cond.clone());
             changed = true;
             idx += 1;
