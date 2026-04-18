@@ -9,6 +9,80 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Cross-block consumer materialization provenance
+
+This wave stayed diagnostic-only. It did not widen cross-block replacement, synthesize merge bindings, or relax alias safety. The goal was to split the dominant `ConsumerInDifferentBlock` slice of `UnknownMalformedDefUseWindow` into CFG-shaped provenance families so the next release wave can choose between single-successor replacement and merge/join handling on evidence instead of guesswork.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated cross-block trace whenever malformed def/use analysis resolves to `ConsumerInDifferentBlock`:
+  - `cross-block-consumer output=... def_block=... consumer_block=... consumer_op_seq=... consumer_opcode=... relation=... def_successors=[...] def_successor_count=... consumer_predecessors=... consumer_is_multiequal=... immediate_successor=... consumer_is_join=... redefined_before_consumer=...`
+- the provenance relation is now classified into a deterministic internal vocabulary:
+  - `SuccessorBlock`
+  - `JoinBlock`
+  - `LoopBackedge`
+  - `PostDominatorBlock`
+  - `UnreachableOrUnclassified`
+  - `MergePhiConsumer`
+  - `OrdinaryDataConsumer`
+- unit coverage now fixes two basic CFG families:
+  - `MergePhiConsumer`
+  - `SuccessorBlock`
+
+Validation:
+
+- `cargo test -p fission-pcode cross_block_consumer_provenance_prefers_merge_phi_consumer --lib -- --test-threads=1`
+- `cargo test -p fission-pcode cross_block_consumer_provenance_marks_single_successor_data_consumer --lib -- --test-threads=1`
+- `cargo test -p fission-pcode malformed_def_use_window_relation_marks_terminator_missing --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `0x140008090` is not primarily a simple immediate-successor issue. The current cross-block distribution is:
+  - `LoopBackedge = 508`
+  - `OrdinaryDataConsumer = 303`
+  - `JoinBlock = 246`
+  - `SuccessorBlock = 32`
+- the dominant consumer opcodes on `0x140008090` are:
+  - `IntEqual = 424`
+  - `IntZExt = 280`
+  - `CBranch = 265`
+  - `IntNotEqual = 112`
+  - `CallInd = 8`
+- concrete examples on `0x140008090` show three distinct owners already:
+  - immediate successor predicate use:
+    - `consumer_block=0x1400080e3`
+    - `consumer_opcode=CBranch`
+    - `relation=SuccessorBlock`
+  - merge/join compare use:
+    - `consumer_block=0x140008113`
+    - `consumer_opcode=IntEqual`
+    - `relation=JoinBlock`
+  - non-successor data consumer:
+    - `consumer_block=0x140008108`
+    - `consumer_opcode=IntZExt`
+    - `relation=OrdinaryDataConsumer`
+- `0x140006c20` is materially simpler:
+  - `LoopBackedge = 156`
+  - `SuccessorBlock = 24`
+  - `PostDominatorBlock = 12`
+- the dominant consumer opcodes on `0x140006c20` are:
+  - `IntNotEqual = 120`
+  - `BoolNegate = 72`
+- representative examples on `0x140006c20` are clean:
+  - `consumer_block=0x140006c55`, `consumer_opcode=IntNotEqual`, `relation=SuccessorBlock`
+  - `consumer_block=0x140006cad`, `consumer_opcode=BoolNegate`, `relation=PostDominatorBlock`
+
+Conclusion:
+
+- `ConsumerInDifferentBlock` is now clearly a mixed family, not one release owner
+- `0x140008090` is dominated by loopback/join/ordinary cross-block consumers, so its next owner is not broad single-successor replacement
+- `0x140006c20` is a better narrow candidate for a future single-successor or postdom-aware replacement experiment
+- if the next wave wants maximum release leverage, it should likely split:
+  - `JoinBlock`/`MergePhiConsumer` into merge-binding ownership
+  - `SuccessorBlock`/`PostDominatorBlock` into narrow cross-block replacement ownership
+
 ### MalformedDefUseWindow invariant tracing
 
 This wave stayed diagnostic-only. It did not relax alias safety, widen representative downgrade, or change the release path for `UnknownMalformedDefUseWindow`. The goal was to split that family into concrete def/use-window relations so the next policy wave can target a real owner instead of a catch-all label.

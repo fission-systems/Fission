@@ -55,6 +55,29 @@ struct MalformedDefUseWindowDetail {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CrossBlockConsumerRelation {
+    SuccessorBlock,
+    JoinBlock,
+    LoopBackedge,
+    PostDominatorBlock,
+    UnreachableOrUnclassified,
+    MergePhiConsumer,
+    OrdinaryDataConsumer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CrossBlockConsumerProvenance {
+    relation: CrossBlockConsumerRelation,
+    consumer_opcode: Option<PcodeOpcode>,
+    consumer_is_multiequal: bool,
+    immediate_successor: bool,
+    consumer_is_join: bool,
+    redefined_before_consumer: bool,
+    def_successor_count: usize,
+    consumer_predecessor_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AliasUnsafeHazard {
     kind: AliasUnsafeHazardKind,
     use_stmt_idx: Option<usize>,
@@ -392,6 +415,9 @@ impl<'a> PreviewBuilder<'a> {
             detail.relation,
             detail.rhs_kind,
         ));
+        if detail.relation == MalformedDefUseWindowRelation::ConsumerInDifferentBlock {
+            self.trace_cross_block_consumer_provenance(block, op_idx, output);
+        }
     }
 
     fn trace_no_consumer_suppressed(
@@ -1526,6 +1552,124 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn trace_cross_block_consumer_provenance(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(provenance) = self.describe_cross_block_consumer_provenance(block, op_idx, output) else {
+            return;
+        };
+        let def_successors = self
+            .address_to_index
+            .get(&block.start_address)
+            .and_then(|idx| self.successors.get(*idx))
+            .map(|succs| {
+                succs.iter()
+                    .filter_map(|succ| self.pcode.blocks.get(*succ).map(|block| format!("0x{:x}", block.start_address)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "none".to_string());
+        let consumer_block = provenance
+            .0
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let consumer_op_seq = provenance
+            .1
+            .map(|seq| seq.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let consumer_opcode = provenance
+            .2
+            .consumer_opcode
+            .map(|opcode| format!("{opcode:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "cross-block-consumer output=space:{} off:0x{:x} size:{} def_block=0x{:x} consumer_block={} consumer_op_seq={} consumer_opcode={} relation={:?} def_successors=[{}] def_successor_count={} consumer_predecessors={} consumer_is_multiequal={} immediate_successor={} consumer_is_join={} redefined_before_consumer={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            consumer_block,
+            consumer_op_seq,
+            consumer_opcode,
+            provenance.2.relation,
+            def_successors,
+            provenance.2.def_successor_count,
+            provenance.2.consumer_predecessor_count,
+            provenance.2.consumer_is_multiequal,
+            provenance.2.immediate_successor,
+            provenance.2.consumer_is_join,
+            provenance.2.redefined_before_consumer,
+        ));
+    }
+
+    fn describe_cross_block_consumer_provenance(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<(Option<u64>, Option<u32>, CrossBlockConsumerProvenance)> {
+        let (consumer_block_addr, consumer_idx, consumer_op_seq) =
+            self.first_output_use_site_outside_block(block.start_address, output)?;
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let consumer_op = consumer_block.ops.get(consumer_idx)?;
+        let consumer_is_multiequal = consumer_op.opcode == PcodeOpcode::MultiEqual;
+        let immediate_successor = self
+            .successors
+            .get(def_block_idx)
+            .is_some_and(|succs| succs.contains(&consumer_block_idx));
+        let consumer_predecessor_count = self.predecessors.get(consumer_block_idx).map_or(0, Vec::len);
+        let consumer_is_join = consumer_predecessor_count > 1;
+        let redefined_before_consumer =
+            Self::first_output_redefinition_in_block(block, op_idx, output).is_some();
+        let consumer_dominates_def = self.dom_tree.dominates(consumer_block_idx, def_block_idx);
+        let consumer_postdominates_def = self
+            .cfg_facts
+            .postdominators()
+            .postdominators()
+            .get(&def_block_idx)
+            .is_some_and(|set| set.contains(&consumer_block_idx));
+        let relation = if consumer_is_multiequal {
+            CrossBlockConsumerRelation::MergePhiConsumer
+        } else if consumer_dominates_def && !consumer_postdominates_def {
+            CrossBlockConsumerRelation::LoopBackedge
+        } else if immediate_successor && !consumer_is_join {
+            CrossBlockConsumerRelation::SuccessorBlock
+        } else if consumer_is_join {
+            CrossBlockConsumerRelation::JoinBlock
+        } else if consumer_postdominates_def {
+            CrossBlockConsumerRelation::PostDominatorBlock
+        } else if immediate_successor {
+            CrossBlockConsumerRelation::SuccessorBlock
+        } else if self.address_to_index.contains_key(&consumer_block_addr) {
+            CrossBlockConsumerRelation::OrdinaryDataConsumer
+        } else {
+            CrossBlockConsumerRelation::UnreachableOrUnclassified
+        };
+        Some((
+            Some(consumer_block_addr),
+            Some(consumer_op_seq),
+            CrossBlockConsumerProvenance {
+                relation,
+                consumer_opcode: Some(consumer_op.opcode),
+                consumer_is_multiequal,
+                immediate_successor,
+                consumer_is_join,
+                redefined_before_consumer,
+                def_successor_count: self.successors.get(def_block_idx).map_or(0, Vec::len),
+                consumer_predecessor_count,
+            },
+        ))
+    }
+
     fn collect_output_use_sites_outside_block(
         blocks: &[crate::pcode::PcodeBasicBlock],
         current_block_addr: u64,
@@ -2253,6 +2397,74 @@ mod tests {
             relation,
             MalformedDefUseWindowRelation::RedefinitionBeforeConsumer
         );
+    }
+
+    #[test]
+    fn cross_block_consumer_provenance_prefers_merge_phi_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(0x1000, 0, vec![op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            )]),
+            block_at(
+                0x1010,
+                1,
+                vec![op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![constant(2)])],
+            ),
+            block_at(0x1020, 2, vec![op(
+                2,
+                PcodeOpcode::MultiEqual,
+                Some(varnode(0x30)),
+                vec![output.clone(), varnode(0x20)],
+            )]),
+        ];
+        blocks[0].successors = vec![2];
+        blocks[1].successors = vec![2];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let provenance = builder
+            .describe_cross_block_consumer_provenance(&blocks[0], 0, &output)
+            .expect("cross-block provenance");
+
+        assert_eq!(provenance.2.relation, CrossBlockConsumerRelation::MergePhiConsumer);
+        assert!(provenance.2.consumer_is_multiequal);
+    }
+
+    #[test]
+    fn cross_block_consumer_provenance_marks_single_successor_data_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(0x1000, 0, vec![op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            )]),
+            block_at(0x1010, 1, vec![op(
+                1,
+                PcodeOpcode::Copy,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            )]),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let provenance = builder
+            .describe_cross_block_consumer_provenance(&blocks[0], 0, &output)
+            .expect("cross-block provenance");
+
+        assert_eq!(provenance.2.relation, CrossBlockConsumerRelation::SuccessorBlock);
+        assert!(!provenance.2.consumer_is_multiequal);
+        assert!(provenance.2.immediate_successor);
+        assert!(!provenance.2.consumer_is_join);
     }
 
     #[test]
