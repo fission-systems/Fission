@@ -737,6 +737,16 @@ impl<'a> PreviewBuilder<'a> {
             outside_refs,
             middle_refs,
         ) {
+            self.emit_ready_trace(format!(
+                "must_emit_label label={} owner=guarded_tail_verify surviving_ref_kind={:?} outside_refs={} middle_refs={} effective_middle_refs={} candidate={} label_idx={}",
+                witness.target_label,
+                rejection,
+                outside_refs,
+                middle_refs,
+                effective_middle_refs,
+                idx,
+                witness.label_idx,
+            ));
             self.mark_promotion_gate_rejection(rejection);
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
@@ -869,6 +879,27 @@ impl<'a> PreviewBuilder<'a> {
 
         if !removable_ops_legal || effective_middle_refs > 0 {
             self.guarded_tail_replacement_plan_rejected_unstable_read_count += 1;
+            for binding in &exported_bindings {
+                if binding.read_sites.is_empty() {
+                    continue;
+                }
+                let read_kinds = binding
+                    .read_sites
+                    .iter()
+                    .map(|read| format!("{:?}@{}", read.kind, read.stmt_idx))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                self.emit_ready_trace(format!(
+                    "unstable_read binding={} def_stmt_idx={} read_kinds=[{}] removable_ops_legal={} effective_middle_refs={} candidate={} join_label={}",
+                    binding.binding_name,
+                    binding.def_stmt_idx,
+                    read_kinds,
+                    removable_ops_legal,
+                    effective_middle_refs,
+                    idx,
+                    witness.target_label,
+                ));
+            }
         }
         if Self::guarded_tail_diag_enabled() {
             eprintln!(

@@ -52,6 +52,36 @@ impl ReplacementValuePlan {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn trace_materialization_plan(
+        &self,
+        block_addr: u64,
+        op: &PcodeOp,
+        output: &Varnode,
+        rhs: &HirExpr,
+        plan: ReplacementValuePlan,
+        event: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let reason = match plan.completeness {
+            ReplacementCompleteness::Complete => "Complete".to_string(),
+            ReplacementCompleteness::Incomplete(reason) => format!("{reason:?}"),
+        };
+        self.emit_ready_trace(format!(
+            "materialization_drift event={} block=0x{:x} op_seq={} output=space:{} off:0x{:x} size:{} dominant_read={:?} reason={} rhs={:?}",
+            event,
+            block_addr,
+            op.seq_num,
+            output.space_id,
+            output.offset,
+            output.size,
+            plan.dominant_read,
+            reason,
+            rhs,
+        ));
+    }
+
     fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Var(_) | HirExpr::Const(..) => false,
@@ -357,11 +387,36 @@ impl<'a> PreviewBuilder<'a> {
         let replacement_plan =
             self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
         if replacement_plan.is_complete() {
+            self.trace_materialization_plan(
+                block_addr,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+                "representative_downgrade",
+            );
             self.representative_downgrade_count += 1;
             return Ok(None);
         }
         if legacy_inline_candidate {
             self.materialization_inline_suppressed_count += 1;
+            self.trace_materialization_plan(
+                block_addr,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+                "inline_suppressed",
+            );
+        } else {
+            self.trace_materialization_plan(
+                block_addr,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+                "materialized_binding",
+            );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
         let lhs = HirLValue::Var(

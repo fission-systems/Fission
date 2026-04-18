@@ -7,7 +7,81 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-18 (latest)
+## 2026-04-19 (latest)
+
+### Emit-ready materialization owner tracing
+
+This wave stayed diagnostic-only. It did not widen guarded-tail acceptance, alter emit legality, or retune materialization policy. The goal was to identify the active owner behind the remaining row-gate regressions on `0x140008090` and `0x140006c20` after `0x140006fe0 candidate 35` had already been finalized as a soundness-preserving unsafe-callee stop.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now exposes a shared row-targeted diagnostic channel:
+  - `emit_ready_trace_enabled_for_current_fn()`
+  - `emit_ready_trace(...)`
+- [`execution.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/execution.rs) now emits explicit guarded-tail execute diagnostics when a candidate stops on emit-readiness:
+  - `must_emit_label ... surviving_ref_kind=...`
+  - `unstable_read binding=... read_kinds=[...]`
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now traces replacement/materialization decisions for builder-owned representatives:
+  - `event=materialized_binding`
+  - `event=inline_suppressed`
+  - `event=representative_downgrade`
+  - together with:
+    - `dominant_read`
+    - `reason`
+    - source `rhs`
+    - lowered `block` and `op_seq`
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the targeted rows did not surface a new guarded-tail acceptance opportunity; the active signal was builder/materialization drift rather than a newly actionable guarded-tail proof closure
+- `0x140008090` emitted only `EMIT-TRACE` materialization diagnostics on the active path:
+  - events:
+    - `materialized_binding=6853`
+    - `inline_suppressed=980`
+    - `representative_downgrade=263`
+  - dominant read classes:
+    - `SameBlockData=6908`
+    - `Merge=1066`
+    - `PredicateSensitive=115`
+    - `SelectorSensitive=7`
+  - rejection/completeness reasons:
+    - `AliasUnsafe=5807`
+    - `MissingMergeBinding=1066`
+    - `ConsumerRequiresStableRepresentative=960`
+    - `Complete=263`
+- `0x140006c20` showed the same owner family with smaller volume:
+  - events:
+    - `materialized_binding=2177`
+    - `inline_suppressed=383`
+    - `representative_downgrade=80`
+  - dominant read classes:
+    - `SameBlockData=2251`
+    - `Merge=342`
+    - `PredicateSensitive=40`
+    - `SelectorSensitive=7`
+  - rejection/completeness reasons:
+    - `AliasUnsafe=1845`
+    - `MissingMergeBinding=342`
+    - `ConsumerRequiresStableRepresentative=373`
+    - `Complete=80`
+- `0x140006c20` also exposed a direct predicate-sensitive case on the active path:
+  - `dominant_read=PredicateSensitive reason=ConsumerRequiresStableRepresentative rhs=Unary { op: Not, expr: Var("xVar57"), ... }`
+
+Conclusion:
+
+- the next owner is still not guarded-tail suffix widening
+- the remaining row-gate work is centered on builder/materialization and emit-readiness, especially:
+  - `AliasUnsafe`
+  - `MissingMergeBinding`
+  - `ConsumerRequiresStableRepresentative`
+- `0x140008090` is the best next primary row because it carries the same family at higher volume and already aligns with the benchmark gate’s `materialization_drift + must_emit_label_conflict + alias_interleave_conflict` bundle
+
+## 2026-04-18
 
 ### Guarded-tail side-effectful callee rejection finalization
 

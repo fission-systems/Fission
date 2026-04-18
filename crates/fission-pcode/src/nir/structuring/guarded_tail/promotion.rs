@@ -30,6 +30,20 @@ impl<'a> PreviewBuilder<'a> {
         self.guarded_tail_function_address() == target
     }
 
+    pub(in crate::nir) fn emit_ready_trace_enabled_for_current_fn(&self) -> bool {
+        Self::guarded_tail_diag_enabled() && self.guarded_tail_trace_enabled_for_current_fn()
+    }
+
+    pub(in crate::nir) fn emit_ready_trace(&self, message: impl std::fmt::Display) {
+        if self.emit_ready_trace_enabled_for_current_fn() {
+            eprintln!(
+                "[EMIT-TRACE] row=0x{:x} {}",
+                self.guarded_tail_function_address(),
+                message
+            );
+        }
+    }
+
     pub(super) fn guarded_tail_trace_emit_snapshot(
         prefix: &str,
         stmts: &[HirStmt],
