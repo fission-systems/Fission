@@ -9,6 +9,53 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail callee effect detail tracing
+
+This wave stayed diagnostic-only. It did not widen guarded-tail acceptance. The goal was to expose the first concrete p-code causes behind the existing `PreviewCalleeAnalysis` verdict for the remaining `stmt_idx=154` call-bearing suffix blocker.
+
+- [`facts.rs`](../../crates/fission-decompiler-core/src/facts.rs) now expands preview callee effect production with first-cause detail tracing:
+  - `PreviewCalleeEffectDetail`
+  - `trace_preview_callee_effect_detail(...)`
+  - `summarize_preview_callee_effects(...) -> (NirCallEffectSummary, PreviewCalleeEffectDetail)`
+- the detail trace records:
+  - total `STORE` / `CALL` / `CALLIND` / `CALLOTHER` / `RETURN` counts seen in the preview-lifted callee
+  - the first `STORE`
+  - the first direct or indirect `CALL`
+  - the first `CALLOTHER`
+- this remains producer-side diagnosis only:
+  - no guarded-tail suffix ownership rule changed
+  - no call-bearing suffix acceptance changed
+  - no effect summary bit was reinterpreted
+
+Validation:
+
+- `cargo test -p fission-decompiler-core preview_callee_effect_summary -- --nocapture`
+- `cargo build -p fission-cli`
+- `cargo check -p fission-pcode`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the active `FUN_0x140043d30` callee summary is now backed by explicit first-cause evidence:
+  - `callee-effect-detail target=FUN_0x140043d30 target_addr=0x140043d30 store_count=27 call_count=2 callind_count=6 callother_count=7 return_count=1`
+  - `callee-effect-first-store target=FUN_0x140043d30 addr=0x140043d30 op=Store`
+  - `callee-effect-first-call target=FUN_0x140043d30 addr=0x140043d63 call_target=Some(5368986496) op=Call`
+  - `callee-effect-first-callother target=FUN_0x140043d30 addr=0x140043d70 op=CallOther`
+- the guarded-tail consumer result on the active path remains:
+  - `suffix-call-effect-shape stmt_idx=154 kind=VoidUnknownCall`
+  - `suffix-unknown-call-summary target=FUN_0x140043d30 ... effect_summary_source=PreviewCalleeAnalysis`
+  - `suffix-unknown-call-effect target=FUN_0x140043d30 writes_memory=yes writes_global=unknown may_call_unknown=yes may_exit=yes return_used=false`
+- this narrows the current blocker further:
+  - the producer is not merely missing precision metadata
+  - it is seeing real `Store`, `Call`/`CallInd`, and `CallOther` operations in the lifted callee body
+
+Conclusion:
+
+- `FUN_0x140043d30` is currently an actually unsafe callee for guarded-tail suffix internalization under the active conservative rules
+- the next owner is callee summary precision itself:
+  - either the preview-lifted callee body is correct, in which case guarded-tail should remain fail-closed here
+  - or the lift/bounds/thunk shape is over-approximated, in which case the next wave should refine callee bounds or thunk normalization rather than widening local guarded-tail acceptance
+
 ### Guarded-tail intraprocedural callee effect summary producer
 
 This wave added the first real callee-effect producer for guarded-tail call-bearing suffix diagnostics. It still did not widen guarded-tail acceptance. The goal was to replace the active `stmt_idx=154` state from “summary source exists but effect bits are unknown” with a conservative intraprocedural effect summary derived from the direct internal callee body itself.

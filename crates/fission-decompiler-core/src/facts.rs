@@ -189,7 +189,9 @@ fn build_preview_callee_effect_summary(
         true,
     )
     .ok()?;
-    Some(summarize_preview_callee_effects(&pcode))
+    let (summary, detail) = summarize_preview_callee_effects(&pcode);
+    trace_preview_callee_effect_detail(target_name, target_addr, &detail);
+    Some(summary)
 }
 
 fn direct_callee_max_bytes(binary: &LoadedBinary, target_addr: u64) -> Option<usize> {
@@ -216,12 +218,27 @@ fn direct_callee_instruction_limit(max_bytes: usize) -> usize {
     estimated.max(32)
 }
 
-fn summarize_preview_callee_effects(pcode: &PcodeFunction) -> NirCallEffectSummary {
+#[derive(Debug, Clone, Default)]
+struct PreviewCalleeEffectDetail {
+    store_count: usize,
+    call_count: usize,
+    callind_count: usize,
+    callother_count: usize,
+    return_count: usize,
+    first_store: Option<(u64, PcodeOpcode)>,
+    first_call: Option<(u64, Option<u64>, PcodeOpcode)>,
+    first_callother: Option<(u64, PcodeOpcode)>,
+}
+
+fn summarize_preview_callee_effects(
+    pcode: &PcodeFunction,
+) -> (NirCallEffectSummary, PreviewCalleeEffectDetail) {
     let mut reads_memory = Some(false);
     let mut writes_memory = Some(false);
     let mut may_call_unknown = Some(false);
     let mut may_exit = None;
     let mut saw_return = false;
+    let mut detail = PreviewCalleeEffectDetail::default();
 
     for block in &pcode.blocks {
         for op in &block.ops {
@@ -232,16 +249,32 @@ fn summarize_preview_callee_effects(pcode: &PcodeFunction) -> NirCallEffectSumma
                 PcodeOpcode::Store => {
                     reads_memory = Some(true);
                     writes_memory = Some(true);
+                    detail.store_count += 1;
+                    detail.first_store.get_or_insert((op.address, op.opcode));
                 }
-                PcodeOpcode::Call | PcodeOpcode::CallInd => {
+                PcodeOpcode::Call => {
                     may_call_unknown = Some(true);
+                    detail.call_count += 1;
+                    detail.first_call.get_or_insert((
+                        op.address,
+                        op.inputs.first().and_then(|input| input.is_constant.then_some(input.offset)),
+                        op.opcode,
+                    ));
+                }
+                PcodeOpcode::CallInd => {
+                    may_call_unknown = Some(true);
+                    detail.callind_count += 1;
+                    detail.first_call.get_or_insert((op.address, None, op.opcode));
                 }
                 PcodeOpcode::CallOther => {
                     may_call_unknown = Some(true);
                     may_exit = Some(true);
+                    detail.callother_count += 1;
+                    detail.first_callother.get_or_insert((op.address, op.opcode));
                 }
                 PcodeOpcode::Return => {
                     saw_return = true;
+                    detail.return_count += 1;
                 }
                 _ => {}
             }
@@ -256,13 +289,54 @@ fn summarize_preview_callee_effects(pcode: &PcodeFunction) -> NirCallEffectSumma
         };
     }
 
-    NirCallEffectSummary {
-        reads_memory,
-        writes_memory,
-        escapes_args: None,
-        may_call_unknown,
-        may_exit,
-        source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+    (
+        NirCallEffectSummary {
+            reads_memory,
+            writes_memory,
+            escapes_args: None,
+            may_call_unknown,
+            may_exit,
+            source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+        },
+        detail,
+    )
+}
+
+fn trace_preview_callee_effect_detail(
+    target_name: &str,
+    target_addr: u64,
+    detail: &PreviewCalleeEffectDetail,
+) {
+    if std::env::var_os("FISSION_PREVIEW_DIAG").is_none() {
+        return;
+    }
+    eprintln!(
+        "[GT-TRACE] callee-effect-detail target={} target_addr=0x{:x} store_count={} call_count={} callind_count={} callother_count={} return_count={}",
+        target_name,
+        target_addr,
+        detail.store_count,
+        detail.call_count,
+        detail.callind_count,
+        detail.callother_count,
+        detail.return_count
+    );
+    if let Some((address, opcode)) = detail.first_store {
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-store target={} addr=0x{:x} op={:?}",
+            target_name, address, opcode
+        );
+    }
+    if let Some((address, call_target, opcode)) = detail.first_call {
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-call target={} addr=0x{:x} call_target={:?} op={:?}",
+            target_name, address, call_target, opcode
+        );
+    }
+    if let Some((address, opcode)) = detail.first_callother {
+        eprintln!(
+            "[GT-TRACE] callee-effect-first-callother target={} addr=0x{:x} op={:?}",
+            target_name, address, opcode
+        );
     }
 }
 
@@ -448,11 +522,12 @@ mod tests {
     #[test]
     fn preview_callee_effect_summary_marks_leaf_return_as_non_exiting() {
         let pcode = test_pcode(vec![op(0, PcodeOpcode::Copy), op(1, PcodeOpcode::Return)]);
-        let summary = summarize_preview_callee_effects(&pcode);
+        let (summary, detail) = summarize_preview_callee_effects(&pcode);
         assert_eq!(summary.reads_memory, Some(false));
         assert_eq!(summary.writes_memory, Some(false));
         assert_eq!(summary.may_call_unknown, Some(false));
         assert_eq!(summary.may_exit, Some(false));
+        assert_eq!(detail.return_count, 1);
     }
 
     #[test]
@@ -463,10 +538,17 @@ mod tests {
             constant_call_op(2, 0x500000),
             op(3, PcodeOpcode::Return),
         ]);
-        let summary = summarize_preview_callee_effects(&pcode);
+        let (summary, detail) = summarize_preview_callee_effects(&pcode);
         assert_eq!(summary.reads_memory, Some(true));
         assert_eq!(summary.writes_memory, Some(true));
         assert_eq!(summary.may_call_unknown, Some(true));
         assert_eq!(summary.may_exit, None);
+        assert_eq!(detail.store_count, 1);
+        assert_eq!(detail.call_count, 1);
+        assert_eq!(detail.first_store, Some((0x401001, PcodeOpcode::Store)));
+        assert_eq!(
+            detail.first_call,
+            Some((0x401002, Some(0x500000), PcodeOpcode::Call))
+        );
     }
 }
