@@ -33,6 +33,15 @@ struct SuffixExternalEntryBudget {
     allowed_external_refs: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternalEntryRefKind {
+    TopLevelExternalGoto,
+    NestedConditionalGoto,
+    AliasRedirectDerived,
+    LoopSwitchDerived,
+    UnknownExternalEntry,
+}
+
 impl SuffixTailRejection {
     fn stmt_idx(&self) -> usize {
         match self {
@@ -513,6 +522,58 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn classify_external_entry_ref_kind_for_stmt(
+        stmt: &HirStmt,
+        label: &str,
+    ) -> ExternalEntryRefKind {
+        match stmt {
+            HirStmt::Goto(target) if target == label => ExternalEntryRefKind::TopLevelExternalGoto,
+            HirStmt::If { .. }
+                if Self::stmt_contains_goto_label(stmt, label) > 0 =>
+            {
+                ExternalEntryRefKind::NestedConditionalGoto
+            }
+            HirStmt::Switch { .. }
+            | HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+                if Self::stmt_contains_goto_label(stmt, label) > 0 =>
+            {
+                ExternalEntryRefKind::LoopSwitchDerived
+            }
+            HirStmt::Block(_)
+                if Self::stmt_contains_goto_label(stmt, label) > 0 =>
+            {
+                ExternalEntryRefKind::AliasRedirectDerived
+            }
+            _ => ExternalEntryRefKind::UnknownExternalEntry,
+        }
+    }
+
+    fn classify_external_entry_ref_kind(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+    ) -> Option<(ExternalEntryRefKind, usize)> {
+        for (stmt_idx, stmt) in body.iter().enumerate() {
+            if Self::stmt_contains_goto_label(stmt, label) == 0 {
+                continue;
+            }
+            if stmt_idx > anchor_idx
+                && stmt_idx < terminal_label_idx
+                && matches!(stmt, HirStmt::Goto(target) if target == label)
+            {
+                continue;
+            }
+            return Some((
+                Self::classify_external_entry_ref_kind_for_stmt(stmt, label),
+                stmt_idx,
+            ));
+        }
+        None
+    }
+
     fn suffix_is_nonowned_terminal_tail(
         body: &[HirStmt],
         anchor_idx: usize,
@@ -562,6 +623,23 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             if budget.effective_external_refs > budget.allowed_external_refs {
+                if Self::guarded_tail_diag_enabled()
+                    && let Some((kind, ref_stmt_idx)) = Self::classify_external_entry_ref_kind(
+                        body,
+                        &current_label,
+                        anchor_idx,
+                        terminal_label_idx,
+                    )
+                    && let Some(ref_stmt) = body.get(ref_stmt_idx)
+                {
+                    eprintln!(
+                        "[GT-TRACE] suffix-external-entry label={} external_entry_kind={:?} ref_stmt_idx={} ref_stmt={:?}",
+                        current_label,
+                        kind,
+                        ref_stmt_idx,
+                        ref_stmt
+                    );
+                }
                 return Err(SuffixTailRejection::SuffixHasExternalEntry {
                     stmt_idx: current_label_idx,
                     label: current_label,
@@ -2574,6 +2652,22 @@ mod owned_join_window_tests {
         assert_eq!(budget, expected);
     }
 
+    fn assert_external_entry_ref_kind(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        expected: Option<(ExternalEntryRefKind, usize)>,
+    ) {
+        let classified = PreviewBuilder::classify_external_entry_ref_kind(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        );
+        assert_eq!(classified, expected);
+    }
+
     #[test]
     fn earliest_owned_join_window_accepts_sink_safe_terminal_tail() {
         let body = vec![
@@ -2833,6 +2927,103 @@ mod owned_join_window_tests {
                 effective_external_refs: 2,
                 allowed_external_refs: 1,
             },
+        );
+    }
+
+    #[test]
+    fn external_entry_kind_classifies_top_level_external_goto() {
+        let body = vec![
+            HirStmt::Goto("join0".to_string()),
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_external_entry_ref_kind(
+            &body,
+            "join0",
+            1,
+            5,
+            Some((ExternalEntryRefKind::TopLevelExternalGoto, 0)),
+        );
+    }
+
+    #[test]
+    fn external_entry_kind_classifies_nested_conditional_goto() {
+        let body = vec![
+            test_if_goto("anchor"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("nested".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_external_entry_ref_kind(
+            &body,
+            "join0",
+            0,
+            4,
+            Some((ExternalEntryRefKind::NestedConditionalGoto, 3)),
+        );
+    }
+
+    #[test]
+    fn external_entry_kind_classifies_loop_switch_derived_goto() {
+        let body = vec![
+            test_if_goto("anchor"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Switch {
+                expr: HirExpr::Var("selector".to_string()),
+                cases: vec![HirSwitchCase {
+                    values: vec![0],
+                    body: vec![HirStmt::Goto("join0".to_string())],
+                }],
+                default: vec![],
+            },
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_external_entry_ref_kind(
+            &body,
+            "join0",
+            0,
+            4,
+            Some((ExternalEntryRefKind::LoopSwitchDerived, 3)),
+        );
+    }
+
+    #[test]
+    fn external_entry_kind_skips_candidate_internal_top_level_goto() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("external".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("join0".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_external_entry_ref_kind(
+            &body,
+            "join0",
+            1,
+            5,
+            Some((ExternalEntryRefKind::NestedConditionalGoto, 0)),
         );
     }
 

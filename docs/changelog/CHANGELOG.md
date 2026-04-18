@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail external-entry kind diagnostics for candidate-35 probing
+
+This wave did not relax `AliasNotFallthrough` or broaden guarded-tail acceptance. It only classified the remaining true external-entry ref shape after the suffix budget refinement proved that `block_140007021` was still externally entered for real.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `ExternalEntryRefKind`
+  - `classify_external_entry_ref_kind_for_stmt(...)`
+  - `classify_external_entry_ref_kind(...)`
+  - env-gated trace lines of the form:
+    - `suffix-external-entry label=...`
+    - `external_entry_kind=...`
+    - `ref_stmt_idx=...`
+    - `ref_stmt={:?}`
+- focused synthetic coverage was added for:
+  - top-level external goto classification
+  - nested conditional goto classification
+  - loop/switch-derived goto classification
+  - skipping candidate-internal top-level gotos so the first true external ref is reported
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_ -- --nocapture`
+- `cargo test -p fission-pcode external_entry_kind_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `cargo test -p fission-automation`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- `candidate 35` still remains:
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+- but the remaining true external-entry blocker for `block_140007021` is now typed:
+  - `suffix-budget label=block_140007021 raw_refs=1 internal_refs=0 suffix_safe_refs=0 effective_external=1 allowed_external=0`
+  - `suffix-external-entry label=block_140007021 external_entry_kind=NestedConditionalGoto ref_stmt_idx=70`
+  - `ref_stmt=If { cond: Var("xVar57"), then_body: [Goto("block_140007021")], else_body: [] }`
+
+Conclusion:
+
+- the owner is no longer budget arithmetic for `block_140007021`
+- the remaining blocker is a real nested conditional entry into the candidate tail
+- the next wave should target nested/nonlocal external-entry ownership around that `xVar57`-guarded conditional, not another broad suffix-budget relaxation
+
 ### Guarded-tail suffix external-entry budget refinement for candidate-35 probing
 
 This wave did not relax external entry in general. It only split the suffix external-entry budget into explicit categories so candidate-local top-level refs and self-terminal-join-safe refs can be subtracted before a label is classified as externally entered.
