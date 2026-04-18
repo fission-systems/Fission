@@ -376,6 +376,53 @@ impl<'a> PreviewBuilder<'a> {
         Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
     }
 
+    fn suffix_stmt_is_terminal_join_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        next_label_idx: usize,
+        terminal_label: &str,
+    ) -> bool {
+        let HirStmt::Goto(target) = &body[stmt_idx] else {
+            return false;
+        };
+        if target != terminal_label {
+            return false;
+        }
+        if Self::top_level_label_definition_count_for_owned_tail(body, terminal_label) != 1 {
+            return false;
+        }
+
+        for trailing_stmt in &body[stmt_idx + 1..next_label_idx] {
+            if is_ignorable_discovery_stmt(trailing_stmt)
+                || matches!(trailing_stmt, HirStmt::Block(inner) if inner.is_empty())
+                || Self::stmt_is_pure_value_expr(trailing_stmt)
+                || Self::stmt_is_pure_value_assign(trailing_stmt)
+            {
+                continue;
+            }
+
+            match trailing_stmt {
+                HirStmt::Goto(target) if target == terminal_label => continue,
+                HirStmt::Break
+                | HirStmt::Continue
+                | HirStmt::Switch { .. }
+                | HirStmt::While { .. }
+                | HirStmt::DoWhile { .. }
+                | HirStmt::For { .. }
+                | HirStmt::If { .. }
+                | HirStmt::Block(_)
+                | HirStmt::VaStart { .. }
+                | HirStmt::Assign { .. }
+                | HirStmt::Expr(_)
+                | HirStmt::Return(_)
+                | HirStmt::Label(_) => return false,
+                HirStmt::Goto(_) => return false,
+            }
+        }
+
+        true
+    }
+
     fn suffix_is_nonowned_terminal_tail(
         body: &[HirStmt],
         anchor_idx: usize,
@@ -436,6 +483,9 @@ impl<'a> PreviewBuilder<'a> {
                     label: current_label,
                 });
             }
+            let HirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
+                unreachable!();
+            };
             let HirStmt::Label(next_label) = &body[next_label_idx] else {
                 unreachable!();
             };
@@ -444,6 +494,16 @@ impl<'a> PreviewBuilder<'a> {
                 .enumerate()
             {
                 let stmt_idx = current_label_idx + 1 + offset;
+                if matches!(stmt, HirStmt::Goto(target) if target == terminal_label)
+                    && Self::suffix_stmt_is_terminal_join_owned_safe(
+                        body,
+                        stmt_idx,
+                        next_label_idx,
+                        terminal_label,
+                    )
+                {
+                    continue;
+                }
                 Self::classify_suffix_stmt(stmt, body, stmt_idx, next_label)?;
             }
 
@@ -2574,6 +2634,58 @@ mod owned_join_window_tests {
         ];
 
         assert_classify_suffix_stmt_ok(&body, 0, "alias");
+    }
+
+    #[test]
+    fn suffix_accepts_self_terminal_join_goto_with_pure_tail() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Expr(HirExpr::Var("pure_gap".to_string())),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Var("value".to_string()),
+            },
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("next".to_string()),
+            HirStmt::Expr(HirExpr::Var("after".to_string())),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_accepts(&body, 0, 2, 9);
+    }
+
+    #[test]
+    fn suffix_rejects_self_terminal_join_goto_with_nested_tail_stmt() {
+        let body = vec![
+            test_if_goto("join0"),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("nested".to_string()),
+                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("next".to_string()),
+            HirStmt::Expr(HirExpr::Var("after".to_string())),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        assert_suffix_rejection(
+            &body,
+            0,
+            2,
+            7,
+            SuffixTailRejection::SuffixHasNonTerminalGoto {
+                stmt_idx: 3,
+                target: "terminal".to_string(),
+            },
+        );
     }
 
     #[test]

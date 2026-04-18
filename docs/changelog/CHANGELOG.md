@@ -9,6 +9,48 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail self-terminal-join suffix ownership closure for candidate-35 probing
+
+This wave narrowed the next owner again. Instead of broadening generic nonterminal-goto acceptance, it only allowed a top-level suffix `Goto(target)` when `target` is the current terminal join label and the trailing segment up to the next label is proven to stay non-owned.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `suffix_stmt_is_terminal_join_owned_safe(...)`
+  - a `suffix_is_nonowned_terminal_tail(...)` fast path for:
+    - `target == current terminal join label`
+    - unique terminal-join label definition
+    - only ignorable / empty-block / pure-expr / pure-assign / same-terminal-join goto trailing payload
+  - continued fail-closed rejection for:
+    - nested/nonlocal trailing refs
+    - side effects
+    - loop / switch / break / continue crossings
+    - non-terminal gotos that do not close to the current terminal join
+- the same file now adds focused coverage for:
+  - self-terminal-join goto with pure trailing payload
+  - rejection when the trailing payload still contains nested control flow
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- synthetic self-terminal-join suffix cases now pass
+- real `candidate 35` still does not narrow:
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+- but the earlier-label blocker for `block_14000701c` moved:
+  - before: `SuffixHasNonTerminalGoto { stmt_idx: 112, target: "block_140007047" }`
+  - after: `SuffixHasExternalEntry { stmt_idx: 113, label: "block_140007021" }`
+
+Conclusion:
+
+- `self-terminal-join` closure is now proven and no longer the first blocker for `block_14000701c`
+- the next owner is the external-entry budget around `block_140007021`, not generic goto closure
+- `candidate 35` is still blocked by terminal-join ownership, but the blocker is now more specific
+
 ### Guarded-tail suffix nonterminal-goto redirect closure for candidate-35 probing
 
 This wave targeted only `SuffixHasNonTerminalGoto`. It did not relax side effects, nested/nonlocal refs, or external-entry ownership. The guarded-tail suffix classifier now allows a very narrow redirect-closure subfamily: a top-level nonterminal `Goto(target)` may be treated as suffix-safe only when the target label is unique and its body closes through a trivial redirect chain to the next label or a terminal `return` sink.
