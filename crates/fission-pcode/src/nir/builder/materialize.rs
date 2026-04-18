@@ -86,6 +86,23 @@ impl ReplacementValuePlan {
     fn is_complete(self) -> bool {
         matches!(self.completeness, ReplacementCompleteness::Complete)
     }
+
+    fn rejection_reason(self) -> Option<MaterializationRejectionReason> {
+        match self.completeness {
+            ReplacementCompleteness::Complete => None,
+            ReplacementCompleteness::Incomplete(reason) => Some(reason),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NoConsumerMaterializationProfile {
+    same_block_consumers: usize,
+    cross_block_consumers: usize,
+    has_later_block_use: bool,
+    has_phi_merge_use: bool,
+    has_debug_use: bool,
+    rhs_side_effectful: bool,
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -214,6 +231,40 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    fn trace_no_consumer_materialization(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        event: &str,
+        output: &Varnode,
+        rhs: &HirExpr,
+        preserve_materialization: bool,
+        legacy_inline_candidate: bool,
+        profile: NoConsumerMaterializationProfile,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "no-consumer-materialization output=space:{} off:0x{:x} size:{} def_block=0x{:x} op_seq={} rhs={:?} materialization_event={} preserve_materialization={} legacy_inline_candidate={} has_later_block_use={} has_phi_merge_use={} has_debug_use={} same_block_consumers={} cross_block_consumers={} rhs_side_effectful={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block_addr,
+            op_seq,
+            rhs,
+            event,
+            preserve_materialization,
+            legacy_inline_candidate,
+            profile.has_later_block_use,
+            profile.has_phi_merge_use,
+            profile.has_debug_use,
+            profile.same_block_consumers,
+            profile.cross_block_consumers,
+            profile.rhs_side_effectful,
+        ));
+    }
+
     fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Var(_) | HirExpr::Const(..) => false,
@@ -225,6 +276,31 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::PtrOffset { .. }
             | HirExpr::Index { .. }
             | HirExpr::AggregateCopy { .. } => true,
+        }
+    }
+
+    fn expr_is_side_effectful_for_materialization_trace(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Call { .. } => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(lhs)
+                    || Self::expr_is_side_effectful_for_materialization_trace(rhs)
+            }
+            HirExpr::Load { ptr, .. } => Self::expr_is_side_effectful_for_materialization_trace(ptr),
+            HirExpr::PtrOffset { base, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(base)
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(base)
+                    || Self::expr_is_side_effectful_for_materialization_trace(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(src)
+            }
+            HirExpr::Var(_) | HirExpr::Const(..) => false,
         }
     }
 
@@ -540,6 +616,17 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_plan,
                 "inline_suppressed",
             );
+            self.trace_no_consumer_materialization_if_needed(
+                block,
+                op_idx,
+                terminator_index,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+                "inline_suppressed",
+                legacy_inline_candidate,
+            );
         } else {
             self.trace_materialization_plan(
                 block_addr,
@@ -548,6 +635,17 @@ impl<'a> PreviewBuilder<'a> {
                 &rhs,
                 replacement_plan,
                 "materialized_binding",
+            );
+            self.trace_no_consumer_materialization_if_needed(
+                block,
+                op_idx,
+                terminator_index,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+                "materialized_binding",
+                legacy_inline_candidate,
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
@@ -759,6 +857,59 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
+    fn trace_no_consumer_materialization_if_needed(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        op: &PcodeOp,
+        output: &Varnode,
+        rhs: &HirExpr,
+        plan: ReplacementValuePlan,
+        event: &str,
+        legacy_inline_candidate: bool,
+    ) {
+        if plan.rejection_reason() != Some(MaterializationRejectionReason::AliasUnsafe) {
+            return;
+        }
+        let hazard = Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);
+        if hazard.kind != AliasUnsafeHazardKind::UnknownNoConsumerFound {
+            return;
+        }
+        let preserve_materialization = Self::should_preserve_materialized_expr(rhs);
+        let profile = self.analyze_no_consumer_materialization_profile(block, op_idx, output, rhs);
+        self.trace_no_consumer_materialization(
+            block.start_address,
+            op.seq_num,
+            event,
+            output,
+            rhs,
+            preserve_materialization,
+            legacy_inline_candidate,
+            profile,
+        );
+    }
+
+    fn analyze_no_consumer_materialization_profile(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> NoConsumerMaterializationProfile {
+        let same_block_consumers = Self::collect_output_use_sites_in_block(block, op_idx, output).len();
+        let (cross_block_consumers, has_phi_merge_use) =
+            Self::collect_output_use_sites_outside_block(&self.pcode.blocks, block.start_address, output);
+        NoConsumerMaterializationProfile {
+            same_block_consumers,
+            cross_block_consumers,
+            has_later_block_use: cross_block_consumers > 0,
+            has_phi_merge_use,
+            has_debug_use: false,
+            rhs_side_effectful: Self::expr_is_side_effectful_for_materialization_trace(rhs),
+        }
+    }
+
     fn classify_alias_unsafe_hazard(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -893,6 +1044,35 @@ impl<'a> PreviewBuilder<'a> {
             .enumerate()
             .skip(op_idx + 1)
             .find(|(_, candidate)| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
+    }
+
+    fn collect_output_use_sites_outside_block(
+        blocks: &[crate::pcode::PcodeBasicBlock],
+        current_block_addr: u64,
+        output: &Varnode,
+    ) -> (usize, bool) {
+        let key = VarnodeKey::from(output);
+        let mut consumer_count = 0usize;
+        let mut has_phi_merge_use = false;
+        for block in blocks {
+            if block.start_address == current_block_addr {
+                continue;
+            }
+            for candidate in &block.ops {
+                if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                    break;
+                }
+                if candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == key)
+                {
+                    consumer_count += 1;
+                    has_phi_merge_use |= candidate.opcode == PcodeOpcode::MultiEqual;
+                }
+            }
+        }
+        (consumer_count, has_phi_merge_use)
     }
 
     fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
@@ -1137,6 +1317,36 @@ mod tests {
             start_address: 0x1000,
             successors: Vec::new(),
             ops,
+        }
+    }
+
+    fn block_at(start_address: u64, index: u32, ops: Vec<PcodeOp>) -> crate::pcode::PcodeBasicBlock {
+        crate::pcode::PcodeBasicBlock {
+            index,
+            start_address,
+            successors: Vec::new(),
+            ops,
+        }
+    }
+
+    fn pcode_function(blocks: Vec<crate::pcode::PcodeBasicBlock>) -> crate::pcode::PcodeFunction {
+        crate::pcode::PcodeFunction { blocks }
+    }
+
+    fn test_options() -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0x1400_0000,
+            sections: vec![(0x1400_1000, 0x1400_2000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            global_names: Default::default(),
+            calling_convention: Default::default(),
         }
     }
 
@@ -1570,5 +1780,76 @@ mod tests {
         assert_eq!(hazard.use_stmt_idx, Some(2));
         assert_eq!(hazard.hazard_stmt_idx, Some(2));
         assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
+    }
+
+    #[test]
+    fn no_consumer_materialization_profile_marks_deadish_local_output() {
+        let output = varnode(0x10);
+        let blocks = vec![block(vec![op(
+            0,
+            PcodeOpcode::Copy,
+            Some(output.clone()),
+            vec![constant(1)],
+        )])];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let profile = builder.analyze_no_consumer_materialization_profile(
+            &blocks[0],
+            0,
+            &output,
+            &HirExpr::Const(1, int(32)),
+        );
+
+        assert_eq!(profile.same_block_consumers, 0);
+        assert_eq!(profile.cross_block_consumers, 0);
+        assert!(!profile.has_later_block_use);
+        assert!(!profile.has_phi_merge_use);
+        assert!(!profile.has_debug_use);
+        assert!(!profile.rhs_side_effectful);
+    }
+
+    #[test]
+    fn no_consumer_materialization_profile_detects_cross_block_multiequal_use() {
+        let output = varnode(0x10);
+        let blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(output.clone()),
+                    vec![constant(1)],
+                )],
+            ),
+            block_at(
+                0x2000,
+                1,
+                vec![op(
+                    0,
+                    PcodeOpcode::MultiEqual,
+                    Some(varnode(0x20)),
+                    vec![output.clone(), constant(2)],
+                )],
+            ),
+        ];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let profile = builder.analyze_no_consumer_materialization_profile(
+            &blocks[0],
+            0,
+            &output,
+            &HirExpr::Const(1, int(32)),
+        );
+
+        assert_eq!(profile.same_block_consumers, 0);
+        assert_eq!(profile.cross_block_consumers, 1);
+        assert!(profile.has_later_block_use);
+        assert!(profile.has_phi_merge_use);
+        assert!(!profile.has_debug_use);
     }
 }

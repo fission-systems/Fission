@@ -9,6 +9,60 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### NoConsumerFound materialization suppression trace
+
+This wave stayed diagnostic-only. It did not suppress dead-ish representatives, widen representative downgrade, or relax alias safety. The goal was to determine whether the dominant `UnknownNoConsumerFound` family on `0x140008090` / `0x140006c20` is a real consumer-scanner blind spot or a builder-owned bookkeeping/materialization residue.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated `EMIT-TRACE` line for the `AliasUnsafeHazardKind::UnknownNoConsumerFound` path:
+  - `no-consumer-materialization output=... def_block=... op_seq=... rhs=... materialization_event=... preserve_materialization=... legacy_inline_candidate=... has_later_block_use=... has_phi_merge_use=... has_debug_use=... same_block_consumers=... cross_block_consumers=... rhs_side_effectful=...`
+- the trace is emitted only when the active replacement plan stopped on `AliasUnsafe` and the builder classifier narrowed that stop to `UnknownNoConsumerFound`
+- a builder-local profile helper now separates:
+  - same-block consumers
+  - cross-block consumers
+  - `MultiEqual`/merge-like nonlocal use
+  - conservative RHS side-effect risk
+- unit coverage now fixes the diagnostic contract for:
+  - a truly local dead-ish representative with no later uses
+  - a cross-block `MultiEqual` consumer, proving the helper will still flag merge-like use instead of collapsing everything into a false dead case
+
+Validation:
+
+- `cargo test -p fission-pcode no_consumer_materialization_profile --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- on both targeted rows, the live `UnknownNoConsumerFound` path now resolves to the same concrete shape:
+  - `same_block_consumers=0`
+  - `cross_block_consumers=0`
+  - `has_later_block_use=false`
+  - `has_phi_merge_use=false`
+  - `has_debug_use=false`
+  - `legacy_inline_candidate=false`
+  - `materialization_event=materialized_binding`
+- `0x140008090`:
+  - `UnknownNoConsumerFound=2137`
+  - all 2137 live samples reported zero same-block and zero cross-block consumers
+  - `preserve_materialization=false` for `1686`
+  - `preserve_materialization=true` for `451`
+  - `rhs_side_effectful=true` for `80`
+- `0x140006c20`:
+  - `UnknownNoConsumerFound=834`
+  - all 834 live samples reported zero same-block and zero cross-block consumers
+  - `preserve_materialization=false` for `622`
+  - `preserve_materialization=true` for `212`
+  - `rhs_side_effectful=true` for `35`
+- representative live samples are mostly constants and comparison/bookkeeping booleans that still surface as `materialized_binding` despite having no proven later use on the targeted rows
+
+Conclusion:
+
+- the current live `UnknownNoConsumerFound` owner on `0x140008090` / `0x140006c20` is not behaving like a consumer-scanner blind spot
+- on these rows it is a builder-owned dead-ish / bookkeeping materialization family: no same-block use, no cross-block use, no merge use, and no debug-only survivor was observed
+- the next high-value wave is no longer more tracing; it is a narrow policy patch for safe dead-ish suppression or representative downgrade on this specific no-consumer family, with `MalformedDefUseWindow` remaining the next backup owner if suppression does not move the row gate
+
 ### AliasUnsafe Unknown subtyping
 
 This wave stayed diagnostic-only. It did not widen builder replacement, add merge synthesis, or relax alias safety. The goal was to replace the residual same-block `Unknown` fallback on the active `0x140008090` / `0x140006c20` path with concrete blind-spot subtypes, so the next patch can target one materialization owner instead of a generic catch-all.
