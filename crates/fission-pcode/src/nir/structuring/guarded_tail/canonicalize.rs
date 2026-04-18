@@ -89,6 +89,85 @@ impl<'a> PreviewBuilder<'a> {
             || Self::stmt_is_sink_safe_return_goto(stmt, full_body)
     }
 
+    fn stmt_is_sink_equivalent_after_label_gap(
+        stmt: &HirStmt,
+        full_body: &[HirStmt],
+        sink_return: &Option<HirExpr>,
+    ) -> bool {
+        if is_ignorable_discovery_stmt(stmt) || matches!(stmt, HirStmt::Block(body) if body.is_empty()) {
+            return true;
+        }
+        let HirStmt::Goto(target) = stmt else {
+            return false;
+        };
+        if Self::top_level_label_definition_count(full_body, target) != 1 {
+            return false;
+        }
+        matches!(
+            Self::resolve_terminal_tail_exit_stmt(full_body, target),
+            Some(HirStmt::Return(ret)) if ret == *sink_return
+        )
+    }
+
+    fn local_after_label_ref_is_sink_equivalent(
+        body: &[HirStmt],
+        full_body: &[HirStmt],
+        label: &str,
+        label_idx: usize,
+        after_label_pos: usize,
+    ) -> bool {
+        let Some(HirStmt::Goto(target)) = body.get(after_label_pos) else {
+            return false;
+        };
+        if after_label_pos <= label_idx || target != label {
+            return false;
+        }
+        if Self::top_level_label_definition_count(full_body, label) != 1 {
+            return false;
+        }
+
+        let Some(HirStmt::Return(sink_return)) =
+            Self::resolve_terminal_tail_exit_stmt(full_body, label)
+        else {
+            return false;
+        };
+
+        let next_label_idx = (after_label_pos + 1..body.len())
+            .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            .unwrap_or(body.len());
+
+        body[after_label_pos + 1..next_label_idx]
+            .iter()
+            .all(|stmt| Self::stmt_is_sink_equivalent_after_label_gap(stmt, full_body, &sink_return))
+    }
+
+    fn count_sink_equivalent_top_level_after_label_refs(
+        body: &[HirStmt],
+        full_body: &[HirStmt],
+        label: &str,
+        label_idx: usize,
+        top_level_after_positions: &[usize],
+        nested_after_label_count: usize,
+        external_ref_count: usize,
+    ) -> usize {
+        if nested_after_label_count > 0 || external_ref_count > 0 {
+            return 0;
+        }
+        top_level_after_positions
+            .iter()
+            .copied()
+            .filter(|pos| {
+                Self::local_after_label_ref_is_sink_equivalent(
+                    body,
+                    full_body,
+                    label,
+                    label_idx,
+                    *pos,
+                )
+            })
+            .count()
+    }
+
     fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
         stmts: &mut Vec<HirStmt>,
         full_body: &[HirStmt],
@@ -207,6 +286,18 @@ impl<'a> PreviewBuilder<'a> {
                 .collect();
             let top_level_after_label_count = top_level_after_positions.len();
             let nested_after_label_count = refs_after.saturating_sub(top_level_after_label_count);
+            let sink_equivalent_top_level_after_label_count =
+                Self::count_sink_equivalent_top_level_after_label_refs(
+                    body,
+                    full_body,
+                    label,
+                    idx,
+                    &top_level_after_positions,
+                    nested_after_label_count,
+                    external_ref_count,
+                );
+            let effective_top_level_after_label_count = top_level_after_label_count
+                .saturating_sub(sink_equivalent_top_level_after_label_count);
             if nested_before > 0 {
                 return Err(
                     GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors,
@@ -239,11 +330,26 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 false
             };
+
+            if self.guarded_tail_trace_enabled_for_current_fn()
+                && sink_equivalent_top_level_after_label_count > 0
+            {
+                eprintln!(
+                    "[GT-TRACE] candidate={} alias_after_sink_equiv label={} raw_after={} sink_equiv={} effective_after={}",
+                    segment_start.saturating_sub(1),
+                    label,
+                    top_level_after_label_count,
+                    sink_equivalent_top_level_after_label_count,
+                    effective_top_level_after_label_count
+                );
+            }
+
             if nested_after_label_count > 0
-                || (top_level_after_label_count > 0 && !allow_top_level_after_label_redirect)
+                || (effective_top_level_after_label_count > 0
+                    && !allow_top_level_after_label_redirect)
             {
                 self.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
-                    top_level_after_label_count;
+                    effective_top_level_after_label_count;
                 self.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
                     nested_after_label_count;
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
@@ -348,7 +454,7 @@ impl<'a> PreviewBuilder<'a> {
                         );
                     }
                     canonicalized_local_nonfallthrough += 1;
-                } else if top_level_after_label_count > 0 {
+                } else if effective_top_level_after_label_count > 0 {
                     canonicalized_local_nonfallthrough += 1;
                 }
                 alias_redirects.insert(label.clone(), Some(next_label.clone()));
@@ -1106,5 +1212,249 @@ mod tests {
         );
 
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_accepts_same_return_sink() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("Lafter".to_string()),
+            HirStmt::Goto("L".to_string()),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[5],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_accepts_empty_and_sink_safe_gap() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("Lafter".to_string()),
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Block(Vec::new()),
+            HirStmt::Goto("Lhop".to_string()),
+            HirStmt::Label("Lhop".to_string()),
+            HirStmt::Return(None),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[5],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_nested_after_ref() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            1,
+            0,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_side_effectful_gap() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Expr(HirExpr::Call {
+                target: "FUN_0x140002000".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_ambiguous_sink_target() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Goto("Lamb".to_string()),
+            HirStmt::Label("Lamb".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("Lamb".to_string()),
+            HirStmt::Return(None),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_nonlocal_reentry() {
+        let body = vec![
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            1,
+            &[5],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_label_crossing_to_non_sink_join() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Goto("Lother".to_string()),
+            HirStmt::Label("Lother".to_string()),
+            HirStmt::Goto("Ltail".to_string()),
+            HirStmt::Label("Ltail".to_string()),
+            HirStmt::Return(Some(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_external_ref_ownership_change() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            0,
+            1,
+        );
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sink_equivalent_after_label_ref_rejects_different_terminal_sink() {
+        let body = vec![
+            HirStmt::Label("L".to_string()),
+            HirStmt::Goto("Lret".to_string()),
+            HirStmt::Label("Lret".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Goto("L".to_string()),
+            HirStmt::Goto("Lother".to_string()),
+            HirStmt::Label("Lother".to_string()),
+            HirStmt::Return(Some(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+        ];
+
+        let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
+            &body,
+            &body,
+            "L",
+            0,
+            &[4],
+            0,
+            0,
+        );
+
+        assert_eq!(count, 0);
     }
 }

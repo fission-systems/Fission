@@ -419,6 +419,63 @@ Result interpretation:
 
 - 7th-wave confirms the bottleneck is first-failing candidate classification/ownership, not missing local canonicalization transforms.
 - highest-priority failing shape is now concretely captured (`AliasNotFallthrough` on a large middle segment), which is the anchor for the next invariant-based shape-specific patch.
+
+### Guarded-tail sink-equivalent after-label refs for AliasNotFallthrough (8th wave)
+
+This wave targets only candidate-35-class `AliasNotFallthrough` by subtracting provably sink-equivalent local top-level after-label references from the reject basis.
+
+Scope/constraints kept strict:
+
+- local / top-level goto only (nested after-label refs stay rejected)
+- unique label ownership only (ambiguous label targets remain rejected)
+- same terminal return sink proof only (via existing terminal tail resolver)
+- trivial gap only (`ignorable`, empty block, sink-safe goto->return hop)
+- side-effectful and control-crossing gaps remain forbidden
+- no nonlocal ownership relaxation (`external_ref_count > 0` still excluded)
+
+Implementation:
+
+- [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs)
+  - added helper trio:
+    - `stmt_is_sink_equivalent_after_label_gap(...)`
+    - `local_after_label_ref_is_sink_equivalent(...)`
+    - `count_sink_equivalent_top_level_after_label_refs(...)`
+  - rewired `AliasNotFallthrough` gate to use:
+    - `effective_top_level_after_label_count = raw_top_level_after_label_count - sink_equivalent_top_level_after_label_count`
+  - reject accounting now increments `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count` by effective (non-sink-equivalent) residual only
+  - added trace line when sink-equivalent subtraction is applied:
+    - `[GT-TRACE] ... alias_after_sink_equiv ...`
+
+Tests:
+
+- new focused tests in [`canonicalize.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/canonicalize.rs):
+  - positive: same-sink after-label ref; empty/sink-safe gap case
+  - negative: nested after-ref, side-effectful gap, ambiguous sink target, re-entry, label-crossing/non-sink target, external-ownership change, different terminal sink
+- validation:
+  - `cargo test -p fission-pcode sink_equivalent_after_label_ref_` -> 9 passed
+  - `cargo test -p fission-pcode guarded_tail` -> 96 passed
+  - `cargo test -p fission-pcode --lib` -> 448 passed
+
+Targeted benchmark rerun:
+
+- artifact: [`putty-alias-sink-eq-wave-20260418`](../../artifacts/batch_benchmark/putty-alias-sink-eq-wave-20260418)
+- trace file: [`fission_stderr.log`](../../artifacts/batch_benchmark/putty-alias-sink-eq-wave-20260418/fission_stderr.log)
+- target row `0x140006fe0` counters (vs 7th-wave [`putty-guarded-tail-trace-wave-20260418`](../../artifacts/batch_benchmark/putty-guarded-tail-trace-wave-20260418)):
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `3 -> 3`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`: `2 -> 2`
+  - `canonicalization_failed_nested_tail_escape`: `7 -> 7`
+  - `guarded_tail_rejected_alias_interleave_conflict_count`: `4 -> 4`
+  - `region_emit_ready_failed_count`: `5 -> 5`
+
+Candidate trace outcome (`0x140006fe0`):
+
+- `candidate=35`, `join_label=block_140007047`, `raw_middle_len=121` remains first reject `AliasNotFallthrough`
+- no `alias_after_sink_equiv` trace line was emitted for this candidate in this sample, meaning sink-equivalent subtractable local after-label refs were not proven under current constraints
+
+Result interpretation:
+
+- 8th-wave rule is integrated and regression-covered, but does not trigger on the current blocker row.
+- next narrowing step should focus candidate-35 segment ownership/window proof (not broadening `AliasHasNonlocalRef`, `NestedTailEscape`, or `MustEmitLabelConflict`).
 - `unsupported_indirect_control_count`: `9`
 - `avg_normalized_similarity`: `37.09`
 - key rows:
