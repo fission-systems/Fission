@@ -9,6 +9,46 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-18 (latest)
 
+### Guarded-tail nested suffix shape subtyping for `stmt_idx=120`
+
+This wave did not broaden nested guarded-tail acceptance. It only split the remaining `SuffixHasNestedOrNonlocalRef` bucket into explicit nested suffix-shape subtypes so the next owner can be chosen from a traced structural family instead of a generic nested/nonlocal label.
+
+- [`promotion.rs`](../../crates/fission-pcode/src/nir/structuring/guarded_tail/promotion.rs) now adds:
+  - `NestedSuffixShapeKind`
+  - `classify_nested_suffix_shape(...)`
+  - env-gated trace lines of the form:
+    - `nested-suffix-shape stmt_idx=... kind=... stmt={:?}`
+- focused synthetic coverage was added for:
+  - `NestedSingleGotoThen`
+  - `NestedGuardFamilyMismatch`
+  - `NestedCrossesTerminalJoin`
+
+Validation:
+
+- `cargo test -p fission-pcode suffix_nested_shape_ -- --nocapture`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006fe0 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006fe0 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the remaining nested/nonlocal blocker for candidate 35 is now typed directly:
+  - `nested-suffix-shape stmt_idx=120 kind=NestedCrossesTerminalJoin`
+  - `stmt=If { cond: Unary { op: Not, expr: Var("xVar57"), ... }, then_body: [Goto("block_140007047")], else_body: [] }`
+- the guard-family entry internalization remains active for `block_140007021`:
+  - `guard_family_internalized_refs=1`
+  - `effective_external=0`
+- the outer blocker still remains unchanged:
+  - `candidate=35`
+  - `join_label=block_140007047`
+  - `raw_middle_len=121`
+  - `first_reject=AliasNotFallthrough`
+
+Conclusion:
+
+- the active owner is no longer external-entry accounting or generic nested/nonlocal shape
+- the remaining blocker is a narrow nested single-goto tail that crosses the terminal join
+- the next wave should target terminal-join-crossing nested tail ownership directly, not broaden arbitrary nested conditional acceptance
+
 ### Guard-family nested conditional entry internalization for `block_140007021`
 
 This wave did not broaden generic nested `if` acceptance. It only internalized a very narrow guarded-tail subfamily: a single-goto nested conditional entry can be subtracted from the suffix external-entry budget when it belongs to the same guard family as the target suffix's terminal-join guard.
