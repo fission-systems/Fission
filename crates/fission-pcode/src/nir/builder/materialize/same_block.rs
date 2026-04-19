@@ -251,6 +251,10 @@ impl<'a> PreviewBuilder<'a> {
         matches!(target, "__popcount" | "__carry" | "__scarry" | "__sborrow")
     }
 
+    fn materialize_call_target_is_carry_like_intrinsic(target: &str) -> bool {
+        matches!(target, "__carry" | "__scarry")
+    }
+
     fn classify_disallowed_single_consumer_rhs_kind(
         rhs: &HirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
@@ -1016,12 +1020,163 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind: base.consumer_kind,
             call_target: call_target.to_string(),
             family,
+            rhs_low_cost: base.rhs_low_cost,
             call_effect_source: effect_source,
             writes_memory,
             may_call_unknown,
             may_exit,
             return_used: true,
             downstream_opcode: Some(base.consumer_opcode),
+        })
+    }
+
+    fn classify_carry_intrinsic_predicate_use_family(
+        consumer_op: &PcodeOp,
+    ) -> CarryIntrinsicPredicateUseFamily {
+        match consumer_op.opcode {
+            PcodeOpcode::BoolOr => CarryIntrinsicPredicateUseFamily::CarryFeedsBoolOr,
+            PcodeOpcode::IntEqual => {
+                let compare_const_zero = consumer_op
+                    .inputs
+                    .iter()
+                    .any(|input| input.is_constant && input.constant_val == 0);
+                if compare_const_zero {
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsCompareZero
+                } else {
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsUnknown
+                }
+            }
+            PcodeOpcode::IntNotEqual => {
+                let compare_const_zero = consumer_op
+                    .inputs
+                    .iter()
+                    .any(|input| input.is_constant && input.constant_val == 0);
+                if compare_const_zero {
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsCompareNonZero
+                } else {
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsUnknown
+                }
+            }
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor => CarryIntrinsicPredicateUseFamily::CarryFeedsArithmetic,
+            _ => CarryIntrinsicPredicateUseFamily::CarryFeedsUnknown,
+        }
+    }
+
+    fn classify_boolor_downstream_use_family(use_op: &PcodeOp) -> BoolOrDownstreamUseFamily {
+        match use_op.opcode {
+            PcodeOpcode::CBranch | PcodeOpcode::BranchInd => {
+                BoolOrDownstreamUseFamily::BoolOrFeedsBranch
+            }
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual => {
+                BoolOrDownstreamUseFamily::BoolOrFeedsCompare
+            }
+            PcodeOpcode::BoolAnd | PcodeOpcode::BoolOr | PcodeOpcode::BoolXor => {
+                BoolOrDownstreamUseFamily::BoolOrFeedsPredicate
+            }
+            PcodeOpcode::Store
+            | PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther => BoolOrDownstreamUseFamily::BoolOrFeedsData,
+            _ => BoolOrDownstreamUseFamily::UnknownBoolOrUse,
+        }
+    }
+
+    pub(super) fn describe_carry_intrinsic_predicate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<CarryIntrinsicPredicateProof> {
+        let base = self.describe_single_consumer_call_rhs_proof(block, op_idx, output, rhs)?;
+        if base.family != SingleConsumerCallRhsFamily::KnownPureIntrinsic
+            || base.consumer_kind != DisallowedSingleConsumerConsumerKind::Predicate
+            || !Self::materialize_call_target_is_carry_like_intrinsic(&base.call_target)
+        {
+            return None;
+        }
+        let (_, args) = Self::first_call_expr_in_materialize_expr(rhs)?;
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (consumer_idx, consumer_op) = *uses.first()?;
+        let bool_chain_role = Self::classify_carry_intrinsic_predicate_use_family(consumer_op);
+        let args_side_effect_free = args.iter().all(|arg| {
+            !Self::materialize_expr_contains_call(arg)
+                && !Self::materialize_expr_contains_load(arg)
+                && !Self::expr_is_side_effectful_for_materialization_trace(arg)
+        });
+        let (final_predicate_context, boolor_downstream_use) =
+            if consumer_op.opcode == PcodeOpcode::BoolOr {
+                if let Some(boolor_output) = consumer_op.output.as_ref() {
+                    let downstream_uses =
+                        Self::collect_output_use_sites_in_block(block, consumer_idx, boolor_output);
+                    let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+                        &self.pcode.blocks,
+                        block.start_address,
+                        boolor_output,
+                    );
+                    if downstream_uses.is_empty() && cross_block_consumers == 0 {
+                        (CarryIntrinsicFinalPredicateContext::BoolOrOnly, None)
+                    } else if downstream_uses.len() == 1 && cross_block_consumers == 0 {
+                        let (_, downstream_op) = downstream_uses[0];
+                        let family = Self::classify_boolor_downstream_use_family(downstream_op);
+                        let context = match family {
+                            BoolOrDownstreamUseFamily::BoolOrFeedsBranch => {
+                                CarryIntrinsicFinalPredicateContext::BranchPredicate
+                            }
+                            BoolOrDownstreamUseFamily::BoolOrFeedsCompare => {
+                                let compare_zero = downstream_op
+                                    .inputs
+                                    .iter()
+                                    .any(|input| input.is_constant && input.constant_val == 0);
+                                if compare_zero {
+                                    CarryIntrinsicFinalPredicateContext::CompareZero
+                                } else {
+                                    CarryIntrinsicFinalPredicateContext::Unknown
+                                }
+                            }
+                            BoolOrDownstreamUseFamily::BoolOrFeedsPredicate => {
+                                CarryIntrinsicFinalPredicateContext::PredicateChain
+                            }
+                            BoolOrDownstreamUseFamily::BoolOrFeedsData
+                            | BoolOrDownstreamUseFamily::UnknownBoolOrUse => {
+                                CarryIntrinsicFinalPredicateContext::Unknown
+                            }
+                        };
+                        (context, Some(family))
+                    } else {
+                        (CarryIntrinsicFinalPredicateContext::Unknown, None)
+                    }
+                } else {
+                    (CarryIntrinsicFinalPredicateContext::Unknown, None)
+                }
+            } else {
+                let context = match bool_chain_role {
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsCompareZero => {
+                        CarryIntrinsicFinalPredicateContext::CompareZero
+                    }
+                    CarryIntrinsicPredicateUseFamily::CarryFeedsCompareNonZero => {
+                        CarryIntrinsicFinalPredicateContext::CompareNonZero
+                    }
+                    _ => CarryIntrinsicFinalPredicateContext::Unknown,
+                };
+                (context, None)
+            };
+
+        Some(CarryIntrinsicPredicateProof {
+            call_target: base.call_target,
+            args: args.iter().map(|arg| format!("{arg:?}")).collect(),
+            consumer_kind: base.consumer_kind,
+            downstream_opcode: base.downstream_opcode.unwrap_or(base.consumer_opcode),
+            bool_chain_role,
+            rhs_low_cost: base.rhs_low_cost,
+            args_side_effect_free,
+            final_predicate_context,
+            boolor_downstream_use,
         })
     }
 
@@ -2470,6 +2625,99 @@ mod tests {
         assert_eq!(proof.may_call_unknown, Some(true));
         assert_eq!(proof.may_exit, Some(true));
         assert_eq!(proof.downstream_opcode, Some(PcodeOpcode::IntAdd));
+    }
+
+    #[test]
+    fn carry_intrinsic_predicate_proof_marks_boolor_branch_chain() {
+        let output = varnode(0x10);
+        let boolor_output = varnode(0x20);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::CallOther,
+                Some(output.clone()),
+                vec![constant(0x2000), constant(1), constant(2)],
+            ),
+            op(
+                1,
+                PcodeOpcode::BoolOr,
+                Some(boolor_output.clone()),
+                vec![output.clone(), constant(1)],
+            ),
+            op(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x3000), boolor_output],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__carry".to_string(),
+            args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+            ty: int(1),
+        };
+
+        let proof = builder
+            .describe_carry_intrinsic_predicate_proof(&block, 0, &output, &rhs)
+            .expect("carry predicate proof");
+
+        assert_eq!(
+            proof.bool_chain_role,
+            CarryIntrinsicPredicateUseFamily::CarryFeedsBoolOr
+        );
+        assert_eq!(
+            proof.boolor_downstream_use,
+            Some(BoolOrDownstreamUseFamily::BoolOrFeedsBranch)
+        );
+        assert_eq!(
+            proof.final_predicate_context,
+            CarryIntrinsicFinalPredicateContext::BranchPredicate
+        );
+        assert!(proof.args_side_effect_free);
+    }
+
+    #[test]
+    fn carry_intrinsic_predicate_proof_marks_compare_zero_chain() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::CallOther,
+                Some(output.clone()),
+                vec![constant(0x2000), constant(1), constant(2)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__scarry".to_string(),
+            args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+            ty: int(1),
+        };
+
+        let proof = builder
+            .describe_carry_intrinsic_predicate_proof(&block, 0, &output, &rhs)
+            .expect("carry predicate proof");
+
+        assert_eq!(
+            proof.bool_chain_role,
+            CarryIntrinsicPredicateUseFamily::CarryFeedsCompareZero
+        );
+        assert_eq!(proof.boolor_downstream_use, None);
+        assert_eq!(
+            proof.final_predicate_context,
+            CarryIntrinsicFinalPredicateContext::CompareZero
+        );
     }
 
     #[test]

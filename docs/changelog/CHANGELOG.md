@@ -9,6 +9,64 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` carry/scarry intrinsic predicate proof tracing
+
+This wave stayed diagnostic-only. It does not widen intrinsic replacement, alter stable-representative policy, or change the default release path. The goal was to take the newly isolated `RhsHasCall -> KnownPureIntrinsic` slice on `0x140008090` and separate the remaining `__carry` / `__scarry` predicate chains from the already-closed `__popcount` parity family.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries carry-intrinsic predicate vocabulary:
+  - `CarryIntrinsicPredicateUseFamily`
+    - `CarryFeedsBoolOr`
+    - `CarryFeedsCompareZero`
+    - `CarryFeedsCompareNonZero`
+    - `CarryFeedsArithmetic`
+    - `CarryFeedsUnknown`
+  - `BoolOrDownstreamUseFamily`
+    - `BoolOrFeedsPredicate`
+    - `BoolOrFeedsBranch`
+    - `BoolOrFeedsCompare`
+    - `BoolOrFeedsData`
+    - `UnknownBoolOrUse`
+  - `CarryIntrinsicFinalPredicateContext`
+    - `BoolOrOnly`
+    - `CompareZero`
+    - `CompareNonZero`
+    - `BranchPredicate`
+    - `PredicateChain`
+    - `Unknown`
+  - `CarryIntrinsicPredicateProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `carry_intrinsic_predicate_family`
+    - `carry_intrinsic_boolor_downstream_use`
+    - `carry_intrinsic_final_predicate_context`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `materialize_call_target_is_carry_like_intrinsic(...)`
+  - `describe_carry_intrinsic_predicate_proof(...)`
+  - same-block downstream proofing for:
+    - direct `IntEqual` / `IntNotEqual` compare-zero vs compare-nonzero carry sinks
+    - `BoolOr` carry aggregation followed by branch/predicate/compare/data uses
+    - carry/scarry arg purity checks for the diagnostic trace
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `carry-intrinsic-predicate-proof output=... call_target=... args=... consumer_kind=... downstream_opcode=... bool_chain_role=... rhs_low_cost=... args_side_effect_free=... final_predicate_context=...`
+  - repartition summary families for:
+    - `carry_intrinsic_predicate_family`
+    - `carry_intrinsic_boolor_downstream_use`
+    - `carry_intrinsic_final_predicate_context`
+  - the new proof is only emitted for `KnownPureIntrinsic` single-consumer call RHS sites whose target is `__carry` or `__scarry` and whose direct consumer is predicate-like
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode carry_intrinsic_predicate_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed intent:
+
+- `__popcount -> IntAnd` remains a closed negative env-gated result and is no longer the active owner for this slice
+- `__carry` / `__scarry` sites are now attributed as explicit predicate-chain families instead of staying mixed into the broad `KnownPureIntrinsic` bucket
+- default release behavior remains unchanged; this wave only narrows the next intrinsic-chain owner
+
 ### `0x140008090` single-consumer call RHS proof tracing
 
 This wave stayed diagnostic-only. It does not widen single-consumer replacement, change stable-representative policy, or alter the default release path. The goal was to take the large `DisallowedSingleConsumer -> RhsHasCall` bucket on `0x140008090` and split it by call target/effect provenance using the existing call-effect summary infrastructure.

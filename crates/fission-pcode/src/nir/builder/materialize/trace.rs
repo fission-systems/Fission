@@ -88,6 +88,22 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "carry_intrinsic_predicate_family",
+                Self::format_materialize_owner_histogram(&summary.carry_intrinsic_predicate_family),
+            ),
+            (
+                "carry_intrinsic_boolor_downstream_use",
+                Self::format_materialize_owner_histogram(
+                    &summary.carry_intrinsic_boolor_downstream_use,
+                ),
+            ),
+            (
+                "carry_intrinsic_final_predicate_context",
+                Self::format_materialize_owner_histogram(
+                    &summary.carry_intrinsic_final_predicate_context,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -524,6 +540,58 @@ impl<'a> PreviewBuilder<'a> {
             proof.return_used,
             proof.consumer_kind,
             downstream_opcode,
+        ));
+        if matches!(proof.call_target.as_str(), "__carry" | "__scarry")
+            && proof.consumer_kind == DisallowedSingleConsumerConsumerKind::Predicate
+        {
+            self.trace_carry_intrinsic_predicate_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_carry_intrinsic_predicate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_carry_intrinsic_predicate_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.carry_intrinsic_predicate_family,
+                format!("{:?}", proof.bool_chain_role),
+            );
+            if let Some(boolor_use) = proof.boolor_downstream_use {
+                Self::bump_materialize_owner_histogram(
+                    &mut summary.carry_intrinsic_boolor_downstream_use,
+                    format!("{:?}", boolor_use),
+                );
+            }
+            Self::bump_materialize_owner_histogram(
+                &mut summary.carry_intrinsic_final_predicate_context,
+                format!("{:?}", proof.final_predicate_context),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "carry-intrinsic-predicate-proof output=space:{} off:0x{:x} size:{} call_target={} args={:?} consumer_kind={:?} downstream_opcode={:?} bool_chain_role={:?} rhs_low_cost={} args_side_effect_free={} final_predicate_context={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            proof.call_target,
+            proof.args,
+            proof.consumer_kind,
+            proof.downstream_opcode,
+            proof.bool_chain_role,
+            proof.rhs_low_cost,
+            proof.args_side_effect_free,
+            proof.final_predicate_context,
         ));
     }
 

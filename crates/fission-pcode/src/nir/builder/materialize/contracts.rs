@@ -102,12 +102,54 @@ pub(super) struct SingleConsumerCallRhsProof {
     pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
     pub(super) call_target: String,
     pub(super) family: SingleConsumerCallRhsFamily,
+    pub(super) rhs_low_cost: bool,
     pub(super) call_effect_source: Option<CallEffectSummarySource>,
     pub(super) writes_memory: Option<bool>,
     pub(super) may_call_unknown: Option<bool>,
     pub(super) may_exit: Option<bool>,
     pub(super) return_used: bool,
     pub(super) downstream_opcode: Option<PcodeOpcode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CarryIntrinsicPredicateUseFamily {
+    CarryFeedsBoolOr,
+    CarryFeedsCompareZero,
+    CarryFeedsCompareNonZero,
+    CarryFeedsArithmetic,
+    CarryFeedsUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoolOrDownstreamUseFamily {
+    BoolOrFeedsPredicate,
+    BoolOrFeedsBranch,
+    BoolOrFeedsCompare,
+    BoolOrFeedsData,
+    UnknownBoolOrUse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CarryIntrinsicFinalPredicateContext {
+    BoolOrOnly,
+    CompareZero,
+    CompareNonZero,
+    BranchPredicate,
+    PredicateChain,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CarryIntrinsicPredicateProof {
+    pub(super) call_target: String,
+    pub(super) args: Vec<String>,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) downstream_opcode: PcodeOpcode,
+    pub(super) bool_chain_role: CarryIntrinsicPredicateUseFamily,
+    pub(super) rhs_low_cost: bool,
+    pub(super) args_side_effect_free: bool,
+    pub(super) final_predicate_context: CarryIntrinsicFinalPredicateContext,
+    pub(super) boolor_downstream_use: Option<BoolOrDownstreamUseFamily>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -517,6 +559,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) single_consumer_call_rhs_effect_source: BTreeMap<String, usize>,
     pub(super) single_consumer_call_rhs_consumer_kind: BTreeMap<String, usize>,
     pub(super) single_consumer_call_rhs_downstream_opcode: BTreeMap<String, usize>,
+    pub(super) carry_intrinsic_predicate_family: BTreeMap<String, usize>,
+    pub(super) carry_intrinsic_boolor_downstream_use: BTreeMap<String, usize>,
+    pub(super) carry_intrinsic_final_predicate_context: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,
