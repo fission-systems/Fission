@@ -9,6 +9,38 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` missing merge binding proof tracing
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the large `MissingMergeBinding=1066` owner on `0x140008090` and split it by merge relation so the next design owner can be chosen from join/loop/predicate/phi-like families rather than one broad bucket.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries missing-merge proof vocabulary:
+  - `MissingMergeBindingRelation`
+    - `JoinMergeMissing`
+    - `LoopHeaderMergeMissing`
+    - `BackedgeMergeMissing`
+    - `PredicateMergeMissing`
+    - `PhiLikeMergeMissing`
+    - `RepresentativeOnlyMissing`
+    - `UnknownMissingMerge`
+  - `MissingMergeBindingProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `missing_merge_binding_relation`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - `describe_missing_merge_binding_proof(...)`
+  - relation classification based on first cross-block consumer, merge-block predecessor shape, predicate/phi-like consumer role, and existing-binding presence
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `missing-merge-binding-proof output=... block=... op_seq=... merge_block=... predecessor_count=... incoming_value_count=... has_existing_binding=... consumer_kind=... rhs_kind=... relation=...`
+  - repartition summary family:
+    - `missing_merge_binding_relation`
+- [`mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs) now traces missing-merge proofs at the exact `output_has_nonlocal_use(...)` rejection point in both preview and builder-aware paths.
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` single-consumer load RHS proof tracing
 
 This wave stayed diagnostic-only. It does not widen load inlining, change stable-representative policy, or alter the default release path. The goal was to take the remaining `DisallowedSingleConsumer -> RhsHasLoad=64` bucket on `0x140008090` and split it by downstream use family plus same-block alias/stability class before any policy discussion.

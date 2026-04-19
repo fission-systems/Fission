@@ -194,6 +194,90 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
+    fn classify_missing_merge_binding_relation(
+        &self,
+        def_block_idx: usize,
+        merge_block_idx: usize,
+        consumer_op: &PcodeOp,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        predecessor_count: usize,
+        has_existing_binding: bool,
+    ) -> MissingMergeBindingRelation {
+        if has_existing_binding {
+            return MissingMergeBindingRelation::RepresentativeOnlyMissing;
+        }
+        if consumer_op.opcode == PcodeOpcode::MultiEqual {
+            return MissingMergeBindingRelation::PhiLikeMergeMissing;
+        }
+        if matches!(
+            consumer_kind,
+            DisallowedSingleConsumerConsumerKind::Predicate
+                | DisallowedSingleConsumerConsumerKind::BranchCondition
+        ) {
+            return MissingMergeBindingRelation::PredicateMergeMissing;
+        }
+        if predecessor_count > 1 {
+            if self.block_can_reach(merge_block_idx, def_block_idx, merge_block_idx) {
+                return MissingMergeBindingRelation::LoopHeaderMergeMissing;
+            }
+            return MissingMergeBindingRelation::JoinMergeMissing;
+        }
+        if self.block_can_reach(merge_block_idx, def_block_idx, merge_block_idx) {
+            return MissingMergeBindingRelation::BackedgeMergeMissing;
+        }
+        MissingMergeBindingRelation::UnknownMissingMerge
+    }
+
+    pub(super) fn describe_missing_merge_binding_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        _op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<MissingMergeBindingProof> {
+        let (merge_block_addr, consumer_op_idx, _) =
+            self.first_output_use_site_outside_block(block.start_address, output)?;
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let merge_block_idx = self.address_to_index.get(&merge_block_addr).copied()?;
+        let merge_block = self.pcode.blocks.get(merge_block_idx)?;
+        let consumer_op = merge_block.ops.get(consumer_op_idx)?;
+        let key = VarnodeKey::from(output);
+        let matched_inputs = consumer_op
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, input)| (VarnodeKey::from(input) == key).then_some(idx))
+            .collect::<Vec<_>>();
+        let consumer_kind =
+            Self::classify_disallowed_single_consumer_kind(consumer_op, &matched_inputs);
+        let predecessor_count = self.predecessors.get(merge_block_idx).map_or(0, Vec::len);
+        let incoming_value_count = if consumer_op.opcode == PcodeOpcode::MultiEqual {
+            consumer_op.inputs.len()
+        } else {
+            predecessor_count.max(1)
+        };
+        let has_existing_binding = merge_block.ops[..consumer_op_idx]
+            .iter()
+            .any(|candidate| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()));
+        let relation = self.classify_missing_merge_binding_relation(
+            def_block_idx,
+            merge_block_idx,
+            consumer_op,
+            consumer_kind,
+            predecessor_count,
+            has_existing_binding,
+        );
+        Some(MissingMergeBindingProof {
+            merge_block: merge_block_addr,
+            predecessor_count,
+            incoming_value_count,
+            has_existing_binding,
+            consumer_kind,
+            rhs_kind: Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+            relation,
+        })
+    }
+
     pub(super) fn classify_malformed_def_use_window_relation(
         def_op_idx: usize,
         terminator_idx: Option<usize>,

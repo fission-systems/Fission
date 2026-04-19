@@ -124,6 +124,10 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "missing_merge_binding_relation",
+                Self::format_materialize_owner_histogram(&summary.missing_merge_binding_relation),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -704,6 +708,44 @@ impl<'a> PreviewBuilder<'a> {
             proof.alias_class,
             proof.same_block_store_before,
             proof.same_block_store_after,
+        ));
+    }
+
+    pub(super) fn trace_missing_merge_binding_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.missing_merge_binding_relation,
+                format!("{:?}", proof.relation),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "missing-merge-binding-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} merge_block=0x{:x} predecessor_count={} incoming_value_count={} has_existing_binding={} consumer_kind={:?} rhs_kind={:?} relation={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.merge_block,
+            proof.predecessor_count,
+            proof.incoming_value_count,
+            proof.has_existing_binding,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.relation,
         ));
     }
 

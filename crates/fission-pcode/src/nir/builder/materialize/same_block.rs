@@ -271,7 +271,7 @@ impl<'a> PreviewBuilder<'a> {
         matches!(target, "__carry" | "__scarry")
     }
 
-    fn classify_disallowed_single_consumer_rhs_kind(
+    pub(super) fn classify_disallowed_single_consumer_rhs_kind(
         rhs: &HirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
         match rhs {
@@ -306,7 +306,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn classify_disallowed_single_consumer_kind(
+    pub(super) fn classify_disallowed_single_consumer_kind(
         use_op: &PcodeOp,
         matched_inputs: &[usize],
     ) -> DisallowedSingleConsumerConsumerKind {

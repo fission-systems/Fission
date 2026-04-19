@@ -544,6 +544,7 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
         if self.output_has_nonlocal_use(block, op_idx, output) {
+            self.trace_missing_merge_binding_proof(block, op_idx, output, rhs);
             return ReplacementValuePlan::incomplete(
                 ReplacementReadClass::Merge,
                 MaterializationRejectionReason::MissingMergeBinding,
@@ -642,6 +643,7 @@ impl<'a> PreviewBuilder<'a> {
             self.record_materialize_rejection_reason(
                 MaterializationRejectionReason::MissingMergeBinding,
             );
+            self.trace_missing_merge_binding_proof(block, op_idx, output, rhs);
             self.trace_loop_boundary_binding_correlation(
                 block,
                 op_idx,
