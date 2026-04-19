@@ -9,6 +9,51 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Loop-boundary missing binding correlation tracing
+
+This wave stayed diagnostic-only. It does not synthesize loop-boundary bindings, widen loop-carried replacement, or change stable-representative policy. The goal was to test whether the remaining `LoopBackedge x OverwriteAtLoopUpdate` boolean family on `0x140006c20` actually overlaps with the builder's active `MissingMergeBinding` or `ConsumerRequiresStableRepresentative` rejection path.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries a dedicated loop-boundary correlation contract:
+  - `LoopBoundaryBindingFamily`
+  - `LoopBoundaryBindingCorrelation`
+- [`loop_carried.rs`](../../crates/fission-pcode/src/nir/builder/materialize/loop_carried.rs) now exposes:
+  - `describe_loop_boundary_binding_correlation(...)`
+  - correlation is only produced when the active output already proves as:
+    - `CrossBlockConsumerRelation::LoopBackedge`
+    - `LoopCarriedValueKind::BooleanFlag`
+  - the traced family stays intentionally narrow:
+    - `BoolNegate`
+    - `IntNotEqual`
+    - `OtherBooleanFlag`
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `loop-boundary-binding-correlation output=... loop_header=... family=... missing_merge_binding=... stable_representative_required=... merge_block=... candidate_binding=... existing_binding=...`
+- [`mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs) now wires that trace only at the existing active rejection sites:
+  - `MissingMergeBinding`
+  - `ConsumerRequiresStableRepresentative`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the live `0x140006c20` row still emits the previously added loop diagnostics:
+  - `loop-boolean-flag-proof`
+  - `loop-guard-refresh-dominance`
+- the new `loop-boundary-binding-correlation` trace does not appear on the live row
+- for the current active builder path, the remaining loop boolean slice is therefore not currently closing through:
+  - `MissingMergeBinding`
+  - `ConsumerRequiresStableRepresentative`
+
+Conclusion:
+
+- the next owner is not a local representative restart and not yet a directly proven missing-merge path on the current live row
+- the loop boolean family still behaves like a broader loop-boundary ownership problem
+- any future binding work should be designed as explicit loop/merge-boundary synthesis, not inferred from the current local restart proofs
+
 ### Loop guard refresh dominance proof tracing
 
 This wave stayed diagnostic-only. It does not widen loop-carried replacement, add a loop-guard restart policy, or change merge-boundary handling. The goal was to take the already isolated `BoolNegate + same_guard_as_exit=true` slice from `0x140006c20` and explain why the existing builder still reports `redef_dominates_backedge=false`.

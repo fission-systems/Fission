@@ -158,6 +158,13 @@ pub(super) enum LoopBooleanGuardFamily {
     NonPredicate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LoopBoundaryBindingFamily {
+    BoolNegate,
+    IntNotEqual,
+    OtherBooleanFlag,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LoopCarriedOverwriteProvenance {
     pub(super) loop_header: u64,
@@ -203,6 +210,17 @@ pub(super) struct LoopGuardRefreshDominanceProof {
     pub(super) all_backedge_paths_covered: bool,
     pub(super) header_predicate_uses_redef: bool,
     pub(super) reason: LoopGuardRefreshDominanceReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LoopBoundaryBindingCorrelation {
+    pub(super) loop_header: u64,
+    pub(super) family: LoopBoundaryBindingFamily,
+    pub(super) missing_merge_binding: bool,
+    pub(super) stable_representative_required: bool,
+    pub(super) merge_block: Option<u64>,
+    pub(super) candidate_binding: String,
+    pub(super) existing_binding: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

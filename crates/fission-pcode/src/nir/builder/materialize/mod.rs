@@ -549,6 +549,12 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if self.output_has_nonlocal_use(block, op_idx, output) {
+            self.trace_loop_boundary_binding_correlation(
+                block,
+                op_idx,
+                output,
+                MaterializationRejectionReason::MissingMergeBinding,
+            );
             self.replacement_plan_rejected_missing_merge_count += 1;
             return ReplacementValuePlan::incomplete(
                 ReplacementReadClass::Merge,
@@ -559,6 +565,12 @@ impl<'a> PreviewBuilder<'a> {
             self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
         {
             if Self::replacement_read_requires_stable_representative(read_class, rhs) {
+                self.trace_loop_boundary_binding_correlation(
+                    block,
+                    op_idx,
+                    output,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
                 self.replacement_plan_rejected_alias_unsafe_count += 1;
                 return ReplacementValuePlan::incomplete(
                     read_class,
@@ -570,6 +582,12 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.output_replacement_is_complete(block, op_idx, output, rhs) {
             if Self::same_block_replacement_requires_stable_representative(rhs) {
+                self.trace_loop_boundary_binding_correlation(
+                    block,
+                    op_idx,
+                    output,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
                 self.replacement_plan_rejected_alias_unsafe_count += 1;
                 return ReplacementValuePlan::incomplete(
                     ReplacementReadClass::SameBlockData,

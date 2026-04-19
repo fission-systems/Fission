@@ -211,6 +211,69 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    pub(super) fn describe_loop_boundary_binding_correlation(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        reason: MaterializationRejectionReason,
+    ) -> Option<LoopBoundaryBindingCorrelation> {
+        let (consumer_block_addr, consumer_op_seq, provenance) =
+            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+        if provenance.relation != CrossBlockConsumerRelation::LoopBackedge {
+            return None;
+        }
+        let consumer_block_addr = consumer_block_addr?;
+        let consumer_op_seq = consumer_op_seq?;
+        let redef = self.describe_cross_block_redefinition_detail(
+            block,
+            op_idx,
+            output,
+            Some(consumer_block_addr),
+        )?;
+        let carried = self.describe_loop_carried_overwrite_provenance(
+            block,
+            output,
+            &redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        )?;
+        if carried.carried_value_kind != LoopCarriedValueKind::BooleanFlag {
+            return None;
+        }
+        let proof = self.describe_loop_boolean_flag_proof(
+            block,
+            op_idx,
+            output,
+            &redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        )?;
+        let family = match proof.consumer_opcode {
+            PcodeOpcode::BoolNegate => LoopBoundaryBindingFamily::BoolNegate,
+            PcodeOpcode::IntNotEqual => LoopBoundaryBindingFamily::IntNotEqual,
+            _ => LoopBoundaryBindingFamily::OtherBooleanFlag,
+        };
+        let existing_binding = self
+            .materialized_vns
+            .get(&MaterializedVarnodeKey::new(output, &block.ops[op_idx]))
+            .cloned();
+        let candidate_binding = format!(
+            "loop_header_0x{:x}_space{}_off0x{:x}",
+            carried.loop_header, output.space_id, output.offset
+        );
+        Some(LoopBoundaryBindingCorrelation {
+            loop_header: carried.loop_header,
+            family,
+            missing_merge_binding: reason == MaterializationRejectionReason::MissingMergeBinding,
+            stable_representative_required: reason
+                == MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+            merge_block: Some(carried.loop_header),
+            candidate_binding,
+            existing_binding,
+        })
+    }
+
     pub(super) fn format_redefinition_rhs(&self, redef: &CrossBlockRedefinitionDetail) -> String {
         let Some(redef_block_idx) = self.address_to_index.get(&redef.redef_block_addr).copied()
         else {

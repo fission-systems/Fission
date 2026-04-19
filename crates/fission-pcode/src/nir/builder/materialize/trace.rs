@@ -454,6 +454,43 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    pub(super) fn trace_loop_boundary_binding_correlation(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        reason: MaterializationRejectionReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(correlation) =
+            self.describe_loop_boundary_binding_correlation(block, op_idx, output, reason)
+        else {
+            return;
+        };
+        let merge_block = correlation
+            .merge_block
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let existing_binding = correlation
+            .existing_binding
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "loop-boundary-binding-correlation output=space:{} off:0x{:x} size:{} loop_header=0x{:x} family={:?} missing_merge_binding={} stable_representative_required={} merge_block={} candidate_binding={} existing_binding={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            correlation.loop_header,
+            correlation.family,
+            correlation.missing_merge_binding,
+            correlation.stable_representative_required,
+            merge_block,
+            correlation.candidate_binding,
+            existing_binding,
+        ));
+    }
+
     pub(super) fn trace_no_consumer_suppressed(
         &self,
         block_addr: u64,
