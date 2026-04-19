@@ -9,6 +9,63 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Loop boolean flag ownership proof tracing
+
+This wave stayed diagnostic-only. It does not widen loop-carried replacement, synthesize loop bindings, or relax merge-boundary handling. The goal was to take the already-isolated `LoopBackedge x OverwriteAtLoopUpdate = 156` boolean slice on `0x140006c20` and prove whether those values behave like loop exit/latch guards or true carried loop state.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated boolean loop-carried proof trace on top of the existing `loop-carried-overwrite` signal:
+  - `loop-boolean-flag-proof output=... loop_header=... def_block=... def_op_seq=... redef_op_seq=... redef_rhs=... consumer_block=... consumer_op_seq=... consumer_opcode=... exit_edge=... backedge_edge=... guard_family=... same_guard_as_exit=... old_def_has_pre_redef_use=... redef_dominates_backedge=... consumer_is_loop_header_predicate=...`
+- the builder-local proof stays intentionally narrow:
+  - only `LoopCarriedValueKind::BooleanFlag` cases participate
+  - it records the loop-header consumer opcode and whether it feeds the header terminator predicate
+  - it separates the loop header's exit edge and backedge edge using CFG reachability from the header successors
+  - it classifies the consumer-side boolean family as:
+    - `DirectFlag`
+    - `NegatedFlag`
+    - `EqZero`
+    - `NeZero`
+    - `NonPredicate`
+- synthetic unit coverage now pins both sides of the split:
+  - same-guard loop-header predicate refresh (`BoolNegate -> CBranch`)
+  - non-predicate carried-state style header use (`Copy` with unrelated loop branch)
+
+Validation:
+
+- `cargo test -p fission-pcode loop_boolean_flag_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the live `0x140006c20` boolean loop-carried family no longer appears monolithic
+- after deduplicating repeated trace emissions, the row splits into two concrete header families:
+  - `loop_header=0x140006c40`
+    - `consumer_opcode=BoolNegate`
+    - `guard_family=NegatedFlag`
+    - `same_guard_as_exit=true`
+    - `consumer_is_loop_header_predicate=true`
+    - `5` unique sites
+  - `loop_header=0x140006c55`
+    - `consumer_opcode=IntNotEqual`
+    - `guard_family=NonPredicate`
+    - `same_guard_as_exit=false`
+    - `consumer_is_loop_header_predicate=true`
+    - `8` unique sites
+- all observed sites still share the same conservative facts:
+  - `old_def_has_pre_redef_use=false`
+  - `redef_dominates_backedge=false`
+
+Conclusion:
+
+- the remaining `0x140006c20` loop-carried boolean owner is not one uniform class
+- one slice now looks like loop-header guard refresh (`BoolNegate`, same-guard-as-exit)
+- the other slice looks like boolean composition/update (`IntNotEqual(..., other_pred)`) rather than a direct guard refresh
+- the next owner should be narrower than generic loop-carried binding synthesis:
+  - loop guard representative handling for the `BoolNegate` slice
+  - separate merge-boundary / composed-predicate treatment for the `IntNotEqual` slice
+- no release policy changed in this wave
+
 ### Loop-carried overwrite binding provenance
 
 This wave stayed diagnostic-only. It does not widen cross-block replacement, synthesize merge bindings, or restart def windows for loop-carried values. The goal was to isolate the remaining `LoopBackedge x OverwriteAtLoopUpdate = 156` slice on `0x140006c20` and prove what kind of carried value it actually is before any merge-boundary policy work.

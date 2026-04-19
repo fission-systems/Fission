@@ -149,6 +149,15 @@ enum LoopCarriedValueKind {
     UnknownLoopCarried,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopBooleanGuardFamily {
+    DirectFlag,
+    NegatedFlag,
+    EqZero,
+    NeZero,
+    NonPredicate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LoopCarriedOverwriteProvenance {
     loop_header: u64,
@@ -161,6 +170,18 @@ struct LoopCarriedOverwriteProvenance {
     phi_input_count: usize,
     induction_like: bool,
     carried_value_kind: LoopCarriedValueKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoopBooleanFlagProof {
+    consumer_opcode: PcodeOpcode,
+    exit_edge: Option<u64>,
+    backedge_edge: Option<u64>,
+    guard_family: LoopBooleanGuardFamily,
+    same_guard_as_exit: bool,
+    old_def_has_pre_redef_use: bool,
+    redef_dominates_backedge: bool,
+    consumer_is_loop_header_predicate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -640,6 +661,69 @@ impl<'a> PreviewBuilder<'a> {
             provenance.phi_input_count,
             provenance.induction_like,
             provenance.carried_value_kind,
+        ));
+        if provenance.carried_value_kind == LoopCarriedValueKind::BooleanFlag {
+            self.trace_loop_boolean_flag_proof(
+                block,
+                op_idx,
+                output,
+                redef,
+                consumer_block_addr,
+                consumer_op_seq,
+            );
+        }
+    }
+
+    fn trace_loop_boolean_flag_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_loop_boolean_flag_proof(
+            block,
+            op_idx,
+            output,
+            redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        ) else {
+            return;
+        };
+        let exit_edge = proof
+            .exit_edge
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let backedge_edge = proof
+            .backedge_edge
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "loop-boolean-flag-proof output=space:{} off:0x{:x} size:{} loop_header=0x{:x} def_block=0x{:x} def_op_seq={} redef_op_seq={} redef_rhs={} consumer_block=0x{:x} consumer_op_seq={} consumer_opcode={:?} exit_edge={} backedge_edge={} guard_family={:?} same_guard_as_exit={} old_def_has_pre_redef_use={} redef_dominates_backedge={} consumer_is_loop_header_predicate={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            consumer_block_addr,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            redef.redef_op_seq,
+            self.format_redefinition_rhs(redef),
+            consumer_block_addr,
+            consumer_op_seq,
+            proof.consumer_opcode,
+            exit_edge,
+            backedge_edge,
+            proof.guard_family,
+            proof.same_guard_as_exit,
+            proof.old_def_has_pre_redef_use,
+            proof.redef_dominates_backedge,
+            proof.consumer_is_loop_header_predicate,
         ));
     }
 
@@ -2635,6 +2719,204 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn describe_loop_boolean_flag_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+    ) -> Option<LoopBooleanFlagProof> {
+        let provenance = self.describe_loop_carried_overwrite_provenance(
+            block,
+            output,
+            redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        )?;
+        if provenance.carried_value_kind != LoopCarriedValueKind::BooleanFlag {
+            return None;
+        }
+        let loop_header_idx = self
+            .address_to_index
+            .get(&provenance.loop_header)
+            .copied()?;
+        let loop_header = self.pcode.blocks.get(loop_header_idx)?;
+        let backedge_block_idx = self
+            .address_to_index
+            .get(&provenance.backedge_block)
+            .copied()?;
+        let backedge_block = self.pcode.blocks.get(backedge_block_idx)?;
+        let consumer_op = loop_header
+            .ops
+            .iter()
+            .find(|op| op.seq_num == consumer_op_seq)?;
+        let guard_family = Self::classify_loop_boolean_guard_family(consumer_op, output);
+        let old_def_has_pre_redef_use =
+            !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
+        let loop_header_terminator = self.block_terminator_index(loop_header)?;
+        let terminator_op = loop_header.ops.get(loop_header_terminator)?;
+        let consumer_is_loop_header_predicate = if consumer_op.seq_num == terminator_op.seq_num {
+            Self::classify_loop_boolean_guard_family(consumer_op, output)
+                != LoopBooleanGuardFamily::NonPredicate
+        } else {
+            terminator_op.opcode == PcodeOpcode::CBranch
+                && terminator_op
+                    .inputs
+                    .get(1)
+                    .zip(consumer_op.output.as_ref())
+                    .is_some_and(|(cond, consumer_output)| {
+                        VarnodeKey::from(cond) == VarnodeKey::from(consumer_output)
+                    })
+        };
+        let same_guard_as_exit = consumer_is_loop_header_predicate
+            && guard_family != LoopBooleanGuardFamily::NonPredicate;
+        let (exit_edge, backedge_edge) =
+            self.describe_loop_header_edges(loop_header_idx, backedge_block_idx);
+        let redef_dominates_backedge =
+            self.block_terminator_index(backedge_block)
+                .is_some_and(|term_idx| {
+                    backedge_block.ops.get(term_idx).is_some_and(|term_op| {
+                        term_op.opcode == PcodeOpcode::Branch
+                            && term_op.inputs.first().is_some_and(|target| {
+                                target.is_constant
+                                    && target.constant_val as u64 == provenance.loop_header
+                            })
+                    }) && redef.redef_op_idx < term_idx
+                });
+        Some(LoopBooleanFlagProof {
+            consumer_opcode: consumer_op.opcode,
+            exit_edge,
+            backedge_edge,
+            guard_family,
+            same_guard_as_exit,
+            old_def_has_pre_redef_use,
+            redef_dominates_backedge,
+            consumer_is_loop_header_predicate,
+        })
+    }
+
+    fn format_redefinition_rhs(&self, redef: &CrossBlockRedefinitionDetail) -> String {
+        let Some(redef_block_idx) = self.address_to_index.get(&redef.redef_block_addr).copied()
+        else {
+            return "<unknown>".to_string();
+        };
+        let Some(redef_block) = self.pcode.blocks.get(redef_block_idx) else {
+            return "<unknown>".to_string();
+        };
+        let Some(redef_op) = redef_block.ops.get(redef.redef_op_idx) else {
+            return "<unknown>".to_string();
+        };
+        Self::format_copy_overwrite_inputs(&redef_op.inputs)
+    }
+
+    fn classify_loop_boolean_guard_family(
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> LoopBooleanGuardFamily {
+        let key = VarnodeKey::from(output);
+        match op.opcode {
+            PcodeOpcode::BoolNegate => op
+                .inputs
+                .first()
+                .is_some_and(|input| VarnodeKey::from(input) == key)
+                .then_some(LoopBooleanGuardFamily::NegatedFlag)
+                .unwrap_or(LoopBooleanGuardFamily::NonPredicate),
+            PcodeOpcode::IntEqual => {
+                if op.inputs.len() != 2 {
+                    return LoopBooleanGuardFamily::NonPredicate;
+                }
+                let lhs_matches = VarnodeKey::from(&op.inputs[0]) == key
+                    && op.inputs[1].is_constant
+                    && op.inputs[1].constant_val == 0;
+                let rhs_matches = VarnodeKey::from(&op.inputs[1]) == key
+                    && op.inputs[0].is_constant
+                    && op.inputs[0].constant_val == 0;
+                if lhs_matches || rhs_matches {
+                    LoopBooleanGuardFamily::EqZero
+                } else {
+                    LoopBooleanGuardFamily::NonPredicate
+                }
+            }
+            PcodeOpcode::IntNotEqual => {
+                if op.inputs.len() != 2 {
+                    return LoopBooleanGuardFamily::NonPredicate;
+                }
+                let lhs_matches = VarnodeKey::from(&op.inputs[0]) == key
+                    && op.inputs[1].is_constant
+                    && op.inputs[1].constant_val == 0;
+                let rhs_matches = VarnodeKey::from(&op.inputs[1]) == key
+                    && op.inputs[0].is_constant
+                    && op.inputs[0].constant_val == 0;
+                if lhs_matches || rhs_matches {
+                    LoopBooleanGuardFamily::NeZero
+                } else {
+                    LoopBooleanGuardFamily::NonPredicate
+                }
+            }
+            PcodeOpcode::CBranch => op
+                .inputs
+                .get(1)
+                .is_some_and(|input| VarnodeKey::from(input) == key)
+                .then_some(LoopBooleanGuardFamily::DirectFlag)
+                .unwrap_or(LoopBooleanGuardFamily::NonPredicate),
+            _ => LoopBooleanGuardFamily::NonPredicate,
+        }
+    }
+
+    fn describe_loop_header_edges(
+        &self,
+        loop_header_idx: usize,
+        backedge_block_idx: usize,
+    ) -> (Option<u64>, Option<u64>) {
+        let Some(successors) = self.successors.get(loop_header_idx) else {
+            return (None, None);
+        };
+        let mut backedge_edge = None;
+        let mut exit_edge = None;
+        for succ_idx in successors {
+            let succ_addr = self
+                .pcode
+                .blocks
+                .get(*succ_idx)
+                .map(|block| block.start_address);
+            if self.block_can_reach(*succ_idx, backedge_block_idx, loop_header_idx) {
+                backedge_edge = succ_addr;
+            } else if exit_edge.is_none() {
+                exit_edge = succ_addr;
+            }
+        }
+        (exit_edge, backedge_edge)
+    }
+
+    fn block_can_reach(&self, start_idx: usize, target_idx: usize, stop_idx: usize) -> bool {
+        if start_idx == target_idx {
+            return true;
+        }
+        let mut stack = vec![start_idx];
+        let mut visited = HashSet::new();
+        while let Some(idx) = stack.pop() {
+            if !visited.insert(idx) {
+                continue;
+            }
+            if idx == target_idx {
+                return true;
+            }
+            if idx == stop_idx {
+                continue;
+            }
+            if let Some(succs) = self.successors.get(idx) {
+                for succ in succs {
+                    if !visited.contains(succ) {
+                        stack.push(*succ);
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn classify_loop_carried_value_kind(
         output: &Varnode,
         redef_op: &PcodeOp,
@@ -4429,6 +4711,159 @@ mod tests {
             detail.carried_value_kind,
             LoopCarriedValueKind::PointerAdvance
         );
+    }
+
+    #[test]
+    fn loop_boolean_flag_proof_marks_same_guard_as_exit_for_header_predicate() {
+        let output = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let predicate = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x21,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::BoolNegate,
+                        Some(predicate.clone()),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), predicate.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x30), constant(0)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+            block_at(0x1020, 2, vec![op(4, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1, 2];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let proof = builder
+            .describe_loop_boolean_flag_proof(&blocks[1], 0, &output, &redef, 0x1000, 0)
+            .expect("loop boolean proof");
+
+        assert_eq!(proof.consumer_opcode, PcodeOpcode::BoolNegate);
+        assert_eq!(proof.guard_family, LoopBooleanGuardFamily::NegatedFlag);
+        assert!(proof.same_guard_as_exit);
+        assert!(proof.consumer_is_loop_header_predicate);
+        assert_eq!(proof.backedge_edge, Some(0x1010));
+        assert_eq!(proof.exit_edge, Some(0x1020));
+        assert!(!proof.old_def_has_pre_redef_use);
+        assert!(proof.redef_dominates_backedge);
+    }
+
+    #[test]
+    fn loop_boolean_flag_proof_marks_non_predicate_carried_state() {
+        let output = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let copied = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x21,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let unrelated = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x22,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(copied.clone()),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), unrelated.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x30), constant(0)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+            block_at(0x1020, 2, vec![op(4, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1, 2];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let proof = builder
+            .describe_loop_boolean_flag_proof(&blocks[1], 0, &output, &redef, 0x1000, 0)
+            .expect("loop boolean proof");
+
+        assert_eq!(proof.consumer_opcode, PcodeOpcode::Copy);
+        assert_eq!(proof.guard_family, LoopBooleanGuardFamily::NonPredicate);
+        assert!(!proof.same_guard_as_exit);
+        assert!(!proof.consumer_is_loop_header_predicate);
+        assert_eq!(proof.backedge_edge, Some(0x1010));
+        assert_eq!(proof.exit_edge, Some(0x1020));
+        assert!(!proof.old_def_has_pre_redef_use);
+        assert!(proof.redef_dominates_backedge);
     }
 
     #[test]
