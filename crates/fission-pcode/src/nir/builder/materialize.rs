@@ -127,6 +127,19 @@ struct CopyOverwriteRestartProof {
     consumer_op_seq: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PredicateOverwriteRefreshProof {
+    consumer_relation: CrossBlockConsumerRelation,
+    redef_op_seq: u32,
+    redef_rhs: String,
+    predicate_consumer_block_addr: u64,
+    predicate_consumer_op_seq: u32,
+    predicate_rhs: String,
+    same_guard_family: bool,
+    old_def_has_pre_redef_use: bool,
+    redef_dominates_predicate: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SameBlockOverwriteShapeKind {
     OverwriteBeforeBranch,
@@ -361,7 +374,12 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
         hazard: AliasUnsafeHazard,
     ) {
-        let Some(block) = self.pcode.blocks.iter().find(|block| block.start_address == block_addr) else {
+        let Some(block) = self
+            .pcode
+            .blocks
+            .iter()
+            .find(|block| block.start_address == block_addr)
+        else {
             return;
         };
         let Some(op_idx) = block.ops.iter().position(|op| op.seq_num == op_seq) else {
@@ -501,7 +519,8 @@ impl<'a> PreviewBuilder<'a> {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
         }
-        let Some(proof) = self.describe_copy_overwrite_restart_proof(block, op_idx, output, redef) else {
+        let Some(proof) = self.describe_copy_overwrite_restart_proof(block, op_idx, output, redef)
+        else {
             return;
         };
         self.emit_ready_trace(format!(
@@ -518,6 +537,45 @@ impl<'a> PreviewBuilder<'a> {
             proof.same_value,
             proof.redef_dominates_consumer,
             proof.old_def_has_pre_redef_use,
+        ));
+    }
+
+    fn trace_predicate_overwrite_refresh_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_relation: CrossBlockConsumerRelation,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_predicate_overwrite_refresh_proof(
+            block,
+            op_idx,
+            output,
+            redef,
+            consumer_relation,
+        ) else {
+            return;
+        };
+        self.emit_ready_trace(format!(
+            "predicate-overwrite-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} redef_rhs={} predicate_consumer_block=0x{:x} predicate_consumer_op_seq={} predicate_rhs={} same_guard_family={} old_def_has_pre_redef_use={} redef_dominates_predicate={} consumer_relation={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops[op_idx].seq_num,
+            proof.redef_op_seq,
+            proof.redef_rhs,
+            proof.predicate_consumer_block_addr,
+            proof.predicate_consumer_op_seq,
+            proof.predicate_rhs,
+            proof.same_guard_family,
+            proof.old_def_has_pre_redef_use,
+            proof.redef_dominates_predicate,
+            proof.consumer_relation,
         ));
     }
 
@@ -608,7 +666,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_is_side_effectful_for_materialization_trace(lhs)
                     || Self::expr_is_side_effectful_for_materialization_trace(rhs)
             }
-            HirExpr::Load { ptr, .. } => Self::expr_is_side_effectful_for_materialization_trace(ptr),
+            HirExpr::Load { ptr, .. } => {
+                Self::expr_is_side_effectful_for_materialization_trace(ptr)
+            }
             HirExpr::PtrOffset { base, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(base)
             }
@@ -1118,9 +1178,12 @@ impl<'a> PreviewBuilder<'a> {
     ) -> ReplacementValuePlan {
         self.replacement_plan_candidate_count += 1;
         if Self::copy_overwrite_restart_enabled() {
-            if let Some(proof) = self
-                .can_restart_def_window_at_copy_overwrite(block, op_idx, terminator_index, output)
-            {
+            if let Some(proof) = self.can_restart_def_window_at_copy_overwrite(
+                block,
+                op_idx,
+                terminator_index,
+                output,
+            ) {
                 self.emit_ready_trace(format!(
                     "def-window-restarted-at-copy-overwrite output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} consumer_block=0x{:x} consumer_op_seq={} relation={:?} redef_rhs={} same_value={} redef_dominates_consumer={} old_def_has_pre_redef_use={}",
                     output.space_id,
@@ -1199,13 +1262,19 @@ impl<'a> PreviewBuilder<'a> {
             self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
         if !matches!(
             provenance.relation,
-            CrossBlockConsumerRelation::SuccessorBlock | CrossBlockConsumerRelation::PostDominatorBlock
+            CrossBlockConsumerRelation::SuccessorBlock
+                | CrossBlockConsumerRelation::PostDominatorBlock
         ) || provenance.consumer_is_multiequal
             || provenance.relation == CrossBlockConsumerRelation::LoopBackedge
         {
             return None;
         }
-        let redef = self.describe_cross_block_redefinition_detail(block, op_idx, output, consumer_block_addr)?;
+        let redef = self.describe_cross_block_redefinition_detail(
+            block,
+            op_idx,
+            output,
+            consumer_block_addr,
+        )?;
         let proof = self.describe_copy_overwrite_restart_proof(block, op_idx, output, &redef)?;
         if !proof.same_value || !proof.redef_dominates_consumer || proof.old_def_has_pre_redef_use {
             return None;
@@ -1228,7 +1297,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn copy_overwrite_rhs_is_pure_restart_candidate(redef: &CrossBlockRedefinitionDetail) -> bool {
         matches!(redef.redef_rhs_kind, SameBlockOverwriteRhsKind::CopyLike)
-            && matches!(redef.overwrite_shape, SameBlockOverwriteShapeKind::OverwriteAtCopy)
+            && matches!(
+                redef.overwrite_shape,
+                SameBlockOverwriteShapeKind::OverwriteAtCopy
+            )
     }
 
     fn no_alias_hazard_between_redef_and_terminator(
@@ -1345,9 +1417,14 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> NoConsumerMaterializationProfile {
-        let same_block_consumers = Self::collect_output_use_sites_in_block(block, op_idx, output).len();
+        let same_block_consumers =
+            Self::collect_output_use_sites_in_block(block, op_idx, output).len();
         let (cross_block_consumers, has_phi_merge_use) =
-            Self::collect_output_use_sites_outside_block(&self.pcode.blocks, block.start_address, output);
+            Self::collect_output_use_sites_outside_block(
+                &self.pcode.blocks,
+                block.start_address,
+                output,
+            );
         NoConsumerMaterializationProfile {
             same_block_consumers,
             cross_block_consumers,
@@ -1473,7 +1550,11 @@ impl<'a> PreviewBuilder<'a> {
             return NoConsumerSuppressionBlockPosition::Local;
         };
         if self.successors.get(block_idx).is_some_and(|succs| {
-            succs.iter().any(|succ| self.predecessors.get(*succ).is_some_and(|preds| preds.len() > 1))
+            succs.iter().any(|succ| {
+                self.predecessors
+                    .get(*succ)
+                    .is_some_and(|preds| preds.len() > 1)
+            })
         }) {
             return NoConsumerSuppressionBlockPosition::MergeAdjacent;
         }
@@ -1522,7 +1603,8 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
         }
-        if let Some((redef_idx, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output)
+        if let Some((redef_idx, redef_op)) =
+            Self::first_output_redefinition_in_block(block, op_idx, output)
         {
             return AliasUnsafeHazard::new(
                 AliasUnsafeHazardKind::UnknownMalformedDefUseWindow,
@@ -1531,7 +1613,12 @@ impl<'a> PreviewBuilder<'a> {
                 Some(redef_op.opcode),
             );
         }
-        AliasUnsafeHazard::new(AliasUnsafeHazardKind::UnknownNoConsumerFound, None, None, None)
+        AliasUnsafeHazard::new(
+            AliasUnsafeHazardKind::UnknownNoConsumerFound,
+            None,
+            None,
+            None,
+        )
     }
 
     fn first_intervening_alias_unsafe_hazard(
@@ -1617,11 +1704,14 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<(usize, &'b PcodeOp)> {
         let key = VarnodeKey::from(output);
-        block.ops
+        block
+            .ops
             .iter()
             .enumerate()
             .skip(start_idx)
-            .find(|(_, candidate)| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
+            .find(|(_, candidate)| {
+                candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone())
+            })
     }
 
     fn collect_output_use_sites_in_block_unbounded<'b>(
@@ -1630,7 +1720,8 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Vec<(usize, &'b PcodeOp)> {
         let key = VarnodeKey::from(output);
-        block.ops
+        block
+            .ops
             .iter()
             .enumerate()
             .skip(op_idx + 1)
@@ -1654,7 +1745,8 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .filter(|block| block.start_address != current_block_addr)
             .find_map(|block| {
-                block.ops
+                block
+                    .ops
                     .iter()
                     .enumerate()
                     .find(|(_, candidate)| {
@@ -1736,13 +1828,19 @@ impl<'a> PreviewBuilder<'a> {
             block_index_present,
             Self::first_output_redefinition_in_block(block, op_idx, output).is_some(),
         );
-        let consumer_count = same_block_consumers.len() + usize::from(first_cross_block_consumer.is_some());
+        let consumer_count =
+            same_block_consumers.len() + usize::from(first_cross_block_consumer.is_some());
         let (first_consumer_block, first_consumer_idx, first_consumer_op_seq) =
             if let Some((idx, op)) = first_same_block_consumer {
                 (Some(block.start_address), Some(idx), Some(op.seq_num))
-            } else if let Some((consumer_block, consumer_idx, consumer_op_seq)) = first_cross_block_consumer
+            } else if let Some((consumer_block, consumer_idx, consumer_op_seq)) =
+                first_cross_block_consumer
             {
-                (Some(consumer_block), Some(consumer_idx), Some(consumer_op_seq))
+                (
+                    Some(consumer_block),
+                    Some(consumer_idx),
+                    Some(consumer_op_seq),
+                )
             } else {
                 (None, None, None)
             };
@@ -1768,7 +1866,8 @@ impl<'a> PreviewBuilder<'a> {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
         }
-        let Some(provenance) = self.describe_cross_block_consumer_provenance(block, op_idx, output) else {
+        let Some(provenance) = self.describe_cross_block_consumer_provenance(block, op_idx, output)
+        else {
             return;
         };
         let def_successors = self
@@ -1776,8 +1875,14 @@ impl<'a> PreviewBuilder<'a> {
             .get(&block.start_address)
             .and_then(|idx| self.successors.get(*idx))
             .map(|succs| {
-                succs.iter()
-                    .filter_map(|succ| self.pcode.blocks.get(*succ).map(|block| format!("0x{:x}", block.start_address)))
+                succs
+                    .iter()
+                    .filter_map(|succ| {
+                        self.pcode
+                            .blocks
+                            .get(*succ)
+                            .map(|block| format!("0x{:x}", block.start_address))
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             })
@@ -1814,7 +1919,8 @@ impl<'a> PreviewBuilder<'a> {
             provenance.2.consumer_is_join,
             provenance.2.redefined_before_consumer,
         ));
-        if let Some(proof) = self.describe_cross_block_replacement_proof(block, op_idx, output, rhs) {
+        if let Some(proof) = self.describe_cross_block_replacement_proof(block, op_idx, output, rhs)
+        {
             let consumer_block = provenance
                 .0
                 .map(|addr| format!("0x{addr:x}"))
@@ -1871,6 +1977,16 @@ impl<'a> PreviewBuilder<'a> {
                 ));
                 if redef.overwrite_shape == SameBlockOverwriteShapeKind::OverwriteAtCopy {
                     self.trace_copy_overwrite_restart_proof(block, op_idx, output, &redef);
+                } else if redef.overwrite_shape
+                    == SameBlockOverwriteShapeKind::OverwriteAtPredicateProducer
+                {
+                    self.trace_predicate_overwrite_refresh_proof(
+                        block,
+                        op_idx,
+                        output,
+                        &redef,
+                        proof.relation,
+                    );
                 }
             }
         }
@@ -1893,7 +2009,10 @@ impl<'a> PreviewBuilder<'a> {
             .successors
             .get(def_block_idx)
             .is_some_and(|succs| succs.contains(&consumer_block_idx));
-        let consumer_predecessor_count = self.predecessors.get(consumer_block_idx).map_or(0, Vec::len);
+        let consumer_predecessor_count = self
+            .predecessors
+            .get(consumer_block_idx)
+            .map_or(0, Vec::len);
         let consumer_is_join = consumer_predecessor_count > 1;
         let redefined_before_consumer =
             Self::first_output_redefinition_in_block(block, op_idx, output).is_some();
@@ -1944,7 +2063,8 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<CrossBlockReplacementProof> {
-        let (_, _, provenance) = self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+        let (_, _, provenance) =
+            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
         let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
         let (consumer_block_addr, _, _) =
             self.first_output_use_site_outside_block(block.start_address, output)?;
@@ -1990,16 +2110,17 @@ impl<'a> PreviewBuilder<'a> {
         let consumer_block_addr = consumer_block_addr?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
-        let (consumer_idx, consumer_op) = consumer_block
-            .ops
-            .iter()
-            .enumerate()
-            .find(|(_, candidate)| {
-                candidate
-                    .inputs
-                    .iter()
-                    .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
-            })?;
+        let (consumer_idx, consumer_op) =
+            consumer_block
+                .ops
+                .iter()
+                .enumerate()
+                .find(|(_, candidate)| {
+                    candidate
+                        .inputs
+                        .iter()
+                        .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
+                })?;
         let consumer_relation = self
             .describe_cross_block_consumer_provenance(block, op_idx, output)
             .map(|(_, _, provenance)| provenance.relation)
@@ -2007,7 +2128,9 @@ impl<'a> PreviewBuilder<'a> {
 
         let terminator_idx = self.block_terminator_index(block);
 
-        if let Some((redef_idx, redef_op)) = Self::first_output_redefinition_in_block(block, op_idx, output) {
+        if let Some((redef_idx, redef_op)) =
+            Self::first_output_redefinition_in_block(block, op_idx, output)
+        {
             return Some(CrossBlockRedefinitionDetail {
                 relation: CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef,
                 redef_block_addr: block.start_address,
@@ -2161,8 +2284,8 @@ impl<'a> PreviewBuilder<'a> {
                     && candidate.start_address != consumer_block_addr
             })
             .find_map(|candidate| {
-                Self::first_output_redefinition_in_block_from(candidate, 0, output).map(|(_, op)| {
-                    CrossBlockRedefinitionDetail {
+                Self::first_output_redefinition_in_block_from(candidate, 0, output).map(
+                    |(_, op)| CrossBlockRedefinitionDetail {
                         relation: CrossBlockRedefinitionRelation::UnknownRedefinition,
                         redef_block_addr: candidate.start_address,
                         redef_op_idx: 0,
@@ -2172,8 +2295,8 @@ impl<'a> PreviewBuilder<'a> {
                         overwrite_shape: SameBlockOverwriteShapeKind::OverwriteUnknown,
                         def_to_redef_gap: 0,
                         redef_to_terminator_gap: None,
-                    }
-                })
+                    },
+                )
             })
     }
 
@@ -2194,18 +2317,20 @@ impl<'a> PreviewBuilder<'a> {
             self.first_output_use_site_outside_block(block.start_address, output)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
-        let (_consumer_idx, consumer_op) = consumer_block
-            .ops
-            .iter()
-            .enumerate()
-            .find(|(_, candidate)| {
-                candidate
-                    .inputs
-                    .iter()
-                    .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
-            })?;
+        let (_consumer_idx, consumer_op) =
+            consumer_block
+                .ops
+                .iter()
+                .enumerate()
+                .find(|(_, candidate)| {
+                    candidate
+                        .inputs
+                        .iter()
+                        .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
+                })?;
         let def_op = block.ops.get(op_idx)?;
-        let old_def_has_pre_redef_use = !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
+        let old_def_has_pre_redef_use =
+            !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
         let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
         let redef_dominates_consumer = self.dom_tree.dominates(def_block_idx, consumer_block_idx)
             && self
@@ -2221,6 +2346,88 @@ impl<'a> PreviewBuilder<'a> {
             consumer_block_addr,
             consumer_op_seq: consumer_op.seq_num,
         })
+    }
+
+    fn describe_predicate_overwrite_refresh_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_relation: CrossBlockConsumerRelation,
+    ) -> Option<PredicateOverwriteRefreshProof> {
+        if redef.relation != CrossBlockRedefinitionRelation::RedefinedInDefBlockAfterDef
+            || redef.overwrite_shape != SameBlockOverwriteShapeKind::OverwriteAtPredicateProducer
+        {
+            return None;
+        }
+        let redef_op = block.ops.get(redef.redef_op_idx)?;
+        let (consumer_block_addr, _, _) =
+            self.first_output_use_site_outside_block(block.start_address, output)?;
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let (_consumer_idx, consumer_op) =
+            consumer_block
+                .ops
+                .iter()
+                .enumerate()
+                .find(|(_, candidate)| {
+                    candidate
+                        .inputs
+                        .iter()
+                        .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output))
+                })?;
+        let old_def_has_pre_redef_use =
+            !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
+        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let redef_dominates_predicate = self.dom_tree.dominates(def_block_idx, consumer_block_idx)
+            && self
+                .block_terminator_index(block)
+                .is_some_and(|term_idx| redef.redef_op_idx < term_idx);
+        Some(PredicateOverwriteRefreshProof {
+            consumer_relation,
+            redef_op_seq: redef.redef_op_seq,
+            redef_rhs: Self::format_copy_overwrite_inputs(&redef_op.inputs),
+            predicate_consumer_block_addr: consumer_block_addr,
+            predicate_consumer_op_seq: consumer_op.seq_num,
+            predicate_rhs: Self::format_copy_overwrite_inputs(&consumer_op.inputs),
+            same_guard_family: Self::predicate_consumer_matches_output_guard_family(
+                consumer_op,
+                output,
+            ),
+            old_def_has_pre_redef_use,
+            redef_dominates_predicate,
+        })
+    }
+
+    fn predicate_consumer_matches_output_guard_family(
+        consumer_op: &PcodeOp,
+        output: &Varnode,
+    ) -> bool {
+        let key = VarnodeKey::from(output);
+        match consumer_op.opcode {
+            PcodeOpcode::BoolNegate => consumer_op
+                .inputs
+                .first()
+                .is_some_and(|input| VarnodeKey::from(input) == key),
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual | PcodeOpcode::BoolXor => {
+                if consumer_op.inputs.len() != 2 {
+                    return false;
+                }
+                let lhs_matches = VarnodeKey::from(&consumer_op.inputs[0]) == key
+                    && consumer_op.inputs[1].is_constant
+                    && consumer_op.inputs[1].constant_val <= 1;
+                let rhs_matches = VarnodeKey::from(&consumer_op.inputs[1]) == key
+                    && consumer_op.inputs[0].is_constant
+                    && consumer_op.inputs[0].constant_val <= 1;
+                lhs_matches || rhs_matches
+            }
+            PcodeOpcode::CBranch => consumer_op
+                .inputs
+                .get(1)
+                .is_some_and(|input| VarnodeKey::from(input) == key),
+            _ => false,
+        }
     }
 
     fn ops_share_copylike_value(def_op: &PcodeOp, redef_op: &PcodeOp) -> bool {
@@ -2607,7 +2814,11 @@ mod tests {
         }
     }
 
-    fn block_at(start_address: u64, index: u32, ops: Vec<PcodeOp>) -> crate::pcode::PcodeBasicBlock {
+    fn block_at(
+        start_address: u64,
+        index: u32,
+        ops: Vec<PcodeOp>,
+    ) -> crate::pcode::PcodeBasicBlock {
         crate::pcode::PcodeBasicBlock {
             index,
             start_address,
@@ -2993,8 +3204,18 @@ mod tests {
     fn alias_unsafe_unknown_subtyping_marks_redefinition_before_consumer() {
         let output = varnode(0x10);
         let block = block(vec![
-            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-            op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(2)],
+            ),
         ]);
 
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
@@ -3017,12 +3238,7 @@ mod tests {
     #[test]
     fn malformed_def_use_window_relation_marks_terminator_missing() {
         let relation = PreviewBuilder::classify_malformed_def_use_window_relation(
-            0,
-            None,
-            None,
-            None,
-            true,
-            true,
+            0, None, None, None, true, true,
         );
 
         assert_eq!(relation, MalformedDefUseWindowRelation::TerminatorMissing);
@@ -3067,23 +3283,36 @@ mod tests {
         let output = varnode(0x10);
         let rhs = HirExpr::Const(1, int(32));
         let mut blocks = vec![
-            block_at(0x1000, 0, vec![op(
+            block_at(
+                0x1000,
                 0,
-                PcodeOpcode::Copy,
-                Some(output.clone()),
-                vec![constant(1)],
-            )]),
+                vec![op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(output.clone()),
+                    vec![constant(1)],
+                )],
+            ),
             block_at(
                 0x1010,
                 1,
-                vec![op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![constant(2)])],
+                vec![op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![constant(2)],
+                )],
             ),
-            block_at(0x1020, 2, vec![op(
+            block_at(
+                0x1020,
                 2,
-                PcodeOpcode::MultiEqual,
-                Some(varnode(0x30)),
-                vec![output.clone(), varnode(0x20)],
-            )]),
+                vec![op(
+                    2,
+                    PcodeOpcode::MultiEqual,
+                    Some(varnode(0x30)),
+                    vec![output.clone(), varnode(0x20)],
+                )],
+            ),
         ];
         blocks[0].successors = vec![2];
         blocks[1].successors = vec![2];
@@ -3095,7 +3324,10 @@ mod tests {
             .describe_cross_block_consumer_provenance(&blocks[0], 0, &output)
             .expect("cross-block provenance");
 
-        assert_eq!(provenance.2.relation, CrossBlockConsumerRelation::MergePhiConsumer);
+        assert_eq!(
+            provenance.2.relation,
+            CrossBlockConsumerRelation::MergePhiConsumer
+        );
         assert!(provenance.2.consumer_is_multiequal);
         let proof = builder
             .describe_cross_block_replacement_proof(&blocks[0], 0, &output, &rhs)
@@ -3109,18 +3341,26 @@ mod tests {
         let output = varnode(0x10);
         let rhs = HirExpr::Const(1, int(32));
         let mut blocks = vec![
-            block_at(0x1000, 0, vec![op(
+            block_at(
+                0x1000,
                 0,
-                PcodeOpcode::Copy,
-                Some(output.clone()),
-                vec![constant(1)],
-            )]),
-            block_at(0x1010, 1, vec![op(
+                vec![op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(output.clone()),
+                    vec![constant(1)],
+                )],
+            ),
+            block_at(
+                0x1010,
                 1,
-                PcodeOpcode::Copy,
-                Some(varnode(0x20)),
-                vec![output.clone()],
-            )]),
+                vec![op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
+            ),
         ];
         blocks[0].successors = vec![1];
         let pcode = pcode_function(blocks.clone());
@@ -3131,7 +3371,10 @@ mod tests {
             .describe_cross_block_consumer_provenance(&blocks[0], 0, &output)
             .expect("cross-block provenance");
 
-        assert_eq!(provenance.2.relation, CrossBlockConsumerRelation::SuccessorBlock);
+        assert_eq!(
+            provenance.2.relation,
+            CrossBlockConsumerRelation::SuccessorBlock
+        );
         assert!(!provenance.2.consumer_is_multiequal);
         assert!(provenance.2.immediate_successor);
         assert!(!provenance.2.consumer_is_join);
@@ -3152,14 +3395,29 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(2)],
+                    ),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(2, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+                vec![op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3186,14 +3444,29 @@ mod tests {
             block_at(
                 0x1000,
                 0,
-                vec![op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)])],
+                vec![op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(output.clone()),
+                    vec![constant(1)],
+                )],
             ),
             block_at(
                 0x1010,
                 1,
                 vec![
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(2)]),
-                    op(2, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(2)],
+                    ),
+                    op(
+                        2,
+                        PcodeOpcode::Copy,
+                        Some(varnode(0x20)),
+                        vec![output.clone()],
+                    ),
                 ],
             ),
         ];
@@ -3222,15 +3495,30 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
                     op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+                vec![op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3241,7 +3529,10 @@ mod tests {
         let redef = builder
             .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
             .expect("cross-block redefinition");
-        assert_eq!(redef.overwrite_shape, SameBlockOverwriteShapeKind::OverwriteAtCopy);
+        assert_eq!(
+            redef.overwrite_shape,
+            SameBlockOverwriteShapeKind::OverwriteAtCopy
+        );
 
         let proof = builder
             .describe_copy_overwrite_restart_proof(&blocks[0], 0, &output, &redef)
@@ -3263,15 +3554,30 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
                     op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+                vec![op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3283,7 +3589,10 @@ mod tests {
             .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
             .expect("restart proof");
 
-        assert_eq!(proof.consumer_relation, CrossBlockConsumerRelation::SuccessorBlock);
+        assert_eq!(
+            proof.consumer_relation,
+            CrossBlockConsumerRelation::SuccessorBlock
+        );
         assert!(proof.same_value);
         assert!(proof.redef_dominates_consumer);
         assert!(!proof.old_def_has_pre_redef_use);
@@ -3297,16 +3606,35 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
                     op(2, PcodeOpcode::Branch, None, vec![constant(0x1008)]),
                 ],
             ),
-            block_at(0x1008, 1, vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)])]),
+            block_at(
+                0x1008,
+                1,
+                vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            ),
             block_at(
                 0x1010,
                 2,
-                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+                vec![op(
+                    4,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3319,7 +3647,10 @@ mod tests {
             .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
             .expect("restart proof");
 
-        assert_eq!(proof.consumer_relation, CrossBlockConsumerRelation::PostDominatorBlock);
+        assert_eq!(
+            proof.consumer_relation,
+            CrossBlockConsumerRelation::PostDominatorBlock
+        );
         assert!(proof.same_value);
         assert!(proof.redef_dominates_consumer);
         assert!(!proof.old_def_has_pre_redef_use);
@@ -3333,16 +3664,36 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
-                    op(2, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(varnode(0x20)),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        2,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
                     op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x30)), vec![output.clone()])],
+                vec![op(
+                    4,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x30)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3350,9 +3701,11 @@ mod tests {
         let options = test_options();
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
-        assert!(builder
-            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
-            .is_none());
+        assert!(
+            builder
+                .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
+                .is_none()
+        );
     }
 
     #[test]
@@ -3364,15 +3717,30 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Load, Some(output.clone()), vec![constant(0), ptr.clone()]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Load,
+                        Some(output.clone()),
+                        vec![constant(0), ptr.clone()],
+                    ),
                     op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(3, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()])],
+                vec![op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3380,9 +3748,11 @@ mod tests {
         let options = test_options();
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
-        assert!(builder
-            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
-            .is_none());
+        assert!(
+            builder
+                .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(2), &output)
+                .is_none()
+        );
     }
 
     #[test]
@@ -3394,16 +3764,36 @@ mod tests {
                 0x1000,
                 0,
                 vec![
-                    op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(1, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-                    op(2, PcodeOpcode::Load, Some(varnode(0x20)), vec![constant(0), ptr.clone()]),
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        2,
+                        PcodeOpcode::Load,
+                        Some(varnode(0x20)),
+                        vec![constant(0), ptr.clone()],
+                    ),
                     op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
                 ],
             ),
             block_at(
                 0x1010,
                 1,
-                vec![op(4, PcodeOpcode::Copy, Some(varnode(0x30)), vec![output.clone()])],
+                vec![op(
+                    4,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x30)),
+                    vec![output.clone()],
+                )],
             ),
         ];
         blocks[0].successors = vec![1];
@@ -3411,17 +3801,142 @@ mod tests {
         let options = test_options();
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
-        assert!(builder
-            .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
-            .is_none());
+        assert!(
+            builder
+                .can_restart_def_window_at_copy_overwrite(&blocks[0], 0, Some(3), &output)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn predicate_overwrite_refresh_proof_marks_same_guard_family_for_bool_negate_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x11), constant(0)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x12), constant(0)],
+                    ),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(
+                    3,
+                    PcodeOpcode::BoolNegate,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
+            .expect("redef");
+
+        let proof = builder
+            .describe_predicate_overwrite_refresh_proof(
+                &blocks[0],
+                0,
+                &output,
+                &redef,
+                CrossBlockConsumerRelation::PostDominatorBlock,
+            )
+            .expect("predicate proof");
+
+        assert!(proof.same_guard_family);
+        assert!(proof.redef_dominates_predicate);
+        assert!(!proof.old_def_has_pre_redef_use);
+    }
+
+    #[test]
+    fn predicate_overwrite_refresh_proof_marks_non_guard_family_for_plain_copy_consumer() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x11), constant(0)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x12), constant(0)],
+                    ),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[0], 0, &output, Some(0x1010))
+            .expect("redef");
+
+        let proof = builder
+            .describe_predicate_overwrite_refresh_proof(
+                &blocks[0],
+                0,
+                &output,
+                &redef,
+                CrossBlockConsumerRelation::SuccessorBlock,
+            )
+            .expect("predicate proof");
+
+        assert!(!proof.same_guard_family);
+        assert!(proof.redef_dominates_predicate);
     }
 
     #[test]
     fn alias_unsafe_unknown_subtyping_marks_allowed_consumer_but_non_low_cost_rhs() {
         let output = varnode(0x10);
         let block = block(vec![
-            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
-            op(1, PcodeOpcode::Copy, Some(varnode(0x20)), vec![output.clone()]),
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            ),
         ]);
 
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(
@@ -3449,9 +3964,19 @@ mod tests {
     fn alias_unsafe_unknown_subtyping_marks_after_terminator_single_consumer() {
         let output = varnode(0x10);
         let block = block(vec![
-            op(0, PcodeOpcode::Copy, Some(output.clone()), vec![constant(1)]),
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
             op(1, PcodeOpcode::Branch, None, vec![constant(0x2000)]),
-            op(2, PcodeOpcode::IntEqual, Some(varnode(0x20)), vec![output.clone(), constant(0)]),
+            op(
+                2,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
         ]);
 
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(

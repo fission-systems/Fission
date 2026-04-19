@@ -9,6 +9,50 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Predicate overwrite refresh proof tracing
+
+This wave stayed diagnostic-only. It did not widen cross-block replacement, relax stable-representative requirements, or re-enable the copy-overwrite restart path. The goal was to isolate the smaller `OverwriteAtPredicateProducer = 24` slice on `0x140006c20` and prove whether it behaves like a same-guard refresh family or a real predicate update family.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated predicate-overwrite trace when a cross-block consumer falls through `RedefinedInDefBlockAfterDef + OverwriteAtPredicateProducer`:
+  - `predicate-overwrite-proof output=... def_op_seq=... redef_op_seq=... redef_rhs=... predicate_consumer_block=... predicate_consumer_op_seq=... predicate_rhs=... same_guard_family=... old_def_has_pre_redef_use=... redef_dominates_predicate=... consumer_relation=...`
+- the proof is intentionally narrow and builder-local:
+  - it only fires for `OverwriteAtPredicateProducer`
+  - it records whether the redefinition still dominates the predicate consumer
+  - it records whether the old definition had any pre-redef use
+  - it classifies the consumer as same-guard-family only when the consumer is a trivial booleanized use of the refreshed output (`BoolNegate`, `IntEqual/IntNotEqual` with `0/1`, or branch-on-output)
+- unit coverage now pins both sides of the classification:
+  - a `BoolNegate` consumer is treated as same-guard-family
+  - a plain `Copy` consumer is not
+
+Validation:
+
+- `cargo test -p fission-pcode predicate_overwrite_refresh_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the targeted `0x140006c20` predicate overwrite slice stays split into the same two live shapes already implied by the cross-block provenance trace:
+  - one `PostDominatorBlock` consumer with `consumer_opcode=BoolNegate`
+  - one `SuccessorBlock` consumer with `consumer_opcode=IntNotEqual`
+- the proof split is now explicit instead of inferred:
+  - the `PostDominatorBlock + BoolNegate` family records `same_guard_family=true`
+  - the `SuccessorBlock + IntNotEqual(output, other_pred)` family records `same_guard_family=false`
+- both live families currently still record:
+  - `old_def_has_pre_redef_use=false`
+  - `redef_dominates_predicate=true`
+- both cases are now explicit predicate-proof targets instead of being buried under the broader overwrite histogram
+- this is enough to decide the next owner based on proof distribution rather than on overwrite shape names alone
+
+Conclusion:
+
+- `OverwriteAtPredicateProducer = 24` is now a real proof family instead of a coarse histogram bucket
+- the next algorithmic decision is whether the observed predicate overwrite cases are mostly:
+  - same-guard refresh / boolean canonicalization
+  - or true predicate state updates that still require stable representatives
+- `OverwriteAtLoopUpdate = 156` remains out of scope for this wave and continues to belong to the loop-carried / merge-boundary owner
+
 ### Copy overwrite def-window restart rollback to env-gated experiment
 
 This wave did implement the narrow `OverwriteAtCopy = 12` restart policy on `0x140006c20`, but it did not hold up against the same-axis `putty limit50` quality gate. The policy now remains available only as an opt-in experiment while the proof and trace infrastructure stay in the default path.
