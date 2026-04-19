@@ -326,6 +326,54 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn classify_unknown_consumer_kind_reason(
+        opcode: PcodeOpcode,
+        matched_inputs: &[usize],
+    ) -> UnknownConsumerKindReason {
+        if matched_inputs.len() > 1 {
+            return UnknownConsumerKindReason::ConsumerHasMultipleMatchedInputs;
+        }
+        match opcode {
+            PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                UnknownConsumerKindReason::ConsumerIsIndirectUse
+            }
+            PcodeOpcode::Branch
+            | PcodeOpcode::BranchInd
+            | PcodeOpcode::CBranch
+            | PcodeOpcode::Return => UnknownConsumerKindReason::ConsumerIsControlLike,
+            PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub => {
+                UnknownConsumerKindReason::ConsumerIsAddressComputation
+            }
+            PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt => UnknownConsumerKindReason::ConsumerIsSubpieceOrCast,
+            PcodeOpcode::Call | PcodeOpcode::Store => {
+                UnknownConsumerKindReason::ConsumerInputRoleUnknown
+            }
+            PcodeOpcode::Copy
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::Load
+            | PcodeOpcode::MultiEqual => UnknownConsumerKindReason::ConsumerOpcodeUnhandled,
+            _ => UnknownConsumerKindReason::Unknown,
+        }
+    }
+
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
         match expr {
             HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
@@ -535,8 +583,7 @@ impl<'a> PreviewBuilder<'a> {
     fn expr_boolean_like(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Const(_, ty) => {
-                matches!(ty, NirType::Bool)
-                    || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+                matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
             HirExpr::Cast { ty, expr } => match ty {
                 NirType::Bool => true,
@@ -698,12 +745,36 @@ impl<'a> PreviewBuilder<'a> {
             consumer_block_addr: block.start_address,
             consumer_op_seq: use_op.seq_num,
             consumer_opcode: use_op.opcode,
+            matched_input_indices: matched_inputs,
             consumer_kind,
             rhs_kind,
             rhs_low_cost,
             rhs_has_load,
             rhs_has_call,
             reason,
+        })
+    }
+
+    pub(super) fn describe_unknown_consumer_kind_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<UnknownConsumerKindProof> {
+        let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
+        if base.reason != DisallowedSingleConsumerReason::UnknownConsumerKind {
+            return None;
+        }
+        Some(UnknownConsumerKindProof {
+            consumer_block_addr: base.consumer_block_addr,
+            consumer_op_seq: base.consumer_op_seq,
+            consumer_opcode: base.consumer_opcode,
+            matched_input_indices: base.matched_input_indices.clone(),
+            rhs_kind: base.rhs_kind,
+            reason: Self::classify_unknown_consumer_kind_reason(
+                base.consumer_opcode,
+                &base.matched_input_indices,
+            ),
         })
     }
 
@@ -1557,6 +1628,74 @@ mod tests {
             DisallowedSingleConsumerReason::ConsumerIsCallArg
         );
         assert_eq!(proof.consumer_opcode, PcodeOpcode::Call);
+    }
+
+    #[test]
+    fn unknown_consumer_kind_proof_marks_address_computation() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PtrAdd,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(4)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_unknown_consumer_kind_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        )
+        .expect("unknown consumer proof");
+
+        assert_eq!(proof.consumer_opcode, PcodeOpcode::PtrAdd);
+        assert_eq!(proof.matched_input_indices, vec![0]);
+        assert_eq!(
+            proof.reason,
+            UnknownConsumerKindReason::ConsumerIsAddressComputation
+        );
+    }
+
+    #[test]
+    fn unknown_consumer_kind_proof_marks_multiple_matched_inputs() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(varnode(0x20)),
+                vec![output.clone(), output.clone()],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_unknown_consumer_kind_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        )
+        .expect("unknown consumer proof");
+
+        assert_eq!(proof.consumer_opcode, PcodeOpcode::IntAdd);
+        assert_eq!(proof.matched_input_indices, vec![0, 1]);
+        assert_eq!(
+            proof.reason,
+            UnknownConsumerKindReason::ConsumerHasMultipleMatchedInputs
+        );
     }
 
     #[test]

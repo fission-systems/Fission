@@ -9,6 +9,75 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` unknown consumer kind subtyping
+
+This wave stayed diagnostic-only. It does not widen single-consumer replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the remaining `DisallowedSingleConsumer -> UnknownConsumerKind=443` slice on `0x140008090` and determine whether it still hides multiple consumer families or has already collapsed to one concrete blind spot.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries unknown-consumer-kind proof vocabulary:
+  - `UnknownConsumerKindReason`
+    - `ConsumerOpcodeUnhandled`
+    - `ConsumerHasMultipleMatchedInputs`
+    - `ConsumerInputRoleUnknown`
+    - `ConsumerIsIndirectUse`
+    - `ConsumerIsAddressComputation`
+    - `ConsumerIsSubpieceOrCast`
+    - `ConsumerIsControlLike`
+    - `Unknown`
+  - `UnknownConsumerKindProof`
+  - `DisallowedSingleConsumerProof` now records `matched_input_indices`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `unknown_consumer_kind_reason`
+    - `unknown_consumer_kind_opcode`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `classify_unknown_consumer_kind_reason(...)`
+  - `describe_unknown_consumer_kind_proof(...)`
+  - unknown-consumer classification for unhandled same-block single-consumer sites
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `unknown-consumer-kind output=... def_block=... def_op_seq=... consumer_block=... consumer_op_seq=... consumer_opcode=... matched_input_indices=... rhs_kind=... reason=...`
+  - summary families for:
+    - `unknown_consumer_kind_reason`
+    - `unknown_consumer_kind_opcode`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode unknown_consumer_kind_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `disallowed_single_consumer_reason`
+  - `ConsumerIsPredicate=567`
+  - `RhsHasCall=479`
+  - `RhsHasLoad=64`
+  - `UnknownConsumerKind=443`
+- `disallowed_single_consumer_consumer_kind`
+  - `Predicate=603`
+  - `UnknownConsumerKind=500`
+  - `OtherData=450`
+- `unknown_consumer_kind_reason`
+  - `Unknown=443`
+- `unknown_consumer_kind_opcode`
+  - `PopCount=443`
+
+Representative traces:
+
+- `output=space:3 off:0xe100005000202700 size:8 def_block=0x140008090 def_op_seq=38 consumer_block=0x140008090 consumer_op_seq=39 consumer_opcode=PopCount matched_input_indices=[0] rhs_kind=Arithmetic reason=Unknown`
+- `output=space:3 off:0xe100005000203640 size:4 def_block=0x140008090 def_op_seq=89 consumer_block=0x140008090 consumer_op_seq=90 consumer_opcode=PopCount matched_input_indices=[0] rhs_kind=Arithmetic reason=Unknown`
+- `output=space:3 off:0xe100005000203d60 size:1 def_block=0x1400080e8 def_op_seq=15 consumer_block=0x1400080e8 consumer_op_seq=16 consumer_opcode=PopCount matched_input_indices=[0] rhs_kind=Arithmetic reason=Unknown`
+
+Conclusion:
+
+- the broad `UnknownConsumerKind` bucket is no longer broad on the live row
+- it collapses almost entirely to a single consumer-opcode blind spot:
+  - `PopCount` consumer
+  - same-block single matched input
+  - arithmetic rhs
+  - still no safe release-policy conclusion
+- the next owner is therefore not generic unknown-consumer handling but a narrower `PopCount` consumer classification / intrinsic-consumer modeling wave
+
 ### `0x140008090` low-bit mask predicate proof tracing
 
 This wave stayed diagnostic-only. It does not widen predicate normalization, alter stable-representative policy, or enable any env-gated policy path. The goal was to take the now-isolated `LowBitAndOne=459` arithmetic predicate slice on `0x140008090` and determine whether it behaves like boolean-flag extraction or plain integer bit testing.

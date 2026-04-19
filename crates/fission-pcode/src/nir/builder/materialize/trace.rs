@@ -66,6 +66,14 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "unknown_consumer_kind_reason",
+                Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
+            ),
+            (
+                "unknown_consumer_kind_opcode",
+                Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_opcode),
+            ),
+            (
                 "single_consumer_predicate_family",
                 Self::format_materialize_owner_histogram(&summary.single_consumer_predicate_family),
             ),
@@ -377,7 +385,50 @@ impl<'a> PreviewBuilder<'a> {
         ));
         if proof.reason == DisallowedSingleConsumerReason::ConsumerIsPredicate {
             self.trace_single_consumer_predicate_proof(block, op_idx, output, rhs);
+        } else if proof.reason == DisallowedSingleConsumerReason::UnknownConsumerKind {
+            self.trace_unknown_consumer_kind(block, op_idx, output, rhs);
         }
+    }
+
+    pub(super) fn trace_unknown_consumer_kind(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = Self::describe_unknown_consumer_kind_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.unknown_consumer_kind_reason,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.unknown_consumer_kind_opcode,
+                format!("{:?}", proof.consumer_opcode),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "unknown-consumer-kind output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_block=0x{:x} consumer_op_seq={} consumer_opcode={:?} matched_input_indices={:?} rhs_kind={:?} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_block_addr,
+            proof.consumer_op_seq,
+            proof.consumer_opcode,
+            proof.matched_input_indices,
+            proof.rhs_kind,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_single_consumer_predicate_proof(

@@ -74,12 +74,35 @@ pub(super) struct DisallowedSingleConsumerProof {
     pub(super) consumer_block_addr: u64,
     pub(super) consumer_op_seq: u32,
     pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) matched_input_indices: Vec<usize>,
     pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
     pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
     pub(super) rhs_low_cost: bool,
     pub(super) rhs_has_load: bool,
     pub(super) rhs_has_call: bool,
     pub(super) reason: DisallowedSingleConsumerReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UnknownConsumerKindReason {
+    ConsumerOpcodeUnhandled,
+    ConsumerHasMultipleMatchedInputs,
+    ConsumerInputRoleUnknown,
+    ConsumerIsIndirectUse,
+    ConsumerIsAddressComputation,
+    ConsumerIsSubpieceOrCast,
+    ConsumerIsControlLike,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UnknownConsumerKindProof {
+    pub(super) consumer_block_addr: u64,
+    pub(super) consumer_op_seq: u32,
+    pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) matched_input_indices: Vec<usize>,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) reason: UnknownConsumerKindReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,6 +390,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) disallowed_single_consumer_reason: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
+    pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
+    pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,
