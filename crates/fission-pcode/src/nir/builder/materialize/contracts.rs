@@ -182,6 +182,38 @@ pub(super) struct IntrinsicCompareOnlyProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SingleConsumerLoadRhsFamily {
+    LoadFeedsPredicate,
+    LoadFeedsArithmetic,
+    LoadFeedsAddressComputation,
+    LoadFeedsStoreOrCall,
+    LoadFeedsUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SingleConsumerLoadAliasClass {
+    ReadOnlyLocalLoad,
+    MayAliasSameBlockStore,
+    MayAliasCall,
+    VolatileOrUnknownLoad,
+    GlobalOrExternalLoad,
+    UnknownLoad,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SingleConsumerLoadRhsProof {
+    pub(super) consumer_block_addr: u64,
+    pub(super) consumer_op_seq: u32,
+    pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) load_ptr: String,
+    pub(super) family: SingleConsumerLoadRhsFamily,
+    pub(super) alias_class: SingleConsumerLoadAliasClass,
+    pub(super) same_block_store_before: bool,
+    pub(super) same_block_store_after: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
@@ -593,6 +625,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) carry_intrinsic_final_predicate_context: BTreeMap<String, usize>,
     pub(super) intrinsic_compare_only_family: BTreeMap<String, usize>,
     pub(super) intrinsic_compare_only_final_predicate_context: BTreeMap<String, usize>,
+    pub(super) single_consumer_load_rhs_family: BTreeMap<String, usize>,
+    pub(super) single_consumer_load_rhs_alias_class: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,

@@ -9,6 +9,46 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` single-consumer load RHS proof tracing
+
+This wave stayed diagnostic-only. It does not widen load inlining, change stable-representative policy, or alter the default release path. The goal was to take the remaining `DisallowedSingleConsumer -> RhsHasLoad=64` bucket on `0x140008090` and split it by downstream use family plus same-block alias/stability class before any policy discussion.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries load-RHS proof vocabulary:
+  - `SingleConsumerLoadRhsFamily`
+    - `LoadFeedsPredicate`
+    - `LoadFeedsArithmetic`
+    - `LoadFeedsAddressComputation`
+    - `LoadFeedsStoreOrCall`
+    - `LoadFeedsUnknown`
+  - `SingleConsumerLoadAliasClass`
+    - `ReadOnlyLocalLoad`
+    - `MayAliasSameBlockStore`
+    - `MayAliasCall`
+    - `VolatileOrUnknownLoad`
+    - `GlobalOrExternalLoad`
+    - `UnknownLoad`
+  - `SingleConsumerLoadRhsProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `single_consumer_load_rhs_family`
+    - `single_consumer_load_rhs_alias_class`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_single_consumer_load_rhs_proof(...)`
+  - first-load extraction from materialized RHS expressions
+  - downstream family classification for predicate, arithmetic, address-computation, store/call, and unknown load consumers
+  - same-block alias/stability classification for store-interleaved, call-interleaved, local-stack-like, global/external, and unknown load provenance
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `single-consumer-load-rhs-proof output=... def_block=... def_op_seq=... consumer_op_seq=... load_ptr=... consumer_kind=... downstream_opcode=... alias_class=... same_block_store_before=... same_block_store_after=...`
+  - repartition summary families for:
+    - `single_consumer_load_rhs_family`
+    - `single_consumer_load_rhs_alias_class`
+  - the new proof is only emitted for `DisallowedSingleConsumer` sites whose blocking reason is `RhsHasLoad`
+
+Validation:
+
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` residual compare-only intrinsic proof tracing
 
 This wave stayed diagnostic-only. It does not widen intrinsic replacement, change stable-representative policy, or alter the default release path. The goal was to close the remaining `KnownPureIntrinsic -> IntEqual=8` slice inside `DisallowedSingleConsumer -> RhsHasCall` by separating compare-only intrinsic users from the already-closed `__popcount` parity chain and the `__carry` / `__scarry` BoolOr boundary family.

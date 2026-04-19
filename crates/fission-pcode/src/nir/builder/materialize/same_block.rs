@@ -247,6 +247,22 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn first_load_expr_in_materialize_expr<'b>(expr: &'b HirExpr) -> Option<&'b HirExpr> {
+        match expr {
+            HirExpr::Load { ptr, .. } => Some(ptr.as_ref()),
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::first_load_expr_in_materialize_expr(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => Self::first_load_expr_in_materialize_expr(lhs)
+                .or_else(|| Self::first_load_expr_in_materialize_expr(rhs)),
+            HirExpr::PtrOffset { base, .. } => Self::first_load_expr_in_materialize_expr(base),
+            HirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
+                .or_else(|| Self::first_load_expr_in_materialize_expr(index)),
+            HirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
+            HirExpr::Call { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => None,
+        }
+    }
+
     fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
         matches!(target, "__popcount" | "__carry" | "__scarry" | "__sborrow")
     }
@@ -1251,6 +1267,132 @@ impl<'a> PreviewBuilder<'a> {
             final_predicate_context: Self::classify_intrinsic_compare_final_predicate_context(
                 consumer_op,
             ),
+        })
+    }
+
+    fn classify_single_consumer_load_rhs_family(
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        consumer_opcode: PcodeOpcode,
+    ) -> SingleConsumerLoadRhsFamily {
+        match consumer_kind {
+            DisallowedSingleConsumerConsumerKind::Predicate
+            | DisallowedSingleConsumerConsumerKind::BranchCondition => {
+                SingleConsumerLoadRhsFamily::LoadFeedsPredicate
+            }
+            DisallowedSingleConsumerConsumerKind::LoadAddr
+            | DisallowedSingleConsumerConsumerKind::StoreAddr => {
+                SingleConsumerLoadRhsFamily::LoadFeedsAddressComputation
+            }
+            DisallowedSingleConsumerConsumerKind::StoreValue
+            | DisallowedSingleConsumerConsumerKind::CallArg => {
+                SingleConsumerLoadRhsFamily::LoadFeedsStoreOrCall
+            }
+            DisallowedSingleConsumerConsumerKind::OtherData => match consumer_opcode {
+                PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::IntMult
+                | PcodeOpcode::IntAnd
+                | PcodeOpcode::IntOr
+                | PcodeOpcode::IntXor
+                | PcodeOpcode::IntEqual
+                | PcodeOpcode::IntNotEqual
+                | PcodeOpcode::IntLess
+                | PcodeOpcode::IntLessEqual
+                | PcodeOpcode::IntSLess
+                | PcodeOpcode::IntSLessEqual => SingleConsumerLoadRhsFamily::LoadFeedsArithmetic,
+                _ => SingleConsumerLoadRhsFamily::LoadFeedsUnknown,
+            },
+            _ => SingleConsumerLoadRhsFamily::LoadFeedsUnknown,
+        }
+    }
+
+    fn classify_single_consumer_load_alias_class(
+        ptr: &HirExpr,
+        same_block_store_before: bool,
+        same_block_store_after: bool,
+        same_block_call_before: bool,
+        same_block_call_after: bool,
+    ) -> SingleConsumerLoadAliasClass {
+        if same_block_store_before || same_block_store_after {
+            return SingleConsumerLoadAliasClass::MayAliasSameBlockStore;
+        }
+        if same_block_call_before || same_block_call_after {
+            return SingleConsumerLoadAliasClass::MayAliasCall;
+        }
+        match ptr {
+            HirExpr::Var(name)
+                if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
+            {
+                SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
+            }
+            HirExpr::PtrOffset { base, .. } => match base.as_ref() {
+                HirExpr::Var(name)
+                    if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
+                {
+                    SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
+                }
+                HirExpr::Var(_) => SingleConsumerLoadAliasClass::GlobalOrExternalLoad,
+                HirExpr::Call { .. } | HirExpr::Load { .. } => {
+                    SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
+                }
+                _ => SingleConsumerLoadAliasClass::UnknownLoad,
+            },
+            HirExpr::Var(_) => SingleConsumerLoadAliasClass::GlobalOrExternalLoad,
+            HirExpr::Call { .. } | HirExpr::Load { .. } => {
+                SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
+            }
+            _ => SingleConsumerLoadAliasClass::UnknownLoad,
+        }
+    }
+
+    pub(super) fn describe_single_consumer_load_rhs_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<SingleConsumerLoadRhsProof> {
+        let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
+        if base.reason != DisallowedSingleConsumerReason::RhsHasLoad {
+            return None;
+        }
+        let load_ptr = Self::first_load_expr_in_materialize_expr(rhs)?;
+        let same_block_store_before = block.ops[..op_idx]
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::Store));
+        let same_block_store_after = block.ops[op_idx + 1..]
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::Store));
+        let same_block_call_before = block.ops[..op_idx].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+            )
+        });
+        let same_block_call_after = block.ops[op_idx + 1..].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+            )
+        });
+        Some(SingleConsumerLoadRhsProof {
+            consumer_block_addr: base.consumer_block_addr,
+            consumer_op_seq: base.consumer_op_seq,
+            consumer_opcode: base.consumer_opcode,
+            consumer_kind: base.consumer_kind,
+            load_ptr: format!("{load_ptr:?}"),
+            family: Self::classify_single_consumer_load_rhs_family(
+                base.consumer_kind,
+                base.consumer_opcode,
+            ),
+            alias_class: Self::classify_single_consumer_load_alias_class(
+                load_ptr,
+                same_block_store_before,
+                same_block_store_after,
+                same_block_call_before,
+                same_block_call_after,
+            ),
+            same_block_store_before,
+            same_block_store_after,
         })
     }
 

@@ -114,6 +114,16 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "single_consumer_load_rhs_family",
+                Self::format_materialize_owner_histogram(&summary.single_consumer_load_rhs_family),
+            ),
+            (
+                "single_consumer_load_rhs_alias_class",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_load_rhs_alias_class,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -467,6 +477,8 @@ impl<'a> PreviewBuilder<'a> {
         ));
         if proof.reason == DisallowedSingleConsumerReason::RhsHasCall {
             self.trace_single_consumer_call_rhs_proof(block, op_idx, output, rhs);
+        } else if proof.reason == DisallowedSingleConsumerReason::RhsHasLoad {
+            self.trace_single_consumer_load_rhs_proof(block, op_idx, output, rhs);
         } else if proof.reason == DisallowedSingleConsumerReason::ConsumerIsPredicate {
             self.trace_single_consumer_predicate_proof(block, op_idx, output, rhs);
         } else if proof.reason == DisallowedSingleConsumerReason::UnknownConsumerKind {
@@ -650,6 +662,48 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_low_cost,
             proof.args_side_effect_free,
             proof.final_predicate_context,
+        ));
+    }
+
+    pub(super) fn trace_single_consumer_load_rhs_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = Self::describe_single_consumer_load_rhs_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_load_rhs_family,
+                format!("{:?}", proof.family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_load_rhs_alias_class,
+                format!("{:?}", proof.alias_class),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "single-consumer-load-rhs-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_op_seq={} load_ptr={} consumer_kind={:?} downstream_opcode={:?} alias_class={:?} same_block_store_before={} same_block_store_after={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_op_seq,
+            proof.load_ptr,
+            proof.consumer_kind,
+            proof.consumer_opcode,
+            proof.alias_class,
+            proof.same_block_store_before,
+            proof.same_block_store_after,
         ));
     }
 
