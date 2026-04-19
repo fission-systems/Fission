@@ -9,6 +9,34 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### LM Studio advisory benchmark summarizer
+
+This wave adds an optional, advisory-only local LLM summarizer to the Python 2-way benchmark pipeline. It does not change deterministic benchmark gating, terminal verdicts, or the existing benchmark JSON/Markdown artifacts. The feature is disabled by default and only runs when `FISSION_BENCHMARK_LLM_ENABLE=1` is set.
+
+- [`llm_advisory.py`](../../artifacts/batch_benchmark_scripts/grand_finale_support/llm_advisory.py) is the new postprocessor owner for:
+  - compact `benchmark_llm_input.json` generation from deterministic benchmark artifacts
+  - LM Studio OpenAI-compatible local HTTP calls
+  - advisory-only markdown/json artifact emission:
+    - `benchmark_llm_summary.md`
+    - `benchmark_llm_summary.json`
+- [`benchmark_core.py`](../../artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py) now calls the advisory postprocessor only after deterministic summary/gate artifacts are written, for both:
+  - single-binary benchmark runs
+  - corpus-manifest top-level `benchmark_summary.json` runs
+- the advisory path is environment-driven and defaults to:
+  - base URL: `http://127.0.0.1:1234/v1`
+  - model: `nvidia/nemotron-3-nano-4b`
+  - deterministic gate remains canonical
+  - LLM failures are non-blocking and only produce advisory failure metadata
+- [`test_llm_advisory.py`](../../artifacts/batch_benchmark_scripts/grand_finale_support/test_llm_advisory.py) covers:
+  - compact input generation
+  - successful advisory artifact generation
+  - non-blocking failure handling when LM Studio is unavailable
+
+Validation:
+
+- `python3 -m unittest discover -s artifacts/batch_benchmark_scripts/grand_finale_support -p 'test_llm_advisory.py'`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py --help`
+
 ### `0x140008090` carry/scarry intrinsic predicate proof tracing
 
 This wave stayed diagnostic-only. It does not widen intrinsic replacement, alter stable-representative policy, or change the default release path. The goal was to take the newly isolated `RhsHasCall -> KnownPureIntrinsic` slice on `0x140008090` and separate the remaining `__carry` / `__scarry` predicate chains from the already-closed `__popcount` parity family.

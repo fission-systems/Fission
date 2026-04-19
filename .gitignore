@@ -86,7 +86,20 @@ benchmark_results/
 **/benchmark_results/
 
 # Local benchmark/decomp artifacts
-artifacts/
+artifacts/*
+!artifacts/batch_benchmark_scripts/
+artifacts/batch_benchmark_scripts/*
+!artifacts/batch_benchmark_scripts/full_decomp_benchmark.py
+!artifacts/batch_benchmark_scripts/README.md
+!artifacts/batch_benchmark_scripts/grand_finale_support/
+artifacts/batch_benchmark_scripts/grand_finale_support/*
+!artifacts/batch_benchmark_scripts/grand_finale_support/__init__.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/llm_advisory.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/metrics.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/resource_monitor.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/runners.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/test_llm_advisory.py
 
 # User-specific utility scripts and tools
 /utils/
