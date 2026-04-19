@@ -9,6 +9,60 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` parity chain materialization trial
+
+This wave is env-gated policy only. It does not change the default release path. The goal was to take the now fully isolated `PopCount -> IntAnd(mask=1) -> CompareZero` family on `0x140008090` and let the builder treat it as a parity intrinsic chain when, and only when, the full same-block proof closes.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries parity-chain policy vocabulary:
+  - `ParityChainRole`
+    - `PopCountInput`
+    - `PopCountResult`
+    - `IntAndResult`
+  - `ParityChainKeepReason`
+    - `PopCountHasMultipleConsumers`
+    - `IntAndMaskNotOne`
+    - `IntAndHasMultipleConsumers`
+    - `FinalConsumerNotCompare`
+    - `CompareConstUnsupported`
+    - `InterveningSideEffect`
+    - `RhsNotLowCost`
+    - `RhsHasLoad`
+    - `RhsHasCall`
+  - `ParityChainProof`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `parity_chain_materialization_enabled(...)`
+  - `describe_parity_chain_proof(...)`
+  - narrow same-block proofing for:
+    - original value feeding `PopCount`
+    - `PopCount` result feeding `IntAnd(mask=1)`
+    - `IntAnd(mask=1)` result feeding `IntEqual`/`IntNotEqual`
+  - intervening side-effect screening between chain members
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `parity-chain-materialized output=... role=... popcount_op_seq=... intand_op_seq=... compare_op_seq=... compare_opcode=... compare_const=... chain_low_cost=... chain_side_effect_free=...`
+  - `parity-chain-kept output=... reason=...`
+- [`mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs) now consults the new proof before other env-gated restart experiments, but only when:
+  - `FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION=1|true|yes`
+  - default release behavior remains unchanged when the flag is unset
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode parity_chain_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION=1 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+- `python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py ... --limit 50 ...` (same-axis putty limit50 trial; see artifact section in the wave report)
+
+Observed intent:
+
+- env-off:
+  - no release-path behavior change
+- env-on:
+  - only parity chains that stay same-block, low-cost, side-effect-free, and end in `IntEqual`/`IntNotEqual` against `0`/`1` are allowed to skip materialized representatives
+  - non-parity or unstable chains stay fail-closed with explicit `parity-chain-kept` reasons
+
+This wave is a trial, not a release promotion. The next decision depends on same-axis `putty limit50` results.
+
 ### `0x140008090` PopCount IntAnd chain proof tracing
 
 This wave stayed diagnostic-only. It does not widen intrinsic replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the already isolated `PopCount -> IntAnd` arithmetic chain on `0x140008090` and determine whether it is a general arithmetic sink or a parity-like slice with a stable final consumer.

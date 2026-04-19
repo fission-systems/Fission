@@ -494,6 +494,20 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
         self.replacement_plan_candidate_count += 1;
+        if Self::parity_chain_materialization_enabled()
+            && let Some(result) = self.describe_parity_chain_proof(block, op_idx, output, rhs)
+        {
+            match result {
+                Ok(proof) => {
+                    self.trace_parity_chain_materialized(block, op_idx, output, &proof);
+                    self.replacement_plan_completed_count += 1;
+                    return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
+                }
+                Err(reason) => {
+                    self.trace_parity_chain_kept(block, op_idx, output, reason);
+                }
+            }
+        }
         if Self::copy_overwrite_restart_enabled() {
             if let Some(proof) = self.can_restart_def_window_at_copy_overwrite(
                 block,

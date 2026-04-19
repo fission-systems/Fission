@@ -162,6 +162,38 @@ pub(super) struct PopCountIntAndChainProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParityChainRole {
+    PopCountInput,
+    PopCountResult,
+    IntAndResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParityChainKeepReason {
+    PopCountHasMultipleConsumers,
+    IntAndMaskNotOne,
+    IntAndHasMultipleConsumers,
+    FinalConsumerNotCompare,
+    CompareConstUnsupported,
+    InterveningSideEffect,
+    RhsNotLowCost,
+    RhsHasLoad,
+    RhsHasCall,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ParityChainProof {
+    pub(super) role: ParityChainRole,
+    pub(super) popcount_op_seq: u32,
+    pub(super) intand_op_seq: u32,
+    pub(super) compare_op_seq: u32,
+    pub(super) compare_opcode: PcodeOpcode,
+    pub(super) compare_const: u64,
+    pub(super) chain_low_cost: bool,
+    pub(super) chain_side_effect_free: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SingleConsumerPredicateFamily {
     DirectFlag,
     NegatedFlag,

@@ -563,6 +563,55 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    pub(super) fn trace_parity_chain_materialized(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        proof: &ParityChainProof,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "parity-chain-materialized output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} role={:?} popcount_op_seq={} intand_op_seq={} compare_op_seq={} compare_opcode={:?} compare_const={} chain_low_cost={} chain_side_effect_free={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.role,
+            proof.popcount_op_seq,
+            proof.intand_op_seq,
+            proof.compare_op_seq,
+            proof.compare_opcode,
+            proof.compare_const,
+            proof.chain_low_cost,
+            proof.chain_side_effect_free,
+        ));
+    }
+
+    pub(super) fn trace_parity_chain_kept(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        reason: ParityChainKeepReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "parity-chain-kept output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            reason,
+        ));
+    }
+
     pub(super) fn trace_single_consumer_predicate_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,

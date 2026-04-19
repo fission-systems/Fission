@@ -531,6 +531,13 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(super) fn parity_chain_materialization_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
+    }
+
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
         match expr {
             HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
@@ -1097,6 +1104,322 @@ impl<'a> PreviewBuilder<'a> {
             chain_low_cost: popcount.rhs_low_cost,
             chain_side_effect_free: !popcount.rhs_has_call && !popcount.rhs_has_load,
         })
+    }
+
+    fn extract_popcount_input_expr<'b>(rhs: &'b HirExpr) -> Option<&'b HirExpr> {
+        let HirExpr::Call { target, args, .. } = rhs else {
+            return None;
+        };
+        (target == "__popcount" && args.len() == 1).then_some(&args[0])
+    }
+
+    fn extract_intand_popcount_operand<'b>(rhs: &'b HirExpr) -> Option<(&'b HirExpr, Option<u64>)> {
+        match rhs {
+            HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let lhs_popcount = Self::extract_popcount_input_expr(lhs);
+                let rhs_popcount = Self::extract_popcount_input_expr(rhs);
+                let lhs_const = match rhs.as_ref() {
+                    HirExpr::Const(value, _) => Some(*value as u64),
+                    _ => None,
+                };
+                let rhs_const = match lhs.as_ref() {
+                    HirExpr::Const(value, _) => Some(*value as u64),
+                    _ => None,
+                };
+                if let Some(popcount_input) = lhs_popcount {
+                    Some((popcount_input, lhs_const))
+                } else if let Some(popcount_input) = rhs_popcount {
+                    Some((popcount_input, rhs_const))
+                } else {
+                    None
+                }
+            }
+            _ => Self::extract_popcount_input_expr(rhs).map(|expr| (expr, None)),
+        }
+    }
+
+    fn range_has_parity_chain_side_effect(
+        block: &crate::pcode::PcodeBasicBlock,
+        start_idx: usize,
+        end_idx: usize,
+    ) -> bool {
+        if end_idx <= start_idx + 1 {
+            return false;
+        }
+        block.ops[start_idx + 1..end_idx].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+                    | PcodeOpcode::Store
+                    | PcodeOpcode::Branch
+                    | PcodeOpcode::CBranch
+                    | PcodeOpcode::BranchInd
+                    | PcodeOpcode::Return
+            )
+        })
+    }
+
+    fn classify_parity_chain_compare<'b>(
+        &self,
+        block: &'b crate::pcode::PcodeBasicBlock,
+        producer_idx: usize,
+        output: &Varnode,
+    ) -> Result<(usize, &'b PcodeOp, u64), ParityChainKeepReason> {
+        let uses = Self::collect_output_use_sites_in_block(block, producer_idx, output);
+        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+            &self.pcode.blocks,
+            block.start_address,
+            output,
+        );
+        if uses.len() != 1 || cross_block_consumers != 0 {
+            return Err(ParityChainKeepReason::IntAndHasMultipleConsumers);
+        }
+        let (compare_idx, compare_op) = uses[0];
+        if !matches!(
+            compare_op.opcode,
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual
+        ) {
+            return Err(ParityChainKeepReason::FinalConsumerNotCompare);
+        }
+        let output_key = VarnodeKey::from(output);
+        let matched_inputs = compare_op
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, input)| (VarnodeKey::from(input) == output_key).then_some(idx))
+            .collect::<Vec<_>>();
+        if matched_inputs.len() != 1 {
+            return Err(ParityChainKeepReason::FinalConsumerNotCompare);
+        }
+        let compare_const = if matched_inputs[0] == 0 {
+            compare_op
+                .inputs
+                .get(1)
+                .and_then(|input| input.is_constant.then_some(input.constant_val as u64))
+        } else {
+            compare_op
+                .inputs
+                .first()
+                .and_then(|input| input.is_constant.then_some(input.constant_val as u64))
+        };
+        let Some(compare_const) = compare_const else {
+            return Err(ParityChainKeepReason::CompareConstUnsupported);
+        };
+        if !matches!(compare_const, 0 | 1) {
+            return Err(ParityChainKeepReason::CompareConstUnsupported);
+        }
+        Ok((compare_idx, compare_op, compare_const))
+    }
+
+    pub(super) fn describe_parity_chain_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<Result<ParityChainProof, ParityChainKeepReason>> {
+        let current_op = block.ops.get(op_idx)?;
+        match current_op.opcode {
+            PcodeOpcode::PopCount => {
+                let input_expr = Self::extract_popcount_input_expr(rhs)?;
+                if !Self::expr_is_low_cost_builder_inline_candidate(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsNotLowCost));
+                }
+                if Self::materialize_expr_contains_load(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsHasLoad));
+                }
+                if Self::materialize_expr_contains_call(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsHasCall));
+                }
+                let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+                let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+                    &self.pcode.blocks,
+                    block.start_address,
+                    output,
+                );
+                if uses.len() != 1 || cross_block_consumers != 0 {
+                    return Some(Err(ParityChainKeepReason::PopCountHasMultipleConsumers));
+                }
+                let (intand_idx, intand_op) = uses[0];
+                let output_key = VarnodeKey::from(output);
+                let matched_inputs = intand_op
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, input)| {
+                        (VarnodeKey::from(input) == output_key).then_some(idx)
+                    })
+                    .collect::<Vec<_>>();
+                let intand_mask =
+                    if matched_inputs == [0] {
+                        intand_op.inputs.get(1).and_then(|input| {
+                            input.is_constant.then_some(input.constant_val as u64)
+                        })
+                    } else if matched_inputs == [1] {
+                        intand_op.inputs.first().and_then(|input| {
+                            input.is_constant.then_some(input.constant_val as u64)
+                        })
+                    } else {
+                        None
+                    };
+                if intand_mask != Some(1) {
+                    return Some(Err(ParityChainKeepReason::IntAndMaskNotOne));
+                }
+                if Self::range_has_parity_chain_side_effect(block, op_idx, intand_idx) {
+                    return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+                }
+                let intand_output = intand_op.output.as_ref()?;
+                let (compare_idx, compare_op, compare_const) =
+                    match self.classify_parity_chain_compare(block, intand_idx, intand_output) {
+                        Ok(proof) => proof,
+                        Err(reason) => return Some(Err(reason)),
+                    };
+                if Self::range_has_parity_chain_side_effect(block, intand_idx, compare_idx) {
+                    return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+                }
+                return Some(Ok(ParityChainProof {
+                    role: ParityChainRole::PopCountResult,
+                    popcount_op_seq: current_op.seq_num,
+                    intand_op_seq: block.ops.get(intand_idx)?.seq_num,
+                    compare_op_seq: compare_op.seq_num,
+                    compare_opcode: compare_op.opcode,
+                    compare_const,
+                    chain_low_cost: true,
+                    chain_side_effect_free: true,
+                }));
+            }
+            PcodeOpcode::IntAnd => {
+                let Some((input_expr, mask_value)) = Self::extract_intand_popcount_operand(rhs)
+                else {
+                    return None;
+                };
+                if mask_value != Some(1) {
+                    return Some(Err(ParityChainKeepReason::IntAndMaskNotOne));
+                }
+                if !Self::expr_is_low_cost_builder_inline_candidate(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsNotLowCost));
+                }
+                if Self::materialize_expr_contains_load(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsHasLoad));
+                }
+                if Self::materialize_expr_contains_call(input_expr) {
+                    return Some(Err(ParityChainKeepReason::RhsHasCall));
+                }
+                let (compare_idx, compare_op, compare_const) =
+                    match self.classify_parity_chain_compare(block, op_idx, output) {
+                        Ok(proof) => proof,
+                        Err(reason) => return Some(Err(reason)),
+                    };
+                if Self::range_has_parity_chain_side_effect(block, op_idx, compare_idx) {
+                    return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+                }
+                let intand_op = block.ops.get(op_idx)?;
+                let popcount_input = if intand_op
+                    .inputs
+                    .first()
+                    .is_some_and(|input| input.is_constant)
+                {
+                    intand_op.inputs.get(1)?
+                } else {
+                    intand_op.inputs.first()?
+                };
+                let popcount_output_key = VarnodeKey::from(popcount_input);
+                let popcount_idx = block
+                    .ops
+                    .iter()
+                    .enumerate()
+                    .take(op_idx)
+                    .rev()
+                    .find(|(_, candidate)| {
+                        candidate.output.as_ref().map(VarnodeKey::from)
+                            == Some(popcount_output_key.clone())
+                    })
+                    .map(|(idx, _)| idx)?;
+                return Some(Ok(ParityChainProof {
+                    role: ParityChainRole::IntAndResult,
+                    popcount_op_seq: block.ops.get(popcount_idx)?.seq_num,
+                    intand_op_seq: current_op.seq_num,
+                    compare_op_seq: compare_op.seq_num,
+                    compare_opcode: compare_op.opcode,
+                    compare_const,
+                    chain_low_cost: true,
+                    chain_side_effect_free: true,
+                }));
+            }
+            _ => {}
+        }
+
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+            &self.pcode.blocks,
+            block.start_address,
+            output,
+        );
+        let Some((popcount_idx, popcount_op)) = uses.first().copied() else {
+            return None;
+        };
+        if popcount_op.opcode != PcodeOpcode::PopCount {
+            return None;
+        }
+        if uses.len() != 1 || cross_block_consumers != 0 {
+            return Some(Err(ParityChainKeepReason::PopCountHasMultipleConsumers));
+        }
+        if !Self::expr_is_low_cost_builder_inline_candidate(rhs) {
+            return Some(Err(ParityChainKeepReason::RhsNotLowCost));
+        }
+        if Self::materialize_expr_contains_load(rhs) {
+            return Some(Err(ParityChainKeepReason::RhsHasLoad));
+        }
+        if Self::materialize_expr_contains_call(rhs) {
+            return Some(Err(ParityChainKeepReason::RhsHasCall));
+        }
+        if Self::range_has_parity_chain_side_effect(block, op_idx, popcount_idx) {
+            return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+        }
+        let chain = self.describe_popcount_intand_chain_proof(block, op_idx, output, rhs)?;
+        if chain.intand_mask_kind != PopCountIntAndMaskKind::AndOne {
+            return Some(Err(ParityChainKeepReason::IntAndMaskNotOne));
+        }
+        let popcount_output = popcount_op.output.as_ref()?;
+        let uses = Self::collect_output_use_sites_in_block(block, popcount_idx, popcount_output);
+        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+            &self.pcode.blocks,
+            block.start_address,
+            popcount_output,
+        );
+        if uses.len() != 1 || cross_block_consumers != 0 {
+            return Some(Err(ParityChainKeepReason::PopCountHasMultipleConsumers));
+        }
+        let (intand_idx, _) = uses[0];
+        if Self::range_has_parity_chain_side_effect(block, popcount_idx, intand_idx) {
+            return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+        }
+        let intand_output = block.ops.get(intand_idx)?.output.as_ref()?;
+        let (compare_idx, compare_op, compare_const) =
+            match self.classify_parity_chain_compare(block, intand_idx, intand_output) {
+                Ok(proof) => proof,
+                Err(reason) => return Some(Err(reason)),
+            };
+        if Self::range_has_parity_chain_side_effect(block, intand_idx, compare_idx) {
+            return Some(Err(ParityChainKeepReason::InterveningSideEffect));
+        }
+        Some(Ok(ParityChainProof {
+            role: ParityChainRole::PopCountInput,
+            popcount_op_seq: popcount_op.seq_num,
+            intand_op_seq: block.ops.get(intand_idx)?.seq_num,
+            compare_op_seq: compare_op.seq_num,
+            compare_opcode: compare_op.opcode,
+            compare_const,
+            chain_low_cost: true,
+            chain_side_effect_free: true,
+        }))
     }
 
     pub(super) fn describe_single_consumer_predicate_proof(
@@ -2200,6 +2523,184 @@ mod tests {
             PopCountIntAndDownstreamUseFamily::FeedsArithmetic
         );
         assert_eq!(proof.downstream_consumer_opcode, Some(PcodeOpcode::IntAdd));
+    }
+
+    #[test]
+    fn parity_chain_proof_marks_popcount_input_role() {
+        let output = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![output.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .describe_parity_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+            .expect("parity chain result")
+            .expect("parity chain proof");
+
+        assert_eq!(proof.role, ParityChainRole::PopCountInput);
+        assert_eq!(proof.compare_opcode, PcodeOpcode::IntEqual);
+        assert_eq!(proof.compare_const, 0);
+        assert!(proof.chain_low_cost);
+        assert!(proof.chain_side_effect_free);
+    }
+
+    #[test]
+    fn parity_chain_proof_marks_popcount_result_role() {
+        let input = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(input.clone()), vec![constant(1)]),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![input.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntNotEqual,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(1)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__popcount".into(),
+            args: vec![HirExpr::Var("tmp_1".into())],
+            ty: int(32),
+        };
+
+        let proof = builder
+            .describe_parity_chain_proof(&block, 1, &popcount_output, &rhs)
+            .expect("parity chain result")
+            .expect("parity chain proof");
+
+        assert_eq!(proof.role, ParityChainRole::PopCountResult);
+        assert_eq!(proof.compare_opcode, PcodeOpcode::IntNotEqual);
+        assert_eq!(proof.compare_const, 1);
+    }
+
+    #[test]
+    fn parity_chain_proof_marks_intand_result_role() {
+        let input = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(input.clone()), vec![constant(1)]),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![input.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(HirExpr::Call {
+                target: "__popcount".into(),
+                args: vec![HirExpr::Var("tmp_1".into())],
+                ty: int(32),
+            }),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: int(32),
+        };
+
+        let proof = builder
+            .describe_parity_chain_proof(&block, 2, &and_output, &rhs)
+            .expect("parity chain result")
+            .expect("parity chain proof");
+
+        assert_eq!(proof.role, ParityChainRole::IntAndResult);
+        assert_eq!(proof.compare_const, 0);
+    }
+
+    #[test]
+    fn parity_chain_proof_rejects_non_one_mask() {
+        let input = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(0, PcodeOpcode::Copy, Some(input.clone()), vec![constant(1)]),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![input.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(3)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let result = builder
+            .describe_parity_chain_proof(&block, 0, &input, &HirExpr::Var("tmp_1".into()))
+            .expect("parity chain result");
+
+        assert_eq!(result, Err(ParityChainKeepReason::IntAndMaskNotOne));
     }
 
     #[test]
