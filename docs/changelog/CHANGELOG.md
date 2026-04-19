@@ -9,6 +9,68 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` PopCount consumer proof tracing
+
+This wave stayed diagnostic-only. It does not widen single-consumer replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the now-isolated `UnknownConsumerKind -> PopCount=443` slice on `0x140008090` and determine whether the `PopCount` consumer behaves like a predicate-only intrinsic, an arithmetic dataflow consumer, or another downstream use family.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries PopCount proof vocabulary:
+  - `PopCountResultUseFamily`
+    - `PopCountFeedsPredicate`
+    - `PopCountFeedsArithmetic`
+    - `PopCountFeedsCompareZero`
+    - `PopCountFeedsCompareConst`
+    - `PopCountFeedsStoreOrCall`
+    - `PopCountResultUnused`
+    - `UnknownPopCountUse`
+  - `PopCountConsumerProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `popcount_consumer_result_use`
+    - `popcount_consumer_downstream_opcode`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `classify_popcount_result_use_family(...)`
+  - `describe_popcount_consumer_proof(...)`
+  - same-block and cross-block downstream-use classification for `PopCount` outputs
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `popcount-consumer-proof output=... def_block=... def_op_seq=... consumer_op_seq=... input_width=... output_width=... rhs_kind=... rhs=... rhs_has_call=... rhs_has_load=... rhs_low_cost=... popcount_result_used_by=... downstream_consumer_opcode=...`
+  - summary families for:
+    - `popcount_consumer_result_use`
+    - `popcount_consumer_downstream_opcode`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode popcount_consumer_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `unknown_consumer_kind_reason`
+  - `Unknown=443`
+- `unknown_consumer_kind_opcode`
+  - `PopCount=443`
+- `popcount_consumer_result_use`
+  - `PopCountFeedsArithmetic=443`
+- `popcount_consumer_downstream_opcode`
+  - `IntAnd=443`
+
+Representative traces:
+
+- `output=space:3 off:0xe100005000202700 size:8 def_block=0x140008090 def_op_seq=38 consumer_op_seq=39 input_width=8 output_width=8 rhs_kind=Arithmetic rhs=Binary { op: And, lhs: Var("rsp"), rhs: Const(255, Int { bits: 64, signed: false }), ty: Int { bits: 64, signed: false } } rhs_has_call=false rhs_has_load=false rhs_low_cost=true popcount_result_used_by=PopCountFeedsArithmetic downstream_consumer_opcode=IntAnd`
+- `output=space:3 off:0xe100005000203640 size:4 def_block=0x140008090 def_op_seq=89 consumer_op_seq=90 input_width=4 output_width=4 rhs_kind=Arithmetic rhs=Binary { op: And, lhs: Var("uVar71"), rhs: Const(255, Int { bits: 32, signed: false }), ty: Int { bits: 32, signed: false } } rhs_has_call=false rhs_has_load=false rhs_low_cost=true popcount_result_used_by=PopCountFeedsArithmetic downstream_consumer_opcode=IntAnd`
+- `output=space:3 off:0xe100005000203d60 size:1 def_block=0x1400080e8 def_op_seq=15 consumer_op_seq=16 input_width=1 output_width=1 rhs_kind=Arithmetic rhs=Binary { op: And, lhs: Var("xVar111"), rhs: Const(255, Int { bits: 8, signed: false }), ty: Int { bits: 8, signed: false } } rhs_has_call=false rhs_has_load=false rhs_low_cost=true popcount_result_used_by=PopCountFeedsArithmetic downstream_consumer_opcode=IntAnd`
+
+Conclusion:
+
+- the `PopCount` blind spot is no longer a generic intrinsic unknown
+- on the live row it collapses to one arithmetic chain:
+  - arithmetic rhs
+  - `PopCount`
+  - downstream `IntAnd`
+  - no predicate-only or compare-only slice was observed
+- the next owner is therefore not predicate-oriented `PopCount` normalization but narrower arithmetic/intrinsic consumer modeling for `PopCount -> IntAnd`
+
 ### `0x140008090` unknown consumer kind subtyping
 
 This wave stayed diagnostic-only. It does not widen single-consumer replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the remaining `DisallowedSingleConsumer -> UnknownConsumerKind=443` slice on `0x140008090` and determine whether it still hides multiple consumer families or has already collapsed to one concrete blind spot.

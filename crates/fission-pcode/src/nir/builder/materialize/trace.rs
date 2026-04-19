@@ -74,6 +74,16 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_opcode),
             ),
             (
+                "popcount_consumer_result_use",
+                Self::format_materialize_owner_histogram(&summary.popcount_consumer_result_use),
+            ),
+            (
+                "popcount_consumer_downstream_opcode",
+                Self::format_materialize_owner_histogram(
+                    &summary.popcount_consumer_downstream_opcode,
+                ),
+            ),
+            (
                 "single_consumer_predicate_family",
                 Self::format_materialize_owner_histogram(&summary.single_consumer_predicate_family),
             ),
@@ -428,6 +438,64 @@ impl<'a> PreviewBuilder<'a> {
             proof.matched_input_indices,
             proof.rhs_kind,
             proof.reason,
+        ));
+        if proof.consumer_opcode == PcodeOpcode::PopCount {
+            self.trace_popcount_consumer_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_popcount_consumer_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_popcount_consumer_proof(block, op_idx, output, rhs) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.popcount_consumer_result_use,
+                format!("{:?}", proof.popcount_result_used_by),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.popcount_consumer_downstream_opcode,
+                proof
+                    .downstream_consumer_opcode
+                    .map(|opcode| format!("{opcode:?}"))
+                    .unwrap_or_else(|| "None".to_string()),
+            );
+        }
+        let output_width = proof
+            .output_width
+            .map(|width| width.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let downstream_consumer_opcode = proof
+            .downstream_consumer_opcode
+            .map(|opcode| format!("{opcode:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "popcount-consumer-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_op_seq={} input_width={} output_width={} rhs_kind={:?} rhs={:?} rhs_has_call={} rhs_has_load={} rhs_low_cost={} popcount_result_used_by={:?} downstream_consumer_opcode={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_op_seq,
+            proof.input_width,
+            output_width,
+            proof.rhs_kind,
+            rhs,
+            proof.rhs_has_call,
+            proof.rhs_has_load,
+            proof.rhs_low_cost,
+            proof.popcount_result_used_by,
+            downstream_consumer_opcode,
         ));
     }
 

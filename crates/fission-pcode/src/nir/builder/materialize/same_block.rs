@@ -374,6 +374,78 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn classify_popcount_result_use_family(
+        use_op: &PcodeOp,
+        matched_inputs: &[usize],
+    ) -> PopCountResultUseFamily {
+        match use_op.opcode {
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual => {
+                if use_op.inputs.len() != 2 {
+                    return PopCountResultUseFamily::UnknownPopCountUse;
+                }
+                let lhs_matches = matched_inputs.contains(&0);
+                let rhs_matches = matched_inputs.contains(&1);
+                let other_input = if lhs_matches && !rhs_matches {
+                    use_op.inputs.get(1)
+                } else if rhs_matches && !lhs_matches {
+                    use_op.inputs.first()
+                } else {
+                    None
+                };
+                match other_input {
+                    Some(input) if input.is_constant && input.constant_val == 0 => {
+                        PopCountResultUseFamily::PopCountFeedsCompareZero
+                    }
+                    Some(input) if input.is_constant => {
+                        PopCountResultUseFamily::PopCountFeedsCompareConst
+                    }
+                    Some(_) => PopCountResultUseFamily::PopCountFeedsPredicate,
+                    None => PopCountResultUseFamily::UnknownPopCountUse,
+                }
+            }
+            PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::CBranch
+            | PcodeOpcode::BranchInd
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual => PopCountResultUseFamily::PopCountFeedsPredicate,
+            PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther
+            | PcodeOpcode::Store
+            | PcodeOpcode::Load => PopCountResultUseFamily::PopCountFeedsStoreOrCall,
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub
+            | PcodeOpcode::PopCount => PopCountResultUseFamily::PopCountFeedsArithmetic,
+            _ => PopCountResultUseFamily::UnknownPopCountUse,
+        }
+    }
+
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
         match expr {
             HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
@@ -775,6 +847,77 @@ impl<'a> PreviewBuilder<'a> {
                 base.consumer_opcode,
                 &base.matched_input_indices,
             ),
+        })
+    }
+
+    pub(super) fn describe_popcount_consumer_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<PopCountConsumerProof> {
+        let base = Self::describe_unknown_consumer_kind_proof(block, op_idx, output, rhs)?;
+        if base.consumer_opcode != PcodeOpcode::PopCount {
+            return None;
+        }
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (consumer_idx, consumer_op) = *uses.first()?;
+        if uses.len() != 1 {
+            return None;
+        }
+        let matched_input = *base.matched_input_indices.first()?;
+        let input_width = consumer_op
+            .inputs
+            .get(matched_input)
+            .map(|input| input.size)
+            .unwrap_or(output.size);
+        let output_width = consumer_op.output.as_ref().map(|vn| vn.size);
+        let (popcount_result_used_by, downstream_consumer_opcode) =
+            if let Some(popcount_output) = consumer_op.output.as_ref() {
+                let downstream_uses =
+                    Self::collect_output_use_sites_in_block(block, consumer_idx, popcount_output);
+                let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+                    &self.pcode.blocks,
+                    block.start_address,
+                    popcount_output,
+                );
+                if downstream_uses.is_empty() && cross_block_consumers == 0 {
+                    (PopCountResultUseFamily::PopCountResultUnused, None)
+                } else if downstream_uses.len() == 1 && cross_block_consumers == 0 {
+                    let (_, downstream_op) = downstream_uses[0];
+                    let output_key = VarnodeKey::from(popcount_output);
+                    let matched_inputs = downstream_op
+                        .inputs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, input)| {
+                            (VarnodeKey::from(input) == output_key).then_some(idx)
+                        })
+                        .collect::<Vec<_>>();
+                    (
+                        Self::classify_popcount_result_use_family(downstream_op, &matched_inputs),
+                        Some(downstream_op.opcode),
+                    )
+                } else {
+                    (
+                        PopCountResultUseFamily::UnknownPopCountUse,
+                        downstream_uses.first().map(|(_, op)| op.opcode),
+                    )
+                }
+            } else {
+                (PopCountResultUseFamily::PopCountResultUnused, None)
+            };
+        Some(PopCountConsumerProof {
+            consumer_op_seq: consumer_op.seq_num,
+            input_width,
+            output_width,
+            rhs_kind: base.rhs_kind,
+            rhs_low_cost: Self::expr_is_low_cost_builder_inline_candidate(rhs),
+            rhs_has_call: Self::materialize_expr_contains_call(rhs),
+            rhs_has_load: Self::materialize_expr_contains_load(rhs),
+            popcount_result_used_by,
+            downstream_consumer_opcode,
         })
     }
 
@@ -1696,6 +1839,86 @@ mod tests {
             proof.reason,
             UnknownConsumerKindReason::ConsumerHasMultipleMatchedInputs
         );
+    }
+
+    #[test]
+    fn popcount_consumer_proof_marks_compare_zero_downstream_use() {
+        let output = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![output.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x30)),
+                vec![popcount_output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .describe_popcount_consumer_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+            .expect("popcount proof");
+
+        assert_eq!(proof.input_width, 8);
+        assert_eq!(proof.output_width, Some(8));
+        assert_eq!(
+            proof.popcount_result_used_by,
+            PopCountResultUseFamily::PopCountFeedsCompareZero
+        );
+        assert_eq!(
+            proof.downstream_consumer_opcode,
+            Some(PcodeOpcode::IntEqual)
+        );
+        assert!(proof.rhs_low_cost);
+        assert!(!proof.rhs_has_call);
+        assert!(!proof.rhs_has_load);
+    }
+
+    #[test]
+    fn popcount_consumer_proof_marks_unused_result() {
+        let output = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output),
+                vec![output.clone()],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .describe_popcount_consumer_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+            .expect("popcount proof");
+
+        assert_eq!(
+            proof.popcount_result_used_by,
+            PopCountResultUseFamily::PopCountResultUnused
+        );
+        assert_eq!(proof.downstream_consumer_opcode, None);
     }
 
     #[test]
