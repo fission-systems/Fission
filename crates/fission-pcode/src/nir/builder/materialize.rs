@@ -697,6 +697,13 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    fn predicate_refresh_restart_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_PREDICATE_REFRESH_RESTART"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
+    }
+
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
         let Some(asm) = op.asm_mnemonic.as_deref() else {
             return false;
@@ -1204,6 +1211,34 @@ impl<'a> PreviewBuilder<'a> {
                 return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
             }
         }
+        if Self::predicate_refresh_restart_enabled() {
+            if let Some(proof) = self.can_restart_def_window_at_predicate_refresh(
+                block,
+                op_idx,
+                terminator_index,
+                output,
+            ) {
+                self.emit_ready_trace(format!(
+                    "def-window-restarted-at-predicate-refresh output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} predicate_consumer_block=0x{:x} predicate_consumer_op_seq={} relation={:?} redef_rhs={} predicate_rhs={} same_guard_family={} old_def_has_pre_redef_use={} redef_dominates_predicate={}",
+                    output.space_id,
+                    output.offset,
+                    output.size,
+                    block.start_address,
+                    block.ops[op_idx].seq_num,
+                    proof.redef_op_seq,
+                    proof.predicate_consumer_block_addr,
+                    proof.predicate_consumer_op_seq,
+                    proof.consumer_relation,
+                    proof.redef_rhs,
+                    proof.predicate_rhs,
+                    proof.same_guard_family,
+                    proof.old_def_has_pre_redef_use,
+                    proof.redef_dominates_predicate,
+                ));
+                self.replacement_plan_completed_count += 1;
+                return ReplacementValuePlan::complete(ReplacementReadClass::PredicateSensitive);
+            }
+        }
         if self.output_has_nonlocal_use(block, op_idx, output) {
             self.replacement_plan_rejected_missing_merge_count += 1;
             return ReplacementValuePlan::incomplete(
@@ -1295,11 +1330,85 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn can_restart_def_window_at_predicate_refresh(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+    ) -> Option<PredicateOverwriteRefreshProof> {
+        let (consumer_block_addr, _consumer_op_seq, provenance) =
+            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+        if provenance.relation != CrossBlockConsumerRelation::PostDominatorBlock
+            || provenance.consumer_is_multiequal
+            || provenance.relation == CrossBlockConsumerRelation::LoopBackedge
+        {
+            return None;
+        }
+        let redef = self.describe_cross_block_redefinition_detail(
+            block,
+            op_idx,
+            output,
+            consumer_block_addr,
+        )?;
+        if !Self::predicate_refresh_rhs_is_restart_candidate(&redef) {
+            return None;
+        }
+        let proof = self.describe_predicate_overwrite_refresh_proof(
+            block,
+            op_idx,
+            output,
+            &redef,
+            provenance.relation,
+        )?;
+        if !proof.same_guard_family
+            || proof.old_def_has_pre_redef_use
+            || !proof.redef_dominates_predicate
+        {
+            return None;
+        }
+        let consumer_block_idx = self
+            .address_to_index
+            .get(&proof.predicate_consumer_block_addr)
+            .copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let consumer_op = consumer_block
+            .ops
+            .iter()
+            .find(|candidate| candidate.seq_num == proof.predicate_consumer_op_seq)?;
+        if consumer_op.opcode != PcodeOpcode::BoolNegate {
+            return None;
+        }
+        if !Self::no_alias_hazard_between_redef_and_terminator(
+            block,
+            redef.redef_op_idx,
+            terminator_index,
+        ) {
+            return None;
+        }
+        Some(proof)
+    }
+
     fn copy_overwrite_rhs_is_pure_restart_candidate(redef: &CrossBlockRedefinitionDetail) -> bool {
         matches!(redef.redef_rhs_kind, SameBlockOverwriteRhsKind::CopyLike)
             && matches!(
                 redef.overwrite_shape,
                 SameBlockOverwriteShapeKind::OverwriteAtCopy
+            )
+    }
+
+    fn predicate_refresh_rhs_is_restart_candidate(redef: &CrossBlockRedefinitionDetail) -> bool {
+        matches!(redef.redef_rhs_kind, SameBlockOverwriteRhsKind::Predicate)
+            && matches!(
+                redef.overwrite_shape,
+                SameBlockOverwriteShapeKind::OverwriteAtPredicateProducer
+            )
+            && matches!(
+                redef.redef_opcode,
+                PcodeOpcode::IntEqual
+                    | PcodeOpcode::IntNotEqual
+                    | PcodeOpcode::BoolNegate
+                    | PcodeOpcode::BoolXor
             )
     }
 
@@ -3919,6 +4028,111 @@ mod tests {
 
         assert!(!proof.same_guard_family);
         assert!(proof.redef_dominates_predicate);
+    }
+
+    #[test]
+    fn predicate_refresh_restart_proves_same_guard_postdom_boolnegate() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x11), constant(0)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x12), constant(0)],
+                    ),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1008)]),
+                ],
+            ),
+            block_at(
+                0x1008,
+                1,
+                vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            ),
+            block_at(
+                0x1010,
+                2,
+                vec![op(
+                    4,
+                    PcodeOpcode::BoolNegate,
+                    Some(varnode(0x20)),
+                    vec![output.clone()],
+                )],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![2];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .can_restart_def_window_at_predicate_refresh(&blocks[0], 0, Some(2), &output)
+            .expect("predicate refresh restart proof");
+
+        assert_eq!(
+            proof.consumer_relation,
+            CrossBlockConsumerRelation::PostDominatorBlock
+        );
+        assert!(proof.same_guard_family);
+        assert!(!proof.old_def_has_pre_redef_use);
+        assert!(proof.redef_dominates_predicate);
+    }
+
+    #[test]
+    fn predicate_refresh_restart_rejects_successor_int_notequal_composition() {
+        let output = varnode(0x10);
+        let other = varnode(0x12);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x11), constant(0)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::IntSLess,
+                        Some(output.clone()),
+                        vec![varnode(0x13), constant(0)],
+                    ),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(
+                    3,
+                    PcodeOpcode::IntNotEqual,
+                    Some(varnode(0x20)),
+                    vec![output.clone(), other],
+                )],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(
+            builder
+                .can_restart_def_window_at_predicate_refresh(&blocks[0], 0, Some(2), &output)
+                .is_none()
+        );
     }
 
     #[test]

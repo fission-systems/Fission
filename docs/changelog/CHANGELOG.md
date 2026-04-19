@@ -9,6 +9,60 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Same-guard predicate refresh restart env-gated trial
+
+This wave added a narrow, opt-in restart trial for the `OverwriteAtPredicateProducer` slice. It does not change the default release path. The trial only targets the already-proved `PostDominatorBlock + BoolNegate + same_guard_family=true` family on `0x140006c20`, while leaving `SuccessorBlock + IntNotEqual(output, other_pred)` fail-closed.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now exposes:
+  - `FISSION_ENABLE_PREDICATE_REFRESH_RESTART=1|true|yes`
+- the active trial path is intentionally narrow:
+  - `relation = PostDominatorBlock`
+  - `overwrite_shape = OverwriteAtPredicateProducer`
+  - `same_guard_family = true`
+  - `old_def_has_pre_redef_use = false`
+  - `redef_dominates_predicate = true`
+  - predicate consumer opcode must be `BoolNegate`
+  - no `Call`/`CallInd`/`CallOther`/`Store`/`Load` between redef and terminator
+- when enabled, the builder emits:
+  - `def-window-restarted-at-predicate-refresh ...`
+- the broader diagnostic trace remains active regardless:
+  - `predicate-overwrite-proof ...`
+
+Validation:
+
+- `cargo test -p fission-pcode predicate_refresh_restart_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode predicate_overwrite_refresh_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_ENABLE_PREDICATE_REFRESH_RESTART=1 FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+- `FISSION_ENABLE_PREDICATE_REFRESH_RESTART=1 python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py samples/windows/x64/putty.exe --ghidra-dir vendor/ghidra/ghidra-Ghidra_11.4.2_build --fission-bin target/debug/fission_cli --output-dir artifacts/batch_benchmark/putty-predicate-refresh-restart-limit50 --baseline-dir artifacts/batch_benchmark/putty-builder-provenance-wave --limit 50 --pairwise-similarity-mode shared-full --ghidra-cache-dir artifacts/ghidra_cache_copy_overwrite --use-ghidra-cache`
+
+Observed state:
+
+- the targeted trace confirms the trial hits only the intended same-guard family:
+  - `def-window-restarted-at-predicate-refresh` fired `12` times on `0x140006c20`
+  - the `PostDominatorBlock + BoolNegate` cases restart
+  - the `SuccessorBlock + IntNotEqual(output, other_pred)` cases remain trace-only
+- the same-axis `putty limit50` run did not produce a quality gain:
+  - `avg_normalized_similarity` stayed at `38.74`
+  - row gate remained failed for:
+    - `0x140008090`
+    - `0x140006c20`
+    - `0x140006fe0`
+  - row deltas stayed effectively unchanged from the default path:
+    - `0x140006c20: 40.52 -> 40.40`
+    - `0x140008090: 35.63 -> 35.28`
+    - `0x140006fe0: 34.76 -> 33.97`
+
+Conclusion:
+
+- the same-guard predicate refresh family is now isolated well enough to trial safely
+- but the current restart rule is not yet release-positive
+- it remains an env-gated experiment only
+- the next owner is likely not generic predicate refresh anymore, but the narrower distinction between:
+  - postdominating boolean negation refresh that is semantically neutral
+  - and broader predicate composition/update families that still need stable representatives
+
 ### Predicate overwrite refresh proof tracing
 
 This wave stayed diagnostic-only. It did not widen cross-block replacement, relax stable-representative requirements, or re-enable the copy-overwrite restart path. The goal was to isolate the smaller `OverwriteAtPredicateProducer = 24` slice on `0x140006c20` and prove whether it behaves like a same-guard refresh family or a real predicate update family.
