@@ -92,6 +92,22 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.popcount_intand_downstream_use),
             ),
             (
+                "parity_chain_regression_role",
+                Self::format_materialize_owner_histogram(&summary.parity_chain_regression_role),
+            ),
+            (
+                "parity_chain_regression_before_event",
+                Self::format_materialize_owner_histogram(
+                    &summary.parity_chain_regression_before_event,
+                ),
+            ),
+            (
+                "parity_chain_regression_consumer_context",
+                Self::format_materialize_owner_histogram(
+                    &summary.parity_chain_regression_consumer_context,
+                ),
+            ),
+            (
                 "single_consumer_predicate_family",
                 Self::format_materialize_owner_histogram(&summary.single_consumer_predicate_family),
             ),
@@ -560,6 +576,74 @@ impl<'a> PreviewBuilder<'a> {
             downstream_consumer_opcode,
             proof.chain_low_cost,
             proof.chain_side_effect_free,
+        ));
+    }
+
+    fn classify_parity_chain_consumer_context(
+        proof: &ParityChainProof,
+    ) -> ParityChainConsumerContext {
+        match (proof.compare_opcode, proof.compare_const) {
+            (PcodeOpcode::IntEqual, 0) => ParityChainConsumerContext::CompareZero,
+            (PcodeOpcode::IntNotEqual, 0) => ParityChainConsumerContext::CompareNonZero,
+            (PcodeOpcode::IntEqual, 1) => ParityChainConsumerContext::CompareOne,
+            (PcodeOpcode::IntNotEqual, 1) => ParityChainConsumerContext::CompareNotOne,
+            _ => ParityChainConsumerContext::CompareZero,
+        }
+    }
+
+    pub(super) fn trace_parity_chain_regression_attribution(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+        proof: &ParityChainProof,
+        legacy_inline_candidate: bool,
+        fallback_plan: ReplacementValuePlan,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let (before_materialized, before_event) = if fallback_plan.is_complete() {
+            (false, "representative_downgrade")
+        } else if legacy_inline_candidate {
+            (true, "inline_suppressed")
+        } else {
+            (true, "materialized_binding")
+        };
+        let consumer_context = Self::classify_parity_chain_consumer_context(proof);
+        let final_hir_expr = Self::describe_parity_chain_final_hir_expr(rhs, proof)
+            .unwrap_or_else(|| format!("{rhs:?}"));
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.parity_chain_regression_role,
+                format!("{:?}", proof.role),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.parity_chain_regression_before_event,
+                before_event,
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.parity_chain_regression_consumer_context,
+                format!("{:?}", consumer_context),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "parity-chain-regression-attribution output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} role={:?} popcount_op_seq={} intand_op_seq={} compare_op_seq={} before_materialized={} after_materialized=false before_event={} after_event=parity_chain_materialized final_hir_expr={} consumer_context={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.role,
+            proof.popcount_op_seq,
+            proof.intand_op_seq,
+            proof.compare_op_seq,
+            before_materialized,
+            before_event,
+            final_hir_expr,
+            consumer_context,
         ));
     }
 

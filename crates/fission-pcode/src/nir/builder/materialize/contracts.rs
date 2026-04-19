@@ -181,6 +181,14 @@ pub(super) enum ParityChainKeepReason {
     RhsHasCall,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParityChainConsumerContext {
+    CompareZero,
+    CompareNonZero,
+    CompareOne,
+    CompareNotOne,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ParityChainProof {
     pub(super) role: ParityChainRole,
@@ -484,6 +492,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) popcount_consumer_downstream_opcode: BTreeMap<String, usize>,
     pub(super) popcount_intand_mask_kind: BTreeMap<String, usize>,
     pub(super) popcount_intand_downstream_use: BTreeMap<String, usize>,
+    pub(super) parity_chain_regression_role: BTreeMap<String, usize>,
+    pub(super) parity_chain_regression_before_event: BTreeMap<String, usize>,
+    pub(super) parity_chain_regression_consumer_context: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,

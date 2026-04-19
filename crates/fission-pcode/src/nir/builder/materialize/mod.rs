@@ -494,11 +494,29 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
         self.replacement_plan_candidate_count += 1;
+        let legacy_inline_candidate =
+            self.output_replacement_is_complete(block, op_idx, output, rhs);
         if Self::parity_chain_materialization_enabled()
             && let Some(result) = self.describe_parity_chain_proof(block, op_idx, output, rhs)
         {
             match result {
                 Ok(proof) => {
+                    let fallback_plan = self.preview_replacement_value_plan_without_parity(
+                        block,
+                        op_idx,
+                        terminator_index,
+                        output,
+                        rhs,
+                    );
+                    self.trace_parity_chain_regression_attribution(
+                        block,
+                        op_idx,
+                        output,
+                        rhs,
+                        &proof,
+                        legacy_inline_candidate,
+                        fallback_plan,
+                    );
                     self.trace_parity_chain_materialized(block, op_idx, output, &proof);
                     self.replacement_plan_completed_count += 1;
                     return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
@@ -508,6 +526,63 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
+        self.build_replacement_value_plan_without_parity(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        )
+    }
+
+    fn preview_replacement_value_plan_without_parity(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> ReplacementValuePlan {
+        if self.output_has_nonlocal_use(block, op_idx, output) {
+            return ReplacementValuePlan::incomplete(
+                ReplacementReadClass::Merge,
+                MaterializationRejectionReason::MissingMergeBinding,
+            );
+        }
+        if let Some(read_class) =
+            self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
+        {
+            if Self::replacement_read_requires_stable_representative(read_class, rhs) {
+                return ReplacementValuePlan::incomplete(
+                    read_class,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
+            }
+            return ReplacementValuePlan::complete(read_class);
+        }
+        if self.output_replacement_is_complete(block, op_idx, output, rhs) {
+            if Self::same_block_replacement_requires_stable_representative(rhs) {
+                return ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::SameBlockData,
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
+            }
+            return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
+        }
+        ReplacementValuePlan::incomplete(
+            ReplacementReadClass::SameBlockData,
+            MaterializationRejectionReason::AliasUnsafe,
+        )
+    }
+
+    fn build_replacement_value_plan_without_parity(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> ReplacementValuePlan {
         if Self::copy_overwrite_restart_enabled() {
             if let Some(proof) = self.can_restart_def_window_at_copy_overwrite(
                 block,

@@ -9,6 +9,47 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008900` parity-chain regression attribution
+
+This wave stayed diagnostic-only. It does not widen parity materialization, change the default release path, or promote the parity-chain env gate. The goal was to explain why the env-gated `PopCount -> IntAnd(mask=1) -> CompareZero` slice regressed `0x140008900` even though the local proof closed on `0x140008090`.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries parity-chain regression reporting vocabulary:
+  - `ParityChainConsumerContext`
+    - `CompareZero`
+    - `CompareNonZero`
+    - `CompareOne`
+    - `CompareNotOne`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `parity_chain_regression_role`
+    - `parity_chain_regression_before_event`
+    - `parity_chain_regression_consumer_context`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_parity_chain_final_hir_expr(...)`
+  - a debug-only formatter for the final parity compare expression that the env-gated path surfaces
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `parity-chain-regression-attribution output=... role=... popcount_op_seq=... intand_op_seq=... compare_op_seq=... before_materialized=... after_materialized=false before_event=... after_event=parity_chain_materialized final_hir_expr=... consumer_context=...`
+  - summary families for:
+    - `parity_chain_regression_role`
+    - `parity_chain_regression_before_event`
+    - `parity_chain_regression_consumer_context`
+- [`mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs) now computes a side-effect-free fallback replacement plan preview before the env-gated parity shortcut emits attribution traces. This keeps regression reporting aligned with the default release path without mutating counters or rejection summaries.
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008900 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008900 --engine nir --profile nir --ghidra-compat`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008900 FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION=1 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008900 --engine nir --profile nir --ghidra-compat`
+
+Observed intent:
+
+- env-off:
+  - parity-chain attribution is absent; default release behavior stays unchanged
+- env-on:
+  - parity-chain attribution now states whether the default path would have kept a `materialized_binding`, `inline_suppressed`, or `representative_downgrade` event before the env-gated shortcut erased the binding
+  - the final surfaced parity expression and consumer context are emitted at the exact site that changed
+
 ### `0x140008090` parity chain materialization trial
 
 This wave is env-gated policy only. It does not change the default release path. The goal was to take the now fully isolated `PopCount -> IntAnd(mask=1) -> CompareZero` family on `0x140008090` and let the builder treat it as a parity intrinsic chain when, and only when, the full same-block proof closes.

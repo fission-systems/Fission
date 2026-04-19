@@ -1422,6 +1422,26 @@ impl<'a> PreviewBuilder<'a> {
         }))
     }
 
+    pub(super) fn describe_parity_chain_final_hir_expr(
+        rhs: &HirExpr,
+        proof: &ParityChainProof,
+    ) -> Option<String> {
+        let input_expr = match proof.role {
+            ParityChainRole::PopCountInput => rhs,
+            ParityChainRole::PopCountResult => Self::extract_popcount_input_expr(rhs)?,
+            ParityChainRole::IntAndResult => Self::extract_intand_popcount_operand(rhs)?.0,
+        };
+        let compare_op = match proof.compare_opcode {
+            PcodeOpcode::IntEqual => "==",
+            PcodeOpcode::IntNotEqual => "!=",
+            _ => return None,
+        };
+        Some(format!(
+            "((__popcount({input_expr:?}) & 1) {compare_op} {})",
+            proof.compare_const
+        ))
+    }
+
     pub(super) fn describe_single_consumer_predicate_proof(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
