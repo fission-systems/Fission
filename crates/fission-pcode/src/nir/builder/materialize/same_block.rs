@@ -446,6 +446,91 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn classify_popcount_intand_mask_kind(mask: Option<u64>) -> PopCountIntAndMaskKind {
+        match mask {
+            Some(1) => PopCountIntAndMaskKind::AndOne,
+            Some(0xff) => PopCountIntAndMaskKind::AndByteMask,
+            Some(value) if value > 1 && (value + 1).is_power_of_two() => {
+                PopCountIntAndMaskKind::AndPowerOfTwoMinusOne
+            }
+            Some(_) => PopCountIntAndMaskKind::AndNonPowerOfTwoMask,
+            None => PopCountIntAndMaskKind::UnknownMask,
+        }
+    }
+
+    fn classify_popcount_intand_downstream_use_family(
+        use_op: &PcodeOp,
+        matched_inputs: &[usize],
+    ) -> PopCountIntAndDownstreamUseFamily {
+        match use_op.opcode {
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual => {
+                if use_op.inputs.len() != 2 {
+                    return PopCountIntAndDownstreamUseFamily::FeedsUnknown;
+                }
+                let lhs_matches = matched_inputs.contains(&0);
+                let rhs_matches = matched_inputs.contains(&1);
+                let other_input = if lhs_matches && !rhs_matches {
+                    use_op.inputs.get(1)
+                } else if rhs_matches && !lhs_matches {
+                    use_op.inputs.first()
+                } else {
+                    None
+                };
+                match other_input {
+                    Some(input) if input.is_constant && input.constant_val == 0 => {
+                        PopCountIntAndDownstreamUseFamily::FeedsCompareZero
+                    }
+                    Some(input) if input.is_constant => {
+                        PopCountIntAndDownstreamUseFamily::FeedsCompareConst
+                    }
+                    Some(_) => PopCountIntAndDownstreamUseFamily::FeedsPredicate,
+                    None => PopCountIntAndDownstreamUseFamily::FeedsUnknown,
+                }
+            }
+            PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::CBranch
+            | PcodeOpcode::BranchInd
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual => PopCountIntAndDownstreamUseFamily::FeedsPredicate,
+            PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther
+            | PcodeOpcode::Store
+            | PcodeOpcode::Load => PopCountIntAndDownstreamUseFamily::FeedsStoreOrCall,
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub
+            | PcodeOpcode::PopCount
+            | PcodeOpcode::MultiEqual => PopCountIntAndDownstreamUseFamily::FeedsArithmetic,
+            _ => PopCountIntAndDownstreamUseFamily::FeedsUnknown,
+        }
+    }
+
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
         match expr {
             HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
@@ -918,6 +1003,99 @@ impl<'a> PreviewBuilder<'a> {
             rhs_has_load: Self::materialize_expr_contains_load(rhs),
             popcount_result_used_by,
             downstream_consumer_opcode,
+        })
+    }
+
+    pub(super) fn describe_popcount_intand_chain_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<PopCountIntAndChainProof> {
+        let popcount = self.describe_popcount_consumer_proof(block, op_idx, output, rhs)?;
+        if popcount.downstream_consumer_opcode != Some(PcodeOpcode::IntAnd) {
+            return None;
+        }
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (consumer_idx, consumer_op) = *uses.first()?;
+        let popcount_output = consumer_op.output.as_ref()?;
+        let downstream_uses =
+            Self::collect_output_use_sites_in_block(block, consumer_idx, popcount_output);
+        let (intand_idx, intand_op) = *downstream_uses.first()?;
+        if intand_op.opcode != PcodeOpcode::IntAnd {
+            return None;
+        }
+        let popcount_output_key = VarnodeKey::from(popcount_output);
+        let matched_inputs = intand_op
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, input)| {
+                (VarnodeKey::from(input) == popcount_output_key).then_some(idx)
+            })
+            .collect::<Vec<_>>();
+        let intand_mask = if matched_inputs == [0] {
+            intand_op
+                .inputs
+                .get(1)
+                .and_then(|input| input.is_constant.then_some(input.constant_val as u64))
+        } else if matched_inputs == [1] {
+            intand_op
+                .inputs
+                .first()
+                .and_then(|input| input.is_constant.then_some(input.constant_val as u64))
+        } else {
+            None
+        };
+        let intand_mask_kind = Self::classify_popcount_intand_mask_kind(intand_mask);
+        let (intand_result_consumer, downstream_consumer_opcode) = if let Some(intand_output) =
+            intand_op.output.as_ref()
+        {
+            let intand_output_uses =
+                Self::collect_output_use_sites_in_block(block, intand_idx, intand_output);
+            let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
+                &self.pcode.blocks,
+                block.start_address,
+                intand_output,
+            );
+            if intand_output_uses.len() == 1 && cross_block_consumers == 0 {
+                let (_, use_op) = intand_output_uses[0];
+                let intand_output_key = VarnodeKey::from(intand_output);
+                let matched_inputs = use_op
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, input)| {
+                        (VarnodeKey::from(input) == intand_output_key).then_some(idx)
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    Self::classify_popcount_intand_downstream_use_family(use_op, &matched_inputs),
+                    Some(use_op.opcode),
+                )
+            } else {
+                (
+                    PopCountIntAndDownstreamUseFamily::FeedsUnknown,
+                    intand_output_uses.first().map(|(_, op)| op.opcode),
+                )
+            }
+        } else {
+            (PopCountIntAndDownstreamUseFamily::FeedsUnknown, None)
+        };
+        Some(PopCountIntAndChainProof {
+            popcount_consumer_op_seq: popcount.consumer_op_seq,
+            intand_op_seq: intand_op.seq_num,
+            popcount_result: format!(
+                "space:{} off:0x{:x} size:{}",
+                popcount_output.space_id, popcount_output.offset, popcount_output.size
+            ),
+            intand_mask,
+            intand_mask_kind,
+            intand_result_consumer,
+            downstream_consumer_opcode,
+            chain_low_cost: popcount.rhs_low_cost,
+            chain_side_effect_free: !popcount.rhs_has_call && !popcount.rhs_has_load,
         })
     }
 
@@ -1919,6 +2097,109 @@ mod tests {
             PopCountResultUseFamily::PopCountResultUnused
         );
         assert_eq!(proof.downstream_consumer_opcode, None);
+    }
+
+    #[test]
+    fn popcount_intand_chain_proof_marks_and_one_compare_zero() {
+        let output = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![output.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .describe_popcount_intand_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+            .expect("popcount intand proof");
+
+        assert_eq!(proof.popcount_consumer_op_seq, 1);
+        assert_eq!(proof.intand_op_seq, 2);
+        assert_eq!(proof.intand_mask, Some(1));
+        assert_eq!(proof.intand_mask_kind, PopCountIntAndMaskKind::AndOne);
+        assert_eq!(
+            proof.intand_result_consumer,
+            PopCountIntAndDownstreamUseFamily::FeedsCompareZero
+        );
+        assert_eq!(
+            proof.downstream_consumer_opcode,
+            Some(PcodeOpcode::IntEqual)
+        );
+        assert!(proof.chain_low_cost);
+        assert!(proof.chain_side_effect_free);
+    }
+
+    #[test]
+    fn popcount_intand_chain_proof_marks_byte_mask_arithmetic() {
+        let output = varnode(0x10);
+        let popcount_output = varnode(0x20);
+        let and_output = varnode(0x30);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::PopCount,
+                Some(popcount_output.clone()),
+                vec![output.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(and_output.clone()),
+                vec![popcount_output.clone(), constant(0xff)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(varnode(0x40)),
+                vec![and_output.clone(), constant(1)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let proof = builder
+            .describe_popcount_intand_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+            .expect("popcount intand proof");
+
+        assert_eq!(proof.intand_mask, Some(0xff));
+        assert_eq!(proof.intand_mask_kind, PopCountIntAndMaskKind::AndByteMask);
+        assert_eq!(
+            proof.intand_result_consumer,
+            PopCountIntAndDownstreamUseFamily::FeedsArithmetic
+        );
+        assert_eq!(proof.downstream_consumer_opcode, Some(PcodeOpcode::IntAdd));
     }
 
     #[test]

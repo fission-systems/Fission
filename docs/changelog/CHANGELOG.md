@@ -9,6 +9,74 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` PopCount IntAnd chain proof tracing
+
+This wave stayed diagnostic-only. It does not widen intrinsic replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the already isolated `PopCount -> IntAnd` arithmetic chain on `0x140008090` and determine whether it is a general arithmetic sink or a parity-like slice with a stable final consumer.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries PopCount-IntAnd chain vocabulary:
+  - `PopCountIntAndMaskKind`
+    - `AndOne`
+    - `AndByteMask`
+    - `AndPowerOfTwoMinusOne`
+    - `AndNonPowerOfTwoMask`
+    - `UnknownMask`
+  - `PopCountIntAndDownstreamUseFamily`
+    - `FeedsPredicate`
+    - `FeedsCompareZero`
+    - `FeedsCompareConst`
+    - `FeedsArithmetic`
+    - `FeedsStoreOrCall`
+    - `FeedsUnknown`
+  - `PopCountIntAndChainProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `popcount_intand_mask_kind`
+    - `popcount_intand_downstream_use`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `classify_popcount_intand_mask_kind(...)`
+  - `classify_popcount_intand_downstream_use_family(...)`
+  - `describe_popcount_intand_chain_proof(...)`
+  - same-block/cross-block downstream use classification for `PopCount -> IntAnd(mask)` chains
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `popcount-intand-chain-proof output=... popcount_input_rhs=... popcount_result=... def_block=... def_op_seq=... consumer_op_seq=... intand_op_seq=... intand_mask=... intand_mask_kind=... intand_result_consumer=... downstream_consumer_opcode=... chain_low_cost=... chain_side_effect_free=...`
+  - summary families for:
+    - `popcount_intand_mask_kind`
+    - `popcount_intand_downstream_use`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode popcount_intand_chain_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `popcount_consumer_result_use`
+  - `PopCountFeedsArithmetic=443`
+- `popcount_consumer_downstream_opcode`
+  - `IntAnd=443`
+- `popcount_intand_mask_kind`
+  - `AndOne=443`
+- `popcount_intand_downstream_use`
+  - `FeedsCompareZero=443`
+
+Representative traces:
+
+- `output=space:3 off:0xe100005000202700 size:8 popcount_input_rhs=Binary { op: And, lhs: Var("rsp"), rhs: Const(255, Int { bits: 64, signed: false }), ty: Int { bits: 64, signed: false } } popcount_result=space:3 off:0xe100005000202708 size:8 def_block=0x140008090 def_op_seq=38 consumer_op_seq=39 intand_op_seq=40 intand_mask=0x1 intand_mask_kind=AndOne intand_result_consumer=FeedsCompareZero downstream_consumer_opcode=IntEqual chain_low_cost=true chain_side_effect_free=true`
+- `output=space:3 off:0xe100005000203640 size:4 popcount_input_rhs=Binary { op: And, lhs: Var("uVar71"), rhs: Const(255, Int { bits: 32, signed: false }), ty: Int { bits: 32, signed: false } } popcount_result=space:3 off:0xe100005000203648 size:4 def_block=0x140008090 def_op_seq=89 consumer_op_seq=90 intand_op_seq=91 intand_mask=0x1 intand_mask_kind=AndOne intand_result_consumer=FeedsCompareZero downstream_consumer_opcode=IntEqual chain_low_cost=true chain_side_effect_free=true`
+- `output=space:3 off:0xe100005000203d60 size:1 popcount_input_rhs=Binary { op: And, lhs: Var("xVar111"), rhs: Const(255, Int { bits: 8, signed: false }), ty: Int { bits: 8, signed: false } } popcount_result=space:3 off:0xe100005000203d68 size:1 def_block=0x1400080e8 def_op_seq=15 consumer_op_seq=16 intand_op_seq=17 intand_mask=0x1 intand_mask_kind=AndOne intand_result_consumer=FeedsCompareZero downstream_consumer_opcode=IntEqual chain_low_cost=true chain_side_effect_free=true`
+
+Conclusion:
+
+- the `PopCount -> IntAnd` arithmetic chain is no longer broad
+- on the live row it collapses to a parity-like family:
+  - `popcount(x & 0xff)`
+  - `& 1`
+  - compared against zero
+  - low-cost and side-effect-free under current proof
+- the next owner is therefore a narrow parity intrinsic chain candidate rather than generic PopCount or arithmetic-consumer handling
+
 ### `0x140008090` PopCount consumer proof tracing
 
 This wave stayed diagnostic-only. It does not widen single-consumer replacement, alter stable-representative policy, or enable any env-gated path. The goal was to take the now-isolated `UnknownConsumerKind -> PopCount=443` slice on `0x140008090` and determine whether the `PopCount` consumer behaves like a predicate-only intrinsic, an arithmetic dataflow consumer, or another downstream use family.

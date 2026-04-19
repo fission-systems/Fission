@@ -130,6 +130,38 @@ pub(super) struct PopCountConsumerProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PopCountIntAndMaskKind {
+    AndOne,
+    AndByteMask,
+    AndPowerOfTwoMinusOne,
+    AndNonPowerOfTwoMask,
+    UnknownMask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PopCountIntAndDownstreamUseFamily {
+    FeedsPredicate,
+    FeedsCompareZero,
+    FeedsCompareConst,
+    FeedsArithmetic,
+    FeedsStoreOrCall,
+    FeedsUnknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PopCountIntAndChainProof {
+    pub(super) popcount_consumer_op_seq: u32,
+    pub(super) intand_op_seq: u32,
+    pub(super) popcount_result: String,
+    pub(super) intand_mask: Option<u64>,
+    pub(super) intand_mask_kind: PopCountIntAndMaskKind,
+    pub(super) intand_result_consumer: PopCountIntAndDownstreamUseFamily,
+    pub(super) downstream_consumer_opcode: Option<PcodeOpcode>,
+    pub(super) chain_low_cost: bool,
+    pub(super) chain_side_effect_free: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SingleConsumerPredicateFamily {
     DirectFlag,
     NegatedFlag,
@@ -418,6 +450,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,
     pub(super) popcount_consumer_downstream_opcode: BTreeMap<String, usize>,
+    pub(super) popcount_intand_mask_kind: BTreeMap<String, usize>,
+    pub(super) popcount_intand_downstream_use: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,

@@ -84,6 +84,14 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "popcount_intand_mask_kind",
+                Self::format_materialize_owner_histogram(&summary.popcount_intand_mask_kind),
+            ),
+            (
+                "popcount_intand_downstream_use",
+                Self::format_materialize_owner_histogram(&summary.popcount_intand_downstream_use),
+            ),
+            (
                 "single_consumer_predicate_family",
                 Self::format_materialize_owner_histogram(&summary.single_consumer_predicate_family),
             ),
@@ -496,6 +504,62 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_low_cost,
             proof.popcount_result_used_by,
             downstream_consumer_opcode,
+        ));
+        if proof.downstream_consumer_opcode == Some(PcodeOpcode::IntAnd) {
+            self.trace_popcount_intand_chain_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_popcount_intand_chain_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_popcount_intand_chain_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.popcount_intand_mask_kind,
+                format!("{:?}", proof.intand_mask_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.popcount_intand_downstream_use,
+                format!("{:?}", proof.intand_result_consumer),
+            );
+        }
+        let intand_mask = proof
+            .intand_mask
+            .map(|value| format!("0x{value:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let downstream_consumer_opcode = proof
+            .downstream_consumer_opcode
+            .map(|opcode| format!("{opcode:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "popcount-intand-chain-proof output=space:{} off:0x{:x} size:{} popcount_input_rhs={:?} popcount_result={} def_block=0x{:x} def_op_seq={} consumer_op_seq={} intand_op_seq={} intand_mask={} intand_mask_kind={:?} intand_result_consumer={:?} downstream_consumer_opcode={} chain_low_cost={} chain_side_effect_free={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            rhs,
+            proof.popcount_result,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.popcount_consumer_op_seq,
+            proof.intand_op_seq,
+            intand_mask,
+            proof.intand_mask_kind,
+            proof.intand_result_consumer,
+            downstream_consumer_opcode,
+            proof.chain_low_cost,
+            proof.chain_side_effect_free,
         ));
     }
 
