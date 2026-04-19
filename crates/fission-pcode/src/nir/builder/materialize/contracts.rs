@@ -31,6 +31,58 @@ pub(super) enum AliasUnsafeHazardKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DisallowedSingleConsumerConsumerKind {
+    BranchCondition,
+    Predicate,
+    CallArg,
+    StoreAddr,
+    StoreValue,
+    LoadAddr,
+    PhiMerge,
+    OtherData,
+    UnknownConsumerKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DisallowedSingleConsumerRhsKind {
+    VarOrConst,
+    UnaryBoolean,
+    BinaryBoolean,
+    Arithmetic,
+    LoadLike,
+    CallLike,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DisallowedSingleConsumerReason {
+    ConsumerIsBranchCondition,
+    ConsumerIsPredicate,
+    ConsumerIsCallArg,
+    ConsumerIsStoreAddr,
+    ConsumerIsStoreValue,
+    ConsumerIsLoadAddr,
+    ConsumerIsPhiMerge,
+    RhsNotLowCost,
+    RhsHasLoad,
+    RhsHasCall,
+    UnknownConsumerKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DisallowedSingleConsumerProof {
+    pub(super) consumer_block_addr: u64,
+    pub(super) consumer_op_seq: u32,
+    pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) rhs_low_cost: bool,
+    pub(super) rhs_has_load: bool,
+    pub(super) rhs_has_call: bool,
+    pub(super) reason: DisallowedSingleConsumerReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MalformedDefUseWindowRelation {
     DefAfterTerminator,
     ConsumerBeforeDef,
@@ -227,6 +279,9 @@ pub(super) struct LoopBoundaryBindingCorrelation {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) alias_unsafe_hazard_kind: BTreeMap<String, usize>,
+    pub(super) disallowed_single_consumer_reason: BTreeMap<String, usize>,
+    pub(super) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
+    pub(super) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
     pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
     pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
     pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,

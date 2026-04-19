@@ -187,6 +187,216 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    fn materialize_expr_contains_load(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Load { .. } => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::materialize_expr_contains_load(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::materialize_expr_contains_load(lhs)
+                    || Self::materialize_expr_contains_load(rhs)
+            }
+            HirExpr::PtrOffset { base, .. } => Self::materialize_expr_contains_load(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::materialize_expr_contains_load(base)
+                    || Self::materialize_expr_contains_load(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_load(src),
+            HirExpr::Call { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
+    fn materialize_expr_contains_call(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Call { .. } => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::materialize_expr_contains_call(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::materialize_expr_contains_call(lhs)
+                    || Self::materialize_expr_contains_call(rhs)
+            }
+            HirExpr::Load { ptr, .. } => Self::materialize_expr_contains_call(ptr),
+            HirExpr::PtrOffset { base, .. } => Self::materialize_expr_contains_call(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::materialize_expr_contains_call(base)
+                    || Self::materialize_expr_contains_call(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_call(src),
+            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
+    fn classify_disallowed_single_consumer_rhs_kind(
+        rhs: &HirExpr,
+    ) -> DisallowedSingleConsumerRhsKind {
+        match rhs {
+            HirExpr::Var(_) | HirExpr::Const(_, _) => DisallowedSingleConsumerRhsKind::VarOrConst,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                ..
+            } => DisallowedSingleConsumerRhsKind::UnaryBoolean,
+            HirExpr::Binary { op, .. }
+                if matches!(
+                    op,
+                    HirBinaryOp::LogicalAnd
+                        | HirBinaryOp::LogicalOr
+                        | HirBinaryOp::Eq
+                        | HirBinaryOp::Ne
+                        | HirBinaryOp::Lt
+                        | HirBinaryOp::Le
+                        | HirBinaryOp::SLt
+                        | HirBinaryOp::SLe
+                ) =>
+            {
+                DisallowedSingleConsumerRhsKind::BinaryBoolean
+            }
+            HirExpr::Binary { .. } => DisallowedSingleConsumerRhsKind::Arithmetic,
+            HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. } => DisallowedSingleConsumerRhsKind::LoadLike,
+            HirExpr::Call { .. } => DisallowedSingleConsumerRhsKind::CallLike,
+            HirExpr::Cast { expr, .. } => Self::classify_disallowed_single_consumer_rhs_kind(expr),
+            HirExpr::Unary { .. } => DisallowedSingleConsumerRhsKind::Other,
+        }
+    }
+
+    fn classify_disallowed_single_consumer_kind(
+        use_op: &PcodeOp,
+        matched_inputs: &[usize],
+    ) -> DisallowedSingleConsumerConsumerKind {
+        match use_op.opcode {
+            PcodeOpcode::CBranch | PcodeOpcode::BranchInd => {
+                DisallowedSingleConsumerConsumerKind::BranchCondition
+            }
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                if matched_inputs.iter().any(|idx| *idx >= 1) {
+                    DisallowedSingleConsumerConsumerKind::CallArg
+                } else {
+                    DisallowedSingleConsumerConsumerKind::UnknownConsumerKind
+                }
+            }
+            PcodeOpcode::Store => {
+                if matched_inputs.contains(&1) {
+                    DisallowedSingleConsumerConsumerKind::StoreAddr
+                } else if matched_inputs.contains(&2) {
+                    DisallowedSingleConsumerConsumerKind::StoreValue
+                } else {
+                    DisallowedSingleConsumerConsumerKind::UnknownConsumerKind
+                }
+            }
+            PcodeOpcode::Load => DisallowedSingleConsumerConsumerKind::LoadAddr,
+            PcodeOpcode::MultiEqual => DisallowedSingleConsumerConsumerKind::PhiMerge,
+            PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr => DisallowedSingleConsumerConsumerKind::Predicate,
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub => DisallowedSingleConsumerConsumerKind::OtherData,
+            _ => DisallowedSingleConsumerConsumerKind::UnknownConsumerKind,
+        }
+    }
+
+    pub(super) fn describe_disallowed_single_consumer_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<DisallowedSingleConsumerProof> {
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (_, use_op) = *uses.first()?;
+        if uses.len() != 1 {
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        let matched_inputs = use_op
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, input)| (VarnodeKey::from(input) == output_key).then_some(idx))
+            .collect::<Vec<_>>();
+        let consumer_kind = Self::classify_disallowed_single_consumer_kind(use_op, &matched_inputs);
+        let rhs_kind = Self::classify_disallowed_single_consumer_rhs_kind(rhs);
+        let rhs_has_call = Self::materialize_expr_contains_call(rhs);
+        let rhs_has_load = Self::materialize_expr_contains_load(rhs);
+        let rhs_low_cost = Self::expr_is_low_cost_builder_inline_candidate(rhs);
+        let reason = if rhs_has_call {
+            DisallowedSingleConsumerReason::RhsHasCall
+        } else if rhs_has_load {
+            DisallowedSingleConsumerReason::RhsHasLoad
+        } else if !rhs_low_cost {
+            DisallowedSingleConsumerReason::RhsNotLowCost
+        } else {
+            match consumer_kind {
+                DisallowedSingleConsumerConsumerKind::BranchCondition => {
+                    DisallowedSingleConsumerReason::ConsumerIsBranchCondition
+                }
+                DisallowedSingleConsumerConsumerKind::Predicate => {
+                    DisallowedSingleConsumerReason::ConsumerIsPredicate
+                }
+                DisallowedSingleConsumerConsumerKind::CallArg => {
+                    DisallowedSingleConsumerReason::ConsumerIsCallArg
+                }
+                DisallowedSingleConsumerConsumerKind::StoreAddr => {
+                    DisallowedSingleConsumerReason::ConsumerIsStoreAddr
+                }
+                DisallowedSingleConsumerConsumerKind::StoreValue => {
+                    DisallowedSingleConsumerReason::ConsumerIsStoreValue
+                }
+                DisallowedSingleConsumerConsumerKind::LoadAddr => {
+                    DisallowedSingleConsumerReason::ConsumerIsLoadAddr
+                }
+                DisallowedSingleConsumerConsumerKind::PhiMerge => {
+                    DisallowedSingleConsumerReason::ConsumerIsPhiMerge
+                }
+                DisallowedSingleConsumerConsumerKind::OtherData
+                | DisallowedSingleConsumerConsumerKind::UnknownConsumerKind => {
+                    DisallowedSingleConsumerReason::UnknownConsumerKind
+                }
+            }
+        };
+        Some(DisallowedSingleConsumerProof {
+            consumer_block_addr: block.start_address,
+            consumer_op_seq: use_op.seq_num,
+            consumer_opcode: use_op.opcode,
+            consumer_kind,
+            rhs_kind,
+            rhs_low_cost,
+            rhs_has_load,
+            rhs_has_call,
+            reason,
+        })
+    }
+
     pub(super) fn first_intervening_alias_unsafe_hazard(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -830,6 +1040,118 @@ mod tests {
         assert_eq!(hazard.use_stmt_idx, Some(1));
         assert_eq!(hazard.hazard_stmt_idx, Some(1));
         assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
+    }
+
+    #[test]
+    fn disallowed_single_consumer_proof_marks_predicate_reason() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_disallowed_single_consumer_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        )
+        .expect("disallowed single consumer proof");
+
+        assert_eq!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::Predicate
+        );
+        assert_eq!(proof.rhs_kind, DisallowedSingleConsumerRhsKind::VarOrConst);
+        assert_eq!(
+            proof.reason,
+            DisallowedSingleConsumerReason::ConsumerIsPredicate
+        );
+        assert!(proof.rhs_low_cost);
+        assert!(!proof.rhs_has_load);
+        assert!(!proof.rhs_has_call);
+    }
+
+    #[test]
+    fn disallowed_single_consumer_proof_marks_load_rhs_reason() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_disallowed_single_consumer_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                ty: int(32),
+            },
+        )
+        .expect("disallowed single consumer proof");
+
+        assert_eq!(proof.reason, DisallowedSingleConsumerReason::RhsHasLoad);
+        assert_eq!(proof.rhs_kind, DisallowedSingleConsumerRhsKind::LoadLike);
+        assert!(proof.rhs_has_load);
+        assert!(!proof.rhs_has_call);
+    }
+
+    #[test]
+    fn disallowed_single_consumer_proof_marks_call_arg_reason() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Call,
+                None,
+                vec![constant(0x2000), output.clone()],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_disallowed_single_consumer_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Var("tmp_1".to_string()),
+        )
+        .expect("disallowed single consumer proof");
+
+        assert_eq!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::CallArg
+        );
+        assert_eq!(
+            proof.reason,
+            DisallowedSingleConsumerReason::ConsumerIsCallArg
+        );
+        assert_eq!(proof.consumer_opcode, PcodeOpcode::Call);
     }
 
     #[test]

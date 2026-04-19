@@ -9,6 +9,69 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### `0x140008090` `DisallowedSingleConsumer` proof subtyping
+
+This wave stayed diagnostic-only. It does not widen same-block replacement, change representative stability policy, or alter env-gated materialization experiments. The goal was to take the now-isolated `DisallowedSingleConsumer=1553` slice on `0x140008090` and partition it by actual consumer/rhs proof instead of leaving it as a single alias-unsafe bucket.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries dedicated diagnostic-only proof vocabulary for this family:
+  - `DisallowedSingleConsumerConsumerKind`
+  - `DisallowedSingleConsumerRhsKind`
+  - `DisallowedSingleConsumerReason`
+  - `DisallowedSingleConsumerProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `disallowed_single_consumer_reason`
+    - `disallowed_single_consumer_consumer_kind`
+    - `disallowed_single_consumer_rhs_kind`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_disallowed_single_consumer_proof(...)`
+  - proof construction stays local to the existing same-block single-consumer hazard:
+    - consumer opcode/input-position classification
+    - rhs shape classification
+    - low-cost/load/call proof bits
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now:
+  - emits:
+    - `disallowed-single-consumer output=... def_block=... def_op_seq=... consumer_block=... consumer_op_seq=... consumer_opcode=... consumer_kind=... rhs_kind=... rhs_low_cost=... rhs_has_load=... rhs_has_call=... reason=...`
+  - records per-function summary families for:
+    - `disallowed_single_consumer_reason`
+    - `disallowed_single_consumer_consumer_kind`
+    - `disallowed_single_consumer_rhs_kind`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode disallowed_single_consumer_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `disallowed_single_consumer_reason`
+  - `ConsumerIsPredicate=567`
+  - `RhsHasCall=479`
+  - `UnknownConsumerKind=443`
+  - `RhsHasLoad=64`
+- `disallowed_single_consumer_consumer_kind`
+  - `Predicate=603`
+  - `UnknownConsumerKind=500`
+  - `OtherData=450`
+- `disallowed_single_consumer_rhs_kind`
+  - `Arithmetic=902`
+  - `CallLike=479`
+  - `BinaryBoolean=77`
+  - `LoadLike=64`
+  - `VarOrConst=31`
+
+Conclusion:
+
+- this wave intentionally narrows the next owner from broad `DisallowedSingleConsumer` to concrete consumer/rhs proof buckets
+- the dominant live slices are now clearly:
+  - single predicate consumers over arithmetic/bool rhs
+  - call-bearing rhs that should stay fail-closed
+  - a smaller unknown-consumer bucket that needs its own proof
+- no policy decision should be made from the old aggregate count alone anymore
+- any next release-safe candidate should target only one of those now-separated slices instead of the whole family
+
 ### `0x140008090` materialize owner repartition tracing
 
 This wave stayed diagnostic-only. It does not widen materialization policy, change representative stability rules, or add new `NirBuildStats` fields. The goal was to re-partition the live `0x140008090` builder/materialize owner after the `materialize` module split and after the `0x140006c20` loop-boundary path had already been narrowed into a larger modeling problem.

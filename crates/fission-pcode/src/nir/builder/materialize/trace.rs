@@ -48,6 +48,24 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.alias_unsafe_hazard_kind),
             ),
             (
+                "disallowed_single_consumer_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.disallowed_single_consumer_reason,
+                ),
+            ),
+            (
+                "disallowed_single_consumer_consumer_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.disallowed_single_consumer_consumer_kind,
+                ),
+            ),
+            (
+                "disallowed_single_consumer_rhs_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.disallowed_single_consumer_rhs_kind,
+                ),
+            ),
+            (
                 "materialization_rejection_reason",
                 Self::format_materialize_owner_histogram(&summary.materialization_rejection_reason),
             ),
@@ -163,6 +181,9 @@ impl<'a> PreviewBuilder<'a> {
             hazard_stmt_idx,
             hazard_op,
         ));
+        if hazard.kind == AliasUnsafeHazardKind::DisallowedSingleConsumer {
+            self.trace_disallowed_single_consumer(block_addr, op_seq, output, rhs);
+        }
         if matches!(
             hazard.kind,
             AliasUnsafeHazardKind::UnknownNoConsumerFound
@@ -230,6 +251,66 @@ impl<'a> PreviewBuilder<'a> {
         if hazard.kind == AliasUnsafeHazardKind::UnknownMalformedDefUseWindow {
             self.trace_malformed_def_use_window(block, op_idx, output, rhs);
         }
+    }
+
+    pub(super) fn trace_disallowed_single_consumer(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(block) = self
+            .pcode
+            .blocks
+            .iter()
+            .find(|block| block.start_address == block_addr)
+        else {
+            return;
+        };
+        let Some(op_idx) = block.ops.iter().position(|op| op.seq_num == op_seq) else {
+            return;
+        };
+        let Some(proof) =
+            Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.disallowed_single_consumer_reason,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.disallowed_single_consumer_consumer_kind,
+                format!("{:?}", proof.consumer_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.disallowed_single_consumer_rhs_kind,
+                format!("{:?}", proof.rhs_kind),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "disallowed-single-consumer output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_block=0x{:x} consumer_op_seq={} consumer_opcode={:?} consumer_kind={:?} rhs_kind={:?} rhs_low_cost={} rhs_has_load={} rhs_has_call={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block_addr,
+            op_seq,
+            proof.consumer_block_addr,
+            proof.consumer_op_seq,
+            proof.consumer_opcode,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.rhs_low_cost,
+            proof.rhs_has_load,
+            proof.rhs_has_call,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_no_consumer_materialization(
