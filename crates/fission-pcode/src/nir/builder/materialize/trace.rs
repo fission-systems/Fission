@@ -394,6 +394,64 @@ impl<'a> PreviewBuilder<'a> {
             proof.redef_dominates_backedge,
             proof.consumer_is_loop_header_predicate,
         ));
+        if proof.same_guard_as_exit && proof.consumer_is_loop_header_predicate {
+            self.trace_loop_guard_refresh_dominance(
+                block,
+                op_idx,
+                output,
+                redef,
+                consumer_block_addr,
+                consumer_op_seq,
+                &proof,
+            );
+        }
+    }
+
+    pub(super) fn trace_loop_guard_refresh_dominance(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+        boolean_proof: &LoopBooleanFlagProof,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_loop_guard_refresh_dominance_proof(
+            block,
+            op_idx,
+            output,
+            redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        ) else {
+            return;
+        };
+        let exit_edge = boolean_proof
+            .exit_edge
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let backedge_edge = boolean_proof
+            .backedge_edge
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "loop-guard-refresh-dominance loop_header=0x{:x} def_block=0x{:x} redef_block=0x{:x} redef_op_seq={} backedge_block=0x{:x} backedge_edge={} exit_edge={} redef_before_backedge_branch={} all_backedge_paths_covered={} header_predicate_uses_redef={} reason={:?}",
+            consumer_block_addr,
+            block.start_address,
+            proof.redef_block,
+            redef.redef_op_seq,
+            proof.backedge_block,
+            backedge_edge,
+            exit_edge,
+            proof.redef_before_backedge_branch,
+            proof.all_backedge_paths_covered,
+            proof.header_predicate_uses_redef,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_no_consumer_suppressed(

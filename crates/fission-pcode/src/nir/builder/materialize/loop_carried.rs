@@ -129,6 +129,88 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    pub(super) fn describe_loop_guard_refresh_dominance_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+    ) -> Option<LoopGuardRefreshDominanceProof> {
+        let boolean_proof = self.describe_loop_boolean_flag_proof(
+            block,
+            op_idx,
+            output,
+            redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        )?;
+        if !boolean_proof.same_guard_as_exit || !boolean_proof.consumer_is_loop_header_predicate {
+            return None;
+        }
+
+        let loop_header_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let backedge_block_idx = self
+            .address_to_index
+            .get(&redef.redef_block_addr)
+            .copied()?;
+        let loop_header_preds = self.predecessors.get(loop_header_idx)?;
+        let header_predicate_uses_redef = boolean_proof.consumer_is_loop_header_predicate;
+
+        let Some(backedge_term_idx) = self
+            .pcode
+            .blocks
+            .get(backedge_block_idx)
+            .and_then(|block| self.block_terminator_index(block))
+        else {
+            return Some(LoopGuardRefreshDominanceProof {
+                redef_block: redef.redef_block_addr,
+                backedge_block: redef.redef_block_addr,
+                redef_before_backedge_branch: false,
+                all_backedge_paths_covered: false,
+                header_predicate_uses_redef,
+                reason: LoopGuardRefreshDominanceReason::MissingBackedgeTerminator,
+            });
+        };
+
+        let backedge_block = self.pcode.blocks.get(backedge_block_idx)?;
+        let backedge_term = backedge_block.ops.get(backedge_term_idx)?;
+        let redef_before_backedge_branch = backedge_term.opcode == PcodeOpcode::Branch
+            && backedge_term.inputs.first().is_some_and(|target| {
+                target.is_constant && target.constant_val as u64 == consumer_block_addr
+            })
+            && redef.redef_op_idx < backedge_term_idx;
+
+        let all_backedge_paths_covered = loop_header_preds.len() == 1
+            && loop_header_preds
+                .first()
+                .is_some_and(|pred_idx| *pred_idx == backedge_block_idx);
+
+        let reason = if !header_predicate_uses_redef {
+            LoopGuardRefreshDominanceReason::HeaderPredicateUsesIntermediate
+        } else if !loop_header_preds.contains(&backedge_block_idx) {
+            LoopGuardRefreshDominanceReason::RedefInNonBackedgeBlock
+        } else if !redef_before_backedge_branch {
+            LoopGuardRefreshDominanceReason::RedefAfterBackedgeBranch
+        } else if !all_backedge_paths_covered {
+            LoopGuardRefreshDominanceReason::MultipleBackedgeBlocks
+        } else if boolean_proof.redef_dominates_backedge {
+            LoopGuardRefreshDominanceReason::ProvedBySingleBackedge
+        } else {
+            LoopGuardRefreshDominanceReason::UnknownDominance
+        };
+
+        Some(LoopGuardRefreshDominanceProof {
+            redef_block: redef.redef_block_addr,
+            backedge_block: redef.redef_block_addr,
+            redef_before_backedge_branch,
+            all_backedge_paths_covered,
+            header_predicate_uses_redef,
+            reason,
+        })
+    }
+
     pub(super) fn format_redefinition_rhs(&self, redef: &CrossBlockRedefinitionDetail) -> String {
         let Some(redef_block_idx) = self.address_to_index.get(&redef.redef_block_addr).copied()
         else {
@@ -581,5 +663,155 @@ mod tests {
         assert_eq!(proof.exit_edge, Some(0x1020));
         assert!(!proof.old_def_has_pre_redef_use);
         assert!(proof.redef_dominates_backedge);
+    }
+
+    #[test]
+    fn loop_guard_refresh_dominance_proof_marks_multiple_backedge_blocks() {
+        let output = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let predicate = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x21,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::BoolNegate,
+                        Some(predicate.clone()),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1030), predicate.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x30), constant(0)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![op(4, PcodeOpcode::Branch, None, vec![constant(0x1000)])],
+            ),
+            block_at(0x1030, 3, vec![op(5, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1, 3];
+        blocks[1].successors = vec![0];
+        blocks[2].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let proof = builder
+            .describe_loop_guard_refresh_dominance_proof(&blocks[1], 0, &output, &redef, 0x1000, 0)
+            .expect("loop guard refresh dominance proof");
+
+        assert!(proof.redef_before_backedge_branch);
+        assert!(!proof.all_backedge_paths_covered);
+        assert!(proof.header_predicate_uses_redef);
+        assert_eq!(
+            proof.reason,
+            LoopGuardRefreshDominanceReason::MultipleBackedgeBlocks
+        );
+    }
+
+    #[test]
+    fn loop_guard_refresh_dominance_proof_marks_single_backedge_proved() {
+        let output = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let predicate = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x21,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::BoolNegate,
+                        Some(predicate.clone()),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), predicate.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntEqual,
+                        Some(output.clone()),
+                        vec![varnode(0x30), constant(0)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+            block_at(0x1020, 2, vec![op(4, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1, 2];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let proof = builder
+            .describe_loop_guard_refresh_dominance_proof(&blocks[1], 0, &output, &redef, 0x1000, 0)
+            .expect("loop guard refresh dominance proof");
+
+        assert!(proof.redef_before_backedge_branch);
+        assert!(proof.all_backedge_paths_covered);
+        assert!(proof.header_predicate_uses_redef);
+        assert_eq!(
+            proof.reason,
+            LoopGuardRefreshDominanceReason::ProvedBySingleBackedge
+        );
     }
 }

@@ -9,6 +9,56 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Loop guard refresh dominance proof tracing
+
+This wave stayed diagnostic-only. It does not widen loop-carried replacement, add a loop-guard restart policy, or change merge-boundary handling. The goal was to take the already isolated `BoolNegate + same_guard_as_exit=true` slice from `0x140006c20` and explain why the existing builder still reports `redef_dominates_backedge=false`.
+
+- [`loop_carried.rs`](../../crates/fission-pcode/src/nir/builder/materialize/loop_carried.rs) now exposes a dedicated dominance proof for the loop-header guard-refresh slice:
+  - `LoopGuardRefreshDominanceReason`
+  - `LoopGuardRefreshDominanceProof`
+  - `describe_loop_guard_refresh_dominance_proof(...)`
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `loop-guard-refresh-dominance loop_header=... def_block=... redef_block=... redef_op_seq=... backedge_block=... backedge_edge=... exit_edge=... redef_before_backedge_branch=... all_backedge_paths_covered=... header_predicate_uses_redef=... reason=...`
+- the proof stays intentionally narrow:
+  - it only fires for `loop-boolean-flag-proof` cases where `same_guard_as_exit=true` and `consumer_is_loop_header_predicate=true`
+  - it distinguishes:
+    - `ProvedBySingleBackedge`
+    - `RedefAfterBackedgeBranch`
+    - `RedefInNonBackedgeBlock`
+    - `MultipleBackedgeBlocks`
+    - `HeaderPredicateUsesIntermediate`
+    - `MissingBackedgeTerminator`
+    - `UnknownDominance`
+- synthetic unit coverage now pins:
+  - a single-backedge proved case
+  - a multiple-backedge rejection case
+
+Validation:
+
+- `cargo test -p fission-pcode loop_boolean_flag_proof_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode loop_guard_refresh_dominance_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the `BoolNegate` loop-header guard slice on `0x140006c20` now emits both:
+  - `loop-boolean-flag-proof`
+  - `loop-guard-refresh-dominance`
+- the live `BoolNegate` slice does not currently look like a missing local dominance refinement
+- it repeatedly closes to:
+  - `reason=RedefInNonBackedgeBlock`
+  - `redef_before_backedge_branch=false`
+  - `all_backedge_paths_covered=false`
+  - `header_predicate_uses_redef=true`
+
+Conclusion:
+
+- the next owner is not generic loop guard restart
+- for the current live row, the `BoolNegate` slice behaves like a non-backedge redef / loop-boundary ownership issue, not a simple local guard-refresh dominance miss
+- any future policy experiment should stay behind an env gate and only happen after backedge ownership is tightened further
+
 ### `materialize.rs` thin-façade module split
 
 This wave is a behavior-preserving refactor. It does not widen replacement/materialization policy, change telemetry, or retune any benchmark gate. The goal was to stop growing one multi-owner builder file and split the existing logic by semantic owner while keeping the external `builder::materialize` module path stable.

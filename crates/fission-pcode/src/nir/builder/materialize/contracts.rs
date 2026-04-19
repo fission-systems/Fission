@@ -185,6 +185,27 @@ pub(super) struct LoopBooleanFlagProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LoopGuardRefreshDominanceReason {
+    ProvedBySingleBackedge,
+    RedefAfterBackedgeBranch,
+    RedefInNonBackedgeBlock,
+    MultipleBackedgeBlocks,
+    HeaderPredicateUsesIntermediate,
+    MissingBackedgeTerminator,
+    UnknownDominance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LoopGuardRefreshDominanceProof {
+    pub(super) redef_block: u64,
+    pub(super) backedge_block: u64,
+    pub(super) redef_before_backedge_branch: bool,
+    pub(super) all_backedge_paths_covered: bool,
+    pub(super) header_predicate_uses_redef: bool,
+    pub(super) reason: LoopGuardRefreshDominanceReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SameBlockOverwriteShapeKind {
     OverwriteBeforeBranch,
     OverwriteAtPredicateProducer,
