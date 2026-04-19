@@ -7,7 +7,92 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-19 (latest)
+## 2026-04-20 (latest)
+
+### `0x140008090` arithmetic mask predicate proof tracing
+
+This wave stayed diagnostic-only. It does not widen predicate replacement, change stable-representative policy, or enable any new env-gated path. The goal was to take the dominant `DisallowedSingleConsumer -> ConsumerIsPredicate -> UnknownPredicate` slice on `0x140008090` and separate arithmetic bit-mask predicate shapes from the remaining classifier blind spot.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries arithmetic-predicate proof vocabulary:
+  - `ArithmeticPredicateShape`
+    - `LowBitAndOne`
+    - `PowerOfTwoMask`
+    - `NonPowerOfTwoMask`
+    - `ShiftAndMask`
+    - `UnknownArithmetic`
+  - `ArithmeticPredicateStableReason`
+    - `PredicateSensitive`
+    - `ArithmeticMask`
+    - `ConsumerCompare`
+    - `NonCanonicalPredicate`
+  - `ArithmeticPredicateProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `arithmetic_predicate_shape`
+    - `arithmetic_predicate_consumer_guard`
+    - `arithmetic_predicate_boolean_width`
+    - `arithmetic_predicate_stable_reason`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_arithmetic_predicate_proof(...)`
+  - arithmetic mask-shape classification for `BitAnd`-based rhs
+  - boolean-width detection for low-bit extraction shapes
+  - stable-representative reason mapping for arithmetic predicate consumers
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `arithmetic-predicate-proof output=... rhs=... mask_kind=... mask_value=... consumer_guard=... boolean_width=... low_cost=... stable_required=... stable_required_reason=...`
+  - summary families for:
+    - `arithmetic_predicate_shape`
+    - `arithmetic_predicate_consumer_guard`
+    - `arithmetic_predicate_boolean_width`
+    - `arithmetic_predicate_stable_reason`
+
+Validation:
+
+- `cargo test -p fission-pcode arithmetic_predicate_proof_ --lib -- --test-threads=1`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `single_consumer_predicate_family`
+  - `UnknownPredicate=468`
+  - `CompareZero=51`
+  - `DirectFlag=22`
+  - `ComposedPredicate=17`
+  - `CompareOtherVar=9`
+- `single_consumer_predicate_guard_family`
+  - `CompareZero=443`
+  - `CompareOtherVar=48`
+  - `NegatedFlag=42`
+  - `ComposedPredicate=18`
+  - `CompareNonZero=16`
+- `single_consumer_predicate_same_guard`
+  - `false=567`
+- `single_consumer_predicate_requires_stable`
+  - `true=536`
+  - `false=31`
+- `arithmetic_predicate_shape`
+  - `LowBitAndOne=459`
+  - `UnknownArithmetic=9`
+- `arithmetic_predicate_consumer_guard`
+  - `CompareZero=443`
+  - `CompareNonZero=16`
+  - `CompareOtherVar=9`
+- `arithmetic_predicate_boolean_width`
+  - `true=468`
+- `arithmetic_predicate_stable_reason`
+  - `ArithmeticMask=459`
+
+Conclusion:
+
+- the dominant former `UnknownPredicate` slice is no longer opaque:
+  - almost all of it is now `(... & 1)`-style low-bit extraction
+  - almost all of it feeds `CompareZero` predicate consumers
+  - almost all of it still requires a stable representative for arithmetic-mask reasons
+- this remains a proof/classifier refinement wave, not an acceptance wave
+- the next owner is now narrower:
+  - either predicate-family normalization for low-bit arithmetic masks, or
+  - explicit proof for why this family must remain stable-representative and not be inlined
+
+## 2026-04-19
 
 ### `0x140008090` single-consumer predicate proof tracing
 

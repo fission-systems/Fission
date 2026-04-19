@@ -455,6 +455,70 @@ impl<'a> PreviewBuilder<'a> {
         predicate_family == guard_family
     }
 
+    fn classify_arithmetic_predicate_shape(
+        expr: &HirExpr,
+    ) -> (ArithmeticPredicateShape, Option<u64>) {
+        match expr {
+            HirExpr::Cast { expr, .. } => Self::classify_arithmetic_predicate_shape(expr),
+            HirExpr::Binary { op, lhs, rhs, .. } if matches!(op, HirBinaryOp::And) => {
+                let (value_expr, mask_value) = match (&**lhs, &**rhs) {
+                    (HirExpr::Const(value, _), other) if *value >= 0 => {
+                        (other, Some(*value as u64))
+                    }
+                    (other, HirExpr::Const(value, _)) if *value >= 0 => {
+                        (other, Some(*value as u64))
+                    }
+                    _ => return (ArithmeticPredicateShape::UnknownArithmetic, None),
+                };
+                let Some(mask_value) = mask_value else {
+                    return (ArithmeticPredicateShape::UnknownArithmetic, None);
+                };
+                let shape = if matches!(
+                    value_expr,
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Shr | HirBinaryOp::Sar | HirBinaryOp::Shl,
+                        ..
+                    }
+                ) {
+                    ArithmeticPredicateShape::ShiftAndMask
+                } else if mask_value == 1 {
+                    ArithmeticPredicateShape::LowBitAndOne
+                } else if mask_value.is_power_of_two() {
+                    ArithmeticPredicateShape::PowerOfTwoMask
+                } else {
+                    ArithmeticPredicateShape::NonPowerOfTwoMask
+                };
+                (shape, Some(mask_value))
+            }
+            _ => (ArithmeticPredicateShape::UnknownArithmetic, None),
+        }
+    }
+
+    fn classify_arithmetic_predicate_stable_reason(
+        proof: &SingleConsumerPredicateProof,
+        shape: ArithmeticPredicateShape,
+    ) -> Option<ArithmeticPredicateStableReason> {
+        if !proof.requires_stable_representative {
+            return None;
+        }
+        if shape != ArithmeticPredicateShape::UnknownArithmetic {
+            return Some(ArithmeticPredicateStableReason::ArithmeticMask);
+        }
+        if !proof.same_guard_as_consumer {
+            return Some(ArithmeticPredicateStableReason::NonCanonicalPredicate);
+        }
+        if matches!(
+            proof.guard_family,
+            SingleConsumerPredicateFamily::CompareZero
+                | SingleConsumerPredicateFamily::CompareNonZero
+                | SingleConsumerPredicateFamily::CompareConst
+                | SingleConsumerPredicateFamily::CompareOtherVar
+        ) {
+            return Some(ArithmeticPredicateStableReason::ConsumerCompare);
+        }
+        Some(ArithmeticPredicateStableReason::PredicateSensitive)
+    }
+
     pub(super) fn describe_disallowed_single_consumer_proof(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -567,6 +631,31 @@ impl<'a> PreviewBuilder<'a> {
             low_cost_if_predicate,
             has_call: base.rhs_has_call,
             has_load: base.rhs_has_load,
+        })
+    }
+
+    pub(super) fn describe_arithmetic_predicate_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<ArithmeticPredicateProof> {
+        let predicate = Self::describe_single_consumer_predicate_proof(block, op_idx, output, rhs)?;
+        if predicate.predicate_family != SingleConsumerPredicateFamily::UnknownPredicate {
+            return None;
+        }
+        let (mask_kind, mask_value) = Self::classify_arithmetic_predicate_shape(rhs);
+        let boolean_width = mask_value == Some(1) || output.size == 1;
+        let stable_required_reason =
+            Self::classify_arithmetic_predicate_stable_reason(&predicate, mask_kind);
+        Some(ArithmeticPredicateProof {
+            consumer_guard: predicate.guard_family,
+            mask_kind,
+            mask_value,
+            boolean_width,
+            low_cost: predicate.low_cost_if_predicate,
+            stable_required: predicate.requires_stable_representative,
+            stable_required_reason,
         })
     }
 
@@ -1452,6 +1541,88 @@ mod tests {
         );
         assert!(!proof.same_guard_as_consumer);
         assert!(proof.low_cost_if_predicate);
+    }
+
+    #[test]
+    fn arithmetic_predicate_proof_marks_low_bit_and_one() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_arithmetic_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Var("flag_bits".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        )
+        .expect("arithmetic predicate proof");
+
+        assert_eq!(proof.mask_kind, ArithmeticPredicateShape::LowBitAndOne);
+        assert_eq!(proof.mask_value, Some(1));
+        assert!(proof.boolean_width);
+        assert!(proof.stable_required);
+        assert_eq!(
+            proof.stable_required_reason,
+            Some(ArithmeticPredicateStableReason::ArithmeticMask)
+        );
+    }
+
+    #[test]
+    fn arithmetic_predicate_proof_marks_shift_and_mask() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_arithmetic_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Shr,
+                    lhs: Box::new(HirExpr::Var("flags".to_string())),
+                    rhs: Box::new(HirExpr::Const(3, int(32))),
+                    ty: int(32),
+                }),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        )
+        .expect("arithmetic predicate proof");
+
+        assert_eq!(proof.mask_kind, ArithmeticPredicateShape::ShiftAndMask);
+        assert_eq!(proof.mask_value, Some(1));
+        assert!(proof.boolean_width);
     }
 
     #[test]

@@ -88,6 +88,28 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "arithmetic_predicate_shape",
+                Self::format_materialize_owner_histogram(&summary.arithmetic_predicate_shape),
+            ),
+            (
+                "arithmetic_predicate_consumer_guard",
+                Self::format_materialize_owner_histogram(
+                    &summary.arithmetic_predicate_consumer_guard,
+                ),
+            ),
+            (
+                "arithmetic_predicate_boolean_width",
+                Self::format_materialize_owner_histogram(
+                    &summary.arithmetic_predicate_boolean_width,
+                ),
+            ),
+            (
+                "arithmetic_predicate_stable_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.arithmetic_predicate_stable_reason,
+                ),
+            ),
+            (
                 "materialization_rejection_reason",
                 Self::format_materialize_owner_histogram(&summary.materialization_rejection_reason),
             ),
@@ -391,6 +413,68 @@ impl<'a> PreviewBuilder<'a> {
             proof.low_cost_if_predicate,
             proof.has_call,
             proof.has_load,
+        ));
+        if proof.predicate_family == SingleConsumerPredicateFamily::UnknownPredicate {
+            self.trace_arithmetic_predicate_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_arithmetic_predicate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = Self::describe_arithmetic_predicate_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.arithmetic_predicate_shape,
+                format!("{:?}", proof.mask_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.arithmetic_predicate_consumer_guard,
+                format!("{:?}", proof.consumer_guard),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.arithmetic_predicate_boolean_width,
+                proof.boolean_width.to_string(),
+            );
+            if let Some(reason) = proof.stable_required_reason {
+                Self::bump_materialize_owner_histogram(
+                    &mut summary.arithmetic_predicate_stable_reason,
+                    format!("{reason:?}"),
+                );
+            }
+        }
+        let mask_value = proof
+            .mask_value
+            .map(|value| format!("0x{value:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let stable_reason = proof
+            .stable_required_reason
+            .map(|reason| format!("{reason:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "arithmetic-predicate-proof output=space:{} off:0x{:x} size:{} rhs={:?} mask_kind={:?} mask_value={} consumer_guard={:?} boolean_width={} low_cost={} stable_required={} stable_required_reason={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            rhs,
+            proof.mask_kind,
+            mask_value,
+            proof.consumer_guard,
+            proof.boolean_width,
+            proof.low_cost,
+            proof.stable_required,
+            stable_reason,
         ));
     }
 

@@ -110,6 +110,34 @@ pub(super) struct SingleConsumerPredicateProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ArithmeticPredicateShape {
+    LowBitAndOne,
+    PowerOfTwoMask,
+    NonPowerOfTwoMask,
+    ShiftAndMask,
+    UnknownArithmetic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ArithmeticPredicateStableReason {
+    PredicateSensitive,
+    ArithmeticMask,
+    ConsumerCompare,
+    NonCanonicalPredicate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ArithmeticPredicateProof {
+    pub(super) consumer_guard: SingleConsumerPredicateFamily,
+    pub(super) mask_kind: ArithmeticPredicateShape,
+    pub(super) mask_value: Option<u64>,
+    pub(super) boolean_width: bool,
+    pub(super) low_cost: bool,
+    pub(super) stable_required: bool,
+    pub(super) stable_required_reason: Option<ArithmeticPredicateStableReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MalformedDefUseWindowRelation {
     DefAfterTerminator,
     ConsumerBeforeDef,
@@ -313,6 +341,10 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,
     pub(super) single_consumer_predicate_requires_stable: BTreeMap<String, usize>,
+    pub(super) arithmetic_predicate_shape: BTreeMap<String, usize>,
+    pub(super) arithmetic_predicate_consumer_guard: BTreeMap<String, usize>,
+    pub(super) arithmetic_predicate_boolean_width: BTreeMap<String, usize>,
+    pub(super) arithmetic_predicate_stable_reason: BTreeMap<String, usize>,
     pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
     pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
     pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,
