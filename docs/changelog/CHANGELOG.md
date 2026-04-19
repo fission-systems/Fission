@@ -9,6 +9,43 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` residual compare-only intrinsic proof tracing
+
+This wave stayed diagnostic-only. It does not widen intrinsic replacement, change stable-representative policy, or alter the default release path. The goal was to close the remaining `KnownPureIntrinsic -> IntEqual=8` slice inside `DisallowedSingleConsumer -> RhsHasCall` by separating compare-only intrinsic users from the already-closed `__popcount` parity chain and the `__carry` / `__scarry` BoolOr boundary family.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries compare-only intrinsic proof vocabulary:
+  - `IntrinsicCompareOnlyFamily`
+    - `BorrowCompareZero`
+    - `CarryCompareZero`
+    - `SignedCarryCompareZero`
+    - `PopCountCompareZero`
+    - `UnknownIntrinsicCompare`
+  - `IntrinsicCompareFinalPredicateContext`
+    - `CompareZero`
+    - `CompareOne`
+    - `CompareNonZero`
+    - `Unknown`
+  - `IntrinsicCompareOnlyProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `intrinsic_compare_only_family`
+    - `intrinsic_compare_only_final_predicate_context`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_intrinsic_compare_only_proof(...)`
+  - compare-only intrinsic family classification for `__carry`, `__scarry`, `__sborrow`, and `__popcount`
+  - final predicate-context classification for `IntEqual` / `IntNotEqual` compare-only sinks
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `intrinsic-compare-only-proof output=... call_target=... args=... downstream_opcode=... compare_const=... rhs_low_cost=... args_side_effect_free=... final_predicate_context=...`
+  - repartition summary families for:
+    - `intrinsic_compare_only_family`
+    - `intrinsic_compare_only_final_predicate_context`
+  - the new proof is only emitted for `KnownPureIntrinsic` single-consumer call RHS sites whose direct consumer is `IntEqual` or `IntNotEqual`
+
+Validation:
+
+- `cargo test -p fission-pcode intrinsic_compare_only_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+
 ### LM Studio advisory benchmark summarizer
 
 This wave adds an optional, advisory-only local LLM summarizer to the Python 2-way benchmark pipeline. It does not change deterministic benchmark gating, terminal verdicts, or the existing benchmark JSON/Markdown artifacts. The feature is disabled by default and only runs when `FISSION_BENCHMARK_LLM_ENABLE=1` is set.

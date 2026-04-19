@@ -153,6 +153,35 @@ pub(super) struct CarryIntrinsicPredicateProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IntrinsicCompareOnlyFamily {
+    BorrowCompareZero,
+    CarryCompareZero,
+    SignedCarryCompareZero,
+    PopCountCompareZero,
+    UnknownIntrinsicCompare,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IntrinsicCompareFinalPredicateContext {
+    CompareZero,
+    CompareOne,
+    CompareNonZero,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IntrinsicCompareOnlyProof {
+    pub(super) call_target: String,
+    pub(super) args: Vec<String>,
+    pub(super) downstream_opcode: PcodeOpcode,
+    pub(super) compare_const: Option<i64>,
+    pub(super) family: IntrinsicCompareOnlyFamily,
+    pub(super) rhs_low_cost: bool,
+    pub(super) args_side_effect_free: bool,
+    pub(super) final_predicate_context: IntrinsicCompareFinalPredicateContext,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
@@ -562,6 +591,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) carry_intrinsic_predicate_family: BTreeMap<String, usize>,
     pub(super) carry_intrinsic_boolor_downstream_use: BTreeMap<String, usize>,
     pub(super) carry_intrinsic_final_predicate_context: BTreeMap<String, usize>,
+    pub(super) intrinsic_compare_only_family: BTreeMap<String, usize>,
+    pub(super) intrinsic_compare_only_final_predicate_context: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,

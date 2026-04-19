@@ -104,6 +104,16 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "intrinsic_compare_only_family",
+                Self::format_materialize_owner_histogram(&summary.intrinsic_compare_only_family),
+            ),
+            (
+                "intrinsic_compare_only_final_predicate_context",
+                Self::format_materialize_owner_histogram(
+                    &summary.intrinsic_compare_only_final_predicate_context,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -546,6 +556,14 @@ impl<'a> PreviewBuilder<'a> {
         {
             self.trace_carry_intrinsic_predicate_proof(block, op_idx, output, rhs);
         }
+        if proof.family == SingleConsumerCallRhsFamily::KnownPureIntrinsic
+            && matches!(
+                proof.consumer_opcode,
+                PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual
+            )
+        {
+            self.trace_intrinsic_compare_only_proof(block, op_idx, output, rhs);
+        }
     }
 
     pub(super) fn trace_carry_intrinsic_predicate_proof(
@@ -589,6 +607,46 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.downstream_opcode,
             proof.bool_chain_role,
+            proof.rhs_low_cost,
+            proof.args_side_effect_free,
+            proof.final_predicate_context,
+        ));
+    }
+
+    pub(super) fn trace_intrinsic_compare_only_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_intrinsic_compare_only_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.intrinsic_compare_only_family,
+                format!("{:?}", proof.family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.intrinsic_compare_only_final_predicate_context,
+                format!("{:?}", proof.final_predicate_context),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "intrinsic-compare-only-proof output=space:{} off:0x{:x} size:{} call_target={} args={:?} downstream_opcode={:?} compare_const={:?} rhs_low_cost={} args_side_effect_free={} final_predicate_context={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            proof.call_target,
+            proof.args,
+            proof.downstream_opcode,
+            proof.compare_const,
             proof.rhs_low_cost,
             proof.args_side_effect_free,
             proof.final_predicate_context,

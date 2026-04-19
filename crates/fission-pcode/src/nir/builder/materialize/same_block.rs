@@ -1180,6 +1180,80 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn classify_intrinsic_compare_only_family(
+        call_target: &str,
+        compare_const: Option<i64>,
+    ) -> IntrinsicCompareOnlyFamily {
+        match (call_target, compare_const) {
+            ("__sborrow" | "__borrow", Some(0)) => IntrinsicCompareOnlyFamily::BorrowCompareZero,
+            ("__carry", Some(0)) => IntrinsicCompareOnlyFamily::CarryCompareZero,
+            ("__scarry", Some(0)) => IntrinsicCompareOnlyFamily::SignedCarryCompareZero,
+            ("__popcount", Some(0)) => IntrinsicCompareOnlyFamily::PopCountCompareZero,
+            _ => IntrinsicCompareOnlyFamily::UnknownIntrinsicCompare,
+        }
+    }
+
+    fn classify_intrinsic_compare_final_predicate_context(
+        consumer_op: &PcodeOp,
+    ) -> IntrinsicCompareFinalPredicateContext {
+        let compare_const = consumer_op
+            .inputs
+            .iter()
+            .find(|input| input.is_constant)
+            .map(|input| input.constant_val);
+        match (consumer_op.opcode, compare_const) {
+            (PcodeOpcode::IntEqual, Some(0)) => IntrinsicCompareFinalPredicateContext::CompareZero,
+            (PcodeOpcode::IntEqual, Some(1)) => IntrinsicCompareFinalPredicateContext::CompareOne,
+            (PcodeOpcode::IntNotEqual, Some(0)) => {
+                IntrinsicCompareFinalPredicateContext::CompareNonZero
+            }
+            _ => IntrinsicCompareFinalPredicateContext::Unknown,
+        }
+    }
+
+    pub(super) fn describe_intrinsic_compare_only_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<IntrinsicCompareOnlyProof> {
+        let base = self.describe_single_consumer_call_rhs_proof(block, op_idx, output, rhs)?;
+        if base.family != SingleConsumerCallRhsFamily::KnownPureIntrinsic
+            || !matches!(
+                base.consumer_opcode,
+                PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual
+            )
+        {
+            return None;
+        }
+        let (_, args) = Self::first_call_expr_in_materialize_expr(rhs)?;
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (_, consumer_op) = *uses.first()?;
+        let compare_const = consumer_op
+            .inputs
+            .iter()
+            .find(|input| input.is_constant)
+            .map(|input| input.constant_val);
+        let args_side_effect_free = args.iter().all(|arg| {
+            !Self::materialize_expr_contains_call(arg)
+                && !Self::materialize_expr_contains_load(arg)
+                && !Self::expr_is_side_effectful_for_materialization_trace(arg)
+        });
+        Some(IntrinsicCompareOnlyProof {
+            call_target: base.call_target.clone(),
+            args: args.iter().map(|arg| format!("{arg:?}")).collect(),
+            downstream_opcode: consumer_op.opcode,
+            compare_const,
+            family: Self::classify_intrinsic_compare_only_family(&base.call_target, compare_const),
+            rhs_low_cost: base.rhs_low_cost,
+            args_side_effect_free,
+            final_predicate_context: Self::classify_intrinsic_compare_final_predicate_context(
+                consumer_op,
+            ),
+        })
+    }
+
     pub(super) fn describe_popcount_consumer_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -2717,6 +2791,83 @@ mod tests {
         assert_eq!(
             proof.final_predicate_context,
             CarryIntrinsicFinalPredicateContext::CompareZero
+        );
+    }
+
+    #[test]
+    fn intrinsic_compare_only_proof_marks_sborrow_compare_zero() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::CallOther,
+                Some(output.clone()),
+                vec![constant(0x2000), constant(1), constant(2)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__sborrow".to_string(),
+            args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+            ty: int(1),
+        };
+
+        let proof = builder
+            .describe_intrinsic_compare_only_proof(&block, 0, &output, &rhs)
+            .expect("intrinsic compare-only proof");
+
+        assert_eq!(proof.family, IntrinsicCompareOnlyFamily::BorrowCompareZero);
+        assert_eq!(proof.compare_const, Some(0));
+        assert_eq!(
+            proof.final_predicate_context,
+            IntrinsicCompareFinalPredicateContext::CompareZero
+        );
+        assert!(proof.args_side_effect_free);
+    }
+
+    #[test]
+    fn intrinsic_compare_only_proof_marks_carry_compare_nonzero() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::CallOther,
+                Some(output.clone()),
+                vec![constant(0x2000), constant(1), constant(2)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntNotEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__carry".to_string(),
+            args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+            ty: int(1),
+        };
+
+        let proof = builder
+            .describe_intrinsic_compare_only_proof(&block, 0, &output, &rhs)
+            .expect("intrinsic compare-only proof");
+
+        assert_eq!(proof.family, IntrinsicCompareOnlyFamily::CarryCompareZero);
+        assert_eq!(proof.compare_const, Some(0));
+        assert_eq!(
+            proof.final_predicate_context,
+            IntrinsicCompareFinalPredicateContext::CompareNonZero
         );
     }
 
