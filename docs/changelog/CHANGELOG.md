@@ -9,6 +9,76 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### `0x140008090` materialize owner repartition tracing
+
+This wave stayed diagnostic-only. It does not widen materialization policy, change representative stability rules, or add new `NirBuildStats` fields. The goal was to re-partition the live `0x140008090` builder/materialize owner after the `materialize` module split and after the `0x140006c20` loop-boundary path had already been narrowed into a larger modeling problem.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries a diagnostic-only per-function summary container:
+  - `MaterializeOwnerRepartition`
+- [`state.rs`](../../crates/fission-pcode/src/nir/builder/state.rs) now keeps that repartition state on `PreviewBuilder`
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now:
+  - records owner-family counts while existing `EMIT-TRACE` diagnostics fire
+  - emits end-of-build summary lines in the form:
+    - `materialize-owner-repartition family=... values=[...]`
+- [`mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs) now records active builder rejection-family counts for:
+  - `AliasUnsafe`
+  - `MissingMergeBinding`
+  - `ConsumerRequiresStableRepresentative`
+- [`builder/mod.rs`](../../crates/fission-pcode/src/nir/builder/mod.rs) now flushes the summary once per traced function after HIR body construction
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `alias_unsafe_hazard_kind`
+  - `UnknownNoConsumerFound=2137`
+  - `UnknownMalformedDefUseWindow=1480`
+  - `DisallowedSingleConsumer=1553`
+  - `MultipleSameBlockConsumers=581`
+  - `SameBlockStore=49`
+  - `UnknownUnhandledConsumerKind=7`
+- `materialization_rejection_reason`
+  - `AliasUnsafe=5807`
+  - `MissingMergeBinding=1066`
+  - `ConsumerRequiresStableRepresentative=960`
+- `malformed_def_use_window_relation`
+  - `ConsumerInDifferentBlock=1089`
+  - `RedefinitionBeforeConsumer=293`
+  - `TerminatorMissing=98`
+- `cross_block_consumer_relation`
+  - `LoopBackedge=508`
+  - `OrdinaryDataConsumer=303`
+  - `JoinBlock=246`
+  - `SuccessorBlock=32`
+- `cross_block_redefinition_relation`
+  - `RedefinedInDefBlockAfterDef=1089`
+- `same_block_overwrite_shape_kind`
+  - `OverwriteAtLoopUpdate=508`
+  - `OverwriteAtPredicateProducer=222`
+  - `OverwriteAtCopy=190`
+  - `OverwriteBeforeBranch=169`
+- `loop_carried_value_kind`
+  - `BooleanFlag=406`
+  - `UnknownLoopCarried=102`
+- `loop_boolean_guard_family`
+  - `DirectFlag=210`
+  - `NonPredicate=196`
+
+Conclusion:
+
+- `0x140008090` is not dominated by the same narrow loop-header guard-refresh family that previously drove `0x140006c20`
+- the live primary owners are now clearly partitioned across:
+  - `AliasUnsafe`
+  - malformed cross-block def/use windows
+  - loop-backedge overwrite families
+  - merge/stable-representative rejection paths
+- the next policy wave should target one of those now-isolated families instead of broad builder-wide retunes
+
 ### Loop-boundary missing binding correlation tracing
 
 This wave stayed diagnostic-only. It does not synthesize loop-boundary bindings, widen loop-carried replacement, or change stable-representative policy. The goal was to test whether the remaining `LoopBackedge x OverwriteAtLoopUpdate` boolean family on `0x140006c20` actually overlaps with the builder's active `MissingMergeBinding` or `ConsumerRequiresStableRepresentative` rejection path.

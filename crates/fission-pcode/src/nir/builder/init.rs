@@ -131,6 +131,9 @@ impl<'a> PreviewBuilder<'a> {
             last_trace_id: None,
             next_trace_id: 1,
             lowering_site_depth: 0,
+            materialize_owner_repartition: std::cell::RefCell::new(
+                super::materialize::MaterializeOwnerRepartition::default(),
+            ),
             build_duration_ms: 0,
             normalize_duration_ms: 0,
             forced_linear_structuring_count: 0,

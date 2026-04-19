@@ -52,6 +52,8 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) last_trace_id: Option<u64>,
     pub(crate) next_trace_id: u64,
     pub(crate) lowering_site_depth: usize,
+    pub(in crate::nir::builder) materialize_owner_repartition:
+        RefCell<super::materialize::MaterializeOwnerRepartition>,
     pub(crate) build_duration_ms: usize,
     pub(crate) normalize_duration_ms: usize,
     pub(crate) forced_linear_structuring_count: usize,

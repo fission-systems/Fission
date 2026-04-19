@@ -2,6 +2,94 @@ use super::contracts::*;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn bump_materialize_owner_histogram(
+        map: &mut std::collections::BTreeMap<String, usize>,
+        key: impl Into<String>,
+    ) {
+        *map.entry(key.into()).or_insert(0) += 1;
+    }
+
+    fn format_materialize_owner_histogram(
+        map: &std::collections::BTreeMap<String, usize>,
+    ) -> Option<String> {
+        if map.is_empty() {
+            return None;
+        }
+        Some(
+            map.iter()
+                .map(|(key, count)| format!("{key}={count}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+
+    pub(super) fn record_materialize_rejection_reason(
+        &self,
+        reason: MaterializationRejectionReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let mut summary = self.materialize_owner_repartition.borrow_mut();
+        Self::bump_materialize_owner_histogram(
+            &mut summary.materialization_rejection_reason,
+            format!("{reason:?}"),
+        );
+    }
+
+    pub(in crate::nir::builder) fn trace_materialize_owner_repartition_summary(&self) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let summary = self.materialize_owner_repartition.borrow();
+        let families = [
+            (
+                "alias_unsafe_hazard_kind",
+                Self::format_materialize_owner_histogram(&summary.alias_unsafe_hazard_kind),
+            ),
+            (
+                "materialization_rejection_reason",
+                Self::format_materialize_owner_histogram(&summary.materialization_rejection_reason),
+            ),
+            (
+                "malformed_def_use_window_relation",
+                Self::format_materialize_owner_histogram(
+                    &summary.malformed_def_use_window_relation,
+                ),
+            ),
+            (
+                "cross_block_consumer_relation",
+                Self::format_materialize_owner_histogram(&summary.cross_block_consumer_relation),
+            ),
+            (
+                "cross_block_redefinition_relation",
+                Self::format_materialize_owner_histogram(
+                    &summary.cross_block_redefinition_relation,
+                ),
+            ),
+            (
+                "same_block_overwrite_shape_kind",
+                Self::format_materialize_owner_histogram(&summary.same_block_overwrite_shape_kind),
+            ),
+            (
+                "loop_carried_value_kind",
+                Self::format_materialize_owner_histogram(&summary.loop_carried_value_kind),
+            ),
+            (
+                "loop_boolean_guard_family",
+                Self::format_materialize_owner_histogram(&summary.loop_boolean_guard_family),
+            ),
+        ];
+        for (family, values) in families {
+            if let Some(values) = values {
+                self.emit_ready_trace(format!(
+                    "materialize-owner-repartition family={} values=[{}]",
+                    family, values
+                ));
+            }
+        }
+    }
+
     pub(super) fn trace_materialization_plan(
         &self,
         block_addr: u64,
@@ -42,6 +130,13 @@ impl<'a> PreviewBuilder<'a> {
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
+        }
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.alias_unsafe_hazard_kind,
+                format!("{:?}", hazard.kind),
+            );
         }
         let use_stmt_idx = hazard
             .use_stmt_idx
@@ -182,6 +277,13 @@ impl<'a> PreviewBuilder<'a> {
             return;
         }
         let detail = self.describe_malformed_def_use_window(block, op_idx, output, rhs);
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.malformed_def_use_window_relation,
+                format!("{:?}", detail.relation),
+            );
+        }
         let terminator_idx = detail
             .terminator_idx
             .map(|idx| idx.to_string())
@@ -313,6 +415,13 @@ impl<'a> PreviewBuilder<'a> {
         ) else {
             return;
         };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.loop_carried_value_kind,
+                format!("{:?}", provenance.carried_value_kind),
+            );
+        }
         self.emit_ready_trace(format!(
             "loop-carried-overwrite output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} redef_rhs={} loop_header=0x{:x} backedge_block=0x{:x} consumer_block=0x{:x} consumer_op_seq={} has_multiequal={} phi_input_count={} induction_like={} carried_value_kind={:?}",
             output.space_id,
@@ -365,6 +474,13 @@ impl<'a> PreviewBuilder<'a> {
         ) else {
             return;
         };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.loop_boolean_guard_family,
+                format!("{:?}", proof.guard_family),
+            );
+        }
         let exit_edge = proof
             .exit_edge
             .map(|addr| format!("0x{addr:x}"))
@@ -568,6 +684,13 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return;
         };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.cross_block_consumer_relation,
+                format!("{:?}", provenance.2.relation),
+            );
+        }
         let def_successors = self
             .address_to_index
             .get(&block.start_address)
@@ -648,6 +771,17 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(redef) =
                 self.describe_cross_block_redefinition_detail(block, op_idx, output, provenance.0)
             {
+                {
+                    let mut summary = self.materialize_owner_repartition.borrow_mut();
+                    Self::bump_materialize_owner_histogram(
+                        &mut summary.cross_block_redefinition_relation,
+                        format!("{:?}", redef.relation),
+                    );
+                    Self::bump_materialize_owner_histogram(
+                        &mut summary.same_block_overwrite_shape_kind,
+                        format!("{:?}", redef.overwrite_shape),
+                    );
+                }
                 self.emit_ready_trace(format!(
                     "cross-block-redefinition output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_block={} relation={:?} redef_block=0x{:x} redef_op_seq={} redef_opcode={:?} redef_rhs_kind={:?} overwrite_shape={:?} redef_relation={:?} consumer_op_seq={} terminator_idx={} def_to_redef_gap={} redef_to_terminator_gap={}",
                     output.space_id,

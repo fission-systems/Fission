@@ -10,6 +10,7 @@ mod scans;
 pub(super) mod test_support;
 mod trace;
 
+pub(in crate::nir::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
 
 impl<'a> PreviewBuilder<'a> {
@@ -549,6 +550,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if self.output_has_nonlocal_use(block, op_idx, output) {
+            self.record_materialize_rejection_reason(
+                MaterializationRejectionReason::MissingMergeBinding,
+            );
             self.trace_loop_boundary_binding_correlation(
                 block,
                 op_idx,
@@ -565,6 +569,9 @@ impl<'a> PreviewBuilder<'a> {
             self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
         {
             if Self::replacement_read_requires_stable_representative(read_class, rhs) {
+                self.record_materialize_rejection_reason(
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
                 self.trace_loop_boundary_binding_correlation(
                     block,
                     op_idx,
@@ -582,6 +589,9 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.output_replacement_is_complete(block, op_idx, output, rhs) {
             if Self::same_block_replacement_requires_stable_representative(rhs) {
+                self.record_materialize_rejection_reason(
+                    MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+                );
                 self.trace_loop_boundary_binding_correlation(
                     block,
                     op_idx,
@@ -598,6 +608,7 @@ impl<'a> PreviewBuilder<'a> {
             return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
         }
         self.replacement_plan_rejected_alias_unsafe_count += 1;
+        self.record_materialize_rejection_reason(MaterializationRejectionReason::AliasUnsafe);
         let hazard =
             Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);
         self.trace_alias_unsafe_hazard(

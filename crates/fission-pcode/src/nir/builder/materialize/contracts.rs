@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReplacementReadClass {
@@ -221,6 +222,18 @@ pub(super) struct LoopBoundaryBindingCorrelation {
     pub(super) merge_block: Option<u64>,
     pub(super) candidate_binding: String,
     pub(super) existing_binding: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
+    pub(super) alias_unsafe_hazard_kind: BTreeMap<String, usize>,
+    pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
+    pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
+    pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,
+    pub(super) cross_block_redefinition_relation: BTreeMap<String, usize>,
+    pub(super) same_block_overwrite_shape_kind: BTreeMap<String, usize>,
+    pub(super) loop_carried_value_kind: BTreeMap<String, usize>,
+    pub(super) loop_boolean_guard_family: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -222,6 +222,8 @@ impl<'a> PreviewBuilder<'a> {
             })
             .unwrap_or(NirType::Unknown);
 
+        self.trace_materialize_owner_repartition_summary();
+
         Ok(HirFunction {
             name: name.to_string(),
             params: self.params.values().cloned().collect(),
