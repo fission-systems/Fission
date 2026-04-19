@@ -9,6 +9,55 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` single-consumer call RHS proof tracing
+
+This wave stayed diagnostic-only. It does not widen single-consumer replacement, change stable-representative policy, or alter the default release path. The goal was to take the large `DisallowedSingleConsumer -> RhsHasCall` bucket on `0x140008090` and split it by call target/effect provenance using the existing call-effect summary infrastructure.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries call-RHS proof vocabulary:
+  - `SingleConsumerCallRhsFamily`
+    - `KnownPureIntrinsic`
+    - `PreviewCalleeAnalysisUnsafe`
+    - `UnknownInternalCall`
+    - `ImportCall`
+    - `CallOther`
+    - `IndirectCall`
+    - `UnknownCall`
+  - `SingleConsumerCallRhsProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `single_consumer_call_rhs_family`
+    - `single_consumer_call_rhs_effect_source`
+    - `single_consumer_call_rhs_consumer_kind`
+    - `single_consumer_call_rhs_downstream_opcode`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - recursive discovery of the first call expression inside a disallowed single-consumer RHS
+  - `describe_single_consumer_call_rhs_proof(...)`
+  - a narrow intrinsic allowlist for diagnostics only:
+    - `__popcount`
+    - `__carry`
+    - `__scarry`
+    - `__sborrow`
+  - classification that distinguishes:
+    - known pure intrinsics
+    - preview-summary unsafe internal callees
+    - import / callother / indirect / unknown call surfaces
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `single-consumer-call-rhs-proof output=... def_block=... def_op_seq=... consumer_op_seq=... call_target=... family=... call_effect_source=... writes_memory=... may_call_unknown=... may_exit=... return_used=... consumer_kind=... downstream_opcode=...`
+  - repartition summary families for the new call-RHS histograms
+  - the new proof is only emitted when the existing `disallowed-single-consumer` reason is `RhsHasCall`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode single_consumer_call_rhs_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed intent:
+
+- direct intrinsic-looking call RHS sites such as `__popcount`, `__carry`, `__scarry`, and `__sborrow` are now separated from broad unknown/unsafe call RHS cases
+- preview-summary unsafe internal callees remain explicit fail-closed stops in diagnostics instead of being conflated with pure intrinsic families
+- the default release path remains unchanged; this wave only improves owner attribution for the next policy decision
 ### `0x140008900` parity-chain regression attribution
 
 This wave stayed diagnostic-only. It does not widen parity materialization, change the default release path, or promote the parity-chain env gate. The goal was to explain why the env-gated `PopCount -> IntAnd(mask=1) -> CompareZero` slice regressed `0x140008900` even though the local proof closed on `0x140008090`.

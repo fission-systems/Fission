@@ -84,6 +84,33 @@ pub(super) struct DisallowedSingleConsumerProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SingleConsumerCallRhsFamily {
+    KnownPureIntrinsic,
+    PreviewCalleeAnalysisUnsafe,
+    UnknownInternalCall,
+    ImportCall,
+    CallOther,
+    IndirectCall,
+    UnknownCall,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SingleConsumerCallRhsProof {
+    pub(super) consumer_block_addr: u64,
+    pub(super) consumer_op_seq: u32,
+    pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) call_target: String,
+    pub(super) family: SingleConsumerCallRhsFamily,
+    pub(super) call_effect_source: Option<CallEffectSummarySource>,
+    pub(super) writes_memory: Option<bool>,
+    pub(super) may_call_unknown: Option<bool>,
+    pub(super) may_exit: Option<bool>,
+    pub(super) return_used: bool,
+    pub(super) downstream_opcode: Option<PcodeOpcode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
@@ -486,6 +513,10 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) disallowed_single_consumer_reason: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
+    pub(super) single_consumer_call_rhs_family: BTreeMap<String, usize>,
+    pub(super) single_consumer_call_rhs_effect_source: BTreeMap<String, usize>,
+    pub(super) single_consumer_call_rhs_consumer_kind: BTreeMap<String, usize>,
+    pub(super) single_consumer_call_rhs_downstream_opcode: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,

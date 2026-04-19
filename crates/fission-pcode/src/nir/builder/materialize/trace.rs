@@ -66,6 +66,28 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "single_consumer_call_rhs_family",
+                Self::format_materialize_owner_histogram(&summary.single_consumer_call_rhs_family),
+            ),
+            (
+                "single_consumer_call_rhs_effect_source",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_call_rhs_effect_source,
+                ),
+            ),
+            (
+                "single_consumer_call_rhs_consumer_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_call_rhs_consumer_kind,
+                ),
+            ),
+            (
+                "single_consumer_call_rhs_downstream_opcode",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_call_rhs_downstream_opcode,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -417,11 +439,92 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_has_call,
             proof.reason,
         ));
-        if proof.reason == DisallowedSingleConsumerReason::ConsumerIsPredicate {
+        if proof.reason == DisallowedSingleConsumerReason::RhsHasCall {
+            self.trace_single_consumer_call_rhs_proof(block, op_idx, output, rhs);
+        } else if proof.reason == DisallowedSingleConsumerReason::ConsumerIsPredicate {
             self.trace_single_consumer_predicate_proof(block, op_idx, output, rhs);
         } else if proof.reason == DisallowedSingleConsumerReason::UnknownConsumerKind {
             self.trace_unknown_consumer_kind(block, op_idx, output, rhs);
         }
+    }
+
+    pub(super) fn trace_single_consumer_call_rhs_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_single_consumer_call_rhs_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_call_rhs_family,
+                format!("{:?}", proof.family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_call_rhs_effect_source,
+                proof
+                    .call_effect_source
+                    .map(|source| format!("{source:?}"))
+                    .unwrap_or_else(|| "None".to_string()),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_call_rhs_consumer_kind,
+                format!("{:?}", proof.consumer_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_call_rhs_downstream_opcode,
+                proof
+                    .downstream_opcode
+                    .map(|opcode| format!("{opcode:?}"))
+                    .unwrap_or_else(|| "None".to_string()),
+            );
+        }
+        let call_effect_source = proof
+            .call_effect_source
+            .map(|source| format!("{source:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        let writes_memory = proof
+            .writes_memory
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let may_call_unknown = proof
+            .may_call_unknown
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let may_exit = proof
+            .may_exit
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let downstream_opcode = proof
+            .downstream_opcode
+            .map(|opcode| format!("{opcode:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "single-consumer-call-rhs-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_op_seq={} call_target={} family={:?} call_effect_source={} writes_memory={} may_call_unknown={} may_exit={} return_used={} consumer_kind={:?} downstream_opcode={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_op_seq,
+            proof.call_target,
+            proof.family,
+            call_effect_source,
+            writes_memory,
+            may_call_unknown,
+            may_exit,
+            proof.return_used,
+            proof.consumer_kind,
+            downstream_opcode,
+        ));
     }
 
     pub(super) fn trace_unknown_consumer_kind(

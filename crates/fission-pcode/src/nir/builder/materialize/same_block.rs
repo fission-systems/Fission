@@ -228,6 +228,29 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn first_call_expr_in_materialize_expr<'b>(
+        expr: &'b HirExpr,
+    ) -> Option<(&'b str, &'b [HirExpr])> {
+        match expr {
+            HirExpr::Call { target, args, .. } => Some((target.as_str(), args.as_slice())),
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::first_call_expr_in_materialize_expr(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => Self::first_call_expr_in_materialize_expr(lhs)
+                .or_else(|| Self::first_call_expr_in_materialize_expr(rhs)),
+            HirExpr::Load { ptr, .. } => Self::first_call_expr_in_materialize_expr(ptr),
+            HirExpr::PtrOffset { base, .. } => Self::first_call_expr_in_materialize_expr(base),
+            HirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
+                .or_else(|| Self::first_call_expr_in_materialize_expr(index)),
+            HirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
+            HirExpr::Var(_) | HirExpr::Const(_, _) => None,
+        }
+    }
+
+    fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
+        matches!(target, "__popcount" | "__carry" | "__scarry" | "__sborrow")
+    }
+
     fn classify_disallowed_single_consumer_rhs_kind(
         rhs: &HirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
@@ -939,6 +962,66 @@ impl<'a> PreviewBuilder<'a> {
                 base.consumer_opcode,
                 &base.matched_input_indices,
             ),
+        })
+    }
+
+    pub(super) fn describe_single_consumer_call_rhs_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<SingleConsumerCallRhsProof> {
+        let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
+        if base.reason != DisallowedSingleConsumerReason::RhsHasCall {
+            return None;
+        }
+        let (call_target, _args) = Self::first_call_expr_in_materialize_expr(rhs)?;
+        let effect_summary = self
+            .type_context
+            .and_then(|ctx| ctx.call_effect_summaries.get(call_target));
+        let effect_source = effect_summary.and_then(|summary| summary.source);
+        let writes_memory = effect_summary.and_then(|summary| summary.writes_memory);
+        let may_call_unknown = effect_summary.and_then(|summary| summary.may_call_unknown);
+        let may_exit = effect_summary.and_then(|summary| summary.may_exit);
+        let import_call = fission_signatures::win_api::WIN_API_DB
+            .get(call_target)
+            .is_some();
+        let internal_target = crate::nir::types::parse_call_target_address(call_target).is_some();
+        let defining_opcode = block.ops.get(op_idx).map(|op| op.opcode);
+        let preview_unsafe = effect_source == Some(CallEffectSummarySource::PreviewCalleeAnalysis)
+            && (writes_memory == Some(true)
+                || may_call_unknown == Some(true)
+                || may_exit == Some(true));
+        let family = if Self::materialize_call_target_is_known_pure_intrinsic(call_target) {
+            SingleConsumerCallRhsFamily::KnownPureIntrinsic
+        } else if preview_unsafe {
+            SingleConsumerCallRhsFamily::PreviewCalleeAnalysisUnsafe
+        } else if import_call {
+            SingleConsumerCallRhsFamily::ImportCall
+        } else if defining_opcode == Some(PcodeOpcode::CallOther) {
+            SingleConsumerCallRhsFamily::CallOther
+        } else if defining_opcode == Some(PcodeOpcode::CallInd) {
+            SingleConsumerCallRhsFamily::IndirectCall
+        } else if internal_target {
+            SingleConsumerCallRhsFamily::UnknownInternalCall
+        } else {
+            SingleConsumerCallRhsFamily::UnknownCall
+        };
+
+        Some(SingleConsumerCallRhsProof {
+            consumer_block_addr: base.consumer_block_addr,
+            consumer_op_seq: base.consumer_op_seq,
+            consumer_opcode: base.consumer_opcode,
+            consumer_kind: base.consumer_kind,
+            call_target: call_target.to_string(),
+            family,
+            call_effect_source: effect_source,
+            writes_memory,
+            may_call_unknown,
+            may_exit,
+            return_used: true,
+            downstream_opcode: Some(base.consumer_opcode),
         })
     }
 
@@ -2292,6 +2375,101 @@ mod tests {
             DisallowedSingleConsumerReason::ConsumerIsCallArg
         );
         assert_eq!(proof.consumer_opcode, PcodeOpcode::Call);
+    }
+
+    #[test]
+    fn single_consumer_call_rhs_proof_marks_known_pure_intrinsic() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::CallOther,
+                Some(output.clone()),
+                vec![constant(0x2000), constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntAnd,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(1)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "__popcount".to_string(),
+            args: vec![HirExpr::Var("tmp_1".to_string())],
+            ty: int(32),
+        };
+
+        let proof = builder
+            .describe_single_consumer_call_rhs_proof(&block, 0, &output, &rhs)
+            .expect("call rhs proof");
+
+        assert_eq!(
+            proof.family,
+            SingleConsumerCallRhsFamily::KnownPureIntrinsic
+        );
+        assert_eq!(proof.call_target, "__popcount");
+        assert_eq!(proof.call_effect_source, None);
+        assert_eq!(proof.downstream_opcode, Some(PcodeOpcode::IntAnd));
+        assert!(proof.return_used);
+    }
+
+    #[test]
+    fn single_consumer_call_rhs_proof_marks_preview_unsafe_internal_call() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Call,
+                Some(output.clone()),
+                vec![constant(0x140043d30)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(1)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = test_options();
+        let mut type_context = NirTypeContext::default();
+        type_context.call_effect_summaries.insert(
+            "FUN_0x140043d30".to_string(),
+            NirCallEffectSummary {
+                writes_memory: Some(true),
+                may_call_unknown: Some(true),
+                may_exit: Some(true),
+                source: Some(CallEffectSummarySource::PreviewCalleeAnalysis),
+                ..NirCallEffectSummary::default()
+            },
+        );
+        let builder = PreviewBuilder::new(&pcode, &options, Some(&type_context));
+        let rhs = HirExpr::Call {
+            target: "FUN_0x140043d30".to_string(),
+            args: vec![HirExpr::Var("arg_1".to_string())],
+            ty: int(32),
+        };
+
+        let proof = builder
+            .describe_single_consumer_call_rhs_proof(&block, 0, &output, &rhs)
+            .expect("call rhs proof");
+
+        assert_eq!(
+            proof.family,
+            SingleConsumerCallRhsFamily::PreviewCalleeAnalysisUnsafe
+        );
+        assert_eq!(
+            proof.call_effect_source,
+            Some(CallEffectSummarySource::PreviewCalleeAnalysis)
+        );
+        assert_eq!(proof.writes_memory, Some(true));
+        assert_eq!(proof.may_call_unknown, Some(true));
+        assert_eq!(proof.may_exit, Some(true));
+        assert_eq!(proof.downstream_opcode, Some(PcodeOpcode::IntAdd));
     }
 
     #[test]
