@@ -519,6 +519,123 @@ impl<'a> PreviewBuilder<'a> {
         Some(ArithmeticPredicateStableReason::PredicateSensitive)
     }
 
+    fn low_bit_mask_input_expr<'b>(expr: &'b HirExpr) -> Option<&'b HirExpr> {
+        match expr {
+            HirExpr::Cast { expr, .. } => Self::low_bit_mask_input_expr(expr),
+            HirExpr::Binary { op, lhs, rhs, .. } if matches!(op, HirBinaryOp::And) => {
+                match (&**lhs, &**rhs) {
+                    (HirExpr::Const(1, _), other) | (other, HirExpr::Const(1, _)) => Some(other),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn expr_boolean_like(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Const(_, ty) => {
+                matches!(ty, NirType::Bool)
+                    || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+            }
+            HirExpr::Cast { ty, expr } => match ty {
+                NirType::Bool => true,
+                NirType::Int { bits, .. } if *bits == 1 => true,
+                _ => Self::expr_boolean_like(expr),
+            },
+            HirExpr::Unary { op, ty, expr } => match op {
+                HirUnaryOp::Not => true,
+                _ => {
+                    matches!(ty, NirType::Bool)
+                        || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+                        || Self::expr_boolean_like(expr)
+                }
+            },
+            HirExpr::Binary { op, ty, .. } => {
+                matches!(
+                    op,
+                    HirBinaryOp::LogicalAnd
+                        | HirBinaryOp::LogicalOr
+                        | HirBinaryOp::Eq
+                        | HirBinaryOp::Ne
+                        | HirBinaryOp::Lt
+                        | HirBinaryOp::Le
+                        | HirBinaryOp::SLt
+                        | HirBinaryOp::SLe
+                ) || matches!(ty, NirType::Bool)
+                    || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+            }
+            HirExpr::Call { ty, .. } | HirExpr::Load { ty, .. } => {
+                matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+            }
+            HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. }
+            | HirExpr::Var(_) => false,
+        }
+    }
+
+    fn classify_low_bit_mask_input_origin_kind(expr: &HirExpr) -> LowBitMaskInputOriginKind {
+        match expr {
+            HirExpr::Cast { expr, .. } => Self::classify_low_bit_mask_input_origin_kind(expr),
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                ..
+            } => LowBitMaskInputOriginKind::BoolOp,
+            HirExpr::Unary { .. } => LowBitMaskInputOriginKind::Unknown,
+            HirExpr::Binary { op, .. } => match op {
+                HirBinaryOp::Eq
+                | HirBinaryOp::Ne
+                | HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe => LowBitMaskInputOriginKind::Compare,
+                HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr => {
+                    LowBitMaskInputOriginKind::BoolOp
+                }
+                HirBinaryOp::And
+                | HirBinaryOp::Or
+                | HirBinaryOp::Xor
+                | HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::Div
+                | HirBinaryOp::Mod
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar => LowBitMaskInputOriginKind::Arithmetic,
+            },
+            HirExpr::Load { .. } | HirExpr::PtrOffset { .. } | HirExpr::Index { .. } => {
+                LowBitMaskInputOriginKind::Load
+            }
+            HirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
+            HirExpr::AggregateCopy { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => {
+                LowBitMaskInputOriginKind::Unknown
+            }
+        }
+    }
+
+    fn classify_low_bit_mask_predicate_family(
+        input_origin_kind: LowBitMaskInputOriginKind,
+        input_is_boolean_like: bool,
+    ) -> LowBitMaskPredicateFamily {
+        match (input_origin_kind, input_is_boolean_like) {
+            (LowBitMaskInputOriginKind::Compare, _) => {
+                LowBitMaskPredicateFamily::MaskFromCompareResult
+            }
+            (LowBitMaskInputOriginKind::BoolOp, true) => LowBitMaskPredicateFamily::BooleanFlagMask,
+            (LowBitMaskInputOriginKind::Arithmetic, _) => {
+                LowBitMaskPredicateFamily::MaskFromArithmeticValue
+            }
+            (LowBitMaskInputOriginKind::Load, false)
+            | (LowBitMaskInputOriginKind::Call, false)
+            | (LowBitMaskInputOriginKind::Unknown, false) => {
+                LowBitMaskPredicateFamily::IntegerBitTest
+            }
+            _ => LowBitMaskPredicateFamily::UnknownLowBitMask,
+        }
+    }
+
     pub(super) fn describe_disallowed_single_consumer_proof(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -656,6 +773,32 @@ impl<'a> PreviewBuilder<'a> {
             low_cost: predicate.low_cost_if_predicate,
             stable_required: predicate.requires_stable_representative,
             stable_required_reason,
+        })
+    }
+
+    pub(super) fn describe_low_bit_mask_predicate_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<LowBitMaskPredicateProof> {
+        let arithmetic = Self::describe_arithmetic_predicate_proof(block, op_idx, output, rhs)?;
+        if arithmetic.mask_kind != ArithmeticPredicateShape::LowBitAndOne {
+            return None;
+        }
+        let mask_input = Self::low_bit_mask_input_expr(rhs)?;
+        let input_origin_kind = Self::classify_low_bit_mask_input_origin_kind(mask_input);
+        let input_is_boolean_like = Self::expr_boolean_like(mask_input);
+        let family =
+            Self::classify_low_bit_mask_predicate_family(input_origin_kind, input_is_boolean_like);
+        Some(LowBitMaskPredicateProof {
+            family,
+            mask_input: format!("{mask_input:?}"),
+            consumer_guard: arithmetic.consumer_guard,
+            feeds_only_predicate: true,
+            input_is_boolean_like,
+            input_origin_kind,
+            stable_required_reason: arithmetic.stable_required_reason,
         })
     }
 
@@ -1623,6 +1766,102 @@ mod tests {
         assert_eq!(proof.mask_kind, ArithmeticPredicateShape::ShiftAndMask);
         assert_eq!(proof.mask_value, Some(1));
         assert!(proof.boolean_width);
+    }
+
+    #[test]
+    fn low_bit_mask_predicate_proof_marks_compare_origin() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_low_bit_mask_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("x".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, int(32))),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        )
+        .expect("low-bit mask predicate proof");
+
+        assert_eq!(
+            proof.family,
+            LowBitMaskPredicateFamily::MaskFromCompareResult
+        );
+        assert_eq!(proof.input_origin_kind, LowBitMaskInputOriginKind::Compare);
+        assert!(proof.input_is_boolean_like);
+        assert!(proof.feeds_only_predicate);
+    }
+
+    #[test]
+    fn low_bit_mask_predicate_proof_marks_arithmetic_origin() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_low_bit_mask_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("x".to_string())),
+                    rhs: Box::new(HirExpr::Const(1, int(32))),
+                    ty: int(32),
+                }),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        )
+        .expect("low-bit mask predicate proof");
+
+        assert_eq!(
+            proof.family,
+            LowBitMaskPredicateFamily::MaskFromArithmeticValue
+        );
+        assert_eq!(
+            proof.input_origin_kind,
+            LowBitMaskInputOriginKind::Arithmetic
+        );
+        assert!(!proof.input_is_boolean_like);
+        assert_eq!(
+            proof.stable_required_reason,
+            Some(ArithmeticPredicateStableReason::ArithmeticMask)
+        );
     }
 
     #[test]

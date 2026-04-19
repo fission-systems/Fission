@@ -110,6 +110,26 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "low_bit_mask_predicate_family",
+                Self::format_materialize_owner_histogram(&summary.low_bit_mask_predicate_family),
+            ),
+            (
+                "low_bit_mask_input_origin_kind",
+                Self::format_materialize_owner_histogram(&summary.low_bit_mask_input_origin_kind),
+            ),
+            (
+                "low_bit_mask_feeds_only_predicate",
+                Self::format_materialize_owner_histogram(
+                    &summary.low_bit_mask_feeds_only_predicate,
+                ),
+            ),
+            (
+                "low_bit_mask_input_is_boolean_like",
+                Self::format_materialize_owner_histogram(
+                    &summary.low_bit_mask_input_is_boolean_like,
+                ),
+            ),
+            (
                 "materialization_rejection_reason",
                 Self::format_materialize_owner_histogram(&summary.materialization_rejection_reason),
             ),
@@ -474,6 +494,61 @@ impl<'a> PreviewBuilder<'a> {
             proof.boolean_width,
             proof.low_cost,
             proof.stable_required,
+            stable_reason,
+        ));
+        if proof.mask_kind == ArithmeticPredicateShape::LowBitAndOne {
+            self.trace_low_bit_mask_predicate_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_low_bit_mask_predicate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = Self::describe_low_bit_mask_predicate_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.low_bit_mask_predicate_family,
+                format!("{:?}", proof.family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.low_bit_mask_input_origin_kind,
+                format!("{:?}", proof.input_origin_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.low_bit_mask_feeds_only_predicate,
+                proof.feeds_only_predicate.to_string(),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.low_bit_mask_input_is_boolean_like,
+                proof.input_is_boolean_like.to_string(),
+            );
+        }
+        let stable_reason = proof
+            .stable_required_reason
+            .map(|reason| format!("{reason:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        self.emit_ready_trace(format!(
+            "low-bit-mask-proof output=space:{} off:0x{:x} size:{} rhs={:?} mask_input={} consumer_guard={:?} feeds_only_predicate={} input_is_boolean_like={} input_origin_kind={:?} stable_required_reason={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            rhs,
+            proof.mask_input,
+            proof.consumer_guard,
+            proof.feeds_only_predicate,
+            proof.input_is_boolean_like,
+            proof.input_origin_kind,
             stable_reason,
         ));
     }

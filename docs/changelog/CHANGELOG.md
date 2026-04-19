@@ -9,6 +9,87 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` low-bit mask predicate proof tracing
+
+This wave stayed diagnostic-only. It does not widen predicate normalization, alter stable-representative policy, or enable any env-gated policy path. The goal was to take the now-isolated `LowBitAndOne=459` arithmetic predicate slice on `0x140008090` and determine whether it behaves like boolean-flag extraction or plain integer bit testing.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries low-bit-mask proof vocabulary:
+  - `LowBitMaskPredicateFamily`
+    - `BooleanFlagMask`
+    - `IntegerBitTest`
+    - `MaskFromCompareResult`
+    - `MaskFromArithmeticValue`
+    - `UnknownLowBitMask`
+  - `LowBitMaskInputOriginKind`
+    - `Compare`
+    - `BoolOp`
+    - `Arithmetic`
+    - `Load`
+    - `Call`
+    - `Unknown`
+  - `LowBitMaskPredicateProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `low_bit_mask_predicate_family`
+    - `low_bit_mask_input_origin_kind`
+    - `low_bit_mask_feeds_only_predicate`
+    - `low_bit_mask_input_is_boolean_like`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_low_bit_mask_predicate_proof(...)`
+  - low-bit mask input extraction for `(x & 1)` style rhs
+  - input origin classification
+  - boolean-like input proof
+  - narrow family classification for low-bit mask predicate consumers
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `low-bit-mask-proof output=... rhs=... mask_input=... consumer_guard=... feeds_only_predicate=... input_is_boolean_like=... input_origin_kind=... stable_required_reason=...`
+  - summary families for:
+    - `low_bit_mask_predicate_family`
+    - `low_bit_mask_input_origin_kind`
+    - `low_bit_mask_feeds_only_predicate`
+    - `low_bit_mask_input_is_boolean_like`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode low_bit_mask_predicate_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `arithmetic_predicate_shape`
+  - `LowBitAndOne=459`
+  - `UnknownArithmetic=9`
+- `arithmetic_predicate_stable_reason`
+  - `ArithmeticMask=459`
+- `low_bit_mask_predicate_family`
+  - `IntegerBitTest=459`
+- `low_bit_mask_input_origin_kind`
+  - `Unknown=459`
+- `low_bit_mask_feeds_only_predicate`
+  - `true=459`
+- `low_bit_mask_input_is_boolean_like`
+  - `false=459`
+
+Representative traces:
+
+- `output=space:3 off:0xe100005000202710 size:8 rhs=Binary { op: And, lhs: Var("xVar31"), rhs: Const(1, Int { bits: 64, signed: false }), ty: Int { bits: 64, signed: false } } mask_input=Var("xVar31") consumer_guard=CompareZero feeds_only_predicate=true input_is_boolean_like=false input_origin_kind=Unknown stable_required_reason=ArithmeticMask`
+- `output=space:3 off:0xe100005000203650 size:4 rhs=Binary { op: And, lhs: Var("uVar77"), rhs: Const(1, Int { bits: 32, signed: false }), ty: Int { bits: 32, signed: false } } mask_input=Var("uVar77") consumer_guard=CompareZero feeds_only_predicate=true input_is_boolean_like=false input_origin_kind=Unknown stable_required_reason=ArithmeticMask`
+- `output=space:3 off:0xe100005000203d70 size:1 rhs=Binary { op: And, lhs: Var("xVar117"), rhs: Const(1, Int { bits: 8, signed: false }), ty: Int { bits: 8, signed: false } } mask_input=Var("xVar117") consumer_guard=CompareZero feeds_only_predicate=true input_is_boolean_like=false input_origin_kind=Unknown stable_required_reason=ArithmeticMask`
+
+Conclusion:
+
+- the dominant `LowBitAndOne` slice does not currently look like boolean-origin flag extraction
+- in the live row, it behaves as:
+  - single predicate consumers only
+  - compare-zero consumers
+  - integer-looking masked inputs with no boolean-like proof
+  - stable-representative requirement still explained by `ArithmeticMask`
+- the next owner is therefore not low-bit boolean normalization but either:
+  - refining var/input provenance so `Var(...)` mask inputs are no longer opaque, or
+  - keeping this family fail-closed as integer bit-test consumers and moving to the next materialize owner
+  
+
 ### `0x140008090` arithmetic mask predicate proof tracing
 
 This wave stayed diagnostic-only. It does not widen predicate replacement, change stable-representative policy, or enable any new env-gated path. The goal was to take the dominant `DisallowedSingleConsumer -> ConsumerIsPredicate -> UnknownPredicate` slice on `0x140008090` and separate arithmetic bit-mask predicate shapes from the remaining classifier blind spot.

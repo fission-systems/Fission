@@ -138,6 +138,36 @@ pub(super) struct ArithmeticPredicateProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LowBitMaskPredicateFamily {
+    BooleanFlagMask,
+    IntegerBitTest,
+    MaskFromCompareResult,
+    MaskFromArithmeticValue,
+    UnknownLowBitMask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LowBitMaskInputOriginKind {
+    Compare,
+    BoolOp,
+    Arithmetic,
+    Load,
+    Call,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LowBitMaskPredicateProof {
+    pub(super) family: LowBitMaskPredicateFamily,
+    pub(super) mask_input: String,
+    pub(super) consumer_guard: SingleConsumerPredicateFamily,
+    pub(super) feeds_only_predicate: bool,
+    pub(super) input_is_boolean_like: bool,
+    pub(super) input_origin_kind: LowBitMaskInputOriginKind,
+    pub(super) stable_required_reason: Option<ArithmeticPredicateStableReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MalformedDefUseWindowRelation {
     DefAfterTerminator,
     ConsumerBeforeDef,
@@ -345,6 +375,10 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) arithmetic_predicate_consumer_guard: BTreeMap<String, usize>,
     pub(super) arithmetic_predicate_boolean_width: BTreeMap<String, usize>,
     pub(super) arithmetic_predicate_stable_reason: BTreeMap<String, usize>,
+    pub(super) low_bit_mask_predicate_family: BTreeMap<String, usize>,
+    pub(super) low_bit_mask_input_origin_kind: BTreeMap<String, usize>,
+    pub(super) low_bit_mask_feeds_only_predicate: BTreeMap<String, usize>,
+    pub(super) low_bit_mask_input_is_boolean_like: BTreeMap<String, usize>,
     pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
     pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
     pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,
