@@ -66,6 +66,28 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "single_consumer_predicate_family",
+                Self::format_materialize_owner_histogram(&summary.single_consumer_predicate_family),
+            ),
+            (
+                "single_consumer_predicate_guard_family",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_predicate_guard_family,
+                ),
+            ),
+            (
+                "single_consumer_predicate_same_guard",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_predicate_same_guard,
+                ),
+            ),
+            (
+                "single_consumer_predicate_requires_stable",
+                Self::format_materialize_owner_histogram(
+                    &summary.single_consumer_predicate_requires_stable,
+                ),
+            ),
+            (
                 "materialization_rejection_reason",
                 Self::format_materialize_owner_histogram(&summary.materialization_rejection_reason),
             ),
@@ -310,6 +332,65 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_has_load,
             proof.rhs_has_call,
             proof.reason,
+        ));
+        if proof.reason == DisallowedSingleConsumerReason::ConsumerIsPredicate {
+            self.trace_single_consumer_predicate_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_single_consumer_predicate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) =
+            Self::describe_single_consumer_predicate_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_predicate_family,
+                format!("{:?}", proof.predicate_family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_predicate_guard_family,
+                format!("{:?}", proof.guard_family),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_predicate_same_guard,
+                proof.same_guard_as_consumer.to_string(),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.single_consumer_predicate_requires_stable,
+                proof.requires_stable_representative.to_string(),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "single-consumer-predicate-proof output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} consumer_block=0x{:x} consumer_op_seq={} consumer_opcode={:?} rhs_kind={:?} rhs={:?} predicate_family={:?} guard_family={:?} same_guard_as_consumer={} requires_stable_representative={} low_cost_if_predicate={} has_call={} has_load={}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_block_addr,
+            proof.consumer_op_seq,
+            proof.consumer_opcode,
+            proof.rhs_kind,
+            rhs,
+            proof.predicate_family,
+            proof.guard_family,
+            proof.same_guard_as_consumer,
+            proof.requires_stable_representative,
+            proof.low_cost_if_predicate,
+            proof.has_call,
+            proof.has_load,
         ));
     }
 

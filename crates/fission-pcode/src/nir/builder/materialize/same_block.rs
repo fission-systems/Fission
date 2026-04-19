@@ -326,6 +326,135 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
+        match expr {
+            HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
+            HirExpr::Cast { expr, .. } => Self::classify_single_consumer_predicate_family(expr),
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                ..
+            } => SingleConsumerPredicateFamily::NegatedFlag,
+            HirExpr::Unary { .. } => SingleConsumerPredicateFamily::UnknownPredicate,
+            HirExpr::Binary { op, lhs, rhs, .. } => match op {
+                HirBinaryOp::Eq => {
+                    if matches!(&**lhs, HirExpr::Const(0, _))
+                        || matches!(&**rhs, HirExpr::Const(0, _))
+                    {
+                        SingleConsumerPredicateFamily::CompareZero
+                    } else if matches!(&**lhs, HirExpr::Const(_, _))
+                        || matches!(&**rhs, HirExpr::Const(_, _))
+                    {
+                        SingleConsumerPredicateFamily::CompareConst
+                    } else {
+                        SingleConsumerPredicateFamily::CompareOtherVar
+                    }
+                }
+                HirBinaryOp::Ne => {
+                    if matches!(&**lhs, HirExpr::Const(0, _))
+                        || matches!(&**rhs, HirExpr::Const(0, _))
+                    {
+                        SingleConsumerPredicateFamily::CompareNonZero
+                    } else if matches!(&**lhs, HirExpr::Const(_, _))
+                        || matches!(&**rhs, HirExpr::Const(_, _))
+                    {
+                        SingleConsumerPredicateFamily::CompareConst
+                    } else {
+                        SingleConsumerPredicateFamily::CompareOtherVar
+                    }
+                }
+                HirBinaryOp::LogicalAnd
+                | HirBinaryOp::LogicalOr
+                | HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe => SingleConsumerPredicateFamily::ComposedPredicate,
+                _ => SingleConsumerPredicateFamily::UnknownPredicate,
+            },
+            HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. }
+            | HirExpr::Const(_, _) => SingleConsumerPredicateFamily::UnknownPredicate,
+        }
+    }
+
+    fn classify_single_consumer_guard_family(
+        use_op: &PcodeOp,
+        matched_inputs: &[usize],
+    ) -> SingleConsumerPredicateFamily {
+        match use_op.opcode {
+            PcodeOpcode::BoolNegate if matched_inputs == [0] => {
+                SingleConsumerPredicateFamily::NegatedFlag
+            }
+            PcodeOpcode::IntEqual => {
+                if use_op.inputs.len() != 2 {
+                    return SingleConsumerPredicateFamily::UnknownPredicate;
+                }
+                let lhs_matches = matched_inputs.contains(&0);
+                let rhs_matches = matched_inputs.contains(&1);
+                if lhs_matches && use_op.inputs[1].is_constant && use_op.inputs[1].constant_val == 0
+                    || rhs_matches
+                        && use_op.inputs[0].is_constant
+                        && use_op.inputs[0].constant_val == 0
+                {
+                    SingleConsumerPredicateFamily::CompareZero
+                } else if lhs_matches && use_op.inputs[1].is_constant
+                    || rhs_matches && use_op.inputs[0].is_constant
+                {
+                    SingleConsumerPredicateFamily::CompareConst
+                } else if lhs_matches || rhs_matches {
+                    SingleConsumerPredicateFamily::CompareOtherVar
+                } else {
+                    SingleConsumerPredicateFamily::UnknownPredicate
+                }
+            }
+            PcodeOpcode::IntNotEqual => {
+                if use_op.inputs.len() != 2 {
+                    return SingleConsumerPredicateFamily::UnknownPredicate;
+                }
+                let lhs_matches = matched_inputs.contains(&0);
+                let rhs_matches = matched_inputs.contains(&1);
+                if lhs_matches && use_op.inputs[1].is_constant && use_op.inputs[1].constant_val == 0
+                    || rhs_matches
+                        && use_op.inputs[0].is_constant
+                        && use_op.inputs[0].constant_val == 0
+                {
+                    SingleConsumerPredicateFamily::CompareNonZero
+                } else if lhs_matches && use_op.inputs[1].is_constant
+                    || rhs_matches && use_op.inputs[0].is_constant
+                {
+                    SingleConsumerPredicateFamily::CompareConst
+                } else if lhs_matches || rhs_matches {
+                    SingleConsumerPredicateFamily::CompareOtherVar
+                } else {
+                    SingleConsumerPredicateFamily::UnknownPredicate
+                }
+            }
+            PcodeOpcode::BoolAnd | PcodeOpcode::BoolOr | PcodeOpcode::BoolXor => matched_inputs
+                .iter()
+                .any(|idx| *idx < use_op.inputs.len())
+                .then_some(SingleConsumerPredicateFamily::ComposedPredicate)
+                .unwrap_or(SingleConsumerPredicateFamily::UnknownPredicate),
+            PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual => matched_inputs
+                .iter()
+                .any(|idx| *idx < use_op.inputs.len())
+                .then_some(SingleConsumerPredicateFamily::ComposedPredicate)
+                .unwrap_or(SingleConsumerPredicateFamily::UnknownPredicate),
+            _ => SingleConsumerPredicateFamily::UnknownPredicate,
+        }
+    }
+
+    fn predicate_families_match(
+        predicate_family: SingleConsumerPredicateFamily,
+        guard_family: SingleConsumerPredicateFamily,
+    ) -> bool {
+        predicate_family == guard_family
+    }
+
     pub(super) fn describe_disallowed_single_consumer_proof(
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -394,6 +523,50 @@ impl<'a> PreviewBuilder<'a> {
             rhs_has_load,
             rhs_has_call,
             reason,
+        })
+    }
+
+    pub(super) fn describe_single_consumer_predicate_proof(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<SingleConsumerPredicateProof> {
+        let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
+        if base.reason != DisallowedSingleConsumerReason::ConsumerIsPredicate {
+            return None;
+        }
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (_, use_op) = *uses.first()?;
+        if uses.len() != 1 {
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        let matched_inputs = use_op
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, input)| (VarnodeKey::from(input) == output_key).then_some(idx))
+            .collect::<Vec<_>>();
+        let predicate_family = Self::classify_single_consumer_predicate_family(rhs);
+        let guard_family = Self::classify_single_consumer_guard_family(use_op, &matched_inputs);
+        let low_cost_if_predicate = Self::expr_is_low_cost_builder_inline_candidate(rhs);
+        let requires_stable_representative = Self::replacement_read_requires_stable_representative(
+            ReplacementReadClass::PredicateSensitive,
+            rhs,
+        );
+        Some(SingleConsumerPredicateProof {
+            consumer_block_addr: base.consumer_block_addr,
+            consumer_op_seq: base.consumer_op_seq,
+            consumer_opcode: base.consumer_opcode,
+            rhs_kind: base.rhs_kind,
+            predicate_family,
+            guard_family,
+            same_guard_as_consumer: Self::predicate_families_match(predicate_family, guard_family),
+            requires_stable_representative,
+            low_cost_if_predicate,
+            has_call: base.rhs_has_call,
+            has_load: base.rhs_has_load,
         })
     }
 
@@ -1152,6 +1325,133 @@ mod tests {
             DisallowedSingleConsumerReason::ConsumerIsCallArg
         );
         assert_eq!(proof.consumer_opcode, PcodeOpcode::Call);
+    }
+
+    #[test]
+    fn single_consumer_predicate_proof_marks_compare_zero_same_guard() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_single_consumer_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("tmp_1".to_string())),
+                rhs: Box::new(HirExpr::Const(0, int(32))),
+                ty: int(1),
+            },
+        )
+        .expect("single consumer predicate proof");
+
+        assert_eq!(
+            proof.predicate_family,
+            SingleConsumerPredicateFamily::CompareZero
+        );
+        assert_eq!(
+            proof.guard_family,
+            SingleConsumerPredicateFamily::CompareZero
+        );
+        assert!(proof.same_guard_as_consumer);
+        assert!(proof.requires_stable_representative);
+    }
+
+    #[test]
+    fn single_consumer_predicate_proof_marks_negated_flag_same_guard() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::BoolNegate,
+                Some(varnode(0x20)),
+                vec![output.clone()],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_single_consumer_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("tmp_1".to_string())),
+                ty: int(1),
+            },
+        )
+        .expect("single consumer predicate proof");
+
+        assert_eq!(
+            proof.predicate_family,
+            SingleConsumerPredicateFamily::NegatedFlag
+        );
+        assert_eq!(
+            proof.guard_family,
+            SingleConsumerPredicateFamily::NegatedFlag
+        );
+        assert!(proof.same_guard_as_consumer);
+    }
+
+    #[test]
+    fn single_consumer_predicate_proof_marks_compare_other_var_guard_mismatch() {
+        let output = varnode(0x10);
+        let block = block(vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(output.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(varnode(0x20)),
+                vec![output.clone(), constant(0)],
+            ),
+        ]);
+
+        let proof = PreviewBuilder::describe_single_consumer_predicate_proof(
+            &block,
+            0,
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("lhs".to_string())),
+                rhs: Box::new(HirExpr::Var("rhs".to_string())),
+                ty: int(1),
+            },
+        )
+        .expect("single consumer predicate proof");
+
+        assert_eq!(
+            proof.predicate_family,
+            SingleConsumerPredicateFamily::CompareOtherVar
+        );
+        assert_eq!(
+            proof.guard_family,
+            SingleConsumerPredicateFamily::CompareZero
+        );
+        assert!(!proof.same_guard_as_consumer);
+        assert!(proof.low_cost_if_predicate);
     }
 
     #[test]

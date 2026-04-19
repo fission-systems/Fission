@@ -83,6 +83,33 @@ pub(super) struct DisallowedSingleConsumerProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SingleConsumerPredicateFamily {
+    DirectFlag,
+    NegatedFlag,
+    CompareZero,
+    CompareNonZero,
+    CompareConst,
+    CompareOtherVar,
+    ComposedPredicate,
+    UnknownPredicate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SingleConsumerPredicateProof {
+    pub(super) consumer_block_addr: u64,
+    pub(super) consumer_op_seq: u32,
+    pub(super) consumer_opcode: PcodeOpcode,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) predicate_family: SingleConsumerPredicateFamily,
+    pub(super) guard_family: SingleConsumerPredicateFamily,
+    pub(super) same_guard_as_consumer: bool,
+    pub(super) requires_stable_representative: bool,
+    pub(super) low_cost_if_predicate: bool,
+    pub(super) has_call: bool,
+    pub(super) has_load: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MalformedDefUseWindowRelation {
     DefAfterTerminator,
     ConsumerBeforeDef,
@@ -282,6 +309,10 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) disallowed_single_consumer_reason: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
     pub(super) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
+    pub(super) single_consumer_predicate_family: BTreeMap<String, usize>,
+    pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
+    pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,
+    pub(super) single_consumer_predicate_requires_stable: BTreeMap<String, usize>,
     pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
     pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
     pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,

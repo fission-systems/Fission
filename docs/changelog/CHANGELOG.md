@@ -9,6 +9,77 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### `0x140008090` single-consumer predicate proof tracing
+
+This wave stayed diagnostic-only. It does not widen predicate inlining, alter stable-representative policy, or enable any new env-gated replacement path. The goal was to take the already isolated `DisallowedSingleConsumer -> ConsumerIsPredicate` slice on `0x140008090` and partition it by predicate-family/guard-family proof instead of treating the whole bucket as a single future policy target.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries a dedicated predicate-only vocabulary for this builder family:
+  - `SingleConsumerPredicateFamily`
+  - `SingleConsumerPredicateProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `single_consumer_predicate_family`
+    - `single_consumer_predicate_guard_family`
+    - `single_consumer_predicate_same_guard`
+    - `single_consumer_predicate_requires_stable`
+- [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs) now exposes:
+  - `describe_single_consumer_predicate_proof(...)`
+  - predicate-side family classification from the producer rhs
+  - consumer-side guard-family classification from the predicate consumer op
+  - `same_guard_as_consumer`
+  - `requires_stable_representative`
+  - `low_cost_if_predicate`
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `single-consumer-predicate-proof output=... def_block=... def_op_seq=... consumer_block=... consumer_op_seq=... consumer_opcode=... rhs_kind=... rhs=... predicate_family=... guard_family=... same_guard_as_consumer=... requires_stable_representative=... low_cost_if_predicate=... has_call=false has_load=false`
+  - summary families for:
+    - `single_consumer_predicate_family`
+    - `single_consumer_predicate_guard_family`
+    - `single_consumer_predicate_same_guard`
+    - `single_consumer_predicate_requires_stable`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode single_consumer_predicate_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
+Observed state on `0x140008090`:
+
+- `disallowed_single_consumer_reason`
+  - `ConsumerIsPredicate=567`
+  - `RhsHasCall=479`
+  - `RhsHasLoad=64`
+  - `UnknownConsumerKind=443`
+- `single_consumer_predicate_family`
+  - `UnknownPredicate=468`
+  - `CompareZero=51`
+  - `DirectFlag=22`
+  - `ComposedPredicate=17`
+  - `CompareOtherVar=9`
+- `single_consumer_predicate_guard_family`
+  - `CompareZero=443`
+  - `CompareOtherVar=48`
+  - `NegatedFlag=42`
+  - `ComposedPredicate=18`
+  - `CompareNonZero=16`
+- `single_consumer_predicate_same_guard`
+  - `false=567`
+- `single_consumer_predicate_requires_stable`
+  - `true=536`
+  - `false=31`
+
+Conclusion:
+
+- the live predicate slice does not currently expose a same-guard narrow acceptance candidate
+- the dominant real shape is now clear:
+  - `IntEqual(output, 0)` consumers over arithmetic `(... & 1)`-style rhs
+  - classified today as `predicate_family=UnknownPredicate`, `guard_family=CompareZero`
+  - almost always still requiring a stable representative
+- the next owner is therefore not a broad predicate-restart policy but either:
+  - refining predicate-family classification for these arithmetic flag-mask rhs shapes, or
+  - explicitly proving why they must remain stable-representative consumers
+
 ### `0x140008090` `DisallowedSingleConsumer` proof subtyping
 
 This wave stayed diagnostic-only. It does not widen same-block replacement, change representative stability policy, or alter env-gated materialization experiments. The goal was to take the now-isolated `DisallowedSingleConsumer=1553` slice on `0x140008090` and partition it by actual consumer/rhs proof instead of leaving it as a single alias-unsafe bucket.
