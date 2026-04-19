@@ -9,6 +9,61 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### `materialize.rs` thin-façade module split
+
+This wave is a behavior-preserving refactor. It does not widen replacement/materialization policy, change telemetry, or retune any benchmark gate. The goal was to stop growing one multi-owner builder file and split the existing logic by semantic owner while keeping the external `builder::materialize` module path stable.
+
+- the old flat [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) implementation was converted into the folder-backed module [`materialize/mod.rs`](../../crates/fission-pcode/src/nir/builder/materialize/mod.rs)
+- the new layout keeps `mod.rs` as a thin orchestration façade and moves helper families into focused siblings:
+  - [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs)
+  - [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs)
+  - [`same_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/same_block.rs)
+  - [`no_consumer.rs`](../../crates/fission-pcode/src/nir/builder/materialize/no_consumer.rs)
+  - [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs)
+  - [`loop_carried.rs`](../../crates/fission-pcode/src/nir/builder/materialize/loop_carried.rs)
+  - [`scans.rs`](../../crates/fission-pcode/src/nir/builder/materialize/scans.rs)
+- shared unit-test scaffolding that was previously trapped in the monolithic file now lives in [`test_support.rs`](../../crates/fission-pcode/src/nir/builder/materialize/test_support.rs), and owner tests were moved into the owning modules instead of staying in one giant local test block
+- ownership boundaries are now explicit:
+  - `contracts.rs` owns shared internal vocabulary
+  - `trace.rs` owns `EMIT-TRACE` formatting only
+  - `same_block.rs`, `no_consumer.rs`, `cross_block.rs`, and `loop_carried.rs` own their semantic proof/classifier families
+  - `scans.rs` owns low-level def/use scanning helpers
+- default behavior remains unchanged:
+  - existing env gates are still the only active switches:
+    - `FISSION_ENABLE_NO_CONSUMER_SUPPRESSION`
+    - `FISSION_ENABLE_COPY_OVERWRITE_RESTART`
+    - `FISSION_ENABLE_PREDICATE_REFRESH_RESTART`
+  - no new trace vocabulary or `NirBuildStats` fields were introduced
+
+Validation:
+
+- `cargo test -p fission-pcode loop_carried_overwrite_provenance_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode loop_boolean_flag_proof_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode predicate_overwrite_refresh_proof_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode predicate_refresh_restart_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode def_window_restart_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- targeted live trace parity checks on:
+  - `0x140006c20`
+  - `0x140008090`
+  - `0x140006fe0`
+
+Observed state:
+
+- the `materialize` split preserved the existing trace families on the live rows:
+  - `0x140006c20` still surfaces `loop-carried-overwrite`, `loop-boolean-flag-proof`, and `predicate-overwrite-proof`
+  - `0x140008090` still surfaces `alias-unsafe-shape`, malformed def/use, and no-consumer diagnostics
+  - `0x140006fe0` still surfaces the pre-existing guarded-tail/materialization diagnostics
+- `cargo test -p fission-pcode` remains red only in the already-known guarded-tail family; the split did not introduce a new materialize-side regression family
+
+Conclusion:
+
+- `builder::materialize` now has explicit internal owners without changing release behavior
+- future waves can target one family at a time without re-expanding a monolithic file
+- the guarded-tail red suite remains a separate known issue and was not altered by this refactor
+- no release policy changed in this wave
+
 ### Loop boolean flag ownership proof tracing
 
 This wave stayed diagnostic-only. It does not widen loop-carried replacement, synthesize loop bindings, or relax merge-boundary handling. The goal was to take the already-isolated `LoopBackedge x OverwriteAtLoopUpdate = 156` boolean slice on `0x140006c20` and prove whether those values behave like loop exit/latch guards or true carried loop state.
