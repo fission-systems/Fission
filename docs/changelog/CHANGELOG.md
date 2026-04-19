@@ -9,6 +9,54 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-19 (latest)
 
+### Loop-carried overwrite binding provenance
+
+This wave stayed diagnostic-only. It does not widen cross-block replacement, synthesize merge bindings, or restart def windows for loop-carried values. The goal was to isolate the remaining `LoopBackedge x OverwriteAtLoopUpdate = 156` slice on `0x140006c20` and prove what kind of carried value it actually is before any merge-boundary policy work.
+
+- [`materialize.rs`](../../crates/fission-pcode/src/nir/builder/materialize.rs) now emits a dedicated loop-carried overwrite trace when a cross-block consumer falls through `LoopCarriedRedefinition + OverwriteAtLoopUpdate`:
+  - `loop-carried-overwrite output=... def_block=... def_op_seq=... redef_op_seq=... redef_rhs=... loop_header=... backedge_block=... consumer_block=... consumer_op_seq=... has_multiequal=... phi_input_count=... induction_like=... carried_value_kind=...`
+- the provenance is intentionally builder-local and diagnostic:
+  - it reads the redef op from the actual backedge/redef block rather than the original def block
+  - it reports whether the loop header block contains any `MULTIEQUAL`
+  - it classifies the carried value into:
+    - `BooleanFlag`
+    - `CounterIncrement`
+    - `PointerAdvance`
+    - `Accumulator`
+    - `UnknownLoopCarried`
+- unit coverage now pins both ends of the classifier:
+  - boolean loop-carried refresh without `MULTIEQUAL`
+  - pointer-advance loop-carried refresh with unrelated header `MULTIEQUAL`
+
+Validation:
+
+- `cargo test -p fission-pcode loop_carried_overwrite_provenance_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140006c20 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140006c20 --engine nir --profile nir --ghidra-compat`
+
+Observed state:
+
+- the targeted `0x140006c20` trace no longer treats the loop-carried slice as a generic cross-block bucket
+- all `156` observed `LoopBackedge x OverwriteAtLoopUpdate` cases currently collapse into the same live family:
+  - `carried_value_kind = BooleanFlag`
+  - `has_multiequal = false`
+  - `phi_input_count = 0`
+  - `induction_like = false`
+- the live loop headers only split across two addresses:
+  - `0x140006c55` (`96` cases)
+  - `0x140006c40` (`60` cases)
+- representative live examples look like boolean refreshes rather than counter/pointer updates:
+  - `redef_rhs=[space:3:0xa8600018:s8,const(0x1:s8)]`
+  - `redef_rhs=[space:3:0xa8600000:s1,const(0x0:s1)]`
+
+Conclusion:
+
+- the remaining large `0x140006c20` owner is not broad loop arithmetic
+- it is a loop-carried boolean flag family across two loop headers
+- the next owner is merge/loop-boundary boolean representative design, not direct cross-block propagation
+- no release policy changed in this wave
+
 ### Same-guard predicate refresh restart env-gated trial
 
 This wave added a narrow, opt-in restart trial for the `OverwriteAtPredicateProducer` slice. It does not change the default release path. The trial only targets the already-proved `PostDominatorBlock + BoolNegate + same_guard_family=true` family on `0x140006c20`, while leaving `SuccessorBlock + IntNotEqual(output, other_pred)` fail-closed.

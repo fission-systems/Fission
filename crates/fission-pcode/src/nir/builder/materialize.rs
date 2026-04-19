@@ -141,6 +141,29 @@ struct PredicateOverwriteRefreshProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopCarriedValueKind {
+    BooleanFlag,
+    CounterIncrement,
+    PointerAdvance,
+    Accumulator,
+    UnknownLoopCarried,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoopCarriedOverwriteProvenance {
+    loop_header: u64,
+    backedge_block: u64,
+    consumer_block: u64,
+    consumer_op_seq: u32,
+    redef_op_seq: u32,
+    redef_rhs: String,
+    has_multiequal: bool,
+    phi_input_count: usize,
+    induction_like: bool,
+    carried_value_kind: LoopCarriedValueKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SameBlockOverwriteShapeKind {
     OverwriteBeforeBranch,
     OverwriteAtPredicateProducer,
@@ -576,6 +599,47 @@ impl<'a> PreviewBuilder<'a> {
             proof.old_def_has_pre_redef_use,
             proof.redef_dominates_predicate,
             proof.consumer_relation,
+        ));
+    }
+
+    fn trace_loop_carried_overwrite_provenance(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(provenance) = self.describe_loop_carried_overwrite_provenance(
+            block,
+            output,
+            redef,
+            consumer_block_addr,
+            consumer_op_seq,
+        ) else {
+            return;
+        };
+        self.emit_ready_trace(format!(
+            "loop-carried-overwrite output=space:{} off:0x{:x} size:{} def_block=0x{:x} def_op_seq={} redef_op_seq={} redef_rhs={} loop_header=0x{:x} backedge_block=0x{:x} consumer_block=0x{:x} consumer_op_seq={} has_multiequal={} phi_input_count={} induction_like={} carried_value_kind={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            provenance.redef_op_seq,
+            provenance.redef_rhs,
+            provenance.loop_header,
+            provenance.backedge_block,
+            provenance.consumer_block,
+            provenance.consumer_op_seq,
+            provenance.has_multiequal,
+            provenance.phi_input_count,
+            provenance.induction_like,
+            provenance.carried_value_kind,
         ));
     }
 
@@ -2096,6 +2160,19 @@ impl<'a> PreviewBuilder<'a> {
                         &redef,
                         proof.relation,
                     );
+                } else if redef.overwrite_shape
+                    == SameBlockOverwriteShapeKind::OverwriteAtLoopUpdate
+                {
+                    if let (Some(consumer_block_addr), Some(consumer_op_seq), _) = provenance {
+                        self.trace_loop_carried_overwrite_provenance(
+                            block,
+                            op_idx,
+                            output,
+                            &redef,
+                            consumer_block_addr,
+                            consumer_op_seq,
+                        );
+                    }
                 }
             }
         }
@@ -2507,6 +2584,107 @@ impl<'a> PreviewBuilder<'a> {
             old_def_has_pre_redef_use,
             redef_dominates_predicate,
         })
+    }
+
+    fn describe_loop_carried_overwrite_provenance(
+        &self,
+        _block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+        redef: &CrossBlockRedefinitionDetail,
+        consumer_block_addr: u64,
+        consumer_op_seq: u32,
+    ) -> Option<LoopCarriedOverwriteProvenance> {
+        if redef.overwrite_shape != SameBlockOverwriteShapeKind::OverwriteAtLoopUpdate {
+            return None;
+        }
+        let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
+        let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
+        let redef_block_idx = self
+            .address_to_index
+            .get(&redef.redef_block_addr)
+            .copied()?;
+        let redef_block = self.pcode.blocks.get(redef_block_idx)?;
+        let loop_header = consumer_block_addr;
+        let backedge_block = redef.redef_block_addr;
+        let (has_multiequal, phi_input_count) = consumer_block
+            .ops
+            .iter()
+            .filter(|op| op.opcode == PcodeOpcode::MultiEqual)
+            .fold((false, 0usize), |(_, max_inputs), op| {
+                (true, max_inputs.max(op.inputs.len()))
+            });
+        let redef_op = redef_block.ops.get(redef.redef_op_idx)?;
+        let redef_rhs = Self::format_copy_overwrite_inputs(&redef_op.inputs);
+        let carried_value_kind =
+            Self::classify_loop_carried_value_kind(output, redef_op, self.options.pointer_size);
+        let induction_like = matches!(
+            carried_value_kind,
+            LoopCarriedValueKind::CounterIncrement | LoopCarriedValueKind::PointerAdvance
+        );
+        Some(LoopCarriedOverwriteProvenance {
+            loop_header,
+            backedge_block,
+            consumer_block: consumer_block_addr,
+            consumer_op_seq,
+            redef_op_seq: redef.redef_op_seq,
+            redef_rhs,
+            has_multiequal,
+            phi_input_count,
+            induction_like,
+            carried_value_kind,
+        })
+    }
+
+    fn classify_loop_carried_value_kind(
+        output: &Varnode,
+        redef_op: &PcodeOp,
+        pointer_size: u32,
+    ) -> LoopCarriedValueKind {
+        match redef_op.opcode {
+            PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::IntCarry
+            | PcodeOpcode::IntSCarry
+            | PcodeOpcode::IntSBorrow => LoopCarriedValueKind::BooleanFlag,
+            PcodeOpcode::IntAdd | PcodeOpcode::IntSub => {
+                let self_carried = redef_op
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == VarnodeKey::from(output));
+                let has_const = redef_op.inputs.iter().any(|input| input.is_constant);
+                if self_carried && has_const && output.size == pointer_size {
+                    LoopCarriedValueKind::PointerAdvance
+                } else if self_carried && has_const {
+                    LoopCarriedValueKind::CounterIncrement
+                } else if self_carried {
+                    LoopCarriedValueKind::Accumulator
+                } else {
+                    LoopCarriedValueKind::UnknownLoopCarried
+                }
+            }
+            PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr => LoopCarriedValueKind::Accumulator,
+            _ => LoopCarriedValueKind::UnknownLoopCarried,
+        }
     }
 
     fn predicate_consumer_matches_output_guard_family(
@@ -4132,6 +4310,124 @@ mod tests {
             builder
                 .can_restart_def_window_at_predicate_refresh(&blocks[0], 0, Some(2), &output)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn loop_carried_overwrite_provenance_marks_boolean_flag_without_multiequal() {
+        let output = varnode(0x10);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(varnode(0x14)),
+                        vec![output.clone()],
+                    ),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntSCarry,
+                        Some(output.clone()),
+                        vec![varnode(0x12), varnode(0x13)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let detail = builder
+            .describe_loop_carried_overwrite_provenance(&blocks[1], &output, &redef, 0x1000, 0)
+            .expect("loop provenance");
+
+        assert_eq!(detail.loop_header, 0x1000);
+        assert_eq!(detail.backedge_block, 0x1010);
+        assert!(!detail.has_multiequal);
+        assert_eq!(detail.phi_input_count, 0);
+        assert!(!detail.induction_like);
+        assert_eq!(detail.carried_value_kind, LoopCarriedValueKind::BooleanFlag);
+    }
+
+    #[test]
+    fn loop_carried_overwrite_provenance_marks_pointer_advance_with_multiequal() {
+        let output = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::MultiEqual,
+                        Some(varnode(0x50)),
+                        vec![varnode(0x30), varnode(0x31)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Copy,
+                        Some(varnode(0x40)),
+                        vec![output.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(output.clone()),
+                        vec![output.clone(), constant(8)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let redef = builder
+            .describe_cross_block_redefinition_detail(&blocks[1], 0, &output, Some(0x1000))
+            .expect("redef");
+        let detail = builder
+            .describe_loop_carried_overwrite_provenance(&blocks[1], &output, &redef, 0x1000, 1)
+            .expect("loop provenance");
+
+        assert_eq!(detail.loop_header, 0x1000);
+        assert_eq!(detail.backedge_block, 0x1010);
+        assert!(detail.has_multiequal);
+        assert_eq!(detail.phi_input_count, 2);
+        assert!(detail.induction_like);
+        assert_eq!(
+            detail.carried_value_kind,
+            LoopCarriedValueKind::PointerAdvance
         );
     }
 
