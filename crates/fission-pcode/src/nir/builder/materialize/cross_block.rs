@@ -757,6 +757,32 @@ impl<'a> PreviewBuilder<'a> {
         (MissingNoPriorDefReason::TrueNoPriorDef, "none".to_string())
     }
 
+    fn classify_temp_only_representative_reason(
+        root_attributed: bool,
+        dead_pred: bool,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        source_event: &str,
+    ) -> TempOnlyRepresentativeReason {
+        if dead_pred {
+            return TempOnlyRepresentativeReason::DeadTempRepresentative;
+        }
+        if root_attributed {
+            return TempOnlyRepresentativeReason::RootAttributedTemp;
+        }
+        if source_event == "TempOnlyNoDef" {
+            return TempOnlyRepresentativeReason::TempRepresentativeResidue;
+        }
+        match consumer_kind {
+            DisallowedSingleConsumerConsumerKind::StoreValue => {
+                TempOnlyRepresentativeReason::StoreValueTemp
+            }
+            DisallowedSingleConsumerConsumerKind::OtherData => {
+                TempOnlyRepresentativeReason::OtherDataTemp
+            }
+            _ => TempOnlyRepresentativeReason::MergeCrossingTemp,
+        }
+    }
+
     pub(super) fn describe_missing_incoming_pred_proofs(
         &self,
         event_block: u64,
@@ -913,6 +939,44 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind,
             rhs_kind,
             default_candidate,
+            reason,
+        })
+    }
+
+    pub(super) fn describe_temp_only_representative_proof(
+        &self,
+        merge_block: u64,
+        pred_block: Option<u64>,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+        source_event: &str,
+        root_attributed: bool,
+        dead_pred: bool,
+    ) -> Option<TempOnlyRepresentativeProof> {
+        if output.space_id != UNIQUE_SPACE_ID || output.is_constant {
+            return None;
+        }
+        let reason = Self::classify_temp_only_representative_reason(
+            root_attributed,
+            dead_pred,
+            consumer_kind,
+            source_event,
+        );
+        Some(TempOnlyRepresentativeProof {
+            merge_block,
+            pred_block,
+            consumer_kind,
+            rhs_kind,
+            defining_event: format!(
+                "space:{} off:0x{:x} size:{}",
+                output.space_id, output.offset, output.size
+            ),
+            materialization_event: source_event.to_string(),
+            has_real_storage: false,
+            has_later_use: true,
+            crosses_merge: true,
+            root_attributed,
             reason,
         })
     }
@@ -2888,5 +2952,41 @@ mod tests {
         );
         assert_eq!(reason, MissingNoPriorDefReason::TempOnlyNoDef);
         assert_eq!(default_candidate, "temp-only");
+    }
+
+    #[test]
+    fn temp_only_representative_reason_marks_root_attributed() {
+        let reason = PreviewBuilder::classify_temp_only_representative_reason(
+            true,
+            false,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            "SyntheticRootBlock",
+        );
+        assert_eq!(reason, TempOnlyRepresentativeReason::RootAttributedTemp);
+    }
+
+    #[test]
+    fn temp_only_representative_reason_marks_dead_pred() {
+        let reason = PreviewBuilder::classify_temp_only_representative_reason(
+            false,
+            true,
+            DisallowedSingleConsumerConsumerKind::StoreValue,
+            "DeadPredNoDef",
+        );
+        assert_eq!(reason, TempOnlyRepresentativeReason::DeadTempRepresentative);
+    }
+
+    #[test]
+    fn temp_only_representative_reason_marks_temp_residue() {
+        let reason = PreviewBuilder::classify_temp_only_representative_reason(
+            false,
+            false,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            "TempOnlyNoDef",
+        );
+        assert_eq!(
+            reason,
+            TempOnlyRepresentativeReason::TempRepresentativeResidue
+        );
     }
 }

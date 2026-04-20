@@ -314,6 +314,32 @@ pub(super) struct MissingNoPriorDefProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TempOnlyRepresentativeReason {
+    TempRepresentativeResidue,
+    RootAttributedTemp,
+    MergeCrossingTemp,
+    DeadTempRepresentative,
+    StoreValueTemp,
+    OtherDataTemp,
+    UnknownTempRepresentative,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TempOnlyRepresentativeProof {
+    pub(super) merge_block: u64,
+    pub(super) pred_block: Option<u64>,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) defining_event: String,
+    pub(super) materialization_event: String,
+    pub(super) has_real_storage: bool,
+    pub(super) has_later_use: bool,
+    pub(super) crosses_merge: bool,
+    pub(super) root_attributed: bool,
+    pub(super) reason: TempOnlyRepresentativeReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -866,6 +892,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
     pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
+    pub(super) temp_only_representative_reason: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,

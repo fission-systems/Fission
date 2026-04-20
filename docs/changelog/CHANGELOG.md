@@ -9,6 +9,43 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` temp-only representative lifecycle repartition
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, create default incoming values, or relax representative policy. The goal was to pull the bookkeeping-heavy `RepresentativeOnlyMissing`, `SyntheticRootBlock`, and `TempOnlyNoDef` slices into one shared taxonomy so real merge-value owners can be separated from temp/root representative residue.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries temp-only representative lifecycle vocabulary:
+  - `TempOnlyRepresentativeReason`
+    - `TempRepresentativeResidue`
+    - `RootAttributedTemp`
+    - `MergeCrossingTemp`
+    - `DeadTempRepresentative`
+    - `StoreValueTemp`
+    - `OtherDataTemp`
+    - `UnknownTempRepresentative`
+  - `TempOnlyRepresentativeProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `temp_only_representative_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - temp-only representative lifecycle classification for UNIQUE temp outputs
+  - source-sensitive grouping across representative-only missing merge, synthetic-root attribution, and temp-only no-prior-def cases
+  - `describe_temp_only_representative_proof(...)`
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `temp-only-representative-proof output=... merge_block=... pred_block=... consumer_kind=... rhs_kind=... defining_event=... materialization_event=... has_real_storage=... has_later_use=... crosses_merge=... root_attributed=... reason=...`
+  - repartition summary family:
+    - `temp_only_representative_reason`
+  - the new proof is only emitted for:
+    - `RepresentativeOnlyMissing`
+    - `SyntheticRootBlock` / `OtherDataRepresentative`
+    - `TempOnlyNoDef` / `DeadPredNoDef`
+
+Validation:
+
+- `cargo fmt --all`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo test -p fission-pcode temp_only_representative_reason_ --lib -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo build -p fission-cli`
+- targeted `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 ... --decomp 0x140008090`
+
 ### `0x140008090` no-prior-def and entry-default incoming provenance tracing
 
 This wave stayed diagnostic-only. It does not invent default incoming values, synthesize merge bindings, or relax representative policy. The goal was to take the remaining `MissingBecauseNoPriorDef` and `MissingBecauseEntryDefault` slices under `MissingIncomingForSomePred` and expose whether they look like entry-default candidates, dead predecessors, temp-only residues, or true no-prior-def cases.

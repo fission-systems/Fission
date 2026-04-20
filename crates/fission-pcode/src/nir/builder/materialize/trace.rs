@@ -140,6 +140,10 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_no_prior_def_reason),
             ),
             (
+                "temp_only_representative_reason",
+                Self::format_materialize_owner_histogram(&summary.temp_only_representative_reason),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -797,6 +801,18 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             proof.relation,
         ));
+        if proof.relation == MissingMergeBindingRelation::RepresentativeOnlyMissing {
+            self.trace_temp_only_representative_proof(
+                proof.merge_block,
+                None,
+                output,
+                proof.consumer_kind,
+                proof.rhs_kind,
+                "RepresentativeOnlyMissing",
+                false,
+                false,
+            );
+        }
         if proof.relation == MissingMergeBindingRelation::JoinMergeMissing {
             self.trace_join_merge_missing_proof(block, op_idx, output, rhs);
         }
@@ -912,6 +928,30 @@ impl<'a> PreviewBuilder<'a> {
             output.size,
             proof.reason,
         ));
+        if matches!(
+            proof.reason,
+            UnknownMissingMergeAttributionReason::SyntheticRootBlock
+                | UnknownMissingMergeAttributionReason::OtherDataRepresentative
+        ) {
+            self.trace_temp_only_representative_proof(
+                proof.merge_block,
+                None,
+                output,
+                proof.consumer_kind,
+                proof.rhs_kind,
+                match proof.reason {
+                    UnknownMissingMergeAttributionReason::SyntheticRootBlock => {
+                        "SyntheticRootBlock"
+                    }
+                    UnknownMissingMergeAttributionReason::OtherDataRepresentative => {
+                        "OtherDataRepresentative"
+                    }
+                    _ => "UnknownRepresentative",
+                },
+                proof.reason == UnknownMissingMergeAttributionReason::SyntheticRootBlock,
+                false,
+            );
+        }
         if proof.reason == UnknownMissingMergeAttributionReason::SyntheticRootBlock {
             self.trace_synthetic_root_merge_attribution(block, op_idx, output, rhs);
         }
@@ -1214,6 +1254,81 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.rhs_kind,
             proof.default_candidate,
+            proof.reason,
+        ));
+        if matches!(
+            proof.reason,
+            MissingNoPriorDefReason::TempOnlyNoDef | MissingNoPriorDefReason::DeadPredNoDef
+        ) {
+            self.trace_temp_only_representative_proof(
+                merge_block,
+                Some(pred_block),
+                output,
+                consumer_kind,
+                rhs_kind,
+                match proof.reason {
+                    MissingNoPriorDefReason::TempOnlyNoDef => "TempOnlyNoDef",
+                    MissingNoPriorDefReason::DeadPredNoDef => "DeadPredNoDef",
+                    _ => "UnknownNoPriorDef",
+                },
+                false,
+                proof.reason == MissingNoPriorDefReason::DeadPredNoDef,
+            );
+        }
+    }
+
+    pub(super) fn trace_temp_only_representative_proof(
+        &self,
+        merge_block: u64,
+        pred_block: Option<u64>,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+        source_event: &str,
+        root_attributed: bool,
+        dead_pred: bool,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_temp_only_representative_proof(
+            merge_block,
+            pred_block,
+            output,
+            consumer_kind,
+            rhs_kind,
+            source_event,
+            root_attributed,
+            dead_pred,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.temp_only_representative_reason,
+                format!("{:?}", proof.reason),
+            );
+        }
+        let pred_block = proof
+            .pred_block
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "temp-only-representative-proof output=space:{} off:0x{:x} size:{} merge_block=0x{:x} pred_block={} consumer_kind={:?} rhs_kind={:?} defining_event={} materialization_event={} has_real_storage={} has_later_use={} crosses_merge={} root_attributed={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            proof.merge_block,
+            pred_block,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.defining_event,
+            proof.materialization_event,
+            proof.has_real_storage,
+            proof.has_later_use,
+            proof.crosses_merge,
+            proof.root_attributed,
             proof.reason,
         ));
     }
