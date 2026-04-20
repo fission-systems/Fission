@@ -8934,3 +8934,14 @@ Added `stable-representative-owner-proof` trace/histograms to correlate `Consume
 - `release_path_changed: no`
 
 Added `merge-binding-candidate-proof` trace/histograms on top of the real `JoinMergeMissing` bucket to separate missing-incoming semantics from narrow phi-like merge-binding candidates. No merge synthesis or release-path policy changed.
+
+# 0x140008090 explicit merge-binding env trial
+
+- `wave_type: env-gated-policy`
+- `behavior_changed: yes`
+- `release_path_changed: no`
+- `env_gate: FISSION_ENABLE_EXPLICIT_MERGE_BINDING`
+
+Added a fail-closed, env-gated prototype that materializes a synthetic `__fission_merge2(...)` binding only for the narrow `PhiLikeBindingCandidate` slice: binary predecessor joins, no missing incoming values, one conflicting incoming pair, `OtherData` consumer only, and incoming kinds restricted to `VarOrConst` or `Arithmetic`. Default release behavior remains unchanged.
+
+Same-axis `putty` limit50 benchmarking reduced the real merge rejection count but did not meet release quality thresholds (`avg_normalized_similarity 38.82 -> 38.74`, with target-row regressions), so this path remains a negative env-gated result and stays default-off.

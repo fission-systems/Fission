@@ -378,4 +378,30 @@ impl<'a> PreviewBuilder<'a> {
         self.temps.insert(name, binding.clone());
         binding
     }
+
+    pub(super) fn ensure_explicit_merge_binding_for_block(
+        &mut self,
+        block_idx: usize,
+        output: &Varnode,
+    ) -> NirBinding {
+        let key = (block_idx, VarnodeKey::from(output));
+        if let Some(name) = self.explicit_merge_bindings.get(&key)
+            && let Some(binding) = self.temps.get(name)
+        {
+            return binding.clone();
+        }
+
+        let ty = type_from_size(output.size, false);
+        let name = next_temp_name(&ty, &mut self.temp_next_id);
+        let binding = NirBinding {
+            name: name.clone(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        self.explicit_merge_bindings.insert(key, name.clone());
+        self.temps.insert(name, binding.clone());
+        binding
+    }
 }

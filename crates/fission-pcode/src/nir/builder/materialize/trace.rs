@@ -142,6 +142,12 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "explicit_merge_binding_trial_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.explicit_merge_binding_trial_reason,
+                ),
+            ),
+            (
                 "missing_incoming_pred_kind",
                 Self::format_materialize_owner_histogram(&summary.missing_incoming_pred_kind),
             ),
@@ -957,6 +963,57 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             proof.can_synthesize_phi_like_binding,
             proof.result,
+        ));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn trace_explicit_merge_binding_trial(
+        &self,
+        merge_block: u64,
+        output: &Varnode,
+        predecessor_blocks: &[u64],
+        incoming_values: &[String],
+        incoming_value_kinds: &[MergeBindingCandidateIncomingKind],
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+        selected_binding: &str,
+        materialized: bool,
+        reason: ExplicitMergeBindingTrialReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.explicit_merge_binding_trial_reason,
+                format!("{:?}", reason),
+            );
+        }
+        let predecessor_blocks = predecessor_blocks
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let incoming_values = incoming_values.join(" | ");
+        let incoming_value_kinds = incoming_value_kinds
+            .iter()
+            .map(|kind| format!("{kind:?}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.emit_ready_trace(format!(
+            "explicit-merge-binding-trial output=space:{} off:0x{:x} size:{} merge_block=0x{:x} predecessor_count={} predecessor_blocks=[{}] incoming_values=[{}] incoming_value_kinds=[{}] rhs_kind={:?} selected_binding={} materialized={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            merge_block,
+            predecessor_blocks.split(',').filter(|s| !s.is_empty()).count(),
+            predecessor_blocks,
+            incoming_values,
+            incoming_value_kinds,
+            rhs_kind,
+            selected_binding,
+            materialized,
+            reason,
         ));
     }
 

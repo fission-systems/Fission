@@ -332,6 +332,13 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let key = VarnodeKey::from(vn);
+        if let Some(site) = self.current_lowering_site
+            && let Some(name) = self
+                .explicit_merge_bindings
+                .get(&(site.block_idx, key.clone()))
+        {
+            return Ok(HirExpr::Var(name.clone()));
+        }
         let def_site = self.lookup_def_site(vn);
         if def_site.is_none() {
             if let Some(param) = self.register_param(vn) {

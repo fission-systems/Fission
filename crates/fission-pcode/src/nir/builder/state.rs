@@ -38,6 +38,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) temps: BTreeMap<String, NirBinding>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,
+    pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,
     pub(crate) call_result_bindings: HashMap<LoweringSite, String>,
     pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), HirExpr>,
     pub(crate) current_lowering_site: Option<LoweringSite>,

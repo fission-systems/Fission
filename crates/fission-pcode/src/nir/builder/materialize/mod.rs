@@ -155,6 +155,9 @@ impl<'a> PreviewBuilder<'a> {
             .get(&block.start_address)
             .copied()
             .unwrap_or(0);
+        if Self::explicit_merge_binding_enabled() {
+            body.extend(self.synthesize_explicit_merge_bindings_for_block(block)?);
+        }
         for (op_idx, op) in block.ops.iter().enumerate() {
             if Some(op_idx) == terminator_index {
                 continue;
@@ -655,6 +658,40 @@ impl<'a> PreviewBuilder<'a> {
         if self.output_has_nonlocal_use(block, op_idx, output) {
             let rejection_reason =
                 self.classify_nonlocal_materialization_rejection_reason(block, op_idx, output, rhs);
+            if rejection_reason == MaterializationRejectionReason::MissingMergeBinding
+                && Self::explicit_merge_binding_enabled()
+            {
+                match self.describe_explicit_merge_binding_trial(block, op_idx, output, rhs) {
+                    Ok(proof) => {
+                        self.trace_explicit_merge_binding_trial(
+                            proof.merge_block,
+                            output,
+                            &[],
+                            &[],
+                            &proof.incoming_value_kinds,
+                            proof.rhs_kind,
+                            "pending",
+                            false,
+                            ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
+                        );
+                        self.replacement_plan_completed_count += 1;
+                        return ReplacementValuePlan::complete(ReplacementReadClass::Merge);
+                    }
+                    Err(reason) => {
+                        self.trace_explicit_merge_binding_trial(
+                            block.start_address,
+                            output,
+                            &[],
+                            &[],
+                            &[],
+                            Self::classify_disallowed_single_consumer_rhs_kind(rhs),
+                            "none",
+                            false,
+                            reason,
+                        );
+                    }
+                }
+            }
             self.record_materialize_rejection_reason(rejection_reason);
             self.trace_missing_merge_binding_proof(block, op_idx, output, rhs);
             self.trace_loop_boundary_binding_correlation(block, op_idx, output, rejection_reason);

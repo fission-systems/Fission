@@ -297,6 +297,18 @@ pub(super) struct MergeBindingCandidateProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExplicitMergeBindingTrialReason {
+    PhiLikeBindingMaterialized,
+    RejectedMissingIncoming,
+    RejectedUnsafeIncomingKind,
+    RejectedConsumerKind,
+    RejectedRootAttribution,
+    RejectedNonBinaryPreds,
+    RejectedMultipleConflicts,
+    RejectedNotJoinMerge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MissingIncomingPredKind {
     MissingBecauseNoPriorDef,
     MissingBecausePriorDefDominates,
@@ -948,6 +960,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
     pub(super) merge_binding_candidate_result: BTreeMap<String, usize>,
     pub(super) merge_binding_candidate_incoming_kind: BTreeMap<String, usize>,
+    pub(super) explicit_merge_binding_trial_reason: BTreeMap<String, usize>,
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
     pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
     pub(super) temp_only_representative_reason: BTreeMap<String, usize>,

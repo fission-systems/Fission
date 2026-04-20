@@ -1,6 +1,7 @@
 use super::contracts::*;
 use super::*;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 impl<'a> PreviewBuilder<'a> {
     fn best_prior_definition_for_missing_pred(
@@ -261,6 +262,13 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn predicate_refresh_restart_enabled() -> bool {
         matches!(
             std::env::var("FISSION_ENABLE_PREDICATE_REFRESH_RESTART"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
+    }
+
+    pub(super) fn explicit_merge_binding_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_EXPLICIT_MERGE_BINDING"),
             Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
         )
     }
@@ -810,6 +818,163 @@ impl<'a> PreviewBuilder<'a> {
             ),
             result,
         })
+    }
+
+    pub(super) fn describe_explicit_merge_binding_trial(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Result<MergeBindingCandidateProof, ExplicitMergeBindingTrialReason> {
+        let Some(missing_proof) =
+            self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)
+        else {
+            return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
+        };
+        if missing_proof.relation != MissingMergeBindingRelation::JoinMergeMissing {
+            return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
+        }
+        let Some(proof) = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)
+        else {
+            return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
+        };
+        if proof.predecessor_count != 2 {
+            return Err(ExplicitMergeBindingTrialReason::RejectedNonBinaryPreds);
+        }
+        if proof.missing_incoming_count > 0 {
+            return Err(ExplicitMergeBindingTrialReason::RejectedMissingIncoming);
+        }
+        if proof.conflicting_incoming_count != 1 {
+            return Err(ExplicitMergeBindingTrialReason::RejectedMultipleConflicts);
+        }
+        if proof.consumer_kind != DisallowedSingleConsumerConsumerKind::OtherData {
+            return Err(ExplicitMergeBindingTrialReason::RejectedConsumerKind);
+        }
+        if !proof.incoming_value_kinds.iter().all(|kind| {
+            matches!(
+                kind,
+                MergeBindingCandidateIncomingKind::VarOrConst
+                    | MergeBindingCandidateIncomingKind::Arithmetic
+            )
+        }) {
+            return Err(ExplicitMergeBindingTrialReason::RejectedUnsafeIncomingKind);
+        }
+        if !proof.can_synthesize_phi_like_binding {
+            return Err(ExplicitMergeBindingTrialReason::RejectedUnsafeIncomingKind);
+        }
+        Ok(proof)
+    }
+
+    pub(super) fn synthesize_explicit_merge_bindings_for_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        if !Self::explicit_merge_binding_enabled() {
+            return Ok(Vec::new());
+        }
+        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+            return Ok(Vec::new());
+        };
+        let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
+            return Ok(Vec::new());
+        };
+
+        struct PendingMergeBinding {
+            output: Varnode,
+            predecessor_blocks: Vec<u64>,
+            incoming_value_kinds: Vec<MergeBindingCandidateIncomingKind>,
+            incoming_values: Vec<String>,
+            rhs_kind: DisallowedSingleConsumerRhsKind,
+            incoming_by_pred: HashMap<u64, HirExpr>,
+        }
+
+        let mut pending: HashMap<VarnodeKey, PendingMergeBinding> = HashMap::new();
+        for pred_idx in predecessor_idxs {
+            let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
+                continue;
+            };
+            for (op_idx, op) in pred_block.ops.iter().enumerate() {
+                let Some(output) = &op.output else {
+                    continue;
+                };
+                let Some(rhs) =
+                    self.try_lower_materialized_output_rhs(pred_block.start_address, op)?
+                else {
+                    continue;
+                };
+                let Ok(proof) =
+                    self.describe_explicit_merge_binding_trial(pred_block, op_idx, output, &rhs)
+                else {
+                    continue;
+                };
+                if proof.merge_block != block.start_address {
+                    continue;
+                }
+                let Some(join_proof) =
+                    self.describe_join_merge_missing_proof(pred_block, op_idx, output, &rhs)
+                else {
+                    continue;
+                };
+                let key = VarnodeKey::from(output);
+                let entry = pending.entry(key).or_insert_with(|| PendingMergeBinding {
+                    output: output.clone(),
+                    predecessor_blocks: join_proof.predecessor_blocks.clone(),
+                    incoming_value_kinds: proof.incoming_value_kinds.clone(),
+                    incoming_values: join_proof.incoming_values.clone(),
+                    rhs_kind: proof.rhs_kind,
+                    incoming_by_pred: HashMap::new(),
+                });
+                entry
+                    .incoming_by_pred
+                    .insert(pred_block.start_address, rhs.clone());
+            }
+        }
+
+        let mut entries = pending.into_iter().collect::<Vec<_>>();
+        entries.sort_by_key(|(key, _)| (key.space_id, key.offset, key.size));
+
+        let mut stmts = Vec::new();
+        for (_key, pending) in entries {
+            if pending.predecessor_blocks.len() != 2
+                || !pending
+                    .predecessor_blocks
+                    .iter()
+                    .all(|pred| pending.incoming_by_pred.contains_key(pred))
+            {
+                continue;
+            }
+            let args = pending
+                .predecessor_blocks
+                .iter()
+                .filter_map(|pred| pending.incoming_by_pred.get(pred).cloned())
+                .collect::<Vec<_>>();
+            if args.len() != 2 {
+                continue;
+            }
+            let binding = self.ensure_explicit_merge_binding_for_block(block_idx, &pending.output);
+            self.trace_explicit_merge_binding_trial(
+                block.start_address,
+                &pending.output,
+                &pending.predecessor_blocks,
+                &pending.incoming_values,
+                &pending.incoming_value_kinds,
+                pending.rhs_kind,
+                &binding.name,
+                true,
+                ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
+            );
+            stmts.push(HirStmt::Assign {
+                lhs: HirLValue::Var(binding.name),
+                rhs: HirExpr::Call {
+                    target: "__fission_merge2".to_string(),
+                    args,
+                    ty: type_from_size(pending.output.size, false),
+                },
+            });
+        }
+
+        Ok(stmts)
     }
 
     fn classify_missing_incoming_pred_kind(
