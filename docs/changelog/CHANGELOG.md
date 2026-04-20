@@ -9,6 +9,40 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` synthetic root merge attribution proof
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the dominant `SyntheticRootBlock=614` slice inside `UnknownMissingMerge` and split root/entry fallback from representative-only root ownership by exposing nearest-join and nearest-postdom-join evidence.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries synthetic-root merge attribution vocabulary:
+  - `SyntheticRootMergeAttributionReason`
+    - `EntryBlockAsMergeFallback`
+    - `NoNearestJoinFound`
+    - `ForwardJoinExistsButNotSelected`
+    - `RootRepresentativeOnly`
+    - `StoreValueAtRoot`
+    - `OtherDataAtRoot`
+    - `UnknownRootAttribution`
+  - `SyntheticRootMergeAttributionProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `synthetic_root_merge_attribution_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - nearest forward join discovery
+  - nearest postdom-join discovery
+  - `describe_synthetic_root_merge_attribution(...)`
+  - root-fallback classification using selected merge block, join candidates, representative reuse, and consumer role
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `synthetic-root-merge-proof output=... block=... op_seq=... event_block=... entry_block=... selected_merge_block=... selected_is_entry=... block_is_entry=... event_block_is_entry=... event_block_dominates=... nearest_join_block=... nearest_join_distance=... nearest_postdom_join=... postdom_distance=... block_successor_count=... entry_successor_count=... consumer_kind=... rhs_kind=... reason=...`
+  - repartition summary family:
+    - `synthetic_root_merge_attribution_reason`
+  - the new proof is only emitted for `UnknownMissingMerge` sites already attributed as `SyntheticRootBlock`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` unknown missing merge attribution refinement
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the dominant `UnknownMissingMerge` slice inside `MissingMergeBinding=1066` and separate entry-block attribution, CFG predecessor gaps, and representative-only families before any merge policy work.

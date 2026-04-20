@@ -260,6 +260,36 @@ pub(super) struct UnknownMissingMergeAttributionProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SyntheticRootMergeAttributionReason {
+    EntryBlockAsMergeFallback,
+    NoNearestJoinFound,
+    ForwardJoinExistsButNotSelected,
+    RootRepresentativeOnly,
+    StoreValueAtRoot,
+    OtherDataAtRoot,
+    UnknownRootAttribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SyntheticRootMergeAttributionProof {
+    pub(super) event_block: u64,
+    pub(super) entry_block: u64,
+    pub(super) selected_merge_block: u64,
+    pub(super) selected_is_entry: bool,
+    pub(super) event_block_is_entry: bool,
+    pub(super) event_block_dominates: bool,
+    pub(super) nearest_join_block: Option<u64>,
+    pub(super) nearest_join_distance: Option<usize>,
+    pub(super) nearest_postdom_join: Option<u64>,
+    pub(super) postdom_distance: Option<usize>,
+    pub(super) block_successor_count: usize,
+    pub(super) entry_successor_count: usize,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) reason: SyntheticRootMergeAttributionReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
@@ -677,6 +707,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_rhs_kind: BTreeMap<String, usize>,
+    pub(super) synthetic_root_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,

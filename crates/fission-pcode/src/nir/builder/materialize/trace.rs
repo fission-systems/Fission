@@ -144,6 +144,12 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.unknown_missing_merge_rhs_kind),
             ),
             (
+                "synthetic_root_merge_attribution_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.synthetic_root_merge_attribution_reason,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -815,6 +821,73 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             output.space_id,
             output.size,
+            proof.reason,
+        ));
+        if proof.reason == UnknownMissingMergeAttributionReason::SyntheticRootBlock {
+            self.trace_synthetic_root_merge_attribution(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_synthetic_root_merge_attribution(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) =
+            self.describe_synthetic_root_merge_attribution(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.synthetic_root_merge_attribution_reason,
+                format!("{:?}", proof.reason),
+            );
+        }
+        let nearest_join_block = proof
+            .nearest_join_block
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let nearest_join_distance = proof
+            .nearest_join_distance
+            .map(|distance| distance.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let nearest_postdom_join = proof
+            .nearest_postdom_join
+            .map(|addr| format!("0x{addr:x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let postdom_distance = proof
+            .postdom_distance
+            .map(|distance| distance.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "synthetic-root-merge-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} event_block=0x{:x} entry_block=0x{:x} selected_merge_block=0x{:x} selected_is_entry={} block_is_entry={} event_block_is_entry={} event_block_dominates={} nearest_join_block={} nearest_join_distance={} nearest_postdom_join={} postdom_distance={} block_successor_count={} entry_successor_count={} consumer_kind={:?} rhs_kind={:?} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.event_block,
+            proof.entry_block,
+            proof.selected_merge_block,
+            proof.selected_is_entry,
+            block.start_address == proof.entry_block,
+            proof.event_block_is_entry,
+            proof.event_block_dominates,
+            nearest_join_block,
+            nearest_join_distance,
+            nearest_postdom_join,
+            postdom_distance,
+            proof.block_successor_count,
+            proof.entry_successor_count,
+            proof.consumer_kind,
+            proof.rhs_kind,
             proof.reason,
         ));
     }

@@ -2,6 +2,59 @@ use super::contracts::*;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn shortest_forward_distance(&self, start_idx: usize, target_idx: usize) -> Option<usize> {
+        if start_idx == target_idx {
+            return Some(0);
+        }
+        let mut queue = std::collections::VecDeque::from([(start_idx, 0usize)]);
+        let mut visited = HashSet::from([start_idx]);
+        while let Some((idx, distance)) = queue.pop_front() {
+            if let Some(succs) = self.successors.get(idx) {
+                for succ in succs {
+                    if !visited.insert(*succ) {
+                        continue;
+                    }
+                    if *succ == target_idx {
+                        return Some(distance + 1);
+                    }
+                    queue.push_back((*succ, distance + 1));
+                }
+            }
+        }
+        None
+    }
+
+    fn nearest_forward_join_block(&self, start_idx: usize) -> Option<(usize, usize)> {
+        let mut queue = std::collections::VecDeque::from([(start_idx, 0usize)]);
+        let mut visited = HashSet::from([start_idx]);
+        while let Some((idx, distance)) = queue.pop_front() {
+            if distance > 0 && self.predecessors.get(idx).map_or(0, Vec::len) > 1 {
+                return Some((idx, distance));
+            }
+            if let Some(succs) = self.successors.get(idx) {
+                for succ in succs {
+                    if visited.insert(*succ) {
+                        queue.push_back((*succ, distance + 1));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn nearest_postdom_join_block(&self, start_idx: usize) -> Option<(usize, usize)> {
+        let succs = self.successors.get(start_idx)?;
+        if succs.len() < 2 {
+            return None;
+        }
+        let candidate = self
+            .cfg_facts
+            .immediate_postdominators()
+            .nearest_common_postdominator(succs)?;
+        let distance = self.shortest_forward_distance(start_idx, candidate)?;
+        Some((candidate, distance))
+    }
+
     pub(super) fn copy_overwrite_restart_enabled() -> bool {
         matches!(
             std::env::var("FISSION_ENABLE_COPY_OVERWRITE_RESTART"),
@@ -344,6 +397,87 @@ impl<'a> PreviewBuilder<'a> {
             incoming_value_count: proof.incoming_value_count,
             consumer_kind: proof.consumer_kind,
             rhs_kind: proof.rhs_kind,
+            reason,
+        })
+    }
+
+    fn classify_synthetic_root_merge_reason(
+        selected_is_entry: bool,
+        nearest_join_block: Option<usize>,
+        nearest_postdom_join: Option<usize>,
+        has_existing_binding: bool,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+    ) -> SyntheticRootMergeAttributionReason {
+        if has_existing_binding {
+            return SyntheticRootMergeAttributionReason::RootRepresentativeOnly;
+        }
+        if nearest_join_block.is_none() && nearest_postdom_join.is_none() {
+            return SyntheticRootMergeAttributionReason::NoNearestJoinFound;
+        }
+        if nearest_join_block.is_some() || nearest_postdom_join.is_some() {
+            return SyntheticRootMergeAttributionReason::ForwardJoinExistsButNotSelected;
+        }
+        if selected_is_entry {
+            return SyntheticRootMergeAttributionReason::EntryBlockAsMergeFallback;
+        }
+        match consumer_kind {
+            DisallowedSingleConsumerConsumerKind::StoreValue => {
+                SyntheticRootMergeAttributionReason::StoreValueAtRoot
+            }
+            DisallowedSingleConsumerConsumerKind::OtherData => {
+                SyntheticRootMergeAttributionReason::OtherDataAtRoot
+            }
+            _ => SyntheticRootMergeAttributionReason::UnknownRootAttribution,
+        }
+    }
+
+    pub(super) fn describe_synthetic_root_merge_attribution(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<SyntheticRootMergeAttributionProof> {
+        let unknown =
+            self.describe_unknown_missing_merge_attribution(block, op_idx, output, rhs)?;
+        if unknown.reason != UnknownMissingMergeAttributionReason::SyntheticRootBlock {
+            return None;
+        }
+        let event_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let entry_block_idx = self
+            .address_to_index
+            .get(&unknown.function_entry_block)
+            .copied()?;
+        let selected_merge_idx = self.address_to_index.get(&unknown.merge_block).copied()?;
+        let nearest_join = self.nearest_forward_join_block(event_block_idx);
+        let nearest_postdom_join = self.nearest_postdom_join_block(event_block_idx);
+        let missing = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        let reason = Self::classify_synthetic_root_merge_reason(
+            unknown.merge_block_is_entry,
+            nearest_join.map(|(idx, _)| idx),
+            nearest_postdom_join.map(|(idx, _)| idx),
+            missing.has_existing_binding,
+            unknown.consumer_kind,
+        );
+        Some(SyntheticRootMergeAttributionProof {
+            event_block: block.start_address,
+            entry_block: unknown.function_entry_block,
+            selected_merge_block: unknown.merge_block,
+            selected_is_entry: unknown.merge_block_is_entry,
+            event_block_is_entry: block.start_address == unknown.function_entry_block,
+            event_block_dominates: self.dom_tree.dominates(event_block_idx, selected_merge_idx),
+            nearest_join_block: nearest_join
+                .map(|(idx, _)| self.pcode.blocks.get(idx).map(|b| b.start_address))
+                .flatten(),
+            nearest_join_distance: nearest_join.map(|(_, distance)| distance),
+            nearest_postdom_join: nearest_postdom_join
+                .map(|(idx, _)| self.pcode.blocks.get(idx).map(|b| b.start_address))
+                .flatten(),
+            postdom_distance: nearest_postdom_join.map(|(_, distance)| distance),
+            block_successor_count: self.successors.get(event_block_idx).map_or(0, Vec::len),
+            entry_successor_count: self.successors.get(entry_block_idx).map_or(0, Vec::len),
+            consumer_kind: unknown.consumer_kind,
+            rhs_kind: unknown.rhs_kind,
             reason,
         })
     }
