@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` forward-join-not-selected proof tracing
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, alter representative reuse, or change the default release path. The goal was to take the `SyntheticRootBlock -> ForwardJoinExistsButNotSelected=215` slice inside `UnknownMissingMerge` and split "entry fallback despite a forward join candidate" into concrete rejection reasons before any attribution fix is considered.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries forward-join rejection vocabulary:
+  - `ForwardJoinNotSelectedRejectedReason`
+    - `JoinDoesNotPostdominate`
+    - `JoinHasMultipleAmbiguousPreds`
+    - `JoinCrossesLoopBoundary`
+    - `JoinCrossesSwitchBoundary`
+    - `JoinNotReachableFromEvent`
+    - `JoinDominanceUnknown`
+    - `JoinRejectedByCurrentHeuristic`
+    - `Unknown`
+  - `ForwardJoinNotSelectedProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `forward_join_not_selected_rejected_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - shortest forward path recovery for event-to-join inspection
+  - switch-boundary detection on the chosen path
+  - `describe_forward_join_not_selected_proof(...)`
+  - rejection classification using reachability, postdom evidence, loop-back reachability, ambiguous predecessor count, and heuristic fallback
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `forward-join-not-selected-proof output=... block=... op_seq=... event_block=... selected_merge_block=... forward_join_block=... forward_join_distance=... forward_join_predecessor_count=... forward_join_successor_count=... event_reaches_forward_join=... forward_join_postdominates_event=... consumer_kind=... rhs_kind=... rejected_reason=...`
+  - repartition summary family:
+    - `forward_join_not_selected_rejected_reason`
+  - the new proof is only emitted for synthetic-root sites already classified as `ForwardJoinExistsButNotSelected`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` synthetic root merge attribution proof
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the dominant `SyntheticRootBlock=614` slice inside `UnknownMissingMerge` and split root/entry fallback from representative-only root ownership by exposing nearest-join and nearest-postdom-join evidence.

@@ -290,6 +290,33 @@ pub(super) struct SyntheticRootMergeAttributionProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ForwardJoinNotSelectedRejectedReason {
+    JoinDoesNotPostdominate,
+    JoinHasMultipleAmbiguousPreds,
+    JoinCrossesLoopBoundary,
+    JoinCrossesSwitchBoundary,
+    JoinNotReachableFromEvent,
+    JoinDominanceUnknown,
+    JoinRejectedByCurrentHeuristic,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ForwardJoinNotSelectedProof {
+    pub(super) event_block: u64,
+    pub(super) selected_merge_block: u64,
+    pub(super) forward_join_block: u64,
+    pub(super) forward_join_distance: Option<usize>,
+    pub(super) forward_join_predecessor_count: usize,
+    pub(super) forward_join_successor_count: usize,
+    pub(super) event_reaches_forward_join: bool,
+    pub(super) forward_join_postdominates_event: bool,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) rejected_reason: ForwardJoinNotSelectedRejectedReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
@@ -708,6 +735,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_rhs_kind: BTreeMap<String, usize>,
     pub(super) synthetic_root_merge_attribution_reason: BTreeMap<String, usize>,
+    pub(super) forward_join_not_selected_rejected_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
     pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
     pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,

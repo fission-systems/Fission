@@ -150,6 +150,12 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "forward_join_not_selected_rejected_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.forward_join_not_selected_rejected_reason,
+                ),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -889,6 +895,55 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.rhs_kind,
             proof.reason,
+        ));
+        if proof.reason == SyntheticRootMergeAttributionReason::ForwardJoinExistsButNotSelected {
+            self.trace_forward_join_not_selected_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_forward_join_not_selected_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_forward_join_not_selected_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.forward_join_not_selected_rejected_reason,
+                format!("{:?}", proof.rejected_reason),
+            );
+        }
+        let forward_join_distance = proof
+            .forward_join_distance
+            .map(|distance| distance.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "forward-join-not-selected-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} event_block=0x{:x} selected_merge_block=0x{:x} forward_join_block=0x{:x} forward_join_distance={} forward_join_predecessor_count={} forward_join_successor_count={} event_reaches_forward_join={} forward_join_postdominates_event={} consumer_kind={:?} rhs_kind={:?} rejected_reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.event_block,
+            proof.selected_merge_block,
+            proof.forward_join_block,
+            forward_join_distance,
+            proof.forward_join_predecessor_count,
+            proof.forward_join_successor_count,
+            proof.event_reaches_forward_join,
+            proof.forward_join_postdominates_event,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.rejected_reason,
         ));
     }
 

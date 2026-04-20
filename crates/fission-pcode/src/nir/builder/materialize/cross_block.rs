@@ -55,6 +55,52 @@ impl<'a> PreviewBuilder<'a> {
         Some((candidate, distance))
     }
 
+    fn shortest_forward_path(&self, start_idx: usize, target_idx: usize) -> Option<Vec<usize>> {
+        if start_idx == target_idx {
+            return Some(vec![start_idx]);
+        }
+        let mut queue = std::collections::VecDeque::from([start_idx]);
+        let mut parents = std::collections::HashMap::new();
+        let mut visited = HashSet::from([start_idx]);
+        while let Some(idx) = queue.pop_front() {
+            if let Some(succs) = self.successors.get(idx) {
+                for succ in succs {
+                    if !visited.insert(*succ) {
+                        continue;
+                    }
+                    parents.insert(*succ, idx);
+                    if *succ == target_idx {
+                        let mut path = vec![target_idx];
+                        let mut cursor = target_idx;
+                        while let Some(parent) = parents.get(&cursor).copied() {
+                            path.push(parent);
+                            if parent == start_idx {
+                                break;
+                            }
+                            cursor = parent;
+                        }
+                        path.reverse();
+                        return Some(path);
+                    }
+                    queue.push_back(*succ);
+                }
+            }
+        }
+        None
+    }
+
+    fn path_crosses_switch_boundary(&self, start_idx: usize, target_idx: usize) -> Option<bool> {
+        let path = self.shortest_forward_path(start_idx, target_idx)?;
+        Some(path.into_iter().any(|idx| {
+            self.pcode
+                .blocks
+                .get(idx)
+                .and_then(|block| self.block_terminator_index(block))
+                .and_then(|term_idx| self.pcode.blocks.get(idx)?.ops.get(term_idx))
+                .is_some_and(|term_op| term_op.opcode == PcodeOpcode::BranchInd)
+        }))
+    }
+
     pub(super) fn copy_overwrite_restart_enabled() -> bool {
         matches!(
             std::env::var("FISSION_ENABLE_COPY_OVERWRITE_RESTART"),
@@ -479,6 +525,94 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind: unknown.consumer_kind,
             rhs_kind: unknown.rhs_kind,
             reason,
+        })
+    }
+
+    fn classify_forward_join_not_selected_rejected_reason(
+        &self,
+        event_block_idx: usize,
+        forward_join_idx: usize,
+        event_reaches_forward_join: bool,
+        forward_join_postdominates_event: Option<bool>,
+        forward_join_predecessor_count: usize,
+        crosses_switch_boundary: bool,
+    ) -> ForwardJoinNotSelectedRejectedReason {
+        if !event_reaches_forward_join {
+            return ForwardJoinNotSelectedRejectedReason::JoinNotReachableFromEvent;
+        }
+        if crosses_switch_boundary {
+            return ForwardJoinNotSelectedRejectedReason::JoinCrossesSwitchBoundary;
+        }
+        if self.block_can_reach(forward_join_idx, event_block_idx, forward_join_idx) {
+            return ForwardJoinNotSelectedRejectedReason::JoinCrossesLoopBoundary;
+        }
+        let Some(forward_join_postdominates_event) = forward_join_postdominates_event else {
+            return ForwardJoinNotSelectedRejectedReason::JoinDominanceUnknown;
+        };
+        if !forward_join_postdominates_event {
+            return ForwardJoinNotSelectedRejectedReason::JoinDoesNotPostdominate;
+        }
+        if forward_join_predecessor_count > 2 {
+            return ForwardJoinNotSelectedRejectedReason::JoinHasMultipleAmbiguousPreds;
+        }
+        ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentHeuristic
+    }
+
+    pub(super) fn describe_forward_join_not_selected_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<ForwardJoinNotSelectedProof> {
+        let synthetic =
+            self.describe_synthetic_root_merge_attribution(block, op_idx, output, rhs)?;
+        if synthetic.reason != SyntheticRootMergeAttributionReason::ForwardJoinExistsButNotSelected
+        {
+            return None;
+        }
+        let event_block_idx = self.address_to_index.get(&synthetic.event_block).copied()?;
+        let forward_join = self
+            .nearest_postdom_join_block(event_block_idx)
+            .or_else(|| self.nearest_forward_join_block(event_block_idx))?;
+        let forward_join_idx = forward_join.0;
+        let forward_join_block = self.pcode.blocks.get(forward_join_idx)?;
+        let event_reaches_forward_join = self
+            .shortest_forward_distance(event_block_idx, forward_join_idx)
+            .is_some();
+        let forward_join_postdominates_event = self
+            .cfg_facts
+            .postdominators()
+            .postdominators()
+            .get(&event_block_idx)
+            .map(|set| set.contains(&forward_join_idx));
+        let forward_join_predecessor_count =
+            self.predecessors.get(forward_join_idx).map_or(0, Vec::len);
+        let forward_join_successor_count =
+            self.successors.get(forward_join_idx).map_or(0, Vec::len);
+        let crosses_switch_boundary = self
+            .path_crosses_switch_boundary(event_block_idx, forward_join_idx)
+            .unwrap_or(false);
+        let rejected_reason = self.classify_forward_join_not_selected_rejected_reason(
+            event_block_idx,
+            forward_join_idx,
+            event_reaches_forward_join,
+            forward_join_postdominates_event,
+            forward_join_predecessor_count,
+            crosses_switch_boundary,
+        );
+        Some(ForwardJoinNotSelectedProof {
+            event_block: synthetic.event_block,
+            selected_merge_block: synthetic.selected_merge_block,
+            forward_join_block: forward_join_block.start_address,
+            forward_join_distance: Some(forward_join.1),
+            forward_join_predecessor_count,
+            forward_join_successor_count,
+            event_reaches_forward_join,
+            forward_join_postdominates_event: forward_join_postdominates_event.unwrap_or(false),
+            consumer_kind: synthetic.consumer_kind,
+            rhs_kind: synthetic.rhs_kind,
+            rejected_reason,
         })
     }
 
@@ -1841,6 +1975,117 @@ mod tests {
             builder
                 .can_restart_def_window_at_predicate_refresh(&blocks[0], 0, Some(2), &output)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn forward_join_not_selected_proof_marks_current_heuristic_rejection() {
+        let output = varnode(0x10);
+        let consumer_out = varnode(0x30);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(consumer_out),
+                        vec![output.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1010), varnode(0x40)],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1008,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::Copy,
+                        Some(output.clone()),
+                        vec![constant(1)],
+                    ),
+                    op(
+                        3,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1010), varnode(0x41)],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                2,
+                vec![op(4, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
+            ),
+            block_at(
+                0x1020,
+                3,
+                vec![op(5, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
+            ),
+            block_at(
+                0x1030,
+                4,
+                vec![op(
+                    6,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x50)),
+                    vec![varnode(0x60)],
+                )],
+            ),
+            block_at(
+                0x1050,
+                5,
+                vec![op(
+                    7,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x61)),
+                    vec![constant(0)],
+                )],
+            ),
+        ];
+        blocks[0].successors = vec![1, 5];
+        blocks[1].successors = vec![2, 3];
+        blocks[2].successors = vec![4];
+        blocks[3].successors = vec![4];
+        let pcode = pcode_function(blocks.clone());
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Const(1, int(32));
+
+        let proof = builder
+            .describe_forward_join_not_selected_proof(&blocks[1], 0, &output, &rhs)
+            .expect("forward join proof");
+
+        assert!(proof.event_reaches_forward_join);
+        assert_eq!(
+            proof.rejected_reason,
+            ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentHeuristic
+        );
+    }
+
+    #[test]
+    fn forward_join_not_selected_classifier_marks_non_postdominating_join() {
+        let pcode = pcode_function(vec![]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert_eq!(
+            builder.classify_forward_join_not_selected_rejected_reason(
+                0,
+                1,
+                true,
+                Some(false),
+                2,
+                false,
+            ),
+            ForwardJoinNotSelectedRejectedReason::JoinDoesNotPostdominate
         );
     }
 }
