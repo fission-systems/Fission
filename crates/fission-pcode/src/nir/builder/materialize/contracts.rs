@@ -263,6 +263,30 @@ pub(super) struct JoinMergeMissingProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MissingIncomingPredKind {
+    MissingBecauseNoPriorDef,
+    MissingBecausePriorDefDominates,
+    MissingBecauseDeadPred,
+    MissingBecauseEntryDefault,
+    MissingBecauseLoopBackedge,
+    MissingBecausePathSensitive,
+    UnknownMissingIncoming,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MissingIncomingPredProof {
+    pub(super) event_block: u64,
+    pub(super) merge_block: u64,
+    pub(super) pred_block: u64,
+    pub(super) pred_reaches_merge: bool,
+    pub(super) pred_has_definition: bool,
+    pub(super) pred_has_prior_definition: bool,
+    pub(super) prior_def_block: Option<u64>,
+    pub(super) prior_def_op_seq: Option<u32>,
+    pub(super) incoming_kind: MissingIncomingPredKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnknownMissingMergeAttributionReason {
     EntryBlockAttribution,
     SyntheticRootBlock,
@@ -787,6 +811,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) single_consumer_load_rhs_alias_class: BTreeMap<String, usize>,
     pub(super) missing_merge_binding_relation: BTreeMap<String, usize>,
     pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
+    pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_rhs_kind: BTreeMap<String, usize>,

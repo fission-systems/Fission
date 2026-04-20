@@ -132,6 +132,10 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.join_merge_missing_reason),
             ),
             (
+                "missing_incoming_pred_kind",
+                Self::format_materialize_owner_histogram(&summary.missing_incoming_pred_kind),
+            ),
+            (
                 "unknown_missing_merge_attribution_reason",
                 Self::format_materialize_owner_histogram(
                     &summary.unknown_missing_merge_attribution_reason,
@@ -838,6 +842,9 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             proof.reason,
         ));
+        if proof.reason == JoinMergeMissingReason::MissingIncomingForSomePred {
+            self.trace_missing_incoming_pred_proof(proof.event_block, proof.merge_block, output);
+        }
     }
 
     pub(super) fn trace_unknown_missing_merge_attribution(
@@ -1070,6 +1077,57 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             proof.reason,
         ));
+        if proof.reason == AmbiguousJoinPredReason::MissingIncomingForSomePred {
+            self.trace_missing_incoming_pred_proof(
+                proof.event_block,
+                proof.forward_join_block,
+                output,
+            );
+        }
+    }
+
+    pub(super) fn trace_missing_incoming_pred_proof(
+        &self,
+        event_block: u64,
+        merge_block: u64,
+        output: &Varnode,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let proofs = self.describe_missing_incoming_pred_proofs(event_block, merge_block, output);
+        for proof in proofs {
+            {
+                let mut summary = self.materialize_owner_repartition.borrow_mut();
+                Self::bump_materialize_owner_histogram(
+                    &mut summary.missing_incoming_pred_kind,
+                    format!("{:?}", proof.incoming_kind),
+                );
+            }
+            let prior_def_block = proof
+                .prior_def_block
+                .map(|addr| format!("0x{addr:x}"))
+                .unwrap_or_else(|| "none".to_string());
+            let prior_def_op_seq = proof
+                .prior_def_op_seq
+                .map(|seq| seq.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            self.emit_ready_trace(format!(
+                "missing-incoming-pred-proof output=space:{} off:0x{:x} size:{} event_block=0x{:x} merge_block=0x{:x} pred_block=0x{:x} pred_reaches_merge={} pred_has_definition={} pred_has_prior_definition={} prior_def_block={} prior_def_op_seq={} incoming_kind={:?}",
+                output.space_id,
+                output.offset,
+                output.size,
+                proof.event_block,
+                proof.merge_block,
+                proof.pred_block,
+                proof.pred_reaches_merge,
+                proof.pred_has_definition,
+                proof.pred_has_prior_definition,
+                prior_def_block,
+                prior_def_op_seq,
+                proof.incoming_kind,
+            ));
+        }
     }
 
     pub(super) fn trace_unknown_consumer_kind(

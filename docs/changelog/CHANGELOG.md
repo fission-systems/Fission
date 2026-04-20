@@ -9,6 +9,40 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` missing incoming predecessor provenance tracing
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, invent default incoming values, or relax merge/representative policy. The goal was to take the `MissingIncomingForSomePred` family observed under both real join merges and forward-join fallback attribution and expose why each predecessor lacks an incoming definition.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries missing-incoming provenance vocabulary:
+  - `MissingIncomingPredKind`
+    - `MissingBecauseNoPriorDef`
+    - `MissingBecausePriorDefDominates`
+    - `MissingBecauseDeadPred`
+    - `MissingBecauseEntryDefault`
+    - `MissingBecauseLoopBackedge`
+    - `MissingBecausePathSensitive`
+    - `UnknownMissingIncoming`
+  - `MissingIncomingPredProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `missing_incoming_pred_kind`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - predecessor-local missing incoming provenance lookup
+  - prior-definition search for missing predecessor inputs
+  - classification into entry-default, dead predecessor, loop backedge, dominating prior def, and path-sensitive prior def families
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `missing-incoming-pred-proof output=... event_block=... merge_block=... pred_block=... pred_reaches_merge=... pred_has_definition=... pred_has_prior_definition=... prior_def_block=... prior_def_op_seq=... incoming_kind=...`
+  - repartition summary family:
+    - `missing_incoming_pred_kind`
+  - the new proof is only emitted when an existing join/fallback proof already classifies the site as `MissingIncomingForSomePred`
+
+Validation:
+
+- `cargo fmt --all`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo test -p fission-pcode missing_incoming_pred_kind_ --lib -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo build -p fission-cli`
+- targeted `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 ... --decomp 0x140008090`
+
 ### `0x140008090` join-merge incoming-value proof tracing
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, relax representative requirements, or change the default release path. The goal was to split the real `JoinMergeMissing=265` bucket by predecessor incoming-value shape, separately from synthetic-root fallback attribution.

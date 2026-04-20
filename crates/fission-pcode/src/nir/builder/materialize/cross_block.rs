@@ -533,6 +533,136 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn classify_missing_incoming_pred_kind(
+        pred_is_entry: bool,
+        pred_reachable_from_entry: bool,
+        merge_reaches_pred: bool,
+        pred_has_prior_definition: bool,
+        prior_def_dominates_pred: bool,
+    ) -> MissingIncomingPredKind {
+        if pred_is_entry {
+            return MissingIncomingPredKind::MissingBecauseEntryDefault;
+        }
+        if !pred_reachable_from_entry {
+            return MissingIncomingPredKind::MissingBecauseDeadPred;
+        }
+        if merge_reaches_pred {
+            return MissingIncomingPredKind::MissingBecauseLoopBackedge;
+        }
+        if pred_has_prior_definition && prior_def_dominates_pred {
+            return MissingIncomingPredKind::MissingBecausePriorDefDominates;
+        }
+        if pred_has_prior_definition {
+            return MissingIncomingPredKind::MissingBecausePathSensitive;
+        }
+        MissingIncomingPredKind::MissingBecauseNoPriorDef
+    }
+
+    pub(super) fn describe_missing_incoming_pred_proofs(
+        &self,
+        event_block: u64,
+        merge_block: u64,
+        output: &Varnode,
+    ) -> Vec<MissingIncomingPredProof> {
+        let Some(merge_block_idx) = self.address_to_index.get(&merge_block).copied() else {
+            return Vec::new();
+        };
+        let Some(entry_block_addr) = self.pcode.blocks.first().map(|block| block.start_address)
+        else {
+            return Vec::new();
+        };
+        let Some(entry_block_idx) = self.address_to_index.get(&entry_block_addr).copied() else {
+            return Vec::new();
+        };
+        let Some(predecessor_idxs) = self.predecessors.get(merge_block_idx) else {
+            return Vec::new();
+        };
+
+        predecessor_idxs
+            .iter()
+            .filter_map(|pred_idx| {
+                let pred_block = self.pcode.blocks.get(*pred_idx)?;
+                let pred_has_definition =
+                    Self::first_output_redefinition_in_block_from(pred_block, 0, output).is_some();
+                if pred_has_definition {
+                    return None;
+                }
+
+                let mut best_prior_def: Option<(usize, u64, u32, bool, usize)> = None;
+                for candidate_idx in 0..self.pcode.blocks.len() {
+                    if candidate_idx == *pred_idx {
+                        continue;
+                    }
+                    let Some(candidate_block) = self.pcode.blocks.get(candidate_idx) else {
+                        continue;
+                    };
+                    let Some((_, candidate_op)) =
+                        Self::first_output_redefinition_in_block_from(candidate_block, 0, output)
+                    else {
+                        continue;
+                    };
+                    if !self.block_can_reach(candidate_idx, *pred_idx, *pred_idx) {
+                        continue;
+                    }
+                    let distance = self
+                        .shortest_forward_distance(candidate_idx, *pred_idx)
+                        .unwrap_or(usize::MAX);
+                    let dominates = self.dom_tree.dominates(candidate_idx, *pred_idx);
+                    let candidate = (
+                        candidate_idx,
+                        candidate_block.start_address,
+                        candidate_op.seq_num,
+                        dominates,
+                        distance,
+                    );
+                    let replace = match best_prior_def {
+                        None => true,
+                        Some(current) => {
+                            (candidate.3 && !current.3)
+                                || (candidate.3 == current.3 && candidate.4 < current.4)
+                                || (candidate.3 == current.3
+                                    && candidate.4 == current.4
+                                    && candidate.1 < current.1)
+                        }
+                    };
+                    if replace {
+                        best_prior_def = Some(candidate);
+                    }
+                }
+
+                let pred_reaches_merge =
+                    self.block_can_reach(*pred_idx, merge_block_idx, merge_block_idx);
+                let pred_reachable_from_entry = self
+                    .shortest_forward_distance(entry_block_idx, *pred_idx)
+                    .is_some();
+                let pred_has_prior_definition = best_prior_def.is_some();
+                let prior_def_dominates_pred = best_prior_def
+                    .as_ref()
+                    .map(|candidate| candidate.3)
+                    .unwrap_or(false);
+                let incoming_kind = Self::classify_missing_incoming_pred_kind(
+                    pred_block.start_address == entry_block_addr,
+                    pred_reachable_from_entry,
+                    self.block_can_reach(merge_block_idx, *pred_idx, merge_block_idx),
+                    pred_has_prior_definition,
+                    prior_def_dominates_pred,
+                );
+
+                Some(MissingIncomingPredProof {
+                    event_block,
+                    merge_block,
+                    pred_block: pred_block.start_address,
+                    pred_reaches_merge,
+                    pred_has_definition,
+                    pred_has_prior_definition,
+                    prior_def_block: best_prior_def.as_ref().map(|candidate| candidate.1),
+                    prior_def_op_seq: best_prior_def.as_ref().map(|candidate| candidate.2),
+                    incoming_kind,
+                })
+            })
+            .collect()
+    }
+
     pub(super) fn describe_unknown_missing_merge_attribution(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -2402,5 +2532,29 @@ mod tests {
             DisallowedSingleConsumerConsumerKind::StoreValue,
         );
         assert_eq!(reason, JoinMergeMissingReason::ConflictingIncomingValues);
+    }
+
+    #[test]
+    fn missing_incoming_pred_kind_prefers_entry_default() {
+        let kind =
+            PreviewBuilder::classify_missing_incoming_pred_kind(true, true, false, false, false);
+        assert_eq!(kind, MissingIncomingPredKind::MissingBecauseEntryDefault);
+    }
+
+    #[test]
+    fn missing_incoming_pred_kind_prefers_prior_def_dominates() {
+        let kind =
+            PreviewBuilder::classify_missing_incoming_pred_kind(false, true, false, true, true);
+        assert_eq!(
+            kind,
+            MissingIncomingPredKind::MissingBecausePriorDefDominates
+        );
+    }
+
+    #[test]
+    fn missing_incoming_pred_kind_prefers_path_sensitive_prior_def() {
+        let kind =
+            PreviewBuilder::classify_missing_incoming_pred_kind(false, true, false, true, false);
+        assert_eq!(kind, MissingIncomingPredKind::MissingBecausePathSensitive);
     }
 }
