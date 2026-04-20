@@ -124,6 +124,48 @@ impl<'a> PreviewBuilder<'a> {
         StableRepresentativeOwnerReason::UnknownStableRepresentative
     }
 
+    fn classify_alias_stable_required_family(
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+        downstream_opcode: Option<PcodeOpcode>,
+    ) -> AliasStableRequiredFamily {
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::LoadAddr
+            || downstream_opcode == Some(PcodeOpcode::Load)
+        {
+            return AliasStableRequiredFamily::LoadAddrStableRequired;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::StoreAddr
+            || downstream_opcode == Some(PcodeOpcode::Store)
+        {
+            return AliasStableRequiredFamily::StoreAddrStableRequired;
+        }
+        if downstream_opcode == Some(PcodeOpcode::BranchInd) {
+            return AliasStableRequiredFamily::BranchIndStableRequired;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::OtherData
+            && rhs_kind == DisallowedSingleConsumerRhsKind::LoadLike
+        {
+            return AliasStableRequiredFamily::OtherDataLoadLikeStable;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::OtherData
+            && rhs_kind == DisallowedSingleConsumerRhsKind::VarOrConst
+            && downstream_opcode == Some(PcodeOpcode::Copy)
+        {
+            return AliasStableRequiredFamily::OtherDataCopyStable;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::OtherData
+            && matches!(
+                rhs_kind,
+                DisallowedSingleConsumerRhsKind::Arithmetic
+                    | DisallowedSingleConsumerRhsKind::BinaryBoolean
+                    | DisallowedSingleConsumerRhsKind::UnaryBoolean
+            )
+        {
+            return AliasStableRequiredFamily::ArithmeticStableRequired;
+        }
+        AliasStableRequiredFamily::UnknownAliasStable
+    }
+
     pub(super) fn describe_stable_representative_owner_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -217,6 +259,46 @@ impl<'a> PreviewBuilder<'a> {
             overlaps_temp_only_lifecycle,
             overlaps_real_missing_merge,
             downstream_opcode,
+            reason,
+        })
+    }
+
+    pub(super) fn describe_alias_stable_required_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<AliasStableRequiredProof> {
+        let proof = self.describe_stable_representative_owner_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        )?;
+        if proof.reason != StableRepresentativeOwnerReason::AliasStableRequired {
+            return None;
+        }
+        let same_block_use_count =
+            Self::collect_output_use_sites_in_block(block, op_idx, output).len();
+        let rhs_has_load = proof.rhs_kind == DisallowedSingleConsumerRhsKind::LoadLike;
+        let rhs_has_call = proof.rhs_kind == DisallowedSingleConsumerRhsKind::CallLike;
+        let requires_preserved_expr = Self::should_preserve_materialized_expr(rhs);
+        let reason = Self::classify_alias_stable_required_family(
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.downstream_opcode,
+        );
+        Some(AliasStableRequiredProof {
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            downstream_opcode: proof.downstream_opcode,
+            same_block_use_count,
+            rhs_has_load,
+            rhs_has_call,
+            requires_preserved_expr,
             reason,
         })
     }
@@ -4016,5 +4098,75 @@ mod tests {
         assert_eq!(hazard.use_stmt_idx, Some(2));
         assert_eq!(hazard.hazard_stmt_idx, Some(2));
         assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_load_addr() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            DisallowedSingleConsumerRhsKind::Arithmetic,
+            Some(PcodeOpcode::Copy),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::LoadAddrStableRequired);
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_store_addr() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::StoreAddr,
+            DisallowedSingleConsumerRhsKind::VarOrConst,
+            Some(PcodeOpcode::Store),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::StoreAddrStableRequired);
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_branch_ind() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            DisallowedSingleConsumerRhsKind::VarOrConst,
+            Some(PcodeOpcode::BranchInd),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::BranchIndStableRequired);
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_otherdata_loadlike() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            DisallowedSingleConsumerRhsKind::LoadLike,
+            Some(PcodeOpcode::Copy),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::OtherDataLoadLikeStable);
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_otherdata_copy() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            DisallowedSingleConsumerRhsKind::VarOrConst,
+            Some(PcodeOpcode::Copy),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::OtherDataCopyStable);
+    }
+
+    #[test]
+    fn alias_stable_required_family_prefers_arithmetic() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            DisallowedSingleConsumerRhsKind::Arithmetic,
+            Some(PcodeOpcode::IntAdd),
+        );
+        assert_eq!(family, AliasStableRequiredFamily::ArithmeticStableRequired);
+    }
+
+    #[test]
+    fn alias_stable_required_family_falls_back_to_unknown() {
+        let family = PreviewBuilder::classify_alias_stable_required_family(
+            DisallowedSingleConsumerConsumerKind::CallArg,
+            DisallowedSingleConsumerRhsKind::Other,
+            None,
+        );
+        assert_eq!(family, AliasStableRequiredFamily::UnknownAliasStable);
     }
 }

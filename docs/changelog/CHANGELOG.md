@@ -8953,3 +8953,11 @@ Same-axis `putty` limit50 benchmarking reduced the real merge rejection count bu
 - `release_path_changed: no`
 
 Added `missing-incoming-semantics-proof` trace/histograms on top of the real `MissingIncomingSemanticsRequired` slice to separate dead-only missing predecessors, entry-default requirements, unsafe prior-def reuse, temp-only representative leakage, and path-sensitive missing semantics. No merge synthesis, default incoming modeling, or release-path behavior changed.
+
+# 0x140008090 alias stable required proof
+
+- `wave_type: diagnostic-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `alias-stable-required-proof` trace/histograms on top of `ConsumerRequiresStableRepresentative -> AliasStableRequired` to split load-address, store-address, branch-indirect selector, other-data loadlike/copy, and arithmetic local stability families. No representative policy or release-path behavior changed.

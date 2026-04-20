@@ -190,6 +190,22 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "alias_stable_required_family",
+                Self::format_materialize_owner_histogram(&summary.alias_stable_required_family),
+            ),
+            (
+                "alias_stable_required_consumer_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.alias_stable_required_consumer_kind,
+                ),
+            ),
+            (
+                "alias_stable_required_downstream_opcode",
+                Self::format_materialize_owner_histogram(
+                    &summary.alias_stable_required_downstream_opcode,
+                ),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1618,6 +1634,61 @@ impl<'a> PreviewBuilder<'a> {
             proof.overlaps_temp_only_lifecycle,
             proof.overlaps_real_missing_merge,
             proof.downstream_opcode,
+            proof.reason,
+        ));
+        if proof.reason == StableRepresentativeOwnerReason::AliasStableRequired {
+            self.trace_alias_stable_required_proof(block, op_idx, terminator_index, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_alias_stable_required_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) =
+            self.describe_alias_stable_required_proof(block, op_idx, terminator_index, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.alias_stable_required_family,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.alias_stable_required_consumer_kind,
+                format!("{:?}", proof.consumer_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.alias_stable_required_downstream_opcode,
+                proof
+                    .downstream_opcode
+                    .map(|opcode| format!("{:?}", opcode))
+                    .unwrap_or_else(|| "none".to_string()),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "alias-stable-required-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} consumer_kind={:?} rhs_kind={:?} downstream_opcode={:?} same_block_use_count={} rhs_has_load={} rhs_has_call={} requires_preserved_expr={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.downstream_opcode,
+            proof.same_block_use_count,
+            proof.rhs_has_load,
+            proof.rhs_has_call,
+            proof.requires_preserved_expr,
             proof.reason,
         ));
     }

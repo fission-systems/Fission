@@ -434,6 +434,29 @@ pub(super) struct StableRepresentativeOwnerProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AliasStableRequiredFamily {
+    LoadAddrStableRequired,
+    StoreAddrStableRequired,
+    OtherDataLoadLikeStable,
+    OtherDataCopyStable,
+    BranchIndStableRequired,
+    ArithmeticStableRequired,
+    UnknownAliasStable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AliasStableRequiredProof {
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) downstream_opcode: Option<PcodeOpcode>,
+    pub(super) same_block_use_count: usize,
+    pub(super) rhs_has_load: bool,
+    pub(super) rhs_has_call: bool,
+    pub(super) requires_preserved_expr: bool,
+    pub(super) reason: AliasStableRequiredFamily,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -995,6 +1018,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) stable_representative_owner_reason: BTreeMap<String, usize>,
     pub(super) stable_representative_consumer_kind: BTreeMap<String, usize>,
     pub(super) stable_representative_downstream_opcode: BTreeMap<String, usize>,
+    pub(super) alias_stable_required_family: BTreeMap<String, usize>,
+    pub(super) alias_stable_required_consumer_kind: BTreeMap<String, usize>,
+    pub(super) alias_stable_required_downstream_opcode: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
