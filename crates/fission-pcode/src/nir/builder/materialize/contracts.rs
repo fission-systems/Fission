@@ -297,6 +297,32 @@ pub(super) struct MergeBindingCandidateProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MissingIncomingSemanticsResult {
+    DeadOnlyMissing,
+    EntryDefaultRequired,
+    PathSensitiveMissing,
+    TempOnlyLeakage,
+    UnsafePriorDefReuse,
+    NoSafeSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MissingIncomingSemanticsProof {
+    pub(super) merge_block: u64,
+    pub(super) predecessor_count: usize,
+    pub(super) missing_pred_count: usize,
+    pub(super) defined_pred_count: usize,
+    pub(super) defined_incoming_values: Vec<String>,
+    pub(super) missing_pred_kinds: Vec<String>,
+    pub(super) missing_pred_has_prior_def: bool,
+    pub(super) missing_pred_prior_def_status: String,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) candidate_semantics: String,
+    pub(super) result: MissingIncomingSemanticsResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ExplicitMergeBindingTrialReason {
     PhiLikeBindingMaterialized,
     RejectedMissingIncoming,
@@ -962,6 +988,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) merge_binding_candidate_incoming_kind: BTreeMap<String, usize>,
     pub(super) explicit_merge_binding_trial_reason: BTreeMap<String, usize>,
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
+    pub(super) missing_incoming_semantics_result: BTreeMap<String, usize>,
+    pub(super) missing_incoming_missing_pred_kind: BTreeMap<String, usize>,
     pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
     pub(super) temp_only_representative_reason: BTreeMap<String, usize>,
     pub(super) stable_representative_owner_reason: BTreeMap<String, usize>,

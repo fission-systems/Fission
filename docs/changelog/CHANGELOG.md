@@ -8945,3 +8945,11 @@ Added `merge-binding-candidate-proof` trace/histograms on top of the real `JoinM
 Added a fail-closed, env-gated prototype that materializes a synthetic `__fission_merge2(...)` binding only for the narrow `PhiLikeBindingCandidate` slice: binary predecessor joins, no missing incoming values, one conflicting incoming pair, `OtherData` consumer only, and incoming kinds restricted to `VarOrConst` or `Arithmetic`. Default release behavior remains unchanged.
 
 Same-axis `putty` limit50 benchmarking reduced the real merge rejection count but did not meet release quality thresholds (`avg_normalized_similarity 38.82 -> 38.74`, with target-row regressions), so this path remains a negative env-gated result and stays default-off.
+
+# 0x140008090 missing incoming semantics proof
+
+- `wave_type: diagnostic-design`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `missing-incoming-semantics-proof` trace/histograms on top of the real `MissingIncomingSemanticsRequired` slice to separate dead-only missing predecessors, entry-default requirements, unsafe prior-def reuse, temp-only representative leakage, and path-sensitive missing semantics. No merge synthesis, default incoming modeling, or release-path behavior changed.

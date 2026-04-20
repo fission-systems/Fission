@@ -152,6 +152,18 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_incoming_pred_kind),
             ),
             (
+                "missing_incoming_semantics_result",
+                Self::format_materialize_owner_histogram(
+                    &summary.missing_incoming_semantics_result,
+                ),
+            ),
+            (
+                "missing_incoming_missing_pred_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.missing_incoming_missing_pred_kind,
+                ),
+            ),
+            (
                 "missing_no_prior_def_reason",
                 Self::format_materialize_owner_histogram(&summary.missing_no_prior_def_reason),
             ),
@@ -964,6 +976,9 @@ impl<'a> PreviewBuilder<'a> {
             proof.can_synthesize_phi_like_binding,
             proof.result,
         ));
+        if proof.result == MergeBindingCandidateResult::MissingIncomingSemanticsRequired {
+            self.trace_missing_incoming_semantics_proof(block, op_idx, output, rhs);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1348,6 +1363,58 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
         }
+    }
+
+    pub(super) fn trace_missing_incoming_semantics_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) =
+            self.describe_missing_incoming_semantics_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.missing_incoming_semantics_result,
+                format!("{:?}", proof.result),
+            );
+            for kind in &proof.missing_pred_kinds {
+                Self::bump_materialize_owner_histogram(
+                    &mut summary.missing_incoming_missing_pred_kind,
+                    kind.clone(),
+                );
+            }
+        }
+        let defined_incoming_values = proof.defined_incoming_values.join(" | ");
+        let missing_pred_kinds = proof.missing_pred_kinds.join(",");
+        self.emit_ready_trace(format!(
+            "missing-incoming-semantics-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} merge_block=0x{:x} predecessor_count={} missing_pred_count={} defined_pred_count={} defined_incoming_values=[{}] missing_pred_kinds=[{}] missing_pred_has_prior_def={} missing_pred_prior_def_status={} consumer_kind={:?} rhs_kind={:?} candidate_semantics={} result={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.merge_block,
+            proof.predecessor_count,
+            proof.missing_pred_count,
+            proof.defined_pred_count,
+            defined_incoming_values,
+            missing_pred_kinds,
+            proof.missing_pred_has_prior_def,
+            proof.missing_pred_prior_def_status,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.candidate_semantics,
+            proof.result,
+        ));
     }
 
     pub(super) fn trace_missing_no_prior_def_proof(

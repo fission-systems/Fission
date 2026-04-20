@@ -776,6 +776,31 @@ impl<'a> PreviewBuilder<'a> {
         MergeBindingCandidateResult::IncomingKindsUnsafe
     }
 
+    fn classify_missing_incoming_semantics_result(
+        all_missing_dead_only: bool,
+        all_missing_entry_default: bool,
+        any_unsafe_prior_def_reuse: bool,
+        any_temp_only_leakage: bool,
+        any_path_sensitive_missing: bool,
+    ) -> MissingIncomingSemanticsResult {
+        if all_missing_dead_only && !any_unsafe_prior_def_reuse {
+            return MissingIncomingSemanticsResult::DeadOnlyMissing;
+        }
+        if all_missing_entry_default {
+            return MissingIncomingSemanticsResult::EntryDefaultRequired;
+        }
+        if any_unsafe_prior_def_reuse {
+            return MissingIncomingSemanticsResult::UnsafePriorDefReuse;
+        }
+        if any_temp_only_leakage {
+            return MissingIncomingSemanticsResult::TempOnlyLeakage;
+        }
+        if any_path_sensitive_missing {
+            return MissingIncomingSemanticsResult::PathSensitiveMissing;
+        }
+        MissingIncomingSemanticsResult::NoSafeSemantics
+    }
+
     pub(super) fn describe_merge_binding_candidate_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -816,6 +841,164 @@ impl<'a> PreviewBuilder<'a> {
                 result,
                 MergeBindingCandidateResult::PhiLikeBindingCandidate
             ),
+            result,
+        })
+    }
+
+    pub(super) fn describe_missing_incoming_semantics_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<MissingIncomingSemanticsProof> {
+        let missing = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        if missing.relation != MissingMergeBindingRelation::JoinMergeMissing {
+            return None;
+        }
+        let join = self.describe_join_merge_missing_proof(block, op_idx, output, rhs)?;
+        let candidate = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)?;
+        if candidate.result != MergeBindingCandidateResult::MissingIncomingSemanticsRequired {
+            return None;
+        }
+
+        let missing_preds = self.describe_missing_incoming_pred_proofs(
+            block.start_address,
+            join.merge_block,
+            output,
+        );
+        if missing_preds.is_empty() {
+            return None;
+        }
+
+        let mut missing_pred_kinds = Vec::new();
+        let mut prior_def_statuses = Vec::new();
+        let mut any_unsafe_prior_def_reuse = false;
+        let mut any_path_sensitive_missing = false;
+        let mut all_missing_dead_only = true;
+        let mut all_missing_entry_default = true;
+
+        for pred in &missing_preds {
+            missing_pred_kinds.push(format!("{:?}", pred.incoming_kind));
+            match pred.incoming_kind {
+                MissingIncomingPredKind::MissingBecauseDeadPred => {
+                    all_missing_entry_default = false;
+                }
+                MissingIncomingPredKind::MissingBecauseEntryDefault => {
+                    all_missing_dead_only = false;
+                }
+                MissingIncomingPredKind::MissingBecausePriorDefDominates => {
+                    all_missing_dead_only = false;
+                    all_missing_entry_default = false;
+                    any_unsafe_prior_def_reuse = true;
+                    let status = self
+                        .describe_dominating_prior_def_incoming_proof(
+                            pred.merge_block,
+                            pred.pred_block,
+                            output,
+                            missing.consumer_kind,
+                            missing.rhs_kind,
+                        )
+                        .map(|proof| format!("{:?}", proof.proof_result))
+                        .unwrap_or_else(|| "PriorDefProofMissing".to_string());
+                    prior_def_statuses.push(status);
+                }
+                MissingIncomingPredKind::MissingBecausePathSensitive => {
+                    all_missing_dead_only = false;
+                    all_missing_entry_default = false;
+                    any_path_sensitive_missing = true;
+                    if pred.pred_has_prior_definition {
+                        any_unsafe_prior_def_reuse = true;
+                        prior_def_statuses.push("PathSensitivePriorDef".to_string());
+                    } else {
+                        prior_def_statuses.push("PathSensitiveMissing".to_string());
+                    }
+                }
+                MissingIncomingPredKind::MissingBecauseNoPriorDef => {
+                    all_missing_dead_only = false;
+                    all_missing_entry_default = false;
+                    let status = self
+                        .describe_missing_no_prior_def_proof(
+                            pred.merge_block,
+                            pred.pred_block,
+                            output,
+                            missing.consumer_kind,
+                            missing.rhs_kind,
+                        )
+                        .map(|proof| format!("{:?}", proof.reason))
+                        .unwrap_or_else(|| "NoPriorDef".to_string());
+                    prior_def_statuses.push(status);
+                }
+                MissingIncomingPredKind::MissingBecauseLoopBackedge
+                | MissingIncomingPredKind::UnknownMissingIncoming => {
+                    all_missing_dead_only = false;
+                    all_missing_entry_default = false;
+                    prior_def_statuses.push(format!("{:?}", pred.incoming_kind));
+                }
+            }
+        }
+
+        let temp_only_leakage = self
+            .describe_temp_only_representative_site_proof(block, op_idx, output, rhs)
+            .is_some()
+            || prior_def_statuses.iter().any(|status| {
+                matches!(
+                    status.as_str(),
+                    "TempOnlyNoDef"
+                        | "TempRepresentativeResidue"
+                        | "RootAttributedTemp"
+                        | "OtherDataTemp"
+                        | "DeadPredNoDef"
+                        | "DeadTempRepresentative"
+                )
+            });
+
+        let result = Self::classify_missing_incoming_semantics_result(
+            all_missing_dead_only,
+            all_missing_entry_default,
+            any_unsafe_prior_def_reuse,
+            temp_only_leakage,
+            any_path_sensitive_missing,
+        );
+        let candidate_semantics = match result {
+            MissingIncomingSemanticsResult::DeadOnlyMissing => "dead-only-missing",
+            MissingIncomingSemanticsResult::EntryDefaultRequired => "entry-default-required",
+            MissingIncomingSemanticsResult::PathSensitiveMissing => "path-sensitive-missing",
+            MissingIncomingSemanticsResult::TempOnlyLeakage => "temp-only-leakage",
+            MissingIncomingSemanticsResult::UnsafePriorDefReuse => "unsafe-prior-def-reuse",
+            MissingIncomingSemanticsResult::NoSafeSemantics => "no-safe-semantics",
+        }
+        .to_string();
+        let missing_pred_has_prior_def = missing_preds
+            .iter()
+            .any(|pred| pred.pred_has_prior_definition);
+        let missing_pred_prior_def_status = if prior_def_statuses.is_empty() {
+            "none".to_string()
+        } else {
+            let mut counts = BTreeMap::<String, usize>::new();
+            for status in prior_def_statuses {
+                *counts.entry(status).or_insert(0) += 1;
+            }
+            counts
+                .into_iter()
+                .map(|(status, count)| format!("{status}={count}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        Some(MissingIncomingSemanticsProof {
+            merge_block: join.merge_block,
+            predecessor_count: candidate.predecessor_count,
+            missing_pred_count: candidate.missing_incoming_count,
+            defined_pred_count: candidate
+                .predecessor_count
+                .saturating_sub(candidate.missing_incoming_count),
+            defined_incoming_values: join.incoming_values,
+            missing_pred_kinds,
+            missing_pred_has_prior_def,
+            missing_pred_prior_def_status,
+            consumer_kind: missing.consumer_kind,
+            rhs_kind: missing.rhs_kind,
+            candidate_semantics,
             result,
         })
     }
@@ -3409,5 +3592,53 @@ mod tests {
             reason,
             TempOnlyRepresentativeReason::TempRepresentativeResidue
         );
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_dead_only_missing() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            true, false, false, false, false,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::DeadOnlyMissing);
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_entry_default_required() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            false, true, false, false, false,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::EntryDefaultRequired);
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_unsafe_prior_def_reuse() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            false, false, true, true, true,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::UnsafePriorDefReuse);
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_temp_only_leakage() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            false, false, false, true, true,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::TempOnlyLeakage);
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_path_sensitive_missing() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            false, false, false, false, true,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::PathSensitiveMissing);
+    }
+
+    #[test]
+    fn missing_incoming_semantics_result_no_safe_semantics_fallback() {
+        let result = PreviewBuilder::classify_missing_incoming_semantics_result(
+            false, false, false, false, false,
+        );
+        assert_eq!(result, MissingIncomingSemanticsResult::NoSafeSemantics);
     }
 }
