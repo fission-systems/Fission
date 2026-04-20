@@ -572,6 +572,52 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.output_replacement_is_complete(block, op_idx, output, rhs) {
             if Self::same_block_replacement_requires_stable_representative(rhs) {
+                if Self::stack_addr_frame_stable_replacement_enabled() {
+                    match self.describe_stack_addr_frame_stable_trial(
+                        block,
+                        op_idx,
+                        terminator_index,
+                        output,
+                        rhs,
+                    ) {
+                        Ok(proof) => {
+                            self.trace_stack_address_frame_stable_trial(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                                Some(&proof),
+                                true,
+                                false,
+                                StackAddrFrameStableTrialReason::StackAddrFrameStableReplaced,
+                            );
+                            return ReplacementValuePlan::complete(
+                                ReplacementReadClass::SameBlockData,
+                            );
+                        }
+                        Err(reason) => {
+                            let proof = self.describe_stack_address_stability_proof(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                            );
+                            self.trace_stack_address_frame_stable_trial(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                                proof.as_ref(),
+                                false,
+                                true,
+                                reason,
+                            );
+                        }
+                    }
+                }
                 self.trace_stable_representative_owner_proof(
                     block,
                     op_idx,
@@ -744,6 +790,53 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.output_replacement_is_complete(block, op_idx, output, rhs) {
             if Self::same_block_replacement_requires_stable_representative(rhs) {
+                if Self::stack_addr_frame_stable_replacement_enabled() {
+                    match self.describe_stack_addr_frame_stable_trial(
+                        block,
+                        op_idx,
+                        terminator_index,
+                        output,
+                        rhs,
+                    ) {
+                        Ok(proof) => {
+                            self.trace_stack_address_frame_stable_trial(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                                Some(&proof),
+                                true,
+                                false,
+                                StackAddrFrameStableTrialReason::StackAddrFrameStableReplaced,
+                            );
+                            self.replacement_plan_completed_count += 1;
+                            return ReplacementValuePlan::complete(
+                                ReplacementReadClass::SameBlockData,
+                            );
+                        }
+                        Err(reason) => {
+                            let proof = self.describe_stack_address_stability_proof(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                            );
+                            self.trace_stack_address_frame_stable_trial(
+                                block,
+                                op_idx,
+                                terminator_index,
+                                output,
+                                rhs,
+                                proof.as_ref(),
+                                false,
+                                true,
+                                reason,
+                            );
+                        }
+                    }
+                }
                 self.trace_stable_representative_owner_proof(
                     block,
                     op_idx,

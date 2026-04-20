@@ -8977,3 +8977,12 @@ Added `address-stable-required-proof` trace/histograms on top of the `LoadAddrSt
 - `release_path_changed: no`
 
 Added `stack-address-stability-proof` trace/histograms on top of the `AddressExprStackRelative` slice to separate single-use, multi-use, escaping, frame-relative, stack-pointer-mutation, and call/store-crossing stack-address families. No representative policy or release-path behavior changed.
+
+# 0x140008090 stack frame-stable address env trial
+
+- `wave_type: env-gated-policy`
+- `behavior_changed: yes`
+- `release_path_changed: no`
+- `env_gate: FISSION_ENABLE_STACK_ADDR_FRAME_STABLE_REPLACEMENT`
+
+Added a default-off, fail-closed replacement trial for the narrow `StackAddrFrameStable` slice under same-block stable-representative address consumers. The trial only replaces `rsp + const` frame-relative load/store address representatives with a single same-block use and no crossing or stack-base mutation evidence. Default release behavior remains unchanged until same-axis benchmark acceptance is met.

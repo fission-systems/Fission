@@ -361,7 +361,7 @@ impl<'a> PreviewBuilder<'a> {
         AddressStableRequiredFamily::AddressExprUnknownBase
     }
 
-    fn classify_stack_address_base_reg(rhs: &HirExpr) -> StackAddressBaseReg {
+    pub(super) fn classify_stack_address_base_reg(rhs: &HirExpr) -> StackAddressBaseReg {
         fn classify_var_name(name: &str) -> StackAddressBaseReg {
             match name {
                 "rsp" => StackAddressBaseReg::Rsp,
@@ -409,7 +409,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn extract_stack_address_offset(rhs: &HirExpr) -> Option<i64> {
+    pub(super) fn extract_stack_address_offset(rhs: &HirExpr) -> Option<i64> {
         fn is_stack_base(expr: &HirExpr) -> bool {
             PreviewBuilder::classify_stack_address_base_reg(expr) != StackAddressBaseReg::Unknown
         }
@@ -547,6 +547,43 @@ impl<'a> PreviewBuilder<'a> {
             return StackAddressStabilityReason::StackAddrSingleUse;
         }
         StackAddressStabilityReason::StackAddrUnknown
+    }
+
+    fn classify_stack_addr_frame_stable_trial_reason(
+        proof: &StackAddressStabilityProof,
+        nonlocal_use_exists: bool,
+    ) -> Result<(), StackAddrFrameStableTrialReason> {
+        if !matches!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::LoadAddr
+                | DisallowedSingleConsumerConsumerKind::StoreAddr
+        ) || !matches!(
+            proof.downstream_opcode,
+            Some(PcodeOpcode::Load | PcodeOpcode::Store)
+        ) {
+            return Err(StackAddrFrameStableTrialReason::RejectedConsumerKind);
+        }
+        if proof.crosses_call || proof.crosses_store {
+            return Err(StackAddrFrameStableTrialReason::RejectedCrossesCallOrStore);
+        }
+        if proof.rsp_redefined_before_use {
+            return Err(StackAddrFrameStableTrialReason::RejectedBaseMutation);
+        }
+        if nonlocal_use_exists || proof.reason == StackAddressStabilityReason::StackAddrEscapes {
+            return Err(StackAddrFrameStableTrialReason::RejectedEscapes);
+        }
+        if proof.same_block_use_count > 1
+            || proof.reason == StackAddressStabilityReason::StackAddrMultipleUse
+        {
+            return Err(StackAddrFrameStableTrialReason::RejectedMultipleUse);
+        }
+        if proof.reason != StackAddressStabilityReason::StackAddrFrameStable
+            || proof.base_reg != StackAddressBaseReg::Rsp
+            || !proof.frame_relative_candidate
+        {
+            return Err(StackAddrFrameStableTrialReason::RejectedNonFrameStable);
+        }
+        Ok(())
     }
 
     pub(super) fn describe_stable_representative_owner_proof(
@@ -788,6 +825,22 @@ impl<'a> PreviewBuilder<'a> {
             frame_relative_candidate,
             reason,
         })
+    }
+
+    pub(super) fn describe_stack_addr_frame_stable_trial(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Result<StackAddressStabilityProof, StackAddrFrameStableTrialReason> {
+        let proof = self
+            .describe_stack_address_stability_proof(block, op_idx, terminator_index, output, rhs)
+            .ok_or(StackAddrFrameStableTrialReason::RejectedNonFrameStable)?;
+        let nonlocal_use_exists = self.output_has_nonlocal_use(block, op_idx, output);
+        Self::classify_stack_addr_frame_stable_trial_reason(&proof, nonlocal_use_exists)?;
+        Ok(proof)
     }
 
     pub(super) fn output_has_nonlocal_use(
@@ -1284,6 +1337,13 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn parity_chain_materialization_enabled() -> bool {
         matches!(
             std::env::var("FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION"),
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+        )
+    }
+
+    pub(super) fn stack_addr_frame_stable_replacement_enabled() -> bool {
+        matches!(
+            std::env::var("FISSION_ENABLE_STACK_ADDR_FRAME_STABLE_REPLACEMENT"),
             Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
         )
     }
@@ -3016,6 +3076,31 @@ mod tests {
 
     fn test_ptr() -> NirType {
         NirType::Ptr(Box::new(NirType::Unknown))
+    }
+
+    fn stack_addr_proof(
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        downstream_opcode: Option<PcodeOpcode>,
+        base_reg: StackAddressBaseReg,
+        same_block_use_count: usize,
+        crosses_call: bool,
+        crosses_store: bool,
+        rsp_redefined_before_use: bool,
+        frame_relative_candidate: bool,
+        reason: StackAddressStabilityReason,
+    ) -> StackAddressStabilityProof {
+        StackAddressStabilityProof {
+            consumer_kind,
+            downstream_opcode,
+            base_reg,
+            offset: Some(0x20),
+            same_block_use_count,
+            crosses_call,
+            crosses_store,
+            rsp_redefined_before_use,
+            frame_relative_candidate,
+            reason,
+        }
     }
 
     #[test]
@@ -5022,5 +5107,195 @@ mod tests {
         assert!(!PreviewBuilder::stack_address_frame_relative_candidate(
             &expr
         ));
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_accepts_rsp_frame_stable_load_addr() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrFrameStable,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_accepts_rsp_frame_stable_store_addr() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::StoreAddr,
+            Some(PcodeOpcode::Store),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrFrameStable,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_non_frame_stable() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            false,
+            false,
+            StackAddressStabilityReason::StackAddrSingleUse,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedNonFrameStable)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_multiple_use() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            2,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrMultipleUse,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedMultipleUse)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_escape() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrEscapes,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, true),
+            Err(StackAddrFrameStableTrialReason::RejectedEscapes)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_base_mutation() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            true,
+            true,
+            StackAddressStabilityReason::StackAddrRspMutatedBeforeUse,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedBaseMutation)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_crosses_call() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            true,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrCrossesCall,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedCrossesCallOrStore)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_crosses_store() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            true,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrCrossesStore,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedCrossesCallOrStore)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_non_rsp_base() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::LoadAddr,
+            Some(PcodeOpcode::Load),
+            StackAddressBaseReg::Rbp,
+            1,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrFrameStable,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedNonFrameStable)
+        );
+    }
+
+    #[test]
+    fn stack_addr_frame_stable_trial_rejects_non_memory_consumer() {
+        let proof = stack_addr_proof(
+            DisallowedSingleConsumerConsumerKind::OtherData,
+            Some(PcodeOpcode::Copy),
+            StackAddressBaseReg::Rsp,
+            1,
+            false,
+            false,
+            false,
+            true,
+            StackAddressStabilityReason::StackAddrFrameStable,
+        );
+        assert_eq!(
+            PreviewBuilder::classify_stack_addr_frame_stable_trial_reason(&proof, false),
+            Err(StackAddrFrameStableTrialReason::RejectedConsumerKind)
+        );
     }
 }

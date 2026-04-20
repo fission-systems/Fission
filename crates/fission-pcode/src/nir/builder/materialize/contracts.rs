@@ -536,6 +536,17 @@ pub(super) struct StackAddressStabilityProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StackAddrFrameStableTrialReason {
+    StackAddrFrameStableReplaced,
+    RejectedNonFrameStable,
+    RejectedMultipleUse,
+    RejectedEscapes,
+    RejectedBaseMutation,
+    RejectedCrossesCallOrStore,
+    RejectedConsumerKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -1106,6 +1117,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) stack_address_stability_reason: BTreeMap<String, usize>,
     pub(super) stack_address_base_reg: BTreeMap<String, usize>,
     pub(super) stack_address_frame_relative_candidate: BTreeMap<String, usize>,
+    pub(super) stack_address_frame_stable_trial_reason: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,

@@ -236,6 +236,12 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "stack_address_frame_stable_trial_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.stack_address_frame_stable_trial_reason,
+                ),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1843,6 +1849,75 @@ impl<'a> PreviewBuilder<'a> {
             proof.rsp_redefined_before_use,
             proof.frame_relative_candidate,
             proof.reason,
+        ));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn trace_stack_address_frame_stable_trial(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+        proof: Option<&StackAddressStabilityProof>,
+        replaced: bool,
+        materialized: bool,
+        reason: StackAddrFrameStableTrialReason,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let owned_stable;
+        let (consumer_kind, downstream_opcode, base_reg, offset) = if let Some(proof) = proof {
+            (
+                proof.consumer_kind,
+                proof.downstream_opcode,
+                proof.base_reg,
+                proof.offset,
+            )
+        } else {
+            owned_stable = self.describe_stable_representative_owner_proof(
+                block,
+                op_idx,
+                terminator_index,
+                output,
+                rhs,
+            );
+            (
+                owned_stable
+                    .as_ref()
+                    .map(|proof| proof.consumer_kind)
+                    .unwrap_or(DisallowedSingleConsumerConsumerKind::OtherData),
+                owned_stable
+                    .as_ref()
+                    .and_then(|proof| proof.downstream_opcode),
+                Self::classify_stack_address_base_reg(rhs),
+                Self::extract_stack_address_offset(rhs),
+            )
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stack_address_frame_stable_trial_reason,
+                format!("{:?}", reason),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "stack-address-frame-stable-trial output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} consumer_kind={:?} downstream_opcode={:?} rhs={} base_reg={:?} offset={:?} replaced={} materialized={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            consumer_kind,
+            downstream_opcode,
+            crate::nir::printer::print_expr(rhs),
+            base_reg,
+            offset,
+            replaced,
+            materialized,
+            reason,
         ));
     }
 
