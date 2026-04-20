@@ -9,6 +9,40 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` dominating prior-def incoming proof tracing
+
+This wave stayed diagnostic-only. It does not reuse prior defs as merge incoming values, synthesize merge bindings, or relax representative policy. The goal was to take the dominant `MissingBecausePriorDefDominates` slice under `MissingIncomingForSomePred` and expose whether the selected prior definition is actually stable all the way to the merge.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries dominating prior-def proof vocabulary:
+  - `DominatingPriorDefProofResult`
+    - `PriorDefStableToMerge`
+    - `PriorDefRedefinedBeforeMerge`
+    - `PriorDefDoesNotDominateMerge`
+    - `PriorDefPathSensitive`
+    - `PriorDefCrossesCallOrStore`
+    - `PriorDefUnknown`
+  - `DominatingPriorDefIncomingProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `dominating_prior_def_proof_result`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - best prior-def selection for missing predecessor inputs
+  - path-slice checks for output redefinition and call/store crossings between prior def and merge
+  - `describe_dominating_prior_def_incoming_proof(...)`
+  - stable vs redefined vs non-dominating merge classification for the dominating-prior-def slice
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `dominating-prior-def-incoming-proof output=... merge_block=... pred_block=... prior_def_block=... prior_def_op_seq=... prior_def_rhs=... prior_def_dominates_pred=... prior_def_dominates_merge=... redefined_between_prior_and_merge=... redefined_on_pred_path=... consumer_kind=... rhs_kind=... proof_result=...`
+  - repartition summary family:
+    - `dominating_prior_def_proof_result`
+  - the new proof is only emitted when `missing-incoming-pred-proof` already classifies the predecessor as `MissingBecausePriorDefDominates`
+
+Validation:
+
+- `cargo fmt --all`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo test -p fission-pcode dominating_prior_def_proof_result_ --lib -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo build -p fission-cli`
+- targeted `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 ... --decomp 0x140008090`
+
 ### `0x140008090` missing incoming predecessor provenance tracing
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, invent default incoming values, or relax merge/representative policy. The goal was to take the `MissingIncomingForSomePred` family observed under both real join merges and forward-join fallback attribution and expose why each predecessor lacks an incoming definition.

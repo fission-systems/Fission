@@ -2,6 +2,146 @@ use super::contracts::*;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn best_prior_definition_for_missing_pred(
+        &self,
+        pred_idx: usize,
+        output: &Varnode,
+    ) -> Option<(usize, u64, usize, u32, bool, usize, String)> {
+        let mut best_prior_def: Option<(usize, u64, usize, u32, bool, usize, String)> = None;
+        for candidate_idx in 0..self.pcode.blocks.len() {
+            if candidate_idx == pred_idx {
+                continue;
+            }
+            let Some(candidate_block) = self.pcode.blocks.get(candidate_idx) else {
+                continue;
+            };
+            let Some((candidate_op_idx, candidate_op)) =
+                Self::first_output_redefinition_in_block_from(candidate_block, 0, output)
+            else {
+                continue;
+            };
+            if !self.block_can_reach(candidate_idx, pred_idx, pred_idx) {
+                continue;
+            }
+            let distance = self
+                .shortest_forward_distance(candidate_idx, pred_idx)
+                .unwrap_or(usize::MAX);
+            let dominates = self.dom_tree.dominates(candidate_idx, pred_idx);
+            let candidate = (
+                candidate_idx,
+                candidate_block.start_address,
+                candidate_op_idx,
+                candidate_op.seq_num,
+                dominates,
+                distance,
+                Self::format_incoming_value(candidate_op),
+            );
+            let replace = match &best_prior_def {
+                None => true,
+                Some(current) => {
+                    (candidate.4 && !current.4)
+                        || (candidate.4 == current.4 && candidate.5 < current.5)
+                        || (candidate.4 == current.4
+                            && candidate.5 == current.5
+                            && candidate.1 < current.1)
+                }
+            };
+            if replace {
+                best_prior_def = Some(candidate);
+            }
+        }
+        best_prior_def
+    }
+
+    fn block_lies_on_path_slice(
+        &self,
+        start_idx: usize,
+        block_idx: usize,
+        target_idx: usize,
+    ) -> bool {
+        self.block_can_reach(start_idx, block_idx, target_idx)
+            && self.block_can_reach(block_idx, target_idx, target_idx)
+    }
+
+    fn path_slice_has_output_redefinition(
+        &self,
+        start_idx: usize,
+        start_op_idx: Option<usize>,
+        target_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        let Some(start_block) = self.pcode.blocks.get(start_idx) else {
+            return false;
+        };
+        let start_search_idx = start_op_idx.map_or(0, |idx| idx + 1);
+        if Self::first_output_redefinition_in_block_from(start_block, start_search_idx, output)
+            .is_some()
+        {
+            return true;
+        }
+        for idx in 0..self.pcode.blocks.len() {
+            if idx == start_idx || idx == target_idx {
+                continue;
+            }
+            if !self.block_lies_on_path_slice(start_idx, idx, target_idx) {
+                continue;
+            }
+            let Some(block) = self.pcode.blocks.get(idx) else {
+                continue;
+            };
+            if Self::first_output_redefinition_in_block_from(block, 0, output).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn path_slice_crosses_call_or_store(
+        &self,
+        start_idx: usize,
+        start_op_idx: Option<usize>,
+        target_idx: usize,
+    ) -> bool {
+        let Some(start_block) = self.pcode.blocks.get(start_idx) else {
+            return false;
+        };
+        let start_search_idx = start_op_idx.map_or(0, |idx| idx + 1);
+        if start_block.ops.iter().skip(start_search_idx).any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+                    | PcodeOpcode::Store
+            )
+        }) {
+            return true;
+        }
+        for idx in 0..self.pcode.blocks.len() {
+            if idx == start_idx || idx == target_idx {
+                continue;
+            }
+            if !self.block_lies_on_path_slice(start_idx, idx, target_idx) {
+                continue;
+            }
+            let Some(block) = self.pcode.blocks.get(idx) else {
+                continue;
+            };
+            if block.ops.iter().any(|op| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call
+                        | PcodeOpcode::CallInd
+                        | PcodeOpcode::CallOther
+                        | PcodeOpcode::Store
+                )
+            }) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn shortest_forward_distance(&self, start_idx: usize, target_idx: usize) -> Option<usize> {
         if start_idx == target_idx {
             return Some(0);
@@ -558,6 +698,27 @@ impl<'a> PreviewBuilder<'a> {
         MissingIncomingPredKind::MissingBecauseNoPriorDef
     }
 
+    fn classify_dominating_prior_def_proof_result(
+        prior_def_dominates_merge: bool,
+        redefined_between_prior_and_merge: bool,
+        redefined_on_pred_path: bool,
+        crosses_call_or_store: bool,
+    ) -> DominatingPriorDefProofResult {
+        if !prior_def_dominates_merge {
+            if redefined_on_pred_path || redefined_between_prior_and_merge {
+                return DominatingPriorDefProofResult::PriorDefPathSensitive;
+            }
+            return DominatingPriorDefProofResult::PriorDefDoesNotDominateMerge;
+        }
+        if redefined_on_pred_path || redefined_between_prior_and_merge {
+            return DominatingPriorDefProofResult::PriorDefRedefinedBeforeMerge;
+        }
+        if crosses_call_or_store {
+            return DominatingPriorDefProofResult::PriorDefCrossesCallOrStore;
+        }
+        DominatingPriorDefProofResult::PriorDefStableToMerge
+    }
+
     pub(super) fn describe_missing_incoming_pred_proofs(
         &self,
         event_block: u64,
@@ -588,47 +749,7 @@ impl<'a> PreviewBuilder<'a> {
                     return None;
                 }
 
-                let mut best_prior_def: Option<(usize, u64, u32, bool, usize)> = None;
-                for candidate_idx in 0..self.pcode.blocks.len() {
-                    if candidate_idx == *pred_idx {
-                        continue;
-                    }
-                    let Some(candidate_block) = self.pcode.blocks.get(candidate_idx) else {
-                        continue;
-                    };
-                    let Some((_, candidate_op)) =
-                        Self::first_output_redefinition_in_block_from(candidate_block, 0, output)
-                    else {
-                        continue;
-                    };
-                    if !self.block_can_reach(candidate_idx, *pred_idx, *pred_idx) {
-                        continue;
-                    }
-                    let distance = self
-                        .shortest_forward_distance(candidate_idx, *pred_idx)
-                        .unwrap_or(usize::MAX);
-                    let dominates = self.dom_tree.dominates(candidate_idx, *pred_idx);
-                    let candidate = (
-                        candidate_idx,
-                        candidate_block.start_address,
-                        candidate_op.seq_num,
-                        dominates,
-                        distance,
-                    );
-                    let replace = match best_prior_def {
-                        None => true,
-                        Some(current) => {
-                            (candidate.3 && !current.3)
-                                || (candidate.3 == current.3 && candidate.4 < current.4)
-                                || (candidate.3 == current.3
-                                    && candidate.4 == current.4
-                                    && candidate.1 < current.1)
-                        }
-                    };
-                    if replace {
-                        best_prior_def = Some(candidate);
-                    }
-                }
+                let best_prior_def = self.best_prior_definition_for_missing_pred(*pred_idx, output);
 
                 let pred_reaches_merge =
                     self.block_can_reach(*pred_idx, merge_block_idx, merge_block_idx);
@@ -638,7 +759,7 @@ impl<'a> PreviewBuilder<'a> {
                 let pred_has_prior_definition = best_prior_def.is_some();
                 let prior_def_dominates_pred = best_prior_def
                     .as_ref()
-                    .map(|candidate| candidate.3)
+                    .map(|candidate| candidate.4)
                     .unwrap_or(false);
                 let incoming_kind = Self::classify_missing_incoming_pred_kind(
                     pred_block.start_address == entry_block_addr,
@@ -656,11 +777,61 @@ impl<'a> PreviewBuilder<'a> {
                     pred_has_definition,
                     pred_has_prior_definition,
                     prior_def_block: best_prior_def.as_ref().map(|candidate| candidate.1),
-                    prior_def_op_seq: best_prior_def.as_ref().map(|candidate| candidate.2),
+                    prior_def_op_seq: best_prior_def.as_ref().map(|candidate| candidate.3),
                     incoming_kind,
                 })
             })
             .collect()
+    }
+
+    pub(super) fn describe_dominating_prior_def_incoming_proof(
+        &self,
+        merge_block: u64,
+        pred_block: u64,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) -> Option<DominatingPriorDefIncomingProof> {
+        let merge_block_idx = self.address_to_index.get(&merge_block).copied()?;
+        let pred_block_idx = self.address_to_index.get(&pred_block).copied()?;
+        let best_prior_def = self.best_prior_definition_for_missing_pred(pred_block_idx, output)?;
+        if !best_prior_def.4 {
+            return None;
+        }
+        let prior_def_dominates_merge = self.dom_tree.dominates(best_prior_def.0, merge_block_idx);
+        let redefined_between_prior_and_merge = self.path_slice_has_output_redefinition(
+            best_prior_def.0,
+            Some(best_prior_def.2),
+            merge_block_idx,
+            output,
+        );
+        let redefined_on_pred_path =
+            self.path_slice_has_output_redefinition(pred_block_idx, None, merge_block_idx, output);
+        let crosses_call_or_store = self.path_slice_crosses_call_or_store(
+            best_prior_def.0,
+            Some(best_prior_def.2),
+            merge_block_idx,
+        );
+        let proof_result = Self::classify_dominating_prior_def_proof_result(
+            prior_def_dominates_merge,
+            redefined_between_prior_and_merge,
+            redefined_on_pred_path,
+            crosses_call_or_store,
+        );
+        Some(DominatingPriorDefIncomingProof {
+            merge_block,
+            pred_block,
+            prior_def_block: best_prior_def.1,
+            prior_def_op_seq: best_prior_def.3,
+            prior_def_rhs: best_prior_def.6,
+            prior_def_dominates_pred: best_prior_def.4,
+            prior_def_dominates_merge,
+            redefined_between_prior_and_merge,
+            redefined_on_pred_path,
+            consumer_kind,
+            rhs_kind,
+            proof_result,
+        })
     }
 
     pub(super) fn describe_unknown_missing_merge_attribution(
@@ -2556,5 +2727,32 @@ mod tests {
         let kind =
             PreviewBuilder::classify_missing_incoming_pred_kind(false, true, false, true, false);
         assert_eq!(kind, MissingIncomingPredKind::MissingBecausePathSensitive);
+    }
+
+    #[test]
+    fn dominating_prior_def_proof_result_prefers_stable_to_merge() {
+        let result =
+            PreviewBuilder::classify_dominating_prior_def_proof_result(true, false, false, false);
+        assert_eq!(result, DominatingPriorDefProofResult::PriorDefStableToMerge);
+    }
+
+    #[test]
+    fn dominating_prior_def_proof_result_marks_redefinition_before_merge() {
+        let result =
+            PreviewBuilder::classify_dominating_prior_def_proof_result(true, true, false, false);
+        assert_eq!(
+            result,
+            DominatingPriorDefProofResult::PriorDefRedefinedBeforeMerge
+        );
+    }
+
+    #[test]
+    fn dominating_prior_def_proof_result_marks_non_dominating_merge() {
+        let result =
+            PreviewBuilder::classify_dominating_prior_def_proof_result(false, false, false, false);
+        assert_eq!(
+            result,
+            DominatingPriorDefProofResult::PriorDefDoesNotDominateMerge
+        );
     }
 }

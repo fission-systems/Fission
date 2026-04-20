@@ -136,6 +136,12 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_incoming_pred_kind),
             ),
             (
+                "dominating_prior_def_proof_result",
+                Self::format_materialize_owner_histogram(
+                    &summary.dominating_prior_def_proof_result,
+                ),
+            ),
+            (
                 "unknown_missing_merge_attribution_reason",
                 Self::format_materialize_owner_histogram(
                     &summary.unknown_missing_merge_attribution_reason,
@@ -843,7 +849,13 @@ impl<'a> PreviewBuilder<'a> {
             proof.reason,
         ));
         if proof.reason == JoinMergeMissingReason::MissingIncomingForSomePred {
-            self.trace_missing_incoming_pred_proof(proof.event_block, proof.merge_block, output);
+            self.trace_missing_incoming_pred_proof(
+                proof.event_block,
+                proof.merge_block,
+                output,
+                proof.consumer_kind,
+                proof.rhs_kind,
+            );
         }
     }
 
@@ -1082,6 +1094,8 @@ impl<'a> PreviewBuilder<'a> {
                 proof.event_block,
                 proof.forward_join_block,
                 output,
+                proof.consumer_kind,
+                proof.rhs_kind,
             );
         }
     }
@@ -1091,6 +1105,8 @@ impl<'a> PreviewBuilder<'a> {
         event_block: u64,
         merge_block: u64,
         output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1127,7 +1143,63 @@ impl<'a> PreviewBuilder<'a> {
                 prior_def_op_seq,
                 proof.incoming_kind,
             ));
+            if proof.incoming_kind == MissingIncomingPredKind::MissingBecausePriorDefDominates {
+                self.trace_dominating_prior_def_incoming_proof(
+                    merge_block,
+                    proof.pred_block,
+                    output,
+                    consumer_kind,
+                    rhs_kind,
+                );
+            }
         }
+    }
+
+    pub(super) fn trace_dominating_prior_def_incoming_proof(
+        &self,
+        merge_block: u64,
+        pred_block: u64,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_dominating_prior_def_incoming_proof(
+            merge_block,
+            pred_block,
+            output,
+            consumer_kind,
+            rhs_kind,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.dominating_prior_def_proof_result,
+                format!("{:?}", proof.proof_result),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "dominating-prior-def-incoming-proof output=space:{} off:0x{:x} size:{} merge_block=0x{:x} pred_block=0x{:x} prior_def_block=0x{:x} prior_def_op_seq={} prior_def_rhs={} prior_def_dominates_pred={} prior_def_dominates_merge={} redefined_between_prior_and_merge={} redefined_on_pred_path={} consumer_kind={:?} rhs_kind={:?} proof_result={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            proof.merge_block,
+            proof.pred_block,
+            proof.prior_def_block,
+            proof.prior_def_op_seq,
+            proof.prior_def_rhs,
+            proof.prior_def_dominates_pred,
+            proof.prior_def_dominates_merge,
+            proof.redefined_between_prior_and_merge,
+            proof.redefined_on_pred_path,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.proof_result,
+        ));
     }
 
     pub(super) fn trace_unknown_consumer_kind(
