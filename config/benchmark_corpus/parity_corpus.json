@@ -1,9 +1,9 @@
 {
-  "name": "fission-ghidra-parity-workbench",
+  "name": "fission-ghidra-parity-windows-workbench",
   "suite_tier": "parity",
   "gate_mode": "advisory",
   "dynamic_watchlist_limit": 5,
-  "notes": "Reference-guided parity corpus for stack-relative addresses, merge/binding, alias-sensitive consumers, and flag/control surfacing.",
+  "notes": "Reference-guided Windows-only x86/x64 parity corpus for stack-relative addresses, merge/binding, alias-sensitive consumers, and flag/control surfacing.",
   "entries": [
     {
       "id": "putty",
@@ -38,10 +38,10 @@
       "role": "release_candidate"
     },
     {
-      "id": "sqlite3-linux",
-      "binary_path": "/Users/sjkim1127/Fission/samples/other/sqlite/sqlite-tools-linux-x64-3510300/sqlite3",
-      "ghidra_project_key": "sqlite3_linux",
-      "tags": ["linux", "elf", "x64", "pie", "stripped", "real-world", "alias-heavy"],
+      "id": "cmake",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/cmake.exe",
+      "ghidra_project_key": "cmake",
+      "tags": ["windows", "pe", "x64", "console", "real-world", "alias-heavy", "address-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
@@ -50,6 +50,14 @@
       "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_structs_classes_x64_O2.exe",
       "ghidra_project_key": "test_structs_classes_x64_o2",
       "tags": ["windows", "pe", "x64", "synthetic", "struct-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    },
+    {
+      "id": "7zr-x86",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x86/7zr.exe",
+      "ghidra_project_key": "7zr_x86",
+      "tags": ["windows", "pe", "x86", "cli", "real-world", "dispatcher-heavy", "x86-canary"],
       "seed_limit": 30,
       "role": "release_candidate"
     }

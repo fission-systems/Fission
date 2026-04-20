@@ -1,9 +1,9 @@
 {
-  "name": "fission-release-generalization",
+  "name": "fission-release-windows-samples",
   "suite_tier": "release",
   "gate_mode": "advisory",
   "dynamic_watchlist_limit": 5,
-  "notes": "Broader advisory release corpus with putty retained as the primary canary.",
+  "notes": "Broader advisory Windows-only x86/x64 sample corpus with putty retained as the primary canary.",
   "entries": [
     {
       "id": "putty",
@@ -47,26 +47,26 @@
       "role": "release_candidate"
     },
     {
-      "id": "sqlite3-linux",
-      "binary_path": "/Users/sjkim1127/Fission/samples/other/sqlite/sqlite-tools-linux-x64-3510300/sqlite3",
-      "ghidra_project_key": "sqlite3_linux",
-      "tags": ["linux", "elf", "x64", "pie", "stripped", "real-world"],
-      "seed_limit": 40,
-      "role": "diagnostic_only"
-    },
-    {
-      "id": "algorithms-linux-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/linux/x64/test_real_world_algorithms_x64_O2",
-      "ghidra_project_key": "test_real_world_algorithms_x64_o2",
-      "tags": ["linux", "elf", "x64", "algorithm-heavy", "synthetic-realistic"],
+      "id": "everything",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/everything.exe",
+      "ghidra_project_key": "everything",
+      "tags": ["windows", "pe", "x64", "gui", "real-world", "alias-heavy"],
       "seed_limit": 40,
       "role": "release_candidate"
     },
     {
-      "id": "structs-linux-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/linux/x64/test_structs_classes_x64_O2",
-      "ghidra_project_key": "test_structs_classes_x64_o2",
-      "tags": ["linux", "elf", "x64", "struct-heavy", "debug-info"],
+      "id": "7zr-x86",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x86/7zr.exe",
+      "ghidra_project_key": "7zr_x86",
+      "tags": ["windows", "pe", "x86", "cli", "real-world", "dispatcher-heavy"],
+      "seed_limit": 40,
+      "role": "release_candidate"
+    },
+    {
+      "id": "sumatrapdf-x86",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x86/SumatraPDF-3.5.2-32.exe",
+      "ghidra_project_key": "sumatrapdf_x86",
+      "tags": ["windows", "pe", "x86", "gui", "real-world", "large"],
       "seed_limit": 40,
       "role": "release_candidate"
     }

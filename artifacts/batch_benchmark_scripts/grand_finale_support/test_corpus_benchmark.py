@@ -19,6 +19,18 @@ from grand_finale_support.benchmark_core import (
 
 
 class CorpusBenchmarkTests(unittest.TestCase):
+    def test_checked_in_corpus_manifests_use_windows_samples_only(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        manifest_dir = repo_root / "config" / "benchmark_corpus"
+
+        for manifest_name in ("smoke_corpus.json", "release_corpus.json", "parity_corpus.json"):
+            loaded = load_corpus_manifest(manifest_dir / manifest_name)
+            for entry in loaded["entries"]:
+                self.assertTrue(
+                    str(entry["binary_path"]).startswith(str(repo_root / "samples" / "windows")),
+                    f"{manifest_name}:{entry['id']} escaped samples/windows",
+                )
+
     def test_load_corpus_manifest_accepts_suite_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)

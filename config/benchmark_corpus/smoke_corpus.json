@@ -1,9 +1,9 @@
 {
-  "name": "fission-smoke-generalization",
+  "name": "fission-smoke-windows-samples",
   "suite_tier": "smoke",
   "gate_mode": "advisory",
   "dynamic_watchlist_limit": 3,
-  "notes": "Fast multi-binary validation suite for local parity and regression checks.",
+  "notes": "Fast Windows-only x86/x64 sample suite for local parity and regression checks.",
   "entries": [
     {
       "id": "putty",
@@ -31,26 +31,26 @@
       "role": "release_candidate"
     },
     {
-      "id": "sqlite3-linux",
-      "binary_path": "/Users/sjkim1127/Fission/samples/other/sqlite/sqlite-tools-linux-x64-3510300/sqlite3",
-      "ghidra_project_key": "sqlite3_linux",
-      "tags": ["linux", "elf", "x64", "pie", "stripped", "real-world"],
+      "id": "controlflow-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_control_flow_x64_O2.exe",
+      "ghidra_project_key": "test_control_flow_x64_o2",
+      "tags": ["windows", "pe", "x64", "synthetic", "merge-heavy", "cfg-heavy"],
       "seed_limit": 20,
       "role": "smoke_sentinel"
     },
     {
-      "id": "structs-linux-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/linux/x64/test_structs_classes_x64_O2",
+      "id": "structs-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_structs_classes_x64_O2.exe",
       "ghidra_project_key": "test_structs_classes_x64_o2",
-      "tags": ["linux", "elf", "x64", "struct-heavy", "debug-info"],
+      "tags": ["windows", "pe", "x64", "synthetic", "struct-heavy"],
       "seed_limit": 20,
       "role": "release_candidate"
     },
     {
-      "id": "controlflow-macos-x64-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/macos/x64/test_control_flow_x64_O2",
-      "ghidra_project_key": "test_control_flow_macos_x64_o2",
-      "tags": ["macos", "macho", "x64", "small", "cfg-heavy"],
+      "id": "sumatrapdf-x86",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x86/SumatraPDF-3.5.2-32.exe",
+      "ghidra_project_key": "sumatrapdf_x86",
+      "tags": ["windows", "pe", "x86", "gui", "real-world", "large"],
       "seed_limit": 20,
       "role": "smoke_sentinel"
     }

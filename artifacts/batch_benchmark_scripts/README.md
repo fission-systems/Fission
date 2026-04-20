@@ -52,23 +52,23 @@ python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
   --corpus-manifest config/benchmark_corpus/smoke_corpus.json \
   --fission-bin target/release/fission_cli \
   --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
-  --output-dir artifacts/batch_benchmark/smoke-generalization
+  --output-dir artifacts/batch_benchmark/smoke-windows
 
 # Parity corpus benchmark for Ghidra-reference work
 python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
   --corpus-manifest config/benchmark_corpus/parity_corpus.json \
   --fission-bin target/release/fission_cli \
   --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
-  --output-dir artifacts/batch_benchmark/parity-generalization \
-  --baseline-dir artifacts/batch_benchmark/parity-generalization-baseline
+  --output-dir artifacts/batch_benchmark/parity-windows \
+  --baseline-dir artifacts/batch_benchmark/parity-windows-baseline
 
 # Release corpus benchmark against a previously accepted corpus baseline
 python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
   --corpus-manifest config/benchmark_corpus/release_corpus.json \
   --fission-bin target/release/fission_cli \
   --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
-  --output-dir artifacts/batch_benchmark/release-generalization \
-  --baseline-dir artifacts/batch_benchmark/release-generalization-baseline
+  --output-dir artifacts/batch_benchmark/release-windows \
+  --baseline-dir artifacts/batch_benchmark/release-windows-baseline
 ```
 
 ## Generated Artifacts
@@ -129,6 +129,8 @@ Checked-in defaults:
 - [`config/benchmark_corpus/release_corpus.json`](/Users/sjkim1127/Fission/config/benchmark_corpus/release_corpus.json)
 - [`config/benchmark_corpus/parity_corpus.json`](/Users/sjkim1127/Fission/config/benchmark_corpus/parity_corpus.json)
 
+Current checked-in suites are intentionally constrained to [`samples/windows`](/Users/sjkim1127/Fission/samples/windows) so Ghidra-parity work stays on Windows x86/x64 binaries only.
+
 Top-level manifest metadata:
 
 - `name`
@@ -188,13 +190,13 @@ The release owner is no longer `putty.exe` alone.
 
 ## Suite Purposes
 
-- `smoke`: fast local validation across a small mixed-platform suite
-- `parity`: Ghidra-reference workbench for owner-focused parity experiments
-- `release`: broader advisory corpus for promotion candidates
+- `smoke`: fast local validation across a small Windows x86/x64 suite
+- `parity`: Ghidra-reference workbench for owner-focused parity experiments on Windows x86/x64 samples
+- `release`: broader advisory Windows x86/x64 corpus for promotion candidates
 
 ## Watchlists
 
-Row fidelity is no longer intended to be `putty`-only.
+Row fidelity is no longer intended to be `putty`-only, but the checked-in suites are still Windows-only.
 
 - manifest `row_fidelity_targets` are treated as bootstrap hints
 - baseline degraded rows are preferred when available
@@ -216,8 +218,8 @@ Recommended workflow:
 
 1. local unit / invariant tests
 2. smoke corpus benchmark
-3. parity corpus benchmark for reference-guided work
-4. release corpus benchmark only for promotion candidates
+3. parity corpus benchmark for Windows reference-guided work
+4. release corpus benchmark only for Windows promotion candidates
 
 ## Investigating Timeout Causes
 
