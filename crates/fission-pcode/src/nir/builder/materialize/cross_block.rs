@@ -228,6 +228,37 @@ impl<'a> PreviewBuilder<'a> {
         MissingMergeBindingRelation::UnknownMissingMerge
     }
 
+    fn classify_unknown_missing_merge_attribution_reason(
+        &self,
+        block_addr: u64,
+        merge_block: u64,
+        function_entry_block: u64,
+        merge_block_is_entry: bool,
+        predecessor_count: usize,
+        successor_count: usize,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+    ) -> UnknownMissingMergeAttributionReason {
+        if merge_block_is_entry && merge_block == block_addr {
+            return UnknownMissingMergeAttributionReason::SelfMergeAtFunctionEntry;
+        }
+        if merge_block_is_entry && predecessor_count == 0 && successor_count > 1 {
+            return UnknownMissingMergeAttributionReason::SyntheticRootBlock;
+        }
+        if merge_block_is_entry && merge_block == function_entry_block {
+            return UnknownMissingMergeAttributionReason::EntryBlockAttribution;
+        }
+        if predecessor_count == 0 {
+            return UnknownMissingMergeAttributionReason::MissingCfgPredecessors;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::StoreValue {
+            return UnknownMissingMergeAttributionReason::StoreValueRepresentative;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::OtherData {
+            return UnknownMissingMergeAttributionReason::OtherDataRepresentative;
+        }
+        UnknownMissingMergeAttributionReason::UnknownAttribution
+    }
+
     pub(super) fn describe_missing_merge_binding_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -275,6 +306,45 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind,
             rhs_kind: Self::classify_disallowed_single_consumer_rhs_kind(rhs),
             relation,
+        })
+    }
+
+    pub(super) fn describe_unknown_missing_merge_attribution(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<UnknownMissingMergeAttributionProof> {
+        let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        if proof.relation != MissingMergeBindingRelation::UnknownMissingMerge {
+            return None;
+        }
+        let function_entry_block = self.pcode.blocks.first()?.start_address;
+        let merge_block_idx = self.address_to_index.get(&proof.merge_block).copied();
+        let merge_block_is_entry = proof.merge_block == function_entry_block;
+        let successor_count = merge_block_idx
+            .and_then(|idx| self.successors.get(idx))
+            .map_or(0, Vec::len);
+        let reason = self.classify_unknown_missing_merge_attribution_reason(
+            block.start_address,
+            proof.merge_block,
+            function_entry_block,
+            merge_block_is_entry,
+            proof.predecessor_count,
+            successor_count,
+            proof.consumer_kind,
+        );
+        Some(UnknownMissingMergeAttributionProof {
+            merge_block: proof.merge_block,
+            function_entry_block,
+            merge_block_is_entry,
+            predecessor_count: proof.predecessor_count,
+            successor_count,
+            incoming_value_count: proof.incoming_value_count,
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            reason,
         })
     }
 

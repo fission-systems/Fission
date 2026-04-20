@@ -9,6 +9,42 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` unknown missing merge attribution refinement
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the dominant `UnknownMissingMerge` slice inside `MissingMergeBinding=1066` and separate entry-block attribution, CFG predecessor gaps, and representative-only families before any merge policy work.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries unknown-merge attribution vocabulary:
+  - `UnknownMissingMergeAttributionReason`
+    - `EntryBlockAttribution`
+    - `SyntheticRootBlock`
+    - `MissingCfgPredecessors`
+    - `SelfMergeAtFunctionEntry`
+    - `StoreValueRepresentative`
+    - `OtherDataRepresentative`
+    - `UnknownAttribution`
+  - `UnknownMissingMergeAttributionProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `unknown_missing_merge_attribution_reason`
+    - `unknown_missing_merge_consumer_kind`
+    - `unknown_missing_merge_rhs_kind`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - `describe_unknown_missing_merge_attribution(...)`
+  - attribution refinement using merge-block entry status, predecessor/successor counts, and consumer role
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `unknown-missing-merge-attribution output=... block=... op_seq=... merge_block=... function_entry_block=... merge_block_is_entry=... predecessor_count=... successor_count=... incoming_value_count=... consumer_kind=... rhs_kind=... output_space=... output_size=... reason=...`
+  - repartition summary families for:
+    - `unknown_missing_merge_attribution_reason`
+    - `unknown_missing_merge_consumer_kind`
+    - `unknown_missing_merge_rhs_kind`
+  - the attribution trace is only emitted when `missing-merge-binding-proof` first lands in `UnknownMissingMerge`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` missing merge binding proof tracing
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, widen representative reuse, or alter the default release path. The goal was to take the large `MissingMergeBinding=1066` owner on `0x140008090` and split it by merge relation so the next design owner can be chosen from join/loop/predicate/phi-like families rather than one broad bucket.

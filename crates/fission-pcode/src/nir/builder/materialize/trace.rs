@@ -128,6 +128,22 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_merge_binding_relation),
             ),
             (
+                "unknown_missing_merge_attribution_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.unknown_missing_merge_attribution_reason,
+                ),
+            ),
+            (
+                "unknown_missing_merge_consumer_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.unknown_missing_merge_consumer_kind,
+                ),
+            ),
+            (
+                "unknown_missing_merge_rhs_kind",
+                Self::format_materialize_owner_histogram(&summary.unknown_missing_merge_rhs_kind),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -746,6 +762,60 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.rhs_kind,
             proof.relation,
+        ));
+        if proof.relation == MissingMergeBindingRelation::UnknownMissingMerge {
+            self.trace_unknown_missing_merge_attribution(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_unknown_missing_merge_attribution(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) =
+            self.describe_unknown_missing_merge_attribution(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.unknown_missing_merge_attribution_reason,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.unknown_missing_merge_consumer_kind,
+                format!("{:?}", proof.consumer_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.unknown_missing_merge_rhs_kind,
+                format!("{:?}", proof.rhs_kind),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "unknown-missing-merge-attribution output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} merge_block=0x{:x} function_entry_block=0x{:x} merge_block_is_entry={} predecessor_count={} successor_count={} incoming_value_count={} consumer_kind={:?} rhs_kind={:?} output_space={} output_size={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.merge_block,
+            proof.function_entry_block,
+            proof.merge_block_is_entry,
+            proof.predecessor_count,
+            proof.successor_count,
+            proof.incoming_value_count,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            output.space_id,
+            output.size,
+            proof.reason,
         ));
     }
 
