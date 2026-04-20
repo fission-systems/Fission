@@ -89,6 +89,15 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    fn format_incoming_value(op: &PcodeOp) -> String {
+        format!(
+            "seq={} op={:?} rhs={}",
+            op.seq_num,
+            op.opcode,
+            Self::format_copy_overwrite_inputs(&op.inputs)
+        )
+    }
+
     fn path_crosses_switch_boundary(&self, start_idx: usize, target_idx: usize) -> Option<bool> {
         let path = self.shortest_forward_path(start_idx, target_idx)?;
         Some(path.into_iter().any(|idx| {
@@ -614,6 +623,121 @@ impl<'a> PreviewBuilder<'a> {
             rhs_kind: synthetic.rhs_kind,
             rejected_reason,
         })
+    }
+
+    pub(super) fn describe_ambiguous_join_pred_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<AmbiguousJoinPredProof> {
+        let proof = self.describe_forward_join_not_selected_proof(block, op_idx, output, rhs)?;
+        if proof.rejected_reason
+            != ForwardJoinNotSelectedRejectedReason::JoinHasMultipleAmbiguousPreds
+        {
+            return None;
+        }
+        let event_block_idx = self.address_to_index.get(&proof.event_block).copied()?;
+        let forward_join_idx = self
+            .address_to_index
+            .get(&proof.forward_join_block)
+            .copied()?;
+        let predecessor_idxs = self.predecessors.get(forward_join_idx)?.clone();
+        let predecessor_blocks = predecessor_idxs
+            .iter()
+            .filter_map(|idx| self.pcode.blocks.get(*idx).map(|block| block.start_address))
+            .collect::<Vec<_>>();
+        let mut incoming_values = Vec::new();
+        let mut event_pred_index = None;
+        let mut event_pred_value = None;
+
+        for (pred_list_idx, pred_idx) in predecessor_idxs.iter().enumerate() {
+            let pred_block = self.pcode.blocks.get(*pred_idx)?;
+            let pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                .map(|(_, op)| Self::format_incoming_value(op));
+            if event_pred_index.is_none()
+                && self.block_can_reach(event_block_idx, *pred_idx, forward_join_idx)
+            {
+                event_pred_index = Some(pred_list_idx);
+                event_pred_value = pred_value.clone();
+            }
+            incoming_values.push(format!(
+                "pred=0x{:x}:{}",
+                pred_block.start_address,
+                pred_value.clone().unwrap_or_else(|| "none".to_string())
+            ));
+        }
+
+        let defined_values = predecessor_idxs
+            .iter()
+            .filter_map(|pred_idx| {
+                self.pcode.blocks.get(*pred_idx).and_then(|pred_block| {
+                    Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                        .map(|(_, op)| Self::format_incoming_value(op))
+                })
+            })
+            .collect::<Vec<_>>();
+        let incoming_value_count = defined_values.len();
+        let distinct_values = defined_values.iter().cloned().collect::<HashSet<_>>();
+        let values_same_across_preds = !defined_values.is_empty() && distinct_values.len() == 1;
+        let has_missing_incoming = incoming_value_count < predecessor_idxs.len();
+        let has_conflicting_incoming = distinct_values.len() > 1;
+        let reason = Self::classify_ambiguous_join_pred_reason(
+            values_same_across_preds,
+            has_missing_incoming,
+            has_conflicting_incoming,
+            event_pred_index.is_some() && event_pred_value.is_some(),
+            incoming_value_count,
+            proof.consumer_kind,
+        );
+
+        Some(AmbiguousJoinPredProof {
+            event_block: proof.event_block,
+            forward_join_block: proof.forward_join_block,
+            predecessor_blocks,
+            incoming_value_count,
+            incoming_values,
+            event_pred_index,
+            event_pred_value,
+            values_same_across_preds,
+            has_missing_incoming,
+            has_conflicting_incoming,
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            reason,
+        })
+    }
+
+    fn classify_ambiguous_join_pred_reason(
+        values_same_across_preds: bool,
+        has_missing_incoming: bool,
+        has_conflicting_incoming: bool,
+        event_pred_has_value: bool,
+        incoming_value_count: usize,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+    ) -> AmbiguousJoinPredReason {
+        if values_same_across_preds && !has_missing_incoming {
+            return AmbiguousJoinPredReason::AllIncomingSame;
+        }
+        if has_missing_incoming {
+            return AmbiguousJoinPredReason::MissingIncomingForSomePred;
+        }
+        if has_conflicting_incoming {
+            return AmbiguousJoinPredReason::ConflictingIncomingValues;
+        }
+        if event_pred_has_value && incoming_value_count == 1 {
+            return AmbiguousJoinPredReason::EventPredOnlyValue;
+        }
+        match consumer_kind {
+            DisallowedSingleConsumerConsumerKind::StoreValue => {
+                AmbiguousJoinPredReason::StoreValueAmbiguous
+            }
+            DisallowedSingleConsumerConsumerKind::OtherData => {
+                AmbiguousJoinPredReason::OtherDataAmbiguous
+            }
+            _ => AmbiguousJoinPredReason::UnknownAmbiguousJoin,
+        }
     }
 
     pub(super) fn classify_malformed_def_use_window_relation(
@@ -2087,5 +2211,44 @@ mod tests {
             ),
             ForwardJoinNotSelectedRejectedReason::JoinDoesNotPostdominate
         );
+    }
+
+    #[test]
+    fn ambiguous_join_pred_reason_prefers_all_incoming_same() {
+        let reason = PreviewBuilder::classify_ambiguous_join_pred_reason(
+            true,
+            false,
+            false,
+            true,
+            3,
+            DisallowedSingleConsumerConsumerKind::StoreValue,
+        );
+        assert_eq!(reason, AmbiguousJoinPredReason::AllIncomingSame);
+    }
+
+    #[test]
+    fn ambiguous_join_pred_reason_prefers_missing_incoming() {
+        let reason = PreviewBuilder::classify_ambiguous_join_pred_reason(
+            false,
+            true,
+            false,
+            true,
+            1,
+            DisallowedSingleConsumerConsumerKind::StoreValue,
+        );
+        assert_eq!(reason, AmbiguousJoinPredReason::MissingIncomingForSomePred);
+    }
+
+    #[test]
+    fn ambiguous_join_pred_reason_prefers_conflicting_incoming() {
+        let reason = PreviewBuilder::classify_ambiguous_join_pred_reason(
+            false,
+            false,
+            true,
+            true,
+            3,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(reason, AmbiguousJoinPredReason::ConflictingIncomingValues);
     }
 }

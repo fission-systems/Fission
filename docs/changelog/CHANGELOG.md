@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` ambiguous forward-join predecessor proof tracing
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, alter representative reuse, or change the default release path. The goal was to take the `ForwardJoinExistsButNotSelected -> JoinHasMultipleAmbiguousPreds=175` slice inside synthetic-root fallback attribution and expose predecessor/incoming-value shape before any merge-selection or binding policy is considered.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries ambiguous-join predecessor vocabulary:
+  - `AmbiguousJoinPredReason`
+    - `AllIncomingSame`
+    - `MissingIncomingForSomePred`
+    - `ConflictingIncomingValues`
+    - `EventPredOnlyValue`
+    - `StoreValueAmbiguous`
+    - `OtherDataAmbiguous`
+    - `UnknownAmbiguousJoin`
+  - `AmbiguousJoinPredProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `ambiguous_join_pred_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - predecessor-local incoming value formatting for join candidates
+  - `describe_ambiguous_join_pred_proof(...)`
+  - reason classification based on predecessor-local output definitions, missing incoming values, conflicting incoming values, and event-path predecessor ownership
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `ambiguous-join-pred-proof output=... block=... op_seq=... event_block=... forward_join_block=... predecessor_count=... predecessor_blocks=[...] incoming_value_count=... incoming_values=[...] event_pred_index=... event_pred_value=... values_same_across_preds=... has_missing_incoming=... has_conflicting_incoming=... consumer_kind=... rhs_kind=... reason=...`
+  - repartition summary family:
+    - `ambiguous_join_pred_reason`
+  - the new proof is only emitted for forward-join sites already classified as `JoinHasMultipleAmbiguousPreds`
+
+Validation:
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode ambiguous_join_pred_reason_ --lib -- --test-threads=1`
+- `cargo test -p fission-pcode forward_join_not_selected_proof_ --lib -- --test-threads=1`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli`
+- `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 target/debug/fission_cli samples/windows/x64/putty.exe --decomp 0x140008090 --engine nir --profile nir --ghidra-compat`
+
 ### `0x140008090` forward-join-not-selected proof tracing
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, alter representative reuse, or change the default release path. The goal was to take the `SyntheticRootBlock -> ForwardJoinExistsButNotSelected=215` slice inside `UnknownMissingMerge` and split "entry fallback despite a forward join candidate" into concrete rejection reasons before any attribution fix is considered.

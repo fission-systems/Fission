@@ -156,6 +156,10 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "ambiguous_join_pred_reason",
+                Self::format_materialize_owner_histogram(&summary.ambiguous_join_pred_reason),
+            ),
+            (
                 "unknown_consumer_kind_reason",
                 Self::format_materialize_owner_histogram(&summary.unknown_consumer_kind_reason),
             ),
@@ -944,6 +948,71 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.rhs_kind,
             proof.rejected_reason,
+        ));
+        if proof.rejected_reason
+            == ForwardJoinNotSelectedRejectedReason::JoinHasMultipleAmbiguousPreds
+        {
+            self.trace_ambiguous_join_pred_proof(block, op_idx, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_ambiguous_join_pred_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_ambiguous_join_pred_proof(block, op_idx, output, rhs)
+        else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.ambiguous_join_pred_reason,
+                format!("{:?}", proof.reason),
+            );
+        }
+        let predecessor_blocks = proof
+            .predecessor_blocks
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let incoming_values = proof.incoming_values.join(" | ");
+        let event_pred_index = proof
+            .event_pred_index
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let event_pred_value = proof
+            .event_pred_value
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        self.emit_ready_trace(format!(
+            "ambiguous-join-pred-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} event_block=0x{:x} forward_join_block=0x{:x} predecessor_count={} predecessor_blocks=[{}] incoming_value_count={} incoming_values=[{}] event_pred_index={} event_pred_value={} values_same_across_preds={} has_missing_incoming={} has_conflicting_incoming={} consumer_kind={:?} rhs_kind={:?} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.event_block,
+            proof.forward_join_block,
+            proof.predecessor_blocks.len(),
+            predecessor_blocks,
+            proof.incoming_value_count,
+            incoming_values,
+            event_pred_index,
+            event_pred_value,
+            proof.values_same_across_preds,
+            proof.has_missing_incoming,
+            proof.has_conflicting_incoming,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.reason,
         ));
     }
 
