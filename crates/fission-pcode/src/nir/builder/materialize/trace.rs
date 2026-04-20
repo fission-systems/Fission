@@ -1333,6 +1333,35 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    pub(super) fn classify_nonlocal_materialization_rejection_reason(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> MaterializationRejectionReason {
+        let Some(proof) =
+            self.describe_temp_only_representative_site_proof(block, op_idx, output, rhs)
+        else {
+            return MaterializationRejectionReason::MissingMergeBinding;
+        };
+        match proof.reason {
+            TempOnlyRepresentativeReason::RootAttributedTemp => {
+                MaterializationRejectionReason::RepresentativeRootAttribution
+            }
+            TempOnlyRepresentativeReason::DeadTempRepresentative => {
+                MaterializationRejectionReason::DeadTempRepresentative
+            }
+            TempOnlyRepresentativeReason::TempRepresentativeResidue
+            | TempOnlyRepresentativeReason::MergeCrossingTemp
+            | TempOnlyRepresentativeReason::StoreValueTemp
+            | TempOnlyRepresentativeReason::OtherDataTemp
+            | TempOnlyRepresentativeReason::UnknownTempRepresentative => {
+                MaterializationRejectionReason::TempOnlyRepresentativeLifecycle
+            }
+        }
+    }
+
     pub(super) fn trace_dominating_prior_def_incoming_proof(
         &self,
         merge_block: u64,

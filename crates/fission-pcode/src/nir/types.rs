@@ -934,6 +934,15 @@ pub struct NirBuildStats {
     /// Replacement plans rejected because a merge/read bridge was required but unavailable.
     #[serde(default)]
     pub replacement_plan_rejected_missing_merge_count: usize,
+    /// Replacement plans rejected because the nonlocal owner was root/entry representative attribution.
+    #[serde(default)]
+    pub replacement_plan_rejected_representative_root_attribution_count: usize,
+    /// Replacement plans rejected because the nonlocal owner was temp-only representative lifecycle.
+    #[serde(default)]
+    pub replacement_plan_rejected_temp_only_representative_lifecycle_count: usize,
+    /// Replacement plans rejected because the nonlocal owner was a dead temp representative.
+    #[serde(default)]
+    pub replacement_plan_rejected_dead_temp_representative_count: usize,
     /// Legacy inline candidates intentionally kept materialized by the replacement planner.
     #[serde(default)]
     pub materialization_inline_suppressed_count: usize,
@@ -1211,6 +1220,12 @@ impl NirBuildStats {
             other.replacement_plan_rejected_alias_unsafe_count;
         self.replacement_plan_rejected_missing_merge_count +=
             other.replacement_plan_rejected_missing_merge_count;
+        self.replacement_plan_rejected_representative_root_attribution_count +=
+            other.replacement_plan_rejected_representative_root_attribution_count;
+        self.replacement_plan_rejected_temp_only_representative_lifecycle_count +=
+            other.replacement_plan_rejected_temp_only_representative_lifecycle_count;
+        self.replacement_plan_rejected_dead_temp_representative_count +=
+            other.replacement_plan_rejected_dead_temp_representative_count;
         self.materialization_inline_suppressed_count +=
             other.materialization_inline_suppressed_count;
         self.representative_downgrade_count += other.representative_downgrade_count;

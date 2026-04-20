@@ -981,6 +981,92 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    pub(super) fn describe_temp_only_representative_site_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<TempOnlyRepresentativeProof> {
+        let missing = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        if missing.relation == MissingMergeBindingRelation::RepresentativeOnlyMissing {
+            return self.describe_temp_only_representative_proof(
+                missing.merge_block,
+                None,
+                output,
+                missing.consumer_kind,
+                missing.rhs_kind,
+                "RepresentativeOnlyMissing",
+                false,
+                false,
+            );
+        }
+        if let Some(unknown) =
+            self.describe_unknown_missing_merge_attribution(block, op_idx, output, rhs)
+        {
+            let source_event = match unknown.reason {
+                UnknownMissingMergeAttributionReason::SyntheticRootBlock => {
+                    Some(("SyntheticRootBlock", true))
+                }
+                UnknownMissingMergeAttributionReason::OtherDataRepresentative => {
+                    Some(("OtherDataRepresentative", false))
+                }
+                _ => None,
+            };
+            if let Some((source_event, root_attributed)) = source_event {
+                return self.describe_temp_only_representative_proof(
+                    unknown.merge_block,
+                    None,
+                    output,
+                    unknown.consumer_kind,
+                    unknown.rhs_kind,
+                    source_event,
+                    root_attributed,
+                    false,
+                );
+            }
+        }
+        for incoming in self.describe_missing_incoming_pred_proofs(
+            block.start_address,
+            missing.merge_block,
+            output,
+        ) {
+            if matches!(
+                incoming.incoming_kind,
+                MissingIncomingPredKind::MissingBecauseNoPriorDef
+                    | MissingIncomingPredKind::MissingBecauseDeadPred
+                    | MissingIncomingPredKind::MissingBecauseEntryDefault
+            ) {
+                if let Some(no_prior) = self.describe_missing_no_prior_def_proof(
+                    incoming.merge_block,
+                    incoming.pred_block,
+                    output,
+                    missing.consumer_kind,
+                    missing.rhs_kind,
+                ) {
+                    let source_event = match no_prior.reason {
+                        MissingNoPriorDefReason::TempOnlyNoDef => Some(("TempOnlyNoDef", false)),
+                        MissingNoPriorDefReason::DeadPredNoDef => Some(("DeadPredNoDef", false)),
+                        _ => None,
+                    };
+                    if let Some((source_event, root_attributed)) = source_event {
+                        return self.describe_temp_only_representative_proof(
+                            no_prior.merge_block,
+                            Some(no_prior.pred_block),
+                            output,
+                            no_prior.consumer_kind,
+                            no_prior.rhs_kind,
+                            source_event,
+                            root_attributed,
+                            no_prior.reason == MissingNoPriorDefReason::DeadPredNoDef,
+                        );
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub(super) fn describe_unknown_missing_merge_attribution(
         &self,
         block: &crate::pcode::PcodeBasicBlock,

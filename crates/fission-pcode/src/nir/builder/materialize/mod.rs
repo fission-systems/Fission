@@ -544,11 +544,10 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
         if self.output_has_nonlocal_use(block, op_idx, output) {
+            let rejection_reason =
+                self.classify_nonlocal_materialization_rejection_reason(block, op_idx, output, rhs);
             self.trace_missing_merge_binding_proof(block, op_idx, output, rhs);
-            return ReplacementValuePlan::incomplete(
-                ReplacementReadClass::Merge,
-                MaterializationRejectionReason::MissingMergeBinding,
-            );
+            return ReplacementValuePlan::incomplete(ReplacementReadClass::Merge, rejection_reason);
         }
         if let Some(read_class) =
             self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
@@ -640,21 +639,28 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if self.output_has_nonlocal_use(block, op_idx, output) {
-            self.record_materialize_rejection_reason(
-                MaterializationRejectionReason::MissingMergeBinding,
-            );
+            let rejection_reason =
+                self.classify_nonlocal_materialization_rejection_reason(block, op_idx, output, rhs);
+            self.record_materialize_rejection_reason(rejection_reason);
             self.trace_missing_merge_binding_proof(block, op_idx, output, rhs);
-            self.trace_loop_boundary_binding_correlation(
-                block,
-                op_idx,
-                output,
-                MaterializationRejectionReason::MissingMergeBinding,
-            );
-            self.replacement_plan_rejected_missing_merge_count += 1;
-            return ReplacementValuePlan::incomplete(
-                ReplacementReadClass::Merge,
-                MaterializationRejectionReason::MissingMergeBinding,
-            );
+            self.trace_loop_boundary_binding_correlation(block, op_idx, output, rejection_reason);
+            match rejection_reason {
+                MaterializationRejectionReason::MissingMergeBinding => {
+                    self.replacement_plan_rejected_missing_merge_count += 1;
+                }
+                MaterializationRejectionReason::RepresentativeRootAttribution => {
+                    self.replacement_plan_rejected_representative_root_attribution_count += 1;
+                }
+                MaterializationRejectionReason::TempOnlyRepresentativeLifecycle => {
+                    self.replacement_plan_rejected_temp_only_representative_lifecycle_count += 1;
+                }
+                MaterializationRejectionReason::DeadTempRepresentative => {
+                    self.replacement_plan_rejected_dead_temp_representative_count += 1;
+                }
+                MaterializationRejectionReason::AliasUnsafe
+                | MaterializationRejectionReason::ConsumerRequiresStableRepresentative => {}
+            }
+            return ReplacementValuePlan::incomplete(ReplacementReadClass::Merge, rejection_reason);
         }
         if let Some(read_class) =
             self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)

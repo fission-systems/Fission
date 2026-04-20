@@ -14,6 +14,9 @@ pub(super) enum ReplacementReadClass {
 pub(super) enum MaterializationRejectionReason {
     AliasUnsafe,
     MissingMergeBinding,
+    RepresentativeRootAttribution,
+    TempOnlyRepresentativeLifecycle,
+    DeadTempRepresentative,
     ConsumerRequiresStableRepresentative,
 }
 

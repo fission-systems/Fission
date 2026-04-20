@@ -8912,3 +8912,10 @@ By this point Fission had already accumulated the foundations that still shape t
 - benchmarking infrastructure
 - desktop UI foundations
 - the first steps toward a Fission-owned decompiler core
+# 0x140008090 representative/root attribution taxonomy split
+
+- `wave_type: diagnostic-taxonomy`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Canonical materialization rejection ownership now splits temp-only representative/root lifecycle families out of raw `MissingMergeBinding` accounting. `SyntheticRootBlock`, `TempOnlyNoDef`, `RepresentativeOnlyMissing`, and `DeadPredNoDef` continue to fail closed, but they now land in dedicated replacement-plan rejection counters instead of inflating the real merge-binding bucket.

@@ -197,6 +197,12 @@ impl<'a> PreviewBuilder<'a> {
                 .replacement_plan_rejected_alias_unsafe_count,
             replacement_plan_rejected_missing_merge_count: self
                 .replacement_plan_rejected_missing_merge_count,
+            replacement_plan_rejected_representative_root_attribution_count: self
+                .replacement_plan_rejected_representative_root_attribution_count,
+            replacement_plan_rejected_temp_only_representative_lifecycle_count: self
+                .replacement_plan_rejected_temp_only_representative_lifecycle_count,
+            replacement_plan_rejected_dead_temp_representative_count: self
+                .replacement_plan_rejected_dead_temp_representative_count,
             materialization_inline_suppressed_count: self.materialization_inline_suppressed_count,
             representative_downgrade_count: self.representative_downgrade_count,
             representative_downgrade_no_aliassafe_source_count: self
