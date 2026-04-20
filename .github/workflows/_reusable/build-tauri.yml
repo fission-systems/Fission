@@ -1,0 +1,63 @@
+name: Reusable Build Tauri
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: false
+        default: ubuntu-latest
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: crates/fission-tauri/package-lock.json
+
+      - name: Install system dependencies (Linux/Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            file
+
+      - name: Build Tauri Frontend
+        working-directory: crates/fission-tauri
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload Tauri Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-log-${{ inputs.os }}-${{ github.sha }}
+          path: crates/fission-tauri/dist/
+          retention-days: 7
+          if-no-files-found: warn

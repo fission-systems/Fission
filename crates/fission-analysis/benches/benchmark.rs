@@ -1,8 +1,10 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, black_box, criterion_group, criterion_main, BenchmarkId};
 use fission_analysis::analysis::cfg::CfgAnalysis;
 use fission_analysis::analysis::optimizer::OptimizerConfig;
 use fission_analysis::analysis::optimizer::integration::optimize_c_code;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use std::fs;
+use std::path::Path;
 
 /// Build a synthetic PcodeFunction with `n` blocks forming a diamond CFG.
 fn build_diamond_cfg(n: usize) -> PcodeFunction {
@@ -36,26 +38,80 @@ fn build_diamond_cfg(n: usize) -> PcodeFunction {
     PcodeFunction { blocks }
 }
 
-fn cfg_analysis_benchmark(c: &mut Criterion) {
-    let func = build_diamond_cfg(64);
-    c.bench_function("cfg_analysis_64_blocks", |b| {
-        b.iter(|| {
-            let result = CfgAnalysis::from_pcode(black_box(&func));
-            black_box(result)
-        })
-    });
+/// Build a complex CFG with multiple branches and loops
+fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
+    let mut blocks = Vec::new();
+    let mut block_id = 0u32;
 
-    let func_large = build_diamond_cfg(256);
-    c.bench_function("cfg_analysis_256_blocks", |b| {
-        b.iter(|| {
-            let result = CfgAnalysis::from_pcode(black_box(&func_large));
-            black_box(result)
-        })
-    });
+    // Generate nested block structure
+    for d in 0..depth {
+        for b in 0..branches {
+            let addr = (0x2000 + d as u64 * 0x1000 + b as u64 * 0x100) as u64;
+            let ops = vec![PcodeOp {
+                seq_num: block_id,
+                opcode: if d == depth - 1 && b == branches - 1 {
+                    PcodeOpcode::Return
+                } else {
+                    PcodeOpcode::CBranch
+                },
+                address: addr,
+                output: None,
+                inputs: vec![
+                    Varnode {
+                        space_id: 0,
+                        offset: addr + 0x10,
+                        size: 8,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                ],
+                asm_mnemonic: None,
+            }];
+            blocks.push(PcodeBasicBlock {
+                index: block_id,
+                start_address: addr,
+                ops,
+            });
+            block_id += 1;
+        }
+    }
+
+    PcodeFunction { blocks }
+}
+
+fn cfg_analysis_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cfg_analysis");
+    
+    // Benchmark different CFG sizes
+    for size in [16, 64, 256].iter() {
+        let func = build_diamond_cfg(*size);
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                let result = CfgAnalysis::from_pcode(black_box(&func));
+                black_box(result)
+            })
+        });
+    }
+
+    // Benchmark complex CFGs
+    for (depth, branches) in [(2, 4), (3, 4), (4, 2)].iter() {
+        let func = build_complex_cfg(*depth, *branches);
+        let name = format!("complex_d{}_b{}", depth, branches);
+        group.bench_with_input(BenchmarkId::from_parameter(&name), &name, |b, _| {
+            b.iter(|| {
+                let result = CfgAnalysis::from_pcode(black_box(&func));
+                black_box(result)
+            })
+        });
+    }
+
+    group.finish();
 }
 
 fn optimizer_benchmark(c: &mut Criterion) {
-    let sample_code = r#"
+    let mut group = c.benchmark_group("optimizer");
+    
+    let simple_code = r#"
     int x = a ^ 0;
     int y = b + 0;
     int z = c * 1;
@@ -64,30 +120,126 @@ fn optimizer_benchmark(c: &mut Criterion) {
     }
     return result;
 "#;
-    c.bench_function("optimizer_simple", |b| {
+    
+    let complex_code = r#"
+    int sum = 0;
+    for (int i = 0; i < 1000; i++) {
+        int temp = (i * 2) & 0xFF;
+        int opt = temp | 0;
+        sum += opt;
+        if (opt > 0) {
+            sum = sum ^ 0;
+        }
+    }
+    int final = sum * 1;
+    return final;
+"#;
+
+    group.bench_function("simple_optimization", |b| {
         b.iter(|| {
-            let result = optimize_c_code(black_box(sample_code), OptimizerConfig::default());
+            let result = optimize_c_code(black_box(simple_code), OptimizerConfig::default());
             black_box(result)
         })
     });
+
+    group.bench_function("complex_optimization", |b| {
+        b.iter(|| {
+            let result = optimize_c_code(black_box(complex_code), OptimizerConfig::default());
+            black_box(result)
+        })
+    });
+
+    group.finish();
 }
 
 fn binary_load_benchmark(c: &mut Criterion) {
-    // Use the PE test binary shipped with the repo (small, self-contained)
-    let pe_bytes: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../examples/binaries/comparison_test_x64.exe"
-    ));
+    let mut group = c.benchmark_group("binary_loading");
+    group.sample_size(50); // Reduce sample size for I/O-heavy benchmark
+    
+    // Construct path to benchmark binary directory
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let binary_dir = Path::new(manifest_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("benchmark/binary/x86-64/window"))
+        .expect("Failed to construct binary directory path");
+    
+    // Benchmark different binary sizes
+    let sizes = vec!["small", "medium", "large"];
+    
+    for size in sizes {
+        let size_dir = binary_dir.join(size);
+        
+        if size_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&size_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && (path.extension().map_or(false, |ext| {
+                        ext == "exe" || ext == "dll" || ext == "sys"
+                    })) {
+                        let binary_name = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        
+                        if let Ok(bytes) = fs::read(&path) {
+                            let benchmark_id = format!("{}_{}", size, binary_name);
+                            group.bench_with_input(
+                                BenchmarkId::from_parameter(&benchmark_id),
+                                &benchmark_id,
+                                |b, _| {
+                                    let binary_bytes = bytes.clone();
+                                    b.iter(|| {
+                                        let binary = fission_loader::LoadedBinary::from_bytes(
+                                            black_box(binary_bytes.clone()),
+                                            binary_name.to_string(),
+                                        );
+                                        black_box(binary)
+                                    })
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Also benchmark commercial binaries if available
+    let commercial_dir = binary_dir.join("commercial_binary");
+    if commercial_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&commercial_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && (path.extension().map_or(false, |ext| {
+                    ext == "exe" || ext == "dll" || ext == "sys"
+                })) {
+                    let binary_name = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    
+                    if let Ok(bytes) = fs::read(&path) {
+                        let benchmark_id = format!("commercial_{}", binary_name);
+                        group.bench_with_input(
+                            BenchmarkId::from_parameter(&benchmark_id),
+                            &benchmark_id,
+                            |b, _| {
+                                let binary_bytes = bytes.clone();
+                                b.iter(|| {
+                                    let binary = fission_loader::LoadedBinary::from_bytes(
+                                        black_box(binary_bytes.clone()),
+                                        binary_name.to_string(),
+                                    );
+                                    black_box(binary)
+                                })
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
 
-    c.bench_function("load_pe_binary", |b| {
-        b.iter(|| {
-            let binary = fission_loader::LoadedBinary::from_bytes(
-                black_box(pe_bytes.to_vec()),
-                "bench.exe".to_string(),
-            );
-            black_box(binary)
-        })
-    });
+    group.finish();
 }
 
 criterion_group!(

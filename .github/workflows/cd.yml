@@ -1,94 +1,128 @@
 name: CD Release
 
 on:
-    push:
-        tags:
-            - "v*.*.*"
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
-    contents: write
+  contents: write
 
 concurrency:
   group: cd-release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-    build-and-release:
-        name: Build & Release
-        runs-on: ${{ matrix.os }}
-        timeout-minutes: 45
-        strategy:
-            matrix:
-                include:
-                    - os: ubuntu-latest
-                      target: x86_64-unknown-linux-gnu
-                      artifact_name: fission_cli
-                      asset_name: fission-linux-x64
-                      archive_ext: tar.gz
-                    - os: macos-latest
-                      target: aarch64-apple-darwin
-                      artifact_name: fission_cli
-                      asset_name: fission-macos-arm64
-                      archive_ext: tar.gz
-                    - os: windows-latest
-                      target: x86_64-pc-windows-msvc
-                      artifact_name: fission_cli.exe
-                      asset_name: fission-windows-x64
-                      archive_ext: zip
+  build-and-release:
+    name: 🚀 Build & Release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: fission_cli
+            asset_name: fission-linux-x64
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: fission_cli
+            asset_name: fission-macos-arm64
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: fission_cli.exe
+            asset_name: fission-windows-x64
+            archive_ext: zip
 
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                  submodules: recursive
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-            - name: Install Rust
-              uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: ${{ matrix.target }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-            # --- Rust Build Steps ---
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
 
-            - name: Build Rust Binary (Release)
-              run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }}
+      - name: Build fission-cli (Release)
+        run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }} --verbose
 
-            # --- Packaging ---
+      - name: Prepare Package Directory
+        shell: bash
+        run: |
+          mkdir -p release_pkg
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
+          
+          # Copy Resources (Ghidra data)
+          if [ -d ghidra ]; then
+            cp -r ghidra release_pkg/
+          elif [ -d ghidra_decompiler ]; then
+            cp -r ghidra_decompiler release_pkg/
+          else
+            echo "ℹ️  No ghidra resource directory found; skipping copy"
+          fi
 
-            - name: Prepare Package Directory
-              shell: bash
-              run: |
-                  mkdir -p release_pkg
-                  # Copy Rust binary
-                  cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
+      - name: Create Archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd release_pkg
+          tar -czf ../${{ matrix.asset_name }}.tar.gz *
+          cd ..
+          ls -lh ${{ matrix.asset_name }}.tar.gz
 
-                  # Copy Resources (Ghidra data)
-                  if [ -d ghidra ]; then
-                    cp -r ghidra release_pkg/
-                  elif [ -d ghidra_decompiler ]; then
-                    cp -r ghidra_decompiler release_pkg/
-                  else
-                    echo "No ghidra resource directory found; skipping copy"
-                  fi
+      - name: Create Archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd release_pkg
+          7z a ../${{ matrix.asset_name }}.zip *
+          cd ..
+          dir ${{ matrix.asset_name }}.zip
 
-            - name: Create Archive (Unix)
-              if: runner.os != 'Windows'
-              run: |
-                  cd release_pkg
-                  tar -czf ../${{ matrix.asset_name }}.tar.gz *
+      - name: Generate SHA256 Checksum
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            certutil -hashfile ${{ matrix.asset_name }}.${{ matrix.archive_ext }} SHA256 | head -1 > ${{ matrix.asset_name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.asset_name }}.${{ matrix.archive_ext }} > ${{ matrix.asset_name }}.sha256
+          fi
+          cat ${{ matrix.asset_name }}.sha256
 
-            - name: Create Archive (Windows)
-              if: runner.os == 'Windows'
-              run: |
-                  cd release_pkg
-                  7z a ../${{ matrix.asset_name }}.zip *
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
+            ${{ matrix.asset_name }}.sha256
+          draft: false
+          prerelease: false
 
-            # --- Release Upload ---
-
-            - name: Upload Release Asset
-              uses: softprops/action-gh-release@v1
-              if: startsWith(github.ref, 'refs/tags/')
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  files: ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
-                  draft: false
-                  prerelease: false
+  # Release validation job
+  release-summary:
+    name: ✅ Release Summary
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check Release Status
+        run: |
+          if [ "${{ needs.build-and-release.result }}" != "success" ]; then
+            echo "❌ Release build failed"
+            exit 1
+          fi
+          echo "✅ Release artifacts created successfully!"
+          echo ""
+          echo "Tag: ${{ github.ref_name }}"
+          echo "Release assets will be available at:"
+          echo "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"

@@ -22,3 +22,11 @@ fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, default-features = false }
 fission-ttd = { path = "../fission-ttd" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+fission-pcode = { path = "../fission-pcode" }
+
+[[bench]]
+name = "benchmark"
+harness = false

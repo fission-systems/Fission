@@ -1,0 +1,68 @@
+# Corpus Benchmark: {{ payload.get("manifest", {}).get("name", "corpus") }}
+
+## Corpus Summary
+
+- Generated: {{ payload.get("generated_at", "unknown") }}
+- Suite tier: `{{ payload.get("suite_tier", "release") }}`
+- Gate mode: `{{ payload.get("gate_mode", "advisory") }}`
+- Comparable to baseline: `{{ payload.get("comparable_to_baseline", false) }}`
+- Baseline artifact: `{{ payload.get("baseline_artifact") or "none" }}`
+- Release promotion allowed: `{{ payload.get("release_promotion_allowed", false) }}`
+- Weighted avg normalized similarity: {{ "%.3f"|format(corpus.get("weighted_avg_normalized_similarity", 0.0) | float) }}%
+
+## x86 / x64 Split
+
+| Arch | Binaries | Release candidates | Weighted avg norm sim | Failed binaries |
+| --- | ---: | ---: | ---: | --- |
+{% for arch in ["x86", "x64"] %}
+{% set row = (payload.get("arch_summary", {}) or {}).get(arch, {}) or {} %}
+| `{{ arch }}` | {{ row.get("binary_count", 0) }} | {{ row.get("release_candidate_count", 0) }} | {{ "%.3f"|format(row.get("weighted_avg_normalized_similarity", 0.0) | float) }}% | {{ ", ".join(row.get("failed_binary_ids", [])) or "none" }} |
+{% endfor %}
+
+## Promotion Blockers
+
+{% for item in payload.get("promotion_blockers", []) %}
+- {{ item }}
+{% else %}
+- none
+{% endfor %}
+
+## Owner Metric Totals
+
+| Metric | Total |
+| --- | ---: |
+{% for key, value in (payload.get("owner_metric_totals", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+## Shape-Drift Totals
+
+Presentation-oriented proxies only; these are not semantic truth.
+
+| Metric | Total |
+| --- | ---: |
+{% for key, value in (payload.get("shape_drift_totals", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+## Watchlist Selection Reasons
+
+| Reason | Count |
+| --- | ---: |
+{% for key, value in (payload.get("watchlist_reason_counts", {}) or {})|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% endfor %}
+
+## Per-Binary Summary
+
+| ID | Arch | Role | Avg norm sim | Coverage | Row gate | Watchlist | Eligibility |
+| --- | --- | --- | ---: | ---: | --- | --- | --- |
+{% for item in binaries %}
+| `{{ item.get("id", "") }}` | `{{ item.get("arch", "unknown") }}` | `{{ item.get("role", "") }}` | {{ "%.3f"|format(item.get("avg_normalized_similarity", 0.0) | float) }}% | {{ "%.3f"|format(item.get("coverage_ratio_pct", 0.0) | float) }}% | `{{ item.get("row_fidelity_gate_status", "unknown") }}` | `{{ item.get("watchlist_source", "unknown") }}` | `{{ (item.get("eligibility", {}) or {}).get("reason", "unknown") }}` |
+{% endfor %}
+
+## Artifacts
+
+- `benchmark_summary.json`
+- `benchmark_summary.md`
+- `benchmark_compact_summary.json`

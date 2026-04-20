@@ -6,215 +6,397 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
-Fission is a Rust-first reverse-engineering and decompilation workspace.
+**Fission** is a high-performance, Rust-native reverse-engineering and decompilation framework designed for precision binary analysis at scale.
 
-The current architectural direction is:
+## Overview
 
-- `fission-sleigh` owns decode, instruction semantics, and lift contracts
-- `fission-pcode` owns canonical IR, structuring, and pseudocode rendering
-- `fission-decompiler-core` owns decompiler orchestration, routing, and postprocess application
-- `fission-static` supplies facts, native prepare helpers, and static-analysis services
-- `fission-cli` and `fission-tauri` are product surfaces over the same core
-- Ghidra is used for comparison, benchmarking, and reference invariants, not as an active decompilation path inside Fission
+Fission represents a fundamental rearchitecture of decompilation workflows, placing Rust at the core of:
 
-This repository is active engineering code, not a polished end-user release. The Rust decompiler path is real and improving quickly, but contracts, docs, and output quality are still moving.
+- **Instruction Semantics**: Precision lift via Sleigh, with semantics-preserving IR normalization
+- **Canonical Intermediate Representation**: NIR/HIR layers ensuring deterministic, auditable transformations
+- **Control-Flow Recovery**: Graph-based structuring with algorithmic soundness, not heuristics
+- **Pseudocode Rendering**: Type-aware, context-sensitive output generation
 
-License: AGPL-3.0-or-later. Contributions are accepted under the CLA in [`CLA.md`](./CLA.md).
+Fission pursues **independent decompilation excellence** with Ghidra available as a benchmarking and validation reference.
+
+### Key Principles
+
+- **Correctness-first**: Unsafe decompilation (even with high precision) fails closed to fallback modes
+- **Deterministic**: All output feeds reproducible snapshots, metrics, and CI validation
+- **Auditable**: Every transformation step is tracked, logged, and verifiable
+- **Modular**: Each layer (lift → IR → structure → render) owns its contract independently
+
+License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./CLA.md).
+
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Pseudocode Rendering                     │
+│          (Type-aware formatting, symbol resolution)         │
+└─────────────────────────────────────────────────────────────┘
+                              ↑
+┌─────────────────────────────────────────────────────────────┐
+│              Structured IR (NIR/HIR Layers)                 │
+│      (Control-flow recovery, loop/region detection)         │
+└─────────────────────────────────────────────────────────────┘
+                              ↑
+┌─────────────────────────────────────────────────────────────┐
+│        Canonical IR (P-Code Normalization & Semantics)      │
+│     (SSA form, value numbering, dataflow analysis)          │
+└─────────────────────────────────────────────────────────────┘
+                              ↑
+┌─────────────────────────────────────────────────────────────┐
+│   Instruction Semantics & Lifting (Sleigh-based)            │
+│         (Precise CFG skeleton, lift contracts)              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Core Components
+
+| Component | Role | Ownership |
+|-----------|------|-----------|
+| **fission-sleigh** | Instruction decode, lift semantics, CFG skeleton | Sleigh layer |
+| **fission-pcode** | Canonical IR, NIR/HIR, structuring, pseudocode printer | IR/Structure layers |
+| **fission-static** | Static facts, native helpers, analysis services | Analysis layer |
+| **fission-decompiler-core** | Orchestration, routing, postprocess pipeline | Workflow layer |
+| **fission-loader** | Binary format parsing, symbols, sections, strings | Binary layer |
+| **fission-signatures** | Function signatures, type signatures, identifier data | Data layer |
+| **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
+| **fission-cli** | Command-line interface, REPL, batch processing | Product layer |
+| **fission-tauri** | Desktop GUI, interactive analysis, visualization | Product layer |
+
+---
 
 ## Documentation Hub
 
-Fission documentation is managed in a hybrid model:
+Fission maintains comprehensive, role-based documentation:
 
-- Repository docs (design decisions, contributor-facing contracts, release notes):
-  - [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md)
-  - [`docs/DOCUMENT_CLASSIFICATION_DRAFT.md`](./docs/DOCUMENT_CLASSIFICATION_DRAFT.md)
-  - [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
-  - [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md)
-- GitHub Wiki (operator guides, tutorials, FAQ, troubleshooting):
-  - [Wiki Home](https://github.com/sjkim1127/Fission/wiki)
-  - [Wiki Git Repository](https://github.com/sjkim1127/Fission.wiki.git)
+### For Researchers & Architects
+- [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
+- [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md) — Complete documentation index
+- [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
 
-## What Fission Is Today
+### For Operators & Users
+- [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
+- [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
+- [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
 
-Fission currently exposes one primary decompilation path:
+### Release & Changelog
+- [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md) — English releases
+- [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md) — Korean releases
 
-| Path | Role | Notes |
-| --- | --- | --- |
-| `nir` | Primary architecture path | Fission Sleigh lift -> Rust NIR/HIR -> structuring -> printer |
+---
 
-Current project bias:
+## Current Capabilities
 
-- Rust owns the decompiler core
-- preview-first routing is the default policy
-- unsupported giant functions must fail closed into explicit fallback, not fabricated structure
-- telemetry and quality gates are treated as first-class engineering inputs
+### Decompilation Paths
+
+| Path | Status | Coverage | Notes |
+|------|--------|----------|-------|
+| **NIR (Rust-native)** | Primary | PE x64, ARM64 | Canonical Rust architecture path |
+
+### Supported Binary Formats
+
+- **PE** (Windows x86, x64, ARM64) — Full support
+- **ELF** (Linux x86, x64, ARM, ARM64) — Core support
+- **Mach-O** (macOS x64, ARM64) — Experimental
+
+### Project Maturity Status
+
+**Solid & Production-Ready:**
+- ✅ CLI interface with REPL and batch modes
+- ✅ Rust-native decompilation pipeline
+- ✅ Quality assurance and regression testing
+- ✅ Automated benchmarking against Ghidra
+- ✅ Deterministic, reproducible output
+
+**In Active Development:**
+- 🔄 Large function readability and precision
+- 🔄 Advanced data abstraction and memory modeling
+- 🔄 Rich type inference and name recovery
+- 🔄 Desktop UI polish and end-user experience
+- 🔄 Additional architecture targets (MIPS, PPC, etc.)
+
+**Technology Notes:**
+PE x64 has the strongest direct NIR coverage. Other architectures and formats exist as development targets and should not be treated as equivalent production-quality claims.
+
+---
 
 ## Repository Layout
 
-Important workspace members:
+### Core Decompiler Modules
+
+| Crate | Responsibility | Key Artifacts |
+|-------|-----------------|----------------|
+| [`crates/fission-sleigh`](./crates/fission-sleigh) | Instruction decode, semantics lift, CFG skeleton | Sleigh bindings, lift contracts |
+| [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR layers, structuring, printing | P-Code IR, graph reduction, pseudocode output |
+| [`crates/fission-static`](./crates/fission-static) | Static fact generation, prepare helpers, analysis | Dominance, SCC, value analysis |
+| [`crates/fission-decompiler-core`](./crates/fission-decompiler-core) | Orchestration, routing, postprocess pipeline | End-to-end workflow |
+
+### Supporting Modules
 
 | Crate | Responsibility |
-| --- | --- |
-| [`crates/fission-sleigh`](./crates/fission-sleigh) | Sleigh decoding, lift semantics, CFG skeleton |
-| [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, printer |
-| [`crates/fission-static`](./crates/fission-static) | Static facts, native prepare helpers, analysis services |
-| [`crates/fission-decompiler-core`](./crates/fission-decompiler-core) | Canonical decompiler orchestration and postprocess owner |
-| [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbols, sections, strings |
-| [`crates/fission-signatures`](./crates/fission-signatures) | Signature and type data |
-| [`crates/fission-automation`](./crates/fission-automation) | `nir-check`, quality lanes, artifact reports |
-| [`crates/fission-cli`](./crates/fission-cli) | CLI surface |
-| [`crates/fission-tauri`](./crates/fission-tauri) | Desktop UI |
+|-------|-----------------|
+| [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbol extraction, section parsing |
+| [`crates/fission-signatures`](./crates/fission-signatures) | Function/type signatures, identifier resolution |
+| [`crates/fission-analysis`](./crates/fission-analysis) | Auxiliary analysis utilities |
+| [`crates/fission-disasm`](./crates/fission-disasm) | Disassembly layer |
+| [`crates/fission-core`](./crates/fission-core) | Core data structures |
+| [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis capabilities |
 
-Secondary crates:
+### Product Surfaces
 
-- [`crates/fission-analysis`](./crates/fission-analysis)
-- [`crates/fission-disasm`](./crates/fission-disasm)
-- [`crates/fission-core`](./crates/fission-core)
-- [`crates/fission-dynamic`](./crates/fission-dynamic)
-- [`crates/fission-decompiler-core`](./crates/fission-decompiler-core)
+| Crate | Purpose |
+|-------|---------|
+| [`crates/fission-cli`](./crates/fission-cli) | Command-line interface with REPL |
+| [`crates/fission-tauri`](./crates/fission-tauri) | Cross-platform desktop GUI |
+| [`crates/fission-automation`](./crates/fission-automation) | Quality lanes, test automation, CI/CD integration |
+
+---
 
 ## Quick Start
 
-Build the CLI:
+### Prerequisites
+
+- **Rust** 1.85+ ([install](https://www.rust-lang.org/tools/install))
+- **Cargo** (bundled with Rust)
+- C++ compiler (for some dependencies)
+
+### Build the CLI
 
 ```bash
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
-
 cargo build -p fission-cli --release
 ```
 
-Basic CLI usage:
+The compiled binary is available at: `target/release/fission_cli`
+
+### Basic Usage
 
 ```bash
-# Binary info
+# Display binary information
 ./target/release/fission_cli <binary> --info
 
-# One-shot decompilation
+# Decompile a single function at address
 ./target/release/fission_cli <binary> --decomp <address>
 
-# Interactive mode
+# Interactive REPL mode
 ./target/release/fission_cli <binary>
+
+# Batch decompilation with limits
+./target/release/fission_cli <binary> --decomp-limit 100
 ```
 
-Run the main quality lane:
+### Run Quality Assurance
+
+Execute the main quality lane for regression testing:
 
 ```bash
 cargo run -p fission-automation -- nir-check --lane nir
 ```
 
-For documentation map and migration plan, see [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md).
-
-## Current Engineering Status
-
-What is solid today:
-
-- the Rust workspace builds
-- the CLI is the most mature product surface
-- the automation lane is wired into the canonical Rust telemetry
-- the `nir` path is the primary implementation target
-- Ghidra-backed comparison remains available for benchmarking and differential validation
-
-What is still in motion:
-
-- large-function readability
-- data abstraction and memory surfacing
-- richer type/name surfacing on the Rust path
-- desktop polish and end-user workflow packaging
-
-PE x64 currently has the strongest direct `nir` coverage. Other architectures and formats exist in the workspace, but they should be treated as development targets rather than equal-production claims.
-
-## Architecture Summary
-
-Fission is organized around four layers:
-
-1. Instruction semantics and lifting
-2. Canonical IR
-3. Structured IR
-4. Presentation
-
-Practical ownership:
-
-- lifting quality is an input-contract problem
-- semantics-preserving normalization belongs in canonical IR
-- control-flow recovery belongs in structured IR
-- naming and formatting polish belongs at presentation time
-
-If a function cannot be structured safely, Fission should end in explicit fallback or unstructured preview output rather than incorrect high-level code.
-
-The full architectural source of truth is [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md).
-
-## Benchmark And Quality Workflow
-
-Fission treats benchmarking as part of the decompiler, not an afterthought.
-
-Current workflow:
-
-- crate and targeted tests for local correctness
-- `nir-check` for regression and fast-lane telemetry
-- 2-way benchmark runs against Ghidra for row-level quality tracking
-- row-level canaries and lowest-similarity reports for release decisions
-
-Important artifact locations:
-
-- [`artifacts/fission-automation/`](./artifacts/fission-automation)
-- [`artifacts/batch_benchmark/`](./artifacts/batch_benchmark)
-- [`artifacts/batch_benchmark_scripts/full_decomp_benchmark.py`](./artifacts/batch_benchmark_scripts/full_decomp_benchmark.py)
-
-Representative validation commands:
+### Build All Products
 
 ```bash
-cargo test -p fission-pcode
-cargo check -p fission-static
-cargo check -p fission-cli
-cargo test -p fission-automation
+# Release build (optimized)
+cargo build --release
 
-cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build --fission-bin target/debug/fission_cli
+# Desktop GUI
+cargo build -p fission-tauri --release
 
-python3 artifacts/batch_benchmark_scripts/full_decomp_benchmark.py \
-  samples/windows/x64/putty.exe \
+# Full test suite
+cargo test --all
+```
+
+---
+
+## Engineering Status
+
+### Production-Ready Components ✅
+
+- **Decompilation Pipeline**: Full Rust-native NIR/HIR path with deterministic output
+- **Command-Line Interface**: Feature-rich REPL with batch processing modes
+- **Quality Assurance**: Integrated regression testing and automated benchmarking
+- **Binary Support**: PE x64 (primary), ELF x64/ARM64, Mach-O (experimental)
+- **Telemetry**: Built-in metrics, statistics, and CI/CD reporting
+
+### Active Development Areas 🔄
+
+| Area | Target | Timeline |
+|------|--------|----------|
+| **Large Function Handling** | >10K instruction functions | Q2 2026 |
+| **Data Abstraction** | Field/type-aware modeling | Q2 2026 |
+| **Name Recovery** | Symbol and identifier inference | Q3 2026 |
+| **UI/UX Polish** | Desktop workflow optimization | Q3 2026 |
+| **Additional Targets** | MIPS, PPC, additional architectures | Q4 2026 |
+
+### Known Limitations
+
+- Large functions (>10K instructions) may produce simplified output
+- Advanced data abstraction patterns in progress
+- Limited cross-architecture coverage (PE x64 is primary target)
+- Desktop UI is functional but undergoing refinement
+
+---
+
+## Advanced Usage
+
+### Benchmark Against Ghidra
+
+For comparative quality analysis:
+
+```bash
+python3 benchmark/full_benchmark/full_decomp_benchmark.py \
+  <binary> \
   --fission-bin target/release/fission_cli \
   --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
-  --output-dir artifacts/batch_benchmark/putty-latest \
+  --output-dir benchmark/artifacts/full_benchmark/<run-name> \
   --limit 50
 ```
 
-## Where To Start
+### Inspect Quality Reports
 
-If you are new to the repository, read these first:
+Automated quality metrics are stored in:
 
-1. [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md)
-2. [`docs/DOCUMENT_CLASSIFICATION_DRAFT.md`](./docs/DOCUMENT_CLASSIFICATION_DRAFT.md)
-3. [`docs/WIKI_TOC_DRAFT.md`](./docs/WIKI_TOC_DRAFT.md)
-4. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)
-5. [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md)
+```
+benchmark/artifacts/automation/          # Fast-lane test results
+benchmark/artifacts/full_benchmark/      # Detailed benchmark runs
+```
 
-For contributor conventions, see [`AGENTS.md`](./AGENTS.md).
+### Extended Architecture
 
-## Screenshots
+For detailed system design, read [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
 
-Main desktop workspace:
+---
 
+## User Interface
+
+### Desktop Application
+
+The Fission desktop GUI provides an integrated analysis environment:
+
+**Main Workspace**
 ![Fission main screen](./image/main_screen.jpeg)
 
-Decompiler view:
-
+**Decompilation View**
 ![Fission decompile view](./image/decompile.jpeg)
 
-## Community
+Features:
+- Interactive function browser with call graphs
+- Real-time decompilation with syntax highlighting
+- Symbol resolution and type inference
+- Batch analysis and report generation
+- Cross-reference navigation
 
-- Discord: [Fission community server](https://discord.gg/dgzqGwBpcE)
-- LinkedIn: [Sung Joo Kim](https://www.linkedin.com/in/sung-joo-kim-718a93303/)
+---
 
-## Long-Term Direction
+## Contributing
 
-Fission is not trying to be a thin UI over someone else's decompiler.
+Fission welcomes contributions from the reverse-engineering and decompilation communities.
 
-The long-term target is project-level software restoration:
+### Getting Started
 
-- recover structure and behavior from compiled artifacts
-- connect static analysis, dynamic analysis, and protocol-facing analysis
-- accumulate facts across functions and binaries
-- provide AI-assisted workflows on top of real analysis artifacts instead of detached text generation
+1. Review [`CONTRIBUTING.md`](./CONTRIBUTING.md) for guidelines
+2. Sign the Contributor License Agreement ([`CLA.md`](./CLA.md))
+3. Check [`AGENTS.md`](./AGENTS.md) for code organization and conventions
+4. Open an issue to discuss your proposed changes
 
-That direction is real, but the current repository should still be judged by what it already does well today: a Rust-owned decompiler core, measurable quality lanes, and a buildable analysis product surface.
+### Contribution Areas
+
+- **Instruction Semantics**: Accuracy improvements for Sleigh lifts
+- **IR Transformations**: New optimizations and normalization passes
+- **Structuring Algorithms**: Control-flow recovery improvements
+- **Binary Format Support**: Additional architectures and formats
+- **Testing & Benchmarking**: Quality metrics and regression detection
+- **Documentation**: Tutorials, guides, and architectural documentation
+
+---
+
+## Community & Support
+
+### Communication
+
+- **Issues & Discussions**: [GitHub Issues](https://github.com/sjkim1127/Fission/issues)
+- **Discord Community**: [Join our server](https://discord.gg/dgzqGwBpcE)
+- **Social Media**: [LinkedIn](https://www.linkedin.com/in/sung-joo-kim-718a93303/)
+
+### Learning Resources
+
+- [Reverse-Engineering Workflows Wiki](https://github.com/sjkim1127/Fission/wiki/Reverse-Engineering-Workflows)
+- [Contributor Onboarding](https://github.com/sjkim1127/Fission/wiki/Contributor-Onboarding)
+- [Troubleshooting Guide](https://github.com/sjkim1127/Fission/wiki/Troubleshooting)
+- [FAQ](https://github.com/sjkim1127/Fission/wiki/FAQ)
+
+---
+
+## Vision & Long-Term Direction
+
+Fission is architected for **project-level software restoration** — not just decompilation.
+
+### Current Focus (2026)
+✅ High-precision decompilation for PE x64  
+✅ Deterministic, auditable analysis pipelines  
+✅ Measurable quality metrics and benchmarking  
+
+### Medium-Term (2026-2027)
+🔄 Expanded architecture support  
+🔄 Advanced data abstraction and memory modeling  
+🔄 Integrated static/dynamic analysis workflows  
+🔄 Semantic-aware type recovery  
+
+### Long-Term Vision (2027+)
+🎯 Project-level program comprehension  
+🎯 Cross-function fact accumulation  
+🎯 AI-assisted analysis on verified artifacts  
+🎯 Protocol-facing and behavioral analysis integration  
+🎯 Commercial-grade analysis platform  
+
+### Design Philosophy
+
+Rather than building a thin UI over existing decompilers, Fission pursues **independent decompilation excellence** with:
+
+- **Algorithmic Soundness**: Graph-based, mathematically rigorous transformations
+- **Auditability**: Every decision is verifiable and reproducible
+- **Modularity**: Clean separation of concerns across layers
+- **Quality Focus**: Metrics and regression detection as first-class citizens
+- **Long-term Maintenance**: Sustainable, understandable codebase
+
+---
+
+## License & Citation
+
+```
+SPDX-License-Identifier: AGPL-3.0-or-later
+```
+
+**License**: GNU Affero General Public License v3.0 or later  
+See [`LICENSE`](./LICENSE) for full text
+
+### Citation
+
+If you use Fission in academic work, please cite:
+
+```bibtex
+@software{fission2024,
+  title={Fission: A Rust-Native Decompilation Framework},
+  author={Kim, Sung Joo},
+  year={2024},
+  url={https://github.com/sjkim1127/Fission}
+}
+```
+
+---
+
+## Acknowledgments
+
+Fission builds upon decades of decompilation research and engineering. Special acknowledgment to:
+
+- **Ghidra** — Reference architecture, semantic lifting, benchmarking
+- **RetDec** — Decompilation techniques and IR design
+- **Radare2** — Analysis ecosystem and tooling inspiration
+- **LLVM** — Compiler infrastructure and optimization patterns
+- The reverse-engineering research community

@@ -60,11 +60,14 @@ vendor/
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
 
+# Benchmark sample binaries (large files, handled separately)
+/benchmark/binary/**
+!benchmark/binary/.gitkeep
+
 # Local sample corpora and scratch projects
 samples/
 
-# Local scripts and thesis working directories
-/scripts/
+# Local thesis working directories (but keep scripts tracked)
 /thesis/
 
 # Script run outputs (result dirs, benchmarks, temp comparison runs)
@@ -76,34 +79,30 @@ scripts/result*/**
 !scripts/result/baseline_x86_summary.json
 scripts/out/
 
+# Python build artifacts in scripts (keep source files tracked)
+scripts/**/__pycache__/
+scripts/**/*.pyc
+
 # Backup/cache artifacts
 *.backup
 *.cache/
 ghidra_decompiler/.cache/
 
-# Benchmark results (criterion output)
+# Benchmark results (criterion output and run artifacts)
 benchmark_results/
 **/benchmark_results/
+/benchmark/results/
+/benchmark/history/timeline.jsonl
+/benchmark/history/main_latest.json
 
 # Local benchmark/decomp artifacts
-artifacts/*
-!artifacts/batch_benchmark_scripts/
-artifacts/batch_benchmark_scripts/*
-!artifacts/batch_benchmark_scripts/full_decomp_benchmark.py
-!artifacts/batch_benchmark_scripts/README.md
-!artifacts/batch_benchmark_scripts/grand_finale_support/
-artifacts/batch_benchmark_scripts/grand_finale_support/*
-!artifacts/batch_benchmark_scripts/grand_finale_support/__init__.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/benchmark_core.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/llm_advisory.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/metrics.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/resource_monitor.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/runners.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/test_corpus_benchmark.py
-!artifacts/batch_benchmark_scripts/grand_finale_support/test_llm_advisory.py
+/benchmark/artifacts/**
+!/benchmark/artifacts/.gitkeep
 
-# User-specific utility scripts and tools
-/utils/
+# Keep benchmark documentation and scripts tracked
+!benchmark/BENCHMARK_GUIDE.md
+!benchmark/IMPLEMENTATION_SUMMARY.md
+!/scripts/benchmark/
 
 # Private product/API layer
 /crates/fission-ai/
@@ -117,9 +116,3 @@ artifacts/batch_benchmark_scripts/grand_finale_support/*
 /.agent/
 /.sisyphus/
 /.venv-bench/
-/config/
-!/config/
-!/config/benchmark_corpus/
-!/config/benchmark_corpus/parity_corpus.json
-!/config/benchmark_corpus/release_corpus.json
-!/config/benchmark_corpus/smoke_corpus.json

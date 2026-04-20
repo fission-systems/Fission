@@ -28,9 +28,10 @@ use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
-use crate::cli::args::{FunctionDiscoveryProfileArg, OneShotArgs};
+use crate::cli::args::{
+    FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, parse_oneshot_args,
+};
 use anyhow::{Context, Result};
-use clap::Parser;
 use fission_loader::loader::{FunctionDiscoveryProfile, LoadedBinary};
 use std::fs;
 use std::io;
@@ -54,12 +55,16 @@ pub fn main() -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    let cli = OneShotArgs::parse();
+    let parsed = parse_oneshot_args();
+    let cli = parsed.args;
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
     logging_options.level = if cli.verbose { "info" } else { "warn" }.to_string();
     logging_options.include_span_events = cli.verbose;
     fission_core::logging::init_with_options(logging_options);
+    if let Some(kind) = parsed.legacy_warning {
+        emit_legacy_deprecation_warning(kind, &cli);
+    }
     if cli.verbose {
         tracing::info!(binary = %cli.binary.display(), "initialized one-shot CLI");
     }
@@ -205,44 +210,91 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     Ok(())
 }
 
+fn emit_legacy_deprecation_warning(kind: LegacyInvocationKind, cli: &OneShotArgs) {
+    let binary = cli.binary.display();
+    let replacement = match kind {
+        LegacyInvocationKind::Info => {
+            if cli.sections {
+                format!("fission_cli info {binary} --sections")
+            } else if cli.imports {
+                format!("fission_cli info {binary} --imports")
+            } else if cli.exports {
+                format!("fission_cli info {binary} --exports")
+            } else {
+                format!("fission_cli info {binary}")
+            }
+        }
+        LegacyInvocationKind::List => format!("fission_cli list {binary}"),
+        LegacyInvocationKind::Disasm => {
+            if let Some(addr) = cli.disasm_function {
+                format!("fission_cli disasm {binary} --addr 0x{addr:x} --function")
+            } else if let Some(addr) = cli.disasm {
+                format!("fission_cli disasm {binary} --addr 0x{addr:x}")
+            } else {
+                format!("fission_cli disasm {binary} --addr <ADDR>")
+            }
+        }
+        LegacyInvocationKind::Decomp => {
+            if cli.decomp_all {
+                if let Some(limit) = cli.decomp_limit {
+                    format!("fission_cli decomp {binary} --all --limit {limit}")
+                } else {
+                    format!("fission_cli decomp {binary} --all")
+                }
+            } else if let Some(addr) = cli.address {
+                format!("fission_cli decomp {binary} --addr 0x{addr:x}")
+            } else {
+                format!("fission_cli decomp {binary} --addr <ADDR>")
+            }
+        }
+    };
+
+    eprintln!("warning: legacy flat CLI syntax is deprecated; use `{replacement}` instead");
+}
+
 fn print_help() {
     println!("Fission CLI - one-shot binary analysis and decompilation");
     println!();
-    println!("Usage: fission_cli <binary> [OPTIONS]");
+    println!("Usage:");
+    println!("  fission_cli info <binary> [--sections|--imports|--exports] [--json]");
+    println!("  fission_cli list <binary> [--json]");
+    println!("  fission_cli disasm <binary> --addr <ADDR> [--count N] [--function] [--json]");
+    println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
+    println!("  fission_cli strings <binary> [--min-len N] [--json]");
+    println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!();
-    println!("Information:");
-    println!("  -i, --info                 Show binary info (format, arch, entry point)");
-    println!("  -S, --sections             Show all sections with permissions");
-    println!("  -l, --list, --funcs        List all discovered functions");
-    println!("  -I, --imports              List imported functions");
-    println!("  -E, --exports              List exported functions");
+    println!("Commands:");
+    println!("  info       Show binary metadata and inventory views");
+    println!("  list       List discovered functions");
+    println!("  disasm     Disassemble instructions or full functions");
+    println!("  decomp     Decompile one function or all discovered functions");
+    println!("  strings    Extract strings");
+    println!("  inventory  Operator-oriented inventory and batch emitters");
     println!();
-    println!("Analysis:");
-    println!("  -d, --disasm, --asm <ADDR> Disassemble at address");
-    println!("      --asm-func <ADDR>      Disassemble full function at address");
-    println!("  -n, --count <N>            Number of instructions (default: 20)");
-    println!("      --strings [MIN]        Extract strings (min length: 4)");
-    println!();
-    println!("Decompilation:");
-    println!("  -a, --address, --decomp <ADDR>  Decompile function");
-    println!();
-    println!("Output:");
-    println!("  -o, --output <FILE>        Write results to file");
-    println!("  -j, --json                 JSON output format");
-    println!("  -v, --verbose              Show detailed progress");
+    println!("Decomp options:");
+    println!("      --profile <P>          balanced|quality|speed|nir");
+    println!("      --engine <E>           auto|nir|rust-sleigh");
     println!("      --compiler-id <ID>     Override compiler ABI hint");
-    println!("      --profile <P>          Decomp profile: balanced|quality|speed");
-    println!("      --engine <E>           Decomp engine: legacy|nir|auto");
+    println!("      --timeout-ms <MS>      Per-function timeout");
+    println!("      --output <FILE>        Write results to file");
+    println!("      --json                 JSON output format");
+    println!("      --verbose              Show detailed progress");
     println!("      --no-header            Suppress function header comments");
     println!("      --ghidra-compat        Suppress headers/warnings + strip inferred structs");
     println!("      --no-warnings          Suppress WARNING/NOTICE lines");
     println!("      --benchmark            Add timing metadata to JSON output");
-    println!("      --decomp-limit <N>     Limit --decomp-all to first N functions");
-    println!("      --function-discovery-profile <P>   conservative|balanced|aggressive");
     println!();
     println!("Examples:");
-    println!("  fission_cli app.exe --info");
-    println!("  fission_cli app.exe --funcs");
-    println!("  fission_cli app.exe --asm 0x140001000");
-    println!("  fission_cli app.exe --decomp 0x140001000");
+    println!("  fission_cli info app.exe");
+    println!("  fission_cli list app.exe");
+    println!("  fission_cli disasm app.exe --addr 0x140001000");
+    println!("  fission_cli decomp app.exe --addr 0x140001000");
+    println!("  fission_cli decomp app.exe --all --limit 10");
+    println!(
+        "  fission_cli inventory function-facts app.exe --output-jsonl rows.jsonl --summary-json summary.json"
+    );
+    println!();
+    println!(
+        "Legacy flat invocations still work during the transition, but now emit deprecation warnings."
+    );
 }

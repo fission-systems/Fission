@@ -1,0 +1,35 @@
+name: Reusable Upload Artifacts
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        type: string
+        required: true
+        description: "Artifact name to display"
+      artifact_paths:
+        type: string
+        required: true
+        description: "Paths to upload (newline-separated)"
+      retention_days:
+        type: string
+        required: false
+        default: "7"
+        description: "Retention days (7-90)"
+      if_no_files_found:
+        type: string
+        required: false
+        default: "warn"
+        description: "Action if no files found: warn, error, or ignore"
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}-${{ github.sha }}
+          path: ${{ inputs.artifact_paths }}
+          retention-days: ${{ fromJson(inputs.retention_days) }}
+          if-no-files-found: ${{ inputs.if_no_files_found }}

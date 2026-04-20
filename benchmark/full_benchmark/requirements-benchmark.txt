@@ -1,0 +1,5 @@
+pydantic>=2,<3
+jinja2>=3,<4
+rich>=13,<14
+pandas>=2,<3
+numpy>=2,<3

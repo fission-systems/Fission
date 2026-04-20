@@ -1,0 +1,58 @@
+name: Reusable Corpus Validation
+
+on:
+  workflow_call:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Validate Corpus Manifests and Referenced Binaries
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          repo = Path.cwd()
+          manifests = [
+              repo / "config/benchmark_corpus/smoke_corpus.json",
+              repo / "config/benchmark_corpus/release_corpus.json",
+          ]
+          
+          for manifest in manifests:
+              if not manifest.exists():
+                  print(f"ℹ️  Manifest not found: {manifest}")
+                  continue
+              
+              payload = json.loads(manifest.read_text(encoding="utf-8"))
+              entries = payload.get("entries", [])
+              
+              assert isinstance(entries, list) and entries, f"❌ empty entries: {manifest}"
+              
+              seen = set()
+              missing = []
+              
+              for entry in entries:
+                  entry_id = entry["id"]
+                  assert entry_id not in seen, f"❌ duplicate id {entry_id} in {manifest}"
+                  seen.add(entry_id)
+                  
+                  binary = Path(entry["binary_path"])
+                  if not binary.is_file():
+                      missing.append(str(binary))
+              
+              if missing:
+                  print(f"❌ Missing binaries in {manifest.name}:")
+                  for b in missing:
+                      print(f"  - {b}")
+                  raise AssertionError(f"{len(missing)} binaries missing")
+              
+              print(f"✓ {manifest.name}: {len(entries)} entries OK")
+          
+          print("✓ All corpus manifests validated")
+          PY

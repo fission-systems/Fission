@@ -1,0 +1,40 @@
+name: Reusable Lint and Format
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: false
+        default: ubuntu-latest
+      exclude_crates:
+        type: string
+        required: false
+        default: "fission-tauri"
+        description: "Crates to exclude from clippy (comma-separated)"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting with rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: Lint with Clippy (Deny Warnings)
+        run: cargo clippy --workspace ${{ format('--exclude {0}', inputs.exclude_crates) }} --locked -- -D warnings

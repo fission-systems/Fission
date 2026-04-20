@@ -1,0 +1,91 @@
+name: Reusable Run Tests
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: false
+        default: ubuntu-latest
+      crates:
+        type: string
+        required: false
+        description: "Specific crates to test (comma-separated, e.g. fission-pcode,fission-automation)"
+      profile:
+        type: string
+        required: false
+        default: "debug"
+        description: "Build profile: debug or release"
+      coverage:
+        type: boolean
+        required: false
+        default: false
+        description: "Generate coverage report"
+      exclude_crates:
+        type: string
+        required: false
+        default: "fission-tauri,fission-static"
+        description: "Crates to exclude from full suite"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (Linux/Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            file
+
+      - name: Run Tests (Specific Crates)
+        if: ${{ inputs.crates != '' }}
+        run: |
+          crates="${{ inputs.crates }}"
+          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
+          for crate in "${CRATE_ARRAY[@]}"; do
+            echo "Testing crate: $crate"
+            cargo test -p "$crate" --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+          done
+
+      - name: Run Full Test Suite (All Crates)
+        if: ${{ inputs.crates == '' }}
+        run: |
+          cargo test --workspace ${{ format('--exclude {0}', inputs.exclude_crates) }} --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+          # Also test excluded crates separately if needed
+          cargo test -p fission-static --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+
+      - name: Generate Coverage Report
+        if: ${{ inputs.coverage }}
+        run: |
+          cargo install cargo-tarpaulin
+          cargo tarpaulin --out Html --output-dir ./coverage
+          echo "Coverage report generated in ./coverage/index.html"
+
+      - name: Upload Coverage Artifact
+        if: ${{ inputs.coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ inputs.profile }}-${{ github.sha }}
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn

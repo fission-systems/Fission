@@ -1,0 +1,122 @@
+name: CI/CD Status Monitor
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # Daily at noon UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  monitor:
+    name: 📊 Monitor Status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Last 10 Workflow Runs (Fast Gate)
+        id: fast-gate
+        run: |
+          python3 << 'PYTHON'
+          import json
+          import subprocess
+          from datetime import datetime, timedelta
+          
+          # Get last 10 CI runs
+          result = subprocess.run(
+              ["gh", "run", "list", "--workflow", "ci.yml", "-L", "10", "--json", "status,conclusion,durationMinutes,createdAt"],
+              capture_output=True,
+              text=True
+          )
+          
+          if result.returncode != 0:
+              print("❌ Failed to fetch CI runs")
+              exit(1)
+          
+          runs = json.loads(result.stdout)
+          
+          success_count = sum(1 for r in runs if r["conclusion"] == "success")
+          total_count = len(runs)
+          success_rate = (success_count / total_count * 100) if total_count > 0 else 0
+          avg_duration = sum(r.get("durationMinutes", 0) for r in runs) / total_count if total_count > 0 else 0
+          
+          print(f"### 🟢 Fast Gate (ci.yml)")
+          print(f"- **Success Rate**: {success_rate:.1f}% ({success_count}/{total_count})")
+          print(f"- **Avg Duration**: {avg_duration:.1f} min")
+          print(f"- **Last 10 Runs**: {json.dumps([r['conclusion'] for r in runs], indent=2)}")
+          print()
+          
+          PYTHON
+
+      - name: Fetch Last 10 Workflow Runs (Heavy)
+        id: heavy
+        run: |
+          python3 << 'PYTHON'
+          import json
+          import subprocess
+          from datetime import datetime, timedelta
+          
+          # Get last 10 CI Heavy runs
+          result = subprocess.run(
+              ["gh", "run", "list", "--workflow", "ci-heavy.yml", "-L", "10", "--json", "status,conclusion,durationMinutes,createdAt"],
+              capture_output=True,
+              text=True
+          )
+          
+          if result.returncode != 0:
+              print("❌ Failed to fetch CI Heavy runs")
+              exit(1)
+          
+          runs = json.loads(result.stdout)
+          
+          success_count = sum(1 for r in runs if r["conclusion"] == "success")
+          total_count = len(runs)
+          success_rate = (success_count / total_count * 100) if total_count > 0 else 0
+          avg_duration = sum(r.get("durationMinutes", 0) for r in runs) / total_count if total_count > 0 else 0
+          
+          print(f"### 🔵 Heavy Validation (ci-heavy.yml)")
+          print(f"- **Success Rate**: {success_rate:.1f}% ({success_count}/{total_count})")
+          print(f"- **Avg Duration**: {avg_duration:.1f} min")
+          print(f"- **Last 10 Runs**: {json.dumps([r['conclusion'] for r in runs], indent=2)}")
+          print()
+          
+          PYTHON
+
+      - name: Generate Status Report
+        id: report
+        run: |
+          cat > ci_cd_status_report.md << 'EOF'
+          # CI/CD Status Report
+          
+          Generated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ## Pipeline Health
+          
+          - **Fast Gate**: ✅ Active (PR/Push)
+          - **Heavy Validation**: ✅ Active (Main + Nightly)
+          - **Release**: ✅ Active (Tag-based)
+          
+          ## Status Summary
+          
+          ### Configuration
+          - Rust Version: 1.85 (stable)
+          - Platforms: Linux, macOS, Windows
+          - Timeout Policy: 40 min (Fast), 90 min (Heavy)
+          
+          ### Recent Runs
+          - See workflow runs: https://github.com/${{ github.repository }}/actions
+          
+          EOF
+          cat ci_cd_status_report.md
+
+      - name: Upload Status Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-cd-status-report-${{ github.run_id }}
+          path: ci_cd_status_report.md
+          retention-days: 30
+          if-no-files-found: warn

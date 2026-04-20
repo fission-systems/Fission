@@ -1,9 +1,10 @@
 //! Common CLI argument parsing utilities
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum FunctionDiscoveryProfileArg {
     Conservative,
     Balanced,
@@ -16,7 +17,438 @@ pub fn parse_hex_address(s: &str) -> Result<u64, String> {
     u64::from_str_radix(s, 16).map_err(|e| format!("Invalid hex address: {}", e))
 }
 
-/// One-shot CLI arguments (for fission_cli binary)
+/// Internal normalized one-shot execution arguments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OneShotArgs {
+    pub binary: PathBuf,
+    pub address: Option<u64>,
+    pub list: bool,
+    pub info: bool,
+    pub sections: bool,
+    pub imports: bool,
+    pub exports: bool,
+    pub strings: Option<usize>,
+    pub disasm: Option<u64>,
+    pub disasm_function: Option<u64>,
+    pub count: usize,
+    pub compiler_id: Option<String>,
+    pub profile: Option<String>,
+    pub engine: Option<String>,
+    pub output: Option<PathBuf>,
+    pub json: bool,
+    pub verbose: bool,
+    pub no_header: bool,
+    pub ghidra_compat: bool,
+    pub no_warnings: bool,
+    pub benchmark: bool,
+    pub decomp_all: bool,
+    pub decomp_limit: Option<usize>,
+    pub timeout_ms: Option<u64>,
+    pub format: Option<String>,
+    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+    pub preview_candidate_inventory: bool,
+    pub preview_candidate_limit: Option<usize>,
+    pub preview_candidate_scan_batch: bool,
+    pub addresses_file: Option<PathBuf>,
+    pub functions_limit: Option<usize>,
+    pub chunk_size: Option<usize>,
+    pub output_jsonl: Option<PathBuf>,
+    pub summary_json: Option<PathBuf>,
+    pub resume_from: Option<PathBuf>,
+    pub quiet_batch_errors: bool,
+    pub emit_function_facts_inventory: bool,
+}
+
+impl Default for OneShotArgs {
+    fn default() -> Self {
+        Self {
+            binary: PathBuf::default(),
+            address: None,
+            list: false,
+            info: false,
+            sections: false,
+            imports: false,
+            exports: false,
+            strings: None,
+            disasm: None,
+            disasm_function: None,
+            count: 20,
+            compiler_id: None,
+            profile: None,
+            engine: None,
+            output: None,
+            json: false,
+            verbose: false,
+            no_header: false,
+            ghidra_compat: false,
+            no_warnings: false,
+            benchmark: false,
+            decomp_all: false,
+            decomp_limit: None,
+            timeout_ms: None,
+            format: None,
+            function_discovery_profile: None,
+            preview_candidate_inventory: false,
+            preview_candidate_limit: None,
+            preview_candidate_scan_batch: false,
+            addresses_file: None,
+            functions_limit: None,
+            chunk_size: None,
+            output_jsonl: None,
+            summary_json: None,
+            resume_from: None,
+            quiet_batch_errors: false,
+            emit_function_facts_inventory: false,
+        }
+    }
+}
+
+impl OneShotArgs {
+    fn with_binary(binary: PathBuf) -> Self {
+        Self {
+            binary,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegacyInvocationKind {
+    Info,
+    List,
+    Disasm,
+    Decomp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedOneShotArgs {
+    pub args: OneShotArgs,
+    pub legacy_warning: Option<LegacyInvocationKind>,
+}
+
+#[derive(Args, Clone, Debug, Default)]
+struct CommonBinaryOutputArgs {
+    /// Output in JSON format
+    #[arg(short, long)]
+    json: bool,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "fission_cli")]
+#[command(author = "Fission Dev Team")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(about = "Next-Gen Binary Analysis & Decompilation")]
+#[command(
+    long_about = "Fission - A powerful binary analysis tool with explicit one-shot subcommands.\n\nQuick Start:\n  fission_cli info binary.exe\n  fission_cli list binary.exe\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n"
+)]
+#[command(arg_required_else_help = true)]
+struct CliArgs {
+    #[command(subcommand)]
+    command: CliCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum CliCommand {
+    /// Show binary metadata and inventory views
+    Info(InfoArgs),
+    /// List discovered functions
+    List(ListArgs),
+    /// Disassemble instructions or a full function
+    Disasm(DisasmArgs),
+    /// Decompile one function or all discovered functions
+    Decomp(DecompArgs),
+    /// Extract binary strings
+    Strings(StringsArgs),
+    /// Operator-oriented inventory and batch emitters
+    Inventory(InventoryArgs),
+}
+
+#[derive(Args, Debug)]
+struct InfoArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Show section information
+    #[arg(short = 'S', long)]
+    sections: bool,
+
+    /// List imported functions
+    #[arg(short = 'I', long)]
+    imports: bool,
+
+    /// List exported functions
+    #[arg(short = 'E', long)]
+    exports: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+struct ListArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+struct DisasmArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Address to disassemble
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Disassemble the full function instead of a fixed instruction count
+    #[arg(long)]
+    function: bool,
+
+    /// Number of instructions to disassemble
+    #[arg(short = 'n', long, default_value_t = 20)]
+    count: usize,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(group(
+    clap::ArgGroup::new("decomp_target")
+        .required(true)
+        .args(["addr", "all"])
+))]
+struct DecompArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Decompile function at specific address
+    #[arg(long, value_parser = parse_hex_address)]
+    addr: Option<u64>,
+
+    /// Decompile all discovered functions
+    #[arg(long)]
+    all: bool,
+
+    /// With --all, limit to first N functions
+    #[arg(long, value_name = "N")]
+    limit: Option<usize>,
+
+    /// Decompilation profile (balanced|quality|speed|nir; mlil-preview is a deprecated alias)
+    #[arg(long, value_name = "PROFILE")]
+    profile: Option<String>,
+
+    /// Decompilation engine (auto|nir|rust-sleigh; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
+    #[arg(long, value_name = "ENGINE")]
+    engine: Option<String>,
+
+    /// Override decompiler compiler ID (auto|windows|gcc|clang|default)
+    #[arg(long, value_name = "ID")]
+    compiler_id: Option<String>,
+
+    /// Decompilation timeout per function in milliseconds (0 = no timeout)
+    #[arg(long, value_name = "MS")]
+    timeout_ms: Option<u64>,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(long, value_enum, value_name = "PROFILE")]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    json: bool,
+
+    /// Output to file instead of stdout
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Suppress the '// ===...=== Function: ...' header comment in output
+    #[arg(long)]
+    no_header: bool,
+
+    /// Suppress WARNING/NOTICE diagnostic lines in decompilation output
+    #[arg(long)]
+    no_warnings: bool,
+
+    /// Ghidra-compatible output mode
+    #[arg(long)]
+    ghidra_compat: bool,
+
+    /// Benchmark mode: record per-function timing in JSON output
+    #[arg(long)]
+    benchmark: bool,
+
+    /// Override binary format detection (auto|pe|elf|macho)
+    #[arg(long, value_name = "FORMAT", hide = true)]
+    format: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct StringsArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Minimum string length
+    #[arg(long = "min-len", default_value_t = 4)]
+    min_len: usize,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+struct InventoryArgs {
+    #[command(subcommand)]
+    command: InventoryCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum InventoryCommand {
+    /// Emit whole-binary function facts inventory as JSONL plus summary JSON
+    FunctionFacts(InventoryFunctionFactsArgs),
+    /// Emit preview candidate inventory and batch scans
+    PreviewCandidates(InventoryPreviewCandidatesArgs),
+}
+
+#[derive(Args, Debug)]
+struct InventoryFunctionFactsArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Restrict inventory emit to one function address
+    #[arg(long, value_parser = parse_hex_address)]
+    addr: Option<u64>,
+
+    /// File containing one hex function address per line
+    #[arg(long, value_name = "FILE")]
+    addresses_file: Option<PathBuf>,
+
+    /// Limit number of functions selected
+    #[arg(long, value_name = "N")]
+    functions_limit: Option<usize>,
+
+    /// Batch chunk size
+    #[arg(long, value_name = "N")]
+    chunk_size: Option<usize>,
+
+    /// Output JSONL path
+    #[arg(long, value_name = "FILE")]
+    output_jsonl: Option<PathBuf>,
+
+    /// Output summary JSON path
+    #[arg(long, value_name = "FILE")]
+    summary_json: Option<PathBuf>,
+
+    /// Resume from an existing JSONL file
+    #[arg(long, value_name = "FILE")]
+    resume_from: Option<PathBuf>,
+
+    /// Suppress noisy per-address panic/log output
+    #[arg(long)]
+    quiet_batch_errors: bool,
+
+    /// Override decompiler compiler ID
+    #[arg(long, value_name = "ID")]
+    compiler_id: Option<String>,
+
+    /// Decompilation profile
+    #[arg(long, value_name = "PROFILE")]
+    profile: Option<String>,
+
+    /// Decompilation timeout per function in milliseconds
+    #[arg(long, value_name = "MS")]
+    timeout_ms: Option<u64>,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(long, value_enum, value_name = "PROFILE")]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[derive(Args, Debug)]
+struct InventoryPreviewCandidatesArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Emit preview candidate inventory JSON
+    #[arg(long)]
+    inventory: bool,
+
+    /// Run preview candidate scan in batch mode inside one process
+    #[arg(long)]
+    batch: bool,
+
+    /// Restrict inventory emit to one function address
+    #[arg(long, value_parser = parse_hex_address)]
+    addr: Option<u64>,
+
+    /// Limit functions included in preview candidate inventory
+    #[arg(long, value_name = "N")]
+    preview_candidate_limit: Option<usize>,
+
+    /// File containing one hex function address per line
+    #[arg(long, value_name = "FILE")]
+    addresses_file: Option<PathBuf>,
+
+    /// Limit number of functions selected for batch preview scan
+    #[arg(long, value_name = "N")]
+    functions_limit: Option<usize>,
+
+    /// Batch chunk size for preview candidate scan
+    #[arg(long, value_name = "N")]
+    chunk_size: Option<usize>,
+
+    /// Output JSONL path for batch preview candidate rows
+    #[arg(long, value_name = "FILE")]
+    output_jsonl: Option<PathBuf>,
+
+    /// Output summary JSON path for batch preview candidate scan
+    #[arg(long, value_name = "FILE")]
+    summary_json: Option<PathBuf>,
+
+    /// Resume batch preview candidate scan from an existing JSONL file
+    #[arg(long, value_name = "FILE")]
+    resume_from: Option<PathBuf>,
+
+    /// Suppress noisy per-address panic/log output
+    #[arg(long)]
+    quiet_batch_errors: bool,
+
+    /// Override decompiler compiler ID
+    #[arg(long, value_name = "ID")]
+    compiler_id: Option<String>,
+
+    /// Decompilation profile
+    #[arg(long, value_name = "PROFILE")]
+    profile: Option<String>,
+
+    /// Decompilation timeout per function in milliseconds
+    #[arg(long, value_name = "MS")]
+    timeout_ms: Option<u64>,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(long, value_enum, value_name = "PROFILE")]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+/// Legacy flat one-shot CLI arguments retained as a compatibility shim.
 #[derive(Parser, Debug)]
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
@@ -25,156 +457,507 @@ pub fn parse_hex_address(s: &str) -> Result<u64, String> {
 #[command(
     long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission_cli binary.exe -i              # Show info\n  fission_cli binary.exe -l              # List functions\n  fission_cli binary.exe --decomp 0x1400 # Decompile function\n  fission_cli binary.exe --asm 0x1400    # Disassemble\n"
 )]
-pub struct OneShotArgs {
+struct LegacyCliArgs {
     /// Path to the binary file to analyze
-    pub binary: PathBuf,
+    binary: PathBuf,
 
     /// Decompile function at specific address (hex, e.g., 0x140001400)
     #[arg(short, long, alias = "decomp", value_parser = parse_hex_address)]
-    pub address: Option<u64>,
+    address: Option<u64>,
 
     /// List all discovered functions
     #[arg(short, long, alias = "funcs")]
-    pub list: bool,
+    list: bool,
 
     /// Show binary information
     #[arg(short, long)]
-    pub info: bool,
+    info: bool,
 
     /// Show section information
     #[arg(short = 'S', long)]
-    pub sections: bool,
+    sections: bool,
 
     /// List imported functions
     #[arg(short = 'I', long)]
-    pub imports: bool,
+    imports: bool,
 
     /// List exported functions
     #[arg(short = 'E', long)]
-    pub exports: bool,
+    exports: bool,
 
     /// Extract strings from binary (min length)
     #[arg(long, value_name = "MIN_LEN", num_args = 0..=1, default_missing_value = "4")]
-    pub strings: Option<usize>,
+    strings: Option<usize>,
 
     /// Disassemble at address (with optional count)
     #[arg(short = 'd', long, alias = "asm", value_parser = parse_hex_address)]
-    pub disasm: Option<u64>,
+    disasm: Option<u64>,
 
     /// Disassemble entire function at address (function boundaries)
     #[arg(long, alias = "asm-func", value_parser = parse_hex_address)]
-    pub disasm_function: Option<u64>,
+    disasm_function: Option<u64>,
 
     /// Number of instructions to disassemble
     #[arg(short = 'n', long, default_value = "20")]
-    pub count: usize,
+    count: usize,
 
     /// Override decompiler compiler ID (auto|windows|gcc|clang|default)
     #[arg(long, value_name = "ID")]
-    pub compiler_id: Option<String>,
+    compiler_id: Option<String>,
 
     /// Decompilation profile (balanced|quality|speed|nir; mlil-preview is a deprecated alias)
     #[arg(long, value_name = "PROFILE")]
-    pub profile: Option<String>,
+    profile: Option<String>,
 
     /// Decompilation engine (auto|nir|rust-sleigh; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]
-    pub engine: Option<String>,
+    engine: Option<String>,
 
     /// Output to file instead of stdout
     #[arg(short, long)]
-    pub output: Option<PathBuf>,
+    output: Option<PathBuf>,
 
     /// Output in JSON format
     #[arg(short, long)]
-    pub json: bool,
+    json: bool,
 
     /// Verbose output
     #[arg(short, long)]
-    pub verbose: bool,
+    verbose: bool,
 
     /// Suppress the '// ===...=== Function: ...' header comment in decompilation output
-    /// (useful for clean output or benchmark comparison against Ghidra)
     #[arg(long)]
-    pub no_header: bool,
+    no_header: bool,
 
-    /// Ghidra-compatible output mode: implies --no-header, strips WARNING lines
-    /// and inferred struct definitions for cleaner benchmark comparison
+    /// Ghidra-compatible output mode
     #[arg(long)]
-    pub ghidra_compat: bool,
+    ghidra_compat: bool,
 
     /// Suppress WARNING/NOTICE diagnostic lines in decompilation output
     #[arg(long)]
-    pub no_warnings: bool,
+    no_warnings: bool,
 
-    /// Benchmark mode: record per-function decomp_sec timing in JSON output.
-    /// Implies --json. Adds initialization timing metadata.
+    /// Benchmark mode: record per-function decomp_sec timing in JSON output
     #[arg(long)]
-    pub benchmark: bool,
+    benchmark: bool,
 
     /// Decompile all discovered functions (batch mode)
     #[arg(long, alias = "all")]
-    pub decomp_all: bool,
+    decomp_all: bool,
 
-    /// With --decomp-all, limit to first N functions (for faster benchmark/testing)
+    /// With --decomp-all, limit to first N functions
     #[arg(long, value_name = "N")]
-    pub decomp_limit: Option<usize>,
+    decomp_limit: Option<usize>,
 
     /// Decompilation timeout per function in milliseconds (0 = no timeout)
     #[arg(long, value_name = "MS")]
-    pub timeout_ms: Option<u64>,
+    timeout_ms: Option<u64>,
 
     /// Override binary format detection (auto|pe|elf|macho)
-    /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]
-    pub format: Option<String>,
+    format: Option<String>,
 
     /// Function discovery profile (conservative|balanced|aggressive)
-    /// Applies additional function recovery passes after initial load.
     #[arg(long, value_enum, value_name = "PROFILE")]
-    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Emit preview candidate inventory JSON for quality-corpus curation
     #[arg(long, hide = true)]
-    pub preview_candidate_inventory: bool,
+    preview_candidate_inventory: bool,
 
     /// Limit functions included in preview candidate inventory
     #[arg(long, hide = true, value_name = "N")]
-    pub preview_candidate_limit: Option<usize>,
+    preview_candidate_limit: Option<usize>,
 
     /// Run preview candidate scan in batch mode inside one process
     #[arg(long, hide = true)]
-    pub preview_candidate_scan_batch: bool,
+    preview_candidate_scan_batch: bool,
 
     /// File containing one hex function address per line for batch preview scan
     #[arg(long, hide = true, value_name = "FILE")]
-    pub addresses_file: Option<PathBuf>,
+    addresses_file: Option<PathBuf>,
 
     /// Limit number of functions selected for batch preview scan
     #[arg(long, hide = true, value_name = "N")]
-    pub functions_limit: Option<usize>,
+    functions_limit: Option<usize>,
 
     /// Batch chunk size for preview candidate scan
     #[arg(long, hide = true, value_name = "N")]
-    pub chunk_size: Option<usize>,
+    chunk_size: Option<usize>,
 
     /// Output JSONL path for batch preview candidate rows
     #[arg(long, hide = true, value_name = "FILE")]
-    pub output_jsonl: Option<PathBuf>,
+    output_jsonl: Option<PathBuf>,
 
     /// Output summary JSON path for batch preview candidate scan
     #[arg(long, hide = true, value_name = "FILE")]
-    pub summary_json: Option<PathBuf>,
+    summary_json: Option<PathBuf>,
 
     /// Resume batch preview candidate scan from an existing JSONL file
     #[arg(long, hide = true, value_name = "FILE")]
-    pub resume_from: Option<PathBuf>,
+    resume_from: Option<PathBuf>,
 
     /// Suppress noisy per-address panic/log output during batch preview candidate scans
     #[arg(long, hide = true)]
-    pub quiet_batch_errors: bool,
+    quiet_batch_errors: bool,
 
     /// Emit whole-binary function facts inventory as JSONL plus summary JSON
     #[arg(long, hide = true)]
-    pub emit_function_facts_inventory: bool,
+    emit_function_facts_inventory: bool,
+}
+
+fn should_use_canonical_parser(argv: &[OsString]) -> bool {
+    if argv.len() <= 1 {
+        return true;
+    }
+
+    match argv[1].to_str() {
+        Some("info" | "list" | "disasm" | "decomp" | "strings" | "inventory") => true,
+        Some("help" | "--help" | "-h" | "--version" | "-V") => true,
+        _ => false,
+    }
+}
+
+pub fn parse_oneshot_args() -> ParsedOneShotArgs {
+    parse_oneshot_args_from(std::env::args_os())
+}
+
+fn parse_oneshot_args_from<I, T>(iter: I) -> ParsedOneShotArgs
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let argv: Vec<OsString> = iter.into_iter().map(Into::into).collect();
+    if should_use_canonical_parser(&argv) {
+        normalize_canonical(CliArgs::parse_from(argv))
+    } else {
+        normalize_legacy(LegacyCliArgs::parse_from(argv))
+    }
+}
+
+fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
+    let args = match cli.command {
+        CliCommand::Info(info) => {
+            let mut args = OneShotArgs::with_binary(info.binary);
+            args.json = info.common.json;
+            args.verbose = info.common.verbose;
+            args.sections = info.sections;
+            args.imports = info.imports;
+            args.exports = info.exports;
+            args.info = !args.sections && !args.imports && !args.exports;
+            args
+        }
+        CliCommand::List(list) => {
+            let mut args = OneShotArgs::with_binary(list.binary);
+            args.list = true;
+            args.json = list.common.json;
+            args.verbose = list.common.verbose;
+            args
+        }
+        CliCommand::Disasm(disasm) => {
+            let mut args = OneShotArgs::with_binary(disasm.binary);
+            args.count = disasm.count;
+            args.json = disasm.common.json;
+            args.verbose = disasm.common.verbose;
+            if disasm.function {
+                args.disasm_function = Some(disasm.addr);
+            } else {
+                args.disasm = Some(disasm.addr);
+            }
+            args
+        }
+        CliCommand::Decomp(decomp) => {
+            let mut args = OneShotArgs::with_binary(decomp.binary);
+            args.address = decomp.addr;
+            args.decomp_all = decomp.all;
+            args.decomp_limit = decomp.limit;
+            args.profile = decomp.profile;
+            args.engine = decomp.engine;
+            args.compiler_id = decomp.compiler_id;
+            args.timeout_ms = decomp.timeout_ms;
+            args.function_discovery_profile = decomp.function_discovery_profile;
+            args.json = decomp.json;
+            args.output = decomp.output;
+            args.verbose = decomp.verbose;
+            args.no_header = decomp.no_header;
+            args.no_warnings = decomp.no_warnings;
+            args.ghidra_compat = decomp.ghidra_compat;
+            args.benchmark = decomp.benchmark;
+            args.format = decomp.format;
+            args
+        }
+        CliCommand::Strings(strings) => {
+            let mut args = OneShotArgs::with_binary(strings.binary);
+            args.strings = Some(strings.min_len);
+            args.json = strings.common.json;
+            args.verbose = strings.common.verbose;
+            args
+        }
+        CliCommand::Inventory(inventory) => match inventory.command {
+            InventoryCommand::FunctionFacts(facts) => {
+                let mut args = OneShotArgs::with_binary(facts.binary);
+                args.emit_function_facts_inventory = true;
+                args.address = facts.addr;
+                args.addresses_file = facts.addresses_file;
+                args.functions_limit = facts.functions_limit;
+                args.chunk_size = facts.chunk_size;
+                args.output_jsonl = facts.output_jsonl;
+                args.summary_json = facts.summary_json;
+                args.resume_from = facts.resume_from;
+                args.quiet_batch_errors = facts.quiet_batch_errors;
+                args.compiler_id = facts.compiler_id;
+                args.profile = facts.profile;
+                args.timeout_ms = facts.timeout_ms;
+                args.function_discovery_profile = facts.function_discovery_profile;
+                args.verbose = facts.verbose;
+                args
+            }
+            InventoryCommand::PreviewCandidates(preview) => {
+                let mut args = OneShotArgs::with_binary(preview.binary);
+                args.preview_candidate_inventory = preview.inventory || !preview.batch;
+                args.preview_candidate_scan_batch = preview.batch;
+                args.address = preview.addr;
+                args.preview_candidate_limit = preview.preview_candidate_limit;
+                args.addresses_file = preview.addresses_file;
+                args.functions_limit = preview.functions_limit;
+                args.chunk_size = preview.chunk_size;
+                args.output_jsonl = preview.output_jsonl;
+                args.summary_json = preview.summary_json;
+                args.resume_from = preview.resume_from;
+                args.quiet_batch_errors = preview.quiet_batch_errors;
+                args.compiler_id = preview.compiler_id;
+                args.profile = preview.profile;
+                args.timeout_ms = preview.timeout_ms;
+                args.function_discovery_profile = preview.function_discovery_profile;
+                args.verbose = preview.verbose;
+                args
+            }
+        },
+    };
+
+    ParsedOneShotArgs {
+        args,
+        legacy_warning: None,
+    }
+}
+
+fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
+    let legacy_warning = legacy_warning_kind(&cli);
+    let args = OneShotArgs {
+        binary: cli.binary,
+        address: cli.address,
+        list: cli.list,
+        info: cli.info,
+        sections: cli.sections,
+        imports: cli.imports,
+        exports: cli.exports,
+        strings: cli.strings,
+        disasm: cli.disasm,
+        disasm_function: cli.disasm_function,
+        count: cli.count,
+        compiler_id: cli.compiler_id,
+        profile: cli.profile,
+        engine: cli.engine,
+        output: cli.output,
+        json: cli.json,
+        verbose: cli.verbose,
+        no_header: cli.no_header,
+        ghidra_compat: cli.ghidra_compat,
+        no_warnings: cli.no_warnings,
+        benchmark: cli.benchmark,
+        decomp_all: cli.decomp_all,
+        decomp_limit: cli.decomp_limit,
+        timeout_ms: cli.timeout_ms,
+        format: cli.format,
+        function_discovery_profile: cli.function_discovery_profile,
+        preview_candidate_inventory: cli.preview_candidate_inventory,
+        preview_candidate_limit: cli.preview_candidate_limit,
+        preview_candidate_scan_batch: cli.preview_candidate_scan_batch,
+        addresses_file: cli.addresses_file,
+        functions_limit: cli.functions_limit,
+        chunk_size: cli.chunk_size,
+        output_jsonl: cli.output_jsonl,
+        summary_json: cli.summary_json,
+        resume_from: cli.resume_from,
+        quiet_batch_errors: cli.quiet_batch_errors,
+        emit_function_facts_inventory: cli.emit_function_facts_inventory,
+    };
+
+    ParsedOneShotArgs {
+        args,
+        legacy_warning,
+    }
+}
+
+fn legacy_warning_kind(cli: &LegacyCliArgs) -> Option<LegacyInvocationKind> {
+    if cli.info || cli.sections || cli.imports || cli.exports {
+        return Some(LegacyInvocationKind::Info);
+    }
+    if cli.list {
+        return Some(LegacyInvocationKind::List);
+    }
+    if cli.disasm.is_some() || cli.disasm_function.is_some() {
+        return Some(LegacyInvocationKind::Disasm);
+    }
+    if cli.address.is_some() || cli.decomp_all {
+        return Some(LegacyInvocationKind::Decomp);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    fn parse_canonical(args: &[&str]) -> ParsedOneShotArgs {
+        parse_oneshot_args_from(args.iter().copied())
+    }
+
+    fn parse_legacy(args: &[&str]) -> ParsedOneShotArgs {
+        parse_oneshot_args_from(args.iter().copied())
+    }
+
+    #[test]
+    fn canonical_info_parsing_maps_to_info_command() {
+        let parsed = parse_canonical(&["fission_cli", "info", "bin.exe"]);
+        assert_eq!(parsed.legacy_warning, None);
+        assert!(parsed.args.info);
+        assert_eq!(parsed.args.binary, PathBuf::from("bin.exe"));
+    }
+
+    #[test]
+    fn canonical_list_parsing_maps_to_list_command() {
+        let parsed = parse_canonical(&["fission_cli", "list", "bin.exe", "--json"]);
+        assert!(parsed.args.list);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_disasm_parsing_maps_to_instruction_mode() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "disasm",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--count",
+            "32",
+        ]);
+        assert_eq!(parsed.args.disasm, Some(0x1400));
+        assert_eq!(parsed.args.disasm_function, None);
+        assert_eq!(parsed.args.count, 32);
+    }
+
+    #[test]
+    fn canonical_decomp_parsing_maps_to_decomp_command() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--ghidra-compat",
+            "--benchmark",
+            "--json",
+        ]);
+        assert_eq!(parsed.args.address, Some(0x1400));
+        assert!(parsed.args.ghidra_compat);
+        assert!(parsed.args.benchmark);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_decomp_all_limit_maps_to_batch_decomp() {
+        let parsed =
+            parse_canonical(&["fission_cli", "decomp", "bin.exe", "--all", "--limit", "10"]);
+        assert!(parsed.args.decomp_all);
+        assert_eq!(parsed.args.decomp_limit, Some(10));
+    }
+
+    #[test]
+    fn canonical_inventory_function_facts_maps_to_inventory_surface() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "inventory",
+            "function-facts",
+            "bin.exe",
+            "--output-jsonl",
+            "rows.jsonl",
+            "--summary-json",
+            "summary.json",
+        ]);
+        assert!(parsed.args.emit_function_facts_inventory);
+        assert_eq!(parsed.args.output_jsonl, Some(PathBuf::from("rows.jsonl")));
+        assert_eq!(
+            parsed.args.summary_json,
+            Some(PathBuf::from("summary.json"))
+        );
+    }
+
+    #[test]
+    fn canonical_inventory_preview_candidates_maps_to_inventory_surface() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "inventory",
+            "preview-candidates",
+            "bin.exe",
+            "--batch",
+            "--output-jsonl",
+            "rows.jsonl",
+        ]);
+        assert!(parsed.args.preview_candidate_scan_batch);
+        assert!(!parsed.args.preview_candidate_inventory);
+        assert_eq!(parsed.args.output_jsonl, Some(PathBuf::from("rows.jsonl")));
+    }
+
+    #[test]
+    fn legacy_info_invocation_maps_to_same_internal_shape() {
+        let parsed = parse_legacy(&["fission_cli", "bin.exe", "--info"]);
+        assert_eq!(parsed.legacy_warning, Some(LegacyInvocationKind::Info));
+        assert!(parsed.args.info);
+    }
+
+    #[test]
+    fn legacy_list_invocation_maps_to_same_internal_shape() {
+        let parsed = parse_legacy(&["fission_cli", "bin.exe", "--funcs"]);
+        assert_eq!(parsed.legacy_warning, Some(LegacyInvocationKind::List));
+        assert!(parsed.args.list);
+    }
+
+    #[test]
+    fn legacy_disasm_invocation_maps_to_same_internal_shape() {
+        let parsed = parse_legacy(&["fission_cli", "bin.exe", "--asm", "0x1400"]);
+        assert_eq!(parsed.legacy_warning, Some(LegacyInvocationKind::Disasm));
+        assert_eq!(parsed.args.disasm, Some(0x1400));
+    }
+
+    #[test]
+    fn legacy_decomp_invocation_maps_to_same_internal_shape() {
+        let parsed = parse_legacy(&["fission_cli", "bin.exe", "--decomp", "0x1400"]);
+        assert_eq!(parsed.legacy_warning, Some(LegacyInvocationKind::Decomp));
+        assert_eq!(parsed.args.address, Some(0x1400));
+    }
+
+    #[test]
+    fn canonical_non_decomp_subcommands_reject_decomp_only_options() {
+        let err = CliArgs::try_parse_from(["fission_cli", "info", "bin.exe", "--benchmark"])
+            .expect_err("expected unknown flag on info subcommand");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn canonical_non_inventory_subcommands_reject_inventory_only_options() {
+        let err = CliArgs::try_parse_from([
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--output-jsonl",
+            "rows.jsonl",
+        ])
+        .expect_err("expected inventory-only flag rejection");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
 }

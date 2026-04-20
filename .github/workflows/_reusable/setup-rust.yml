@@ -1,0 +1,43 @@
+name: Reusable Setup Rust
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: false
+        default: ubuntu-latest
+        description: "Runner OS: ubuntu-latest, macos-latest, windows-latest"
+      target:
+        type: string
+        required: false
+        description: "Optional cross-compilation target (e.g., aarch64-apple-darwin)"
+      components:
+        type: string
+        required: false
+        default: "clippy,rustfmt"
+        description: "Rust components to install (comma-separated)"
+
+env:
+  RUST_VERSION: "1.85"
+  RUST_BACKTRACE: "1"
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  setup:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: ${{ inputs.components }}
+          targets: ${{ inputs.target || '' }}
+
+      - name: Cache Rust Build Outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            benchmark

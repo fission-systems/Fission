@@ -1,0 +1,93 @@
+name: Reusable Build CLI
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: false
+        default: ubuntu-latest
+      target:
+        type: string
+        required: false
+        description: "Cargo build target (e.g., x86_64-pc-windows-msvc)"
+      profile:
+        type: string
+        required: false
+        default: "release"
+        description: "Build profile: release or debug"
+      upload_artifact:
+        type: boolean
+        required: false
+        default: true
+        description: "Upload artifact to GitHub Actions"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.target || '' }}
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build fission-cli (${{ inputs.profile }})
+        run: |
+          cargo build -p fission-cli --locked ${{ inputs.profile == 'release' && '--release' || '' }} ${{ inputs.target && format('--target {0}', inputs.target) || '' }} --verbose
+
+      - name: Locate Binary
+        id: locate
+        shell: bash
+        run: |
+          if [ "${{ inputs.profile }}" = "release" ]; then
+            PROFILE_DIR="release"
+          else
+            PROFILE_DIR="debug"
+          fi
+          
+          TARGET_DIR="${{ inputs.target && format('target/{0}/release', inputs.target) || format('target/{0}', PROFILE_DIR) }}"
+          
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BINARY_NAME="fission_cli.exe"
+          else
+            BINARY_NAME="fission_cli"
+          fi
+          
+          BINARY_PATH="$TARGET_DIR/$BINARY_NAME"
+          
+          if [ -f "$BINARY_PATH" ]; then
+            SIZE=$(du -h "$BINARY_PATH" | cut -f1)
+            echo "binary_path=$BINARY_PATH" >> $GITHUB_OUTPUT
+            echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
+            echo "size=$SIZE" >> $GITHUB_OUTPUT
+            echo "✓ Binary ready: $BINARY_PATH ($SIZE)"
+          else
+            echo "✗ Binary not found: $BINARY_PATH"
+            exit 1
+          fi
+
+      - name: Print Binary Info
+        run: |
+          echo "Binary: ${{ steps.locate.outputs.binary_name }}"
+          echo "Path: ${{ steps.locate.outputs.binary_path }}"
+          echo "Size: ${{ steps.locate.outputs.size }}"
+
+      - name: Upload Binary Artifact
+        if: ${{ inputs.upload_artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fission-cli-${{ inputs.os }}-${{ inputs.profile }}-${{ github.sha }}
+          path: ${{ steps.locate.outputs.binary_path }}
+          retention-days: 7
+          if-no-files-found: warn

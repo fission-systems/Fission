@@ -71,7 +71,7 @@ struct NirCheckArgs {
     baseline: Option<PathBuf>,
     #[arg(long, default_value_t = true)]
     update_latest: bool,
-    /// Skip copying this run into `artifacts/fission-automation/latest/<lane>/` (CI-friendly).
+    /// Skip copying this run into `benchmark/artifacts/automation/latest/<lane>/` (CI-friendly).
     #[arg(long = "no-update-latest")]
     no_update_latest: bool,
     #[arg(long)]
@@ -183,6 +183,14 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn automation_artifact_root(root: &Path) -> PathBuf {
+    root.join("benchmark").join("artifacts").join("automation")
+}
+
+fn automation_run_dir(root: &Path, lane: &str, run_profile: RunProfile, run_id: &str) -> PathBuf {
+    automation_artifact_root(root).join(format!("{}-{}-{}", lane, run_profile.as_str(), run_id))
+}
+
 fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let run_started = Instant::now();
     let root = repo_root();
@@ -208,11 +216,9 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     validate_lane_target_paths(&targets)?;
 
     let run_id = unix_run_id();
-    let base_output_dir = args.output_dir.unwrap_or_else(|| {
-        root.join("artifacts")
-            .join("fission-automation")
-            .join(&run_id)
-    });
+    let base_output_dir = args
+        .output_dir
+        .unwrap_or_else(|| automation_run_dir(&root, canonical_lane, args.run_profile, &run_id));
     let per_binary_dir = base_output_dir.join("per_binary");
 
     if args.dry_run {
@@ -250,9 +256,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     fs::create_dir_all(&per_binary_dir)
         .with_context(|| format!("create {}", per_binary_dir.display()))?;
 
-    let latest_dir = root
-        .join("artifacts")
-        .join("fission-automation")
+    let latest_dir = automation_artifact_root(&root)
         .join("latest")
         .join(canonical_lane);
     let baseline_path = args
@@ -519,9 +523,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
 }
 
 fn init_automation_logging(root: &Path) {
-    let log_path = root
-        .join("artifacts")
-        .join("fission-automation")
+    let log_path = automation_artifact_root(root)
         .join("logs")
         .join("fission-automation.log");
     let options = fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging)

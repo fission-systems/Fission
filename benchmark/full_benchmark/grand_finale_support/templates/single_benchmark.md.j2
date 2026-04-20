@@ -1,0 +1,62 @@
+# Whole Decomp Benchmark: {{ summary.binary or "unknown" }}
+
+## Summary
+
+- Generated: {{ summary.generated_at or "unknown" }}
+- Public summary: {{ summary.public_summary_line or "n/a" }}
+- Avg normalized similarity: {{ "%.3f"|format(quality.get("avg_normalized_similarity", 0.0) | float) }}%
+- Aggregate normalized similarity: {{ "%.3f"|format(quality.get("aggregate_normalized_similarity", 0.0) | float) }}%
+- Coverage: {{ "%.3f"|format(coverage.get("coverage_ratio_pct", 0.0) | float) }}%
+
+{% if baseline_gate %}
+## Baseline Gate
+
+- Status: `{{ baseline_gate.get("status", "unknown") }}`
+- Promotion blockers:
+{% for item in baseline_gate.get("regressions", []) %}
+- {{ item }}
+{% else %}
+- none
+{% endfor %}
+{% endif %}
+
+## Owner Metrics
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in owner_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+## Shape-Drift Proxies
+
+Presentation-oriented proxies only; these are not semantic truth.
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in shape_drift_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+## Watchlist
+
+- Source: `{{ watchlist.get("watchlist_source", "unknown") }}`
+- Bootstrap rows: {{ (watchlist.get("bootstrap_row_targets", []) or []) | length }}
+- Dynamic rows: {{ (watchlist.get("dynamic_watchlist_rows", []) or []) | length }}
+
+{% set diag = watchlist.get("watchlist_diagnostics", {}) or {} %}
+{% if diag.get("selected_because_counts") %}
+### Watchlist Selection Reasons
+
+| Reason | Count |
+| --- | ---: |
+{% for key, value in diag.get("selected_because_counts", {})|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% endfor %}
+{% endif %}
+
+## Artifacts
+
+- `benchmark_summary.json`
+- `benchmark_summary.md`
+- `benchmark_compact_summary.json`

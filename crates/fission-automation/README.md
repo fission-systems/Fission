@@ -21,11 +21,11 @@ cargo run -p fission-automation -- nir-check --lane nir
 
 By default, outputs are written under:
 
-- `artifacts/fission-automation/<run_id>/`
+- `benchmark/artifacts/automation/<lane>-<profile>-<run_id>/`
 
 and latest is mirrored to:
 
-- `artifacts/fission-automation/latest/<lane>/`
+- `benchmark/artifacts/automation/latest/<lane>/`
 
 ---
 
@@ -39,6 +39,9 @@ and latest is mirrored to:
   - `fast`: short feedback loop (smaller effective limits/timeouts)
   - `mid`: default balanced mode
   - `full`: broader validation window
+
+- `--manifest <path>`
+  - override the default lane manifest at `benchmark/config/automation/sentinel_sets.toml`
 
 - `--focus-top-mismatch <N>`
   - uses baseline candidates to focus run targets to binaries implicated by top `conditional_tail_exit_mismatch` rows
@@ -86,7 +89,7 @@ cargo run -p fission-automation -- nir-check \
   --focus-top-mismatch 5 \
   --no-build \
   --fission-bin ./target/debug/fission_cli \
-  --baseline artifacts/fission-automation/latest/nir/summary.json
+  --baseline benchmark/artifacts/automation/latest/nir/summary.json
 ```
 
 Use this to quickly validate whether the top mismatch rows move.
@@ -99,7 +102,7 @@ cargo run -p fission-automation -- nir-check \
   --run-profile mid \
   --no-build \
   --fission-bin ./target/debug/fission_cli \
-  --baseline artifacts/fission-automation/latest/nir/summary.json
+  --baseline benchmark/artifacts/automation/latest/nir/summary.json
 ```
 
 ### 3) Full loop (periodic broader validation)
@@ -133,5 +136,8 @@ Treat this as an operational guardrail, not an absolute truth. Always inspect to
   - `diagnosis.rs`: diagnosis buckets and recommended patch classification
   - `corpus.rs`: candidate aggregation and quality artifact assembly
   - `inventory.rs`: `fission_cli` inventory execution and loading
+- Default automation config lives under `benchmark/config/automation/`
+  - `sentinel_sets.toml`: lane target definitions
+  - `preview_explicit_source_inventory.json`: optional source inventory overlay
 - Tests:
   - `cargo test -p fission-automation`

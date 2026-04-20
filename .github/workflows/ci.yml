@@ -18,108 +18,95 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux-fast-gate:
-    name: Linux Fast Gate
+  # Step 1: Security & Lint (Ubuntu, ~10 min)
+  security-check:
+    name: 🔒 Security Check
+    uses: ./.github/workflows/_reusable/security-check.yml
+    with:
+      check_npm: true
+
+  lint-format:
+    name: 📋 Lint & Format
+    uses: ./.github/workflows/_reusable/lint-format.yml
+    with:
+      os: ubuntu-latest
+      exclude_crates: "fission-tauri"
+
+  # Step 2: Core Tests (Linux, ~15 min)
+  test-linux:
+    name: 🧪 Tests (Linux)
+    needs: [security-check, lint-format]
+    uses: ./.github/workflows/_reusable/run-tests.yml
+    with:
+      os: ubuntu-latest
+      crates: "fission-pcode,fission-automation,fission-loader"
+      profile: debug
+
+  # Step 3: Build & Test (Windows, ~20 min parallel)
+  build-windows:
+    name: 🪟 Build & Test (Windows)
+    needs: [security-check, lint-format]
+    uses: ./.github/workflows/_reusable/build-cli.yml
+    with:
+      os: windows-latest
+      profile: release
+      upload_artifact: false
+
+  test-windows:
+    name: 🧪 Tests (Windows)
+    needs: build-windows
+    uses: ./.github/workflows/_reusable/run-tests.yml
+    with:
+      os: windows-latest
+      crates: "fission-pcode,fission-automation"
+      profile: release
+
+  # Step 4: Build & Test (macOS, ~20 min parallel)
+  build-macos:
+    name: 🍎 Build & Test (macOS)
+    needs: [security-check, lint-format]
+    uses: ./.github/workflows/_reusable/build-cli.yml
+    with:
+      os: macos-latest
+      profile: release
+      upload_artifact: false
+
+  test-macos:
+    name: 🧪 Tests (macOS)
+    needs: build-macos
+    uses: ./.github/workflows/_reusable/run-tests.yml
+    with:
+      os: macos-latest
+      crates: "fission-pcode,fission-automation,fission-loader"
+      profile: debug
+
+  # Final summary
+  ci-summary:
+    name: ✅ CI Summary
+    needs: [security-check, lint-format, test-linux, test-windows, test-macos]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-
+    if: always()
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: crates/fission-tauri/package-lock.json
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Security advisory check (Rust — advisories, bans, licenses, sources)
-        run: cargo deny check all
-
-      - name: Security advisory check (Node)
+      - name: Check Status
         run: |
-          cd crates/fission-tauri
-          npm ci --ignore-scripts
-          npm audit --audit-level=high
-
-      - name: Install system dependencies (Linux/Tauri)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libssl-dev \
-            librsvg2-dev \
-            libayatana-appindicator3-dev \
-            build-essential \
-            file
-
-      - name: Check Formatting
-        run: cargo fmt --all -- --check
-
-      - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri --locked -- -D warnings
-
-      - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --locked --verbose
-
-  windows-build-test:
-    name: Windows Build/Test
-    runs-on: windows-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --locked --release
-
-      - name: Run Windows core tests
-        run: cargo test -p fission-pcode -p fission-automation --locked --release --verbose
-
-  macos-build-test:
-    name: Build and Test (macOS)
-    runs-on: macos-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check Formatting
-        run: cargo fmt --all -- --check
-
-      - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri --locked -- -D warnings
-
-      - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --locked --verbose
+          if [ "${{ needs.security-check.result }}" != "success" ]; then
+            echo "❌ Security check failed"
+            exit 1
+          fi
+          if [ "${{ needs.lint-format.result }}" != "success" ]; then
+            echo "❌ Lint/format check failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-linux.result }}" != "success" ]; then
+            echo "❌ Linux tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-windows.result }}" != "success" ]; then
+            echo "❌ Windows tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-macos.result }}" != "success" ]; then
+            echo "❌ macOS tests failed"
+            exit 1
+          fi
+          echo "✅ All CI checks passed!"

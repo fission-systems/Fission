@@ -34,9 +34,9 @@ struct SourceInventoryFile {
 }
 
 pub fn default_manifest_path(root: &Path) -> PathBuf {
-    root.join("crates")
-        .join("fission-automation")
+    root.join("benchmark")
         .join("config")
+        .join("automation")
         .join("sentinel_sets.toml")
 }
 
@@ -49,9 +49,9 @@ pub fn normalize_lane_name(lane_name: &str) -> (&str, bool) {
 
 pub fn default_source_inventory_path(root: &Path) -> Option<PathBuf> {
     let candidate = root
-        .join("artifacts")
-        .join("batch_benchmark_scripts")
-        .join("corpora")
+        .join("benchmark")
+        .join("config")
+        .join("automation")
         .join("preview_explicit_source_inventory.json");
     candidate.exists().then_some(candidate)
 }

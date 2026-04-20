@@ -1,0 +1,62 @@
+name: Reusable NIR-Check Automation
+
+on:
+  workflow_call:
+    inputs:
+      run_profile:
+        type: string
+        required: false
+        default: "fast"
+        description: "NIR-Check profile: fast or full"
+      functions_limit:
+        type: string
+        required: false
+        default: "10"
+        description: "Limit functions analyzed per binary"
+      update_latest:
+        type: boolean
+        required: false
+        default: false
+        description: "Update latest baseline (caution: only on stable runs)"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  nir-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build fission-cli (Release)
+        run: cargo build -p fission-cli --locked --release
+
+      - name: Run automation crate tests
+        run: cargo test -p fission-automation --locked --verbose
+
+      - name: Run NIR-Check Automation
+        run: |
+          cargo run -p fission-automation --release -- nir-check \
+            --lane nir \
+            --no-build \
+            ${{ inputs.update_latest && '--update-latest' || '--no-update-latest' }} \
+            --fission-bin target/release/fission_cli \
+            --run-profile ${{ inputs.run_profile }} \
+            --functions-limit ${{ inputs.functions_limit }}
+
+      - name: Upload Automation Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nir-check-artifacts-${{ github.sha }}
+          path: artifacts/fission-automation/
+          retention-days: 14
+          if-no-files-found: warn
