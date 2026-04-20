@@ -144,6 +144,24 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.temp_only_representative_reason),
             ),
             (
+                "stable_representative_owner_reason",
+                Self::format_materialize_owner_histogram(
+                    &summary.stable_representative_owner_reason,
+                ),
+            ),
+            (
+                "stable_representative_consumer_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.stable_representative_consumer_kind,
+                ),
+            ),
+            (
+                "stable_representative_downstream_opcode",
+                Self::format_materialize_owner_histogram(
+                    &summary.stable_representative_downstream_opcode,
+                ),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1360,6 +1378,61 @@ impl<'a> PreviewBuilder<'a> {
                 MaterializationRejectionReason::TempOnlyRepresentativeLifecycle
             }
         }
+    }
+
+    pub(super) fn trace_stable_representative_owner_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_stable_representative_owner_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stable_representative_owner_reason,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stable_representative_consumer_kind,
+                format!("{:?}", proof.consumer_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stable_representative_downstream_opcode,
+                proof
+                    .downstream_opcode
+                    .map(|opcode| format!("{:?}", opcode))
+                    .unwrap_or_else(|| "none".to_string()),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "stable-representative-owner-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} consumer_kind={:?} rhs_kind={:?} overlaps_representative_root_attribution={} overlaps_temp_only_lifecycle={} overlaps_real_missing_merge={} downstream_opcode={:?} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.overlaps_representative_root_attribution,
+            proof.overlaps_temp_only_lifecycle,
+            proof.overlaps_real_missing_merge,
+            proof.downstream_opcode,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_dominating_prior_def_incoming_proof(

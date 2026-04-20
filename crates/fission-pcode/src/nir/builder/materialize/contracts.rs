@@ -343,6 +343,28 @@ pub(super) struct TempOnlyRepresentativeProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StableRepresentativeOwnerReason {
+    RootRepresentativeStableRequired,
+    TempLifecycleStableRequired,
+    RealMergeStableRequired,
+    PredicateStableRequired,
+    StoreValueStableRequired,
+    AliasStableRequired,
+    UnknownStableRepresentative,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StableRepresentativeOwnerProof {
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) overlaps_representative_root_attribution: bool,
+    pub(super) overlaps_temp_only_lifecycle: bool,
+    pub(super) overlaps_real_missing_merge: bool,
+    pub(super) downstream_opcode: Option<PcodeOpcode>,
+    pub(super) reason: StableRepresentativeOwnerReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -896,6 +918,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
     pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
     pub(super) temp_only_representative_reason: BTreeMap<String, usize>,
+    pub(super) stable_representative_owner_reason: BTreeMap<String, usize>,
+    pub(super) stable_representative_consumer_kind: BTreeMap<String, usize>,
+    pub(super) stable_representative_downstream_opcode: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,

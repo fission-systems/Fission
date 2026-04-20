@@ -83,6 +83,144 @@ impl<'a> PreviewBuilder<'a> {
         Self::should_preserve_materialized_expr(rhs)
     }
 
+    fn classify_stable_representative_owner_reason(
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        overlaps_representative_root_attribution: bool,
+        overlaps_temp_only_lifecycle: bool,
+        overlaps_real_missing_merge: bool,
+        downstream_opcode: Option<PcodeOpcode>,
+    ) -> StableRepresentativeOwnerReason {
+        if overlaps_representative_root_attribution {
+            return StableRepresentativeOwnerReason::RootRepresentativeStableRequired;
+        }
+        if overlaps_temp_only_lifecycle {
+            return StableRepresentativeOwnerReason::TempLifecycleStableRequired;
+        }
+        if overlaps_real_missing_merge {
+            return StableRepresentativeOwnerReason::RealMergeStableRequired;
+        }
+        if matches!(
+            consumer_kind,
+            DisallowedSingleConsumerConsumerKind::Predicate
+                | DisallowedSingleConsumerConsumerKind::BranchCondition
+        ) || downstream_opcode == Some(PcodeOpcode::CBranch)
+        {
+            return StableRepresentativeOwnerReason::PredicateStableRequired;
+        }
+        if consumer_kind == DisallowedSingleConsumerConsumerKind::StoreValue {
+            return StableRepresentativeOwnerReason::StoreValueStableRequired;
+        }
+        if matches!(
+            consumer_kind,
+            DisallowedSingleConsumerConsumerKind::OtherData
+                | DisallowedSingleConsumerConsumerKind::CallArg
+                | DisallowedSingleConsumerConsumerKind::LoadAddr
+                | DisallowedSingleConsumerConsumerKind::StoreAddr
+                | DisallowedSingleConsumerConsumerKind::PhiMerge
+        ) || downstream_opcode.is_some()
+        {
+            return StableRepresentativeOwnerReason::AliasStableRequired;
+        }
+        StableRepresentativeOwnerReason::UnknownStableRepresentative
+    }
+
+    pub(super) fn describe_stable_representative_owner_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<StableRepresentativeOwnerProof> {
+        let rhs_kind = Self::classify_disallowed_single_consumer_rhs_kind(rhs);
+        let use_sites = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let output_key = VarnodeKey::from(output);
+        let first_use = use_sites.first().map(|(_, op)| *op);
+        let mut consumer_kind = DisallowedSingleConsumerConsumerKind::OtherData;
+        let mut downstream_opcode = first_use.map(|op| op.opcode);
+
+        let stable_required = if let Some(read_class) =
+            self.classify_terminator_sensitive_output_use(block, op_idx, terminator_index, output)
+        {
+            if !Self::replacement_read_requires_stable_representative(read_class, rhs) {
+                return None;
+            }
+            match read_class {
+                ReplacementReadClass::PredicateSensitive => {
+                    consumer_kind = DisallowedSingleConsumerConsumerKind::Predicate;
+                    downstream_opcode = Some(PcodeOpcode::CBranch);
+                }
+                ReplacementReadClass::SelectorSensitive => {
+                    consumer_kind = DisallowedSingleConsumerConsumerKind::OtherData;
+                    downstream_opcode = Some(PcodeOpcode::BranchInd);
+                }
+                ReplacementReadClass::ReturnPath => {
+                    consumer_kind = DisallowedSingleConsumerConsumerKind::OtherData;
+                    downstream_opcode = Some(PcodeOpcode::Return);
+                }
+                ReplacementReadClass::SameBlockData | ReplacementReadClass::Merge => {}
+            }
+            true
+        } else if self.output_replacement_is_complete(block, op_idx, output, rhs)
+            && Self::same_block_replacement_requires_stable_representative(rhs)
+        {
+            if let Some(use_op) = first_use {
+                let matched_inputs = use_op
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, input)| {
+                        (VarnodeKey::from(input) == output_key).then_some(idx)
+                    })
+                    .collect::<Vec<_>>();
+                consumer_kind =
+                    Self::classify_disallowed_single_consumer_kind(use_op, &matched_inputs);
+                downstream_opcode = Some(use_op.opcode);
+            }
+            true
+        } else {
+            false
+        };
+
+        if !stable_required {
+            return None;
+        }
+
+        let nonlocal_reason = self
+            .output_has_nonlocal_use(block, op_idx, output)
+            .then(|| {
+                self.classify_nonlocal_materialization_rejection_reason(block, op_idx, output, rhs)
+            });
+        let overlaps_representative_root_attribution =
+            nonlocal_reason == Some(MaterializationRejectionReason::RepresentativeRootAttribution);
+        let overlaps_temp_only_lifecycle = matches!(
+            nonlocal_reason,
+            Some(
+                MaterializationRejectionReason::TempOnlyRepresentativeLifecycle
+                    | MaterializationRejectionReason::DeadTempRepresentative
+            )
+        );
+        let overlaps_real_missing_merge =
+            nonlocal_reason == Some(MaterializationRejectionReason::MissingMergeBinding);
+        let reason = Self::classify_stable_representative_owner_reason(
+            consumer_kind,
+            overlaps_representative_root_attribution,
+            overlaps_temp_only_lifecycle,
+            overlaps_real_missing_merge,
+            downstream_opcode,
+        );
+
+        Some(StableRepresentativeOwnerProof {
+            consumer_kind,
+            rhs_kind,
+            overlaps_representative_root_attribution,
+            overlaps_temp_only_lifecycle,
+            overlaps_real_missing_merge,
+            downstream_opcode,
+            reason,
+        })
+    }
+
     pub(super) fn output_has_nonlocal_use(
         &self,
         block: &crate::pcode::PcodeBasicBlock,

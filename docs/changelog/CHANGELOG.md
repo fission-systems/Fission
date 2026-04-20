@@ -8919,3 +8919,10 @@ By this point Fission had already accumulated the foundations that still shape t
 - `release_path_changed: no`
 
 Canonical materialization rejection ownership now splits temp-only representative/root lifecycle families out of raw `MissingMergeBinding` accounting. `SyntheticRootBlock`, `TempOnlyNoDef`, `RepresentativeOnlyMissing`, and `DeadPredNoDef` continue to fail closed, but they now land in dedicated replacement-plan rejection counters instead of inflating the real merge-binding bucket.
+# 0x140008090 ConsumerRequiresStableRepresentative correlation
+
+- `wave_type: diagnostic-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `stable-representative-owner-proof` trace/histograms to correlate `ConsumerRequiresStableRepresentative` sites with representative/root attribution, temp-only lifecycle, real merge ownership, and local predicate/store/alias consumers. No replacement policy or release-path materialization behavior changed.
