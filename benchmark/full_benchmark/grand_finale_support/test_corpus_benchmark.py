@@ -11,6 +11,8 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from grand_finale_support.benchmark_core import (
+    _default_binary_output_name,
+    _default_corpus_output_name,
     _derive_binary_arch,
     _derive_dynamic_row_targets,
     _extract_owner_metrics_from_engine_summary,
@@ -125,6 +127,18 @@ def _minimal_single_binary_summary(
 
 
 class CorpusBenchmarkTests(unittest.TestCase):
+    def test_checked_in_corpus_manifests_include_required_suite_metadata(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        manifest_dir = repo_root / "benchmark" / "config" / "benchmark_corpus"
+        required_top = {"name", "suite_tier", "gate_mode", "dynamic_watchlist_limit", "notes", "entries"}
+
+        for manifest_name in ("smoke_corpus.json", "release_corpus.json", "parity_corpus.json"):
+            payload = json.loads((manifest_dir / manifest_name).read_text())
+            self.assertEqual(required_top - set(payload), set(), manifest_name)
+            self.assertIn(payload["suite_tier"], {"smoke", "release", "parity"})
+            self.assertIn(payload["gate_mode"], {"advisory", "blocking"})
+            self.assertGreater(int(payload["dynamic_watchlist_limit"]), 0)
+
     def test_checked_in_corpus_manifests_use_windows_samples_only(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         manifest_dir = repo_root / "benchmark" / "config" / "benchmark_corpus"
@@ -136,6 +150,27 @@ class CorpusBenchmarkTests(unittest.TestCase):
                     str(entry["binary_path"]).startswith(str(repo_root / "samples" / "windows")),
                     f"{manifest_name}:{entry['id']} escaped samples/windows",
                 )
+                self.assertIn(
+                    _derive_binary_arch(entry),
+                    {"x86", "x64"},
+                    f"{manifest_name}:{entry['id']} missing x86/x64 arch identity",
+                )
+
+    def test_default_output_naming_contract_uses_latest_suffix(self) -> None:
+        binary_name = _default_binary_output_name(
+            Path("/repo/samples/windows/x64/putty.exe"),
+            profile="balanced",
+            timestamped=False,
+        )
+        corpus_name = _default_corpus_output_name(
+            manifest_name="fission-smoke-windows-samples",
+            manifest_path=Path("/repo/benchmark/config/benchmark_corpus/smoke_corpus.json"),
+            profile="balanced",
+            timestamped=False,
+        )
+
+        self.assertEqual(binary_name, "putty-balanced-latest")
+        self.assertEqual(corpus_name, "fission-smoke-windows-samples-balanced-latest")
 
     def test_load_corpus_manifest_accepts_suite_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -20,31 +20,59 @@ jobs:
 
           repo = Path.cwd()
           manifests = [
-              repo / "config/benchmark_corpus/smoke_corpus.json",
-              repo / "config/benchmark_corpus/release_corpus.json",
+              repo / "benchmark" / "config" / "benchmark_corpus" / "smoke_corpus.json",
+              repo / "benchmark" / "config" / "benchmark_corpus" / "release_corpus.json",
+              repo / "benchmark" / "config" / "benchmark_corpus" / "parity_corpus.json",
           ]
-          
+          windows_root = repo / "samples" / "windows"
+          required_top = {"name", "suite_tier", "gate_mode", "dynamic_watchlist_limit", "entries"}
+          valid_tiers = {"smoke", "release", "parity"}
+          valid_gates = {"advisory", "blocking"}
+
           for manifest in manifests:
-              if not manifest.exists():
-                  print(f"ℹ️  Manifest not found: {manifest}")
-                  continue
-              
+              assert manifest.exists(), f"❌ missing manifest: {manifest}"
               payload = json.loads(manifest.read_text(encoding="utf-8"))
+              missing_top = sorted(required_top - set(payload))
+              assert not missing_top, f"❌ missing top-level fields in {manifest.name}: {missing_top}"
+              assert payload["suite_tier"] in valid_tiers, f"❌ bad suite_tier in {manifest.name}"
+              assert payload["gate_mode"] in valid_gates, f"❌ bad gate_mode in {manifest.name}"
+              assert int(payload["dynamic_watchlist_limit"]) > 0, f"❌ bad dynamic_watchlist_limit in {manifest.name}"
               entries = payload.get("entries", [])
-              
               assert isinstance(entries, list) and entries, f"❌ empty entries: {manifest}"
-              
+
               seen = set()
               missing = []
-              
+
               for entry in entries:
                   entry_id = entry["id"]
                   assert entry_id not in seen, f"❌ duplicate id {entry_id} in {manifest}"
                   seen.add(entry_id)
-                  
+
                   binary = Path(entry["binary_path"])
                   if not binary.is_file():
                       missing.append(str(binary))
+                      continue
+
+                  try:
+                      binary.relative_to(windows_root)
+                  except ValueError as exc:
+                      raise AssertionError(
+                          f"❌ {manifest.name}:{entry_id} escaped samples/windows: {binary}"
+                      ) from exc
+
+                  tags = set(entry.get("tags", []))
+                  inferred_arch = None
+                  if "x86" in tags:
+                      inferred_arch = "x86"
+                  elif "x64" in tags:
+                      inferred_arch = "x64"
+                  elif "/samples/windows/x86/" in str(binary):
+                      inferred_arch = "x86"
+                  elif "/samples/windows/x64/" in str(binary):
+                      inferred_arch = "x64"
+                  assert inferred_arch in {"x86", "x64"}, (
+                      f"❌ {manifest.name}:{entry_id} is missing x86/x64 arch identity"
+                  )
               
               if missing:
                   print(f"❌ Missing binaries in {manifest.name}:")
@@ -53,6 +81,17 @@ jobs:
                   raise AssertionError(f"{len(missing)} binaries missing")
               
               print(f"✓ {manifest.name}: {len(entries)} entries OK")
-          
-          print("✓ All corpus manifests validated")
+
+          readme = (repo / "benchmark" / "full_benchmark" / "README.md").read_text(encoding="utf-8")
+          assert "python3 benchmark/full_benchmark/full_decomp_benchmark.py" in readme, (
+              "❌ benchmark/full_benchmark/README.md missing canonical entrypoint"
+          )
+          assert "benchmark/config/benchmark_corpus/smoke_corpus.json" in readme, (
+              "❌ benchmark/full_benchmark/README.md missing canonical manifest path"
+          )
+          assert "benchmark/artifacts/full_benchmark" in readme, (
+              "❌ benchmark/full_benchmark/README.md missing canonical artifact root"
+          )
+
+          print("✓ All corpus manifests and benchmark docs validated")
           PY

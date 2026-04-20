@@ -57,6 +57,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nir-check-artifacts-${{ github.sha }}
-          path: artifacts/fission-automation/
+          path: benchmark/artifacts/automation/
           retention-days: 14
           if-no-files-found: warn

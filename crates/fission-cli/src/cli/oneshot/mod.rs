@@ -249,11 +249,13 @@ fn emit_legacy_deprecation_warning(kind: LegacyInvocationKind, cli: &OneShotArgs
         }
     };
 
-    eprintln!("warning: legacy flat CLI syntax is deprecated; use `{replacement}` instead");
+    eprintln!(
+        "warning: legacy flat CLI syntax is deprecated; use canonical subcommand syntax `{replacement}` instead"
+    );
 }
 
 fn print_help() {
-    println!("Fission CLI - one-shot binary analysis and decompilation");
+    println!("Fission CLI - headless-first binary analysis and decompilation");
     println!();
     println!("Usage:");
     println!("  fission_cli info <binary> [--sections|--imports|--exports] [--json]");
@@ -295,6 +297,6 @@ fn print_help() {
     );
     println!();
     println!(
-        "Legacy flat invocations still work during the transition, but now emit deprecation warnings."
+        "Legacy flat invocations still work during the transition, but now emit deprecation warnings and normalize into the canonical subcommand path."
     );
 }

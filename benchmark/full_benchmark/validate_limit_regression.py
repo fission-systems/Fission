@@ -19,7 +19,7 @@ def find_repo_root() -> Path:
 
 
 ROOT_DIR = find_repo_root()
-BENCH_SCRIPT = ROOT_DIR / "artifacts" / "batch_benchmark_scripts" / "full_decomp_benchmark.py"
+BENCH_SCRIPT = ROOT_DIR / "benchmark" / "full_benchmark" / "full_decomp_benchmark.py"
 DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC"
 DEFAULT_BINARY = ROOT_DIR / "samples" / "windows" / "x64" / "test_control_flow_x64_O0.exe"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "debug" / "fission_cli"

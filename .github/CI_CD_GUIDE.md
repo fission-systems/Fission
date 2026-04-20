@@ -136,7 +136,7 @@ git push
 **If it fails:**
 ```bash
 # 1. Corpus validation failure
-cd config/benchmark_corpus/
+cd benchmark/config/benchmark_corpus/
 python3 -c "import json; json.load(open('smoke_corpus.json'))"
 
 # 2. Test failure

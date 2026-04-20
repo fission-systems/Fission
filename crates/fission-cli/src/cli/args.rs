@@ -141,9 +141,9 @@ struct CommonBinaryOutputArgs {
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Next-Gen Binary Analysis & Decompilation")]
+#[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission - A powerful binary analysis tool with explicit one-shot subcommands.\n\nQuick Start:\n  fission_cli info binary.exe\n  fission_cli list binary.exe\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -168,6 +168,10 @@ enum CliCommand {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Show binary metadata plus optional section/import/export inventories.\n\nUse this command for quick facts about the loaded binary without entering the decompilation path.",
+    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json"
+)]
 struct InfoArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -189,6 +193,10 @@ struct InfoArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "List discovered functions for a binary.\n\nThis is the canonical function inventory surface for humans and automation.",
+    after_help = "Examples:\n  fission_cli list app.exe\n  fission_cli list app.exe --json"
+)]
 struct ListArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -198,6 +206,10 @@ struct ListArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Disassemble instructions at a specific address or decode the full containing function.\n\nUse `--function` when you want function boundaries rather than a fixed instruction window.",
+    after_help = "Examples:\n  fission_cli disasm app.exe --addr 0x140001000\n  fission_cli disasm app.exe --addr 0x140001000 --count 64\n  fission_cli disasm app.exe --addr 0x140001000 --function --json"
+)]
 struct DisasmArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -224,6 +236,10 @@ struct DisasmArgs {
         .required(true)
         .args(["addr", "all"])
 ))]
+#[command(
+    long_about = "Decompile one function or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--all` only for bounded batch-style local runs.",
+    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --all --limit 10 --json"
+)]
 struct DecompArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -294,6 +310,10 @@ struct DecompArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Extract printable strings from the binary image.",
+    after_help = "Examples:\n  fission_cli strings app.exe\n  fission_cli strings app.exe --min-len 8 --json"
+)]
 struct StringsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -307,6 +327,10 @@ struct StringsArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Operator-oriented inventory and batch emitters.\n\nThese commands are intended for automation, corpus curation, and offline report generation rather than the primary one-shot decompilation flow.",
+    after_help = "Examples:\n  fission_cli inventory function-facts app.exe --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory preview-candidates app.exe --inventory"
+)]
 struct InventoryArgs {
     #[command(subcommand)]
     command: InventoryCommand,
@@ -321,6 +345,10 @@ enum InventoryCommand {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Emit whole-binary function facts inventory as JSONL plus summary JSON.\n\nThis is an operator/batch surface used by automation and reporting lanes.",
+    after_help = "Examples:\n  fission_cli inventory function-facts app.exe --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory function-facts app.exe --addr 0x140001000 --summary-json summary.json"
+)]
 struct InventoryFunctionFactsArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -379,6 +407,10 @@ struct InventoryFunctionFactsArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    long_about = "Emit preview candidate inventory rows or run preview candidate batch scans.\n\nThis surface exists for operator-grade corpus curation and candidate analysis, not normal interactive decompilation.",
+    after_help = "Examples:\n  fission_cli inventory preview-candidates app.exe --inventory\n  fission_cli inventory preview-candidates app.exe --batch --output-jsonl rows.jsonl --summary-json summary.json"
+)]
 struct InventoryPreviewCandidatesArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
@@ -453,9 +485,9 @@ struct InventoryPreviewCandidatesArgs {
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Next-Gen Binary Analysis & Decompilation")]
+#[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission_cli binary.exe -i              # Show info\n  fission_cli binary.exe -l              # List functions\n  fission_cli binary.exe --decomp 0x1400 # Decompile function\n  fission_cli binary.exe --asm 0x1400    # Disassemble\n"
+    long_about = "Legacy flat CLI compatibility surface.\n\nCanonical commands:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n\nLegacy flat invocations remain available as deprecated compatibility shims and normalize into the canonical subcommand execution path."
 )]
 struct LegacyCliArgs {
     /// Path to the binary file to analyze

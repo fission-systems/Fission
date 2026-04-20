@@ -7,6 +7,8 @@ Scope: `crates/fission-automation/`
 
 This crate runs quality lanes against `fission_cli`, aggregates inventory/diagnosis into JSON/Markdown, computes deltas vs baselines, and emits go/stop signals. Telemetry in summaries must stay aligned with `fission_pcode::NirBuildStats` (canonical definition: `crates/fission-pcode/src/nir/types.rs`).
 
+Benchmark runner ownership now lives under `benchmark/full_benchmark/`; this crate only owns automation lanes and their artifact/reporting contract.
+
 ## Layout
 
 ```text
@@ -39,6 +41,12 @@ src/
 ## CI
 
 Heavy workflow builds `fission-cli` (release), runs crate tests, then a **fast** `nir-check` without baseline (perf regression gate skipped) and without updating `latest/`. Artifacts upload: `benchmark/artifacts/automation/`.
+
+## Related config / paths
+
+- Sentinel manifests: `benchmark/config/automation/sentinel_sets.toml`
+- Automation artifacts: `benchmark/artifacts/automation/`
+- Full benchmark runner: `benchmark/full_benchmark/`
 
 ## Validation
 

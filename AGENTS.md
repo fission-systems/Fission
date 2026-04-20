@@ -1,6 +1,6 @@
 # Fission Agent Guide
 
-Generated: 2026-03-27
+Generated: 2026-04-21
 Scope: repository root
 
 ## Overview
@@ -11,6 +11,11 @@ Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-nati
 
 ```text
 Fission/
+├── benchmark/
+│   ├── config/              # Benchmark corpus + automation manifests
+│   ├── full_benchmark/      # Benchmark runner, support modules, rendering
+│   ├── artifacts/           # Benchmark outputs (automation/, full_benchmark/)
+│   └── binary/              # Curated benchmark binaries and fixtures
 ├── crates/
 │   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, printer
 │   ├── fission-static/       # Static orchestration, preview routing, fact application
@@ -19,7 +24,9 @@ Fission/
 │   ├── fission-signatures/   # FID/signature data and lookup
 │   ├── fission-cli/          # CLI surface
 │   └── fission-tauri/        # Desktop surface
+├── utils/                    # Checked-in signatures, type info, benchmark support data
 ├── vendor/                   # Ghidra, RetDec, other reference code
+├── scripts/benchmark/        # Benchmark setup / history helpers
 ├── scripts/test/             # Smoke / fuzz / automation helpers
 └── .github/workflows/        # CI/CD source of truth
 ```
@@ -29,6 +36,7 @@ Fission/
 - `crates/fission-pcode/src/nir/AGENTS.md`
 - `crates/fission-pcode/src/nir/structuring/AGENTS.md`
 - `crates/fission-automation/AGENTS.md`
+- `crates/fission-cli/AGENTS.md`
 - `crates/fission-static/src/analysis/decomp/postprocess/AGENTS.md`
 
 Read the nearest child file before editing those areas.
@@ -41,6 +49,9 @@ Read the nearest child file before editing those areas.
 | NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
 | Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
 | Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |
+| Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
+| Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
+| CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Static orchestration / postprocess | `crates/fission-static/src/analysis/` | Routing and downstream passes |
 | Legacy compatibility boundary | `crates/fission-static/src/analysis/decomp/` | Keep compatibility-only logic separate from canonical Rust structuring |
 | Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
@@ -59,6 +70,7 @@ Read the nearest child file before editing those areas.
 - Do not add one-off binary-specific heuristics without invariant-based guards.
 - Do not duplicate the same metric definition across pcode and automation.
 - Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
+- Do not treat benchmark/reporting scripts as semantic repair layers.
 - Do not claim success from one targeted test if crate-level regression remains.
 
 ## Build / Test Commands
@@ -74,12 +86,16 @@ cargo check -p fission-automation
 
 # Quality lane
 cargo run -p fission-automation -- nir-check --lane nir
+
+# Benchmark runner
+python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 ```
 
 ## Workflow Bias
 
 - For NIR/structuring changes: targeted tests → `cargo test -p fission-pcode` → `cargo check -p fission-pcode`.
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
+- If benchmark/reporting changes: validate under `benchmark/full_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 
 ## References

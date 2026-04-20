@@ -3,8 +3,8 @@
 Identify functions that trigger timeouts or hang-like behavior.
 
 This script helps find the specific function responsible for a long timeout,
-such as a 900-second timeout during `putty.exe --decomp-limit 20`.
-It runs each function individually with `--decomp <addr>` and checks whether
+such as a long `fission_cli decomp putty.exe --all --limit 20` run.
+It runs each function individually with `decomp --addr <addr>` and checks whether
 the decompilation finishes within the given time budget.
 
 Usage:
@@ -98,8 +98,8 @@ def make_fission_env(fission_bin: Path) -> dict[str, str]:
 
 
 def get_function_addresses(binary: Path, fission_bin: Path, limit: int) -> list[dict]:
-    """Get first N function addresses via fission_cli -l --json."""
-    cmd = [str(fission_bin), str(binary), "-l", "--json"]
+    """Get first N function addresses via `fission_cli list <binary> --json`."""
+    cmd = [str(fission_bin), "list", str(binary), "--json"]
     env = make_fission_env(fission_bin)
     result = subprocess.run(
         cmd,
@@ -111,11 +111,11 @@ def get_function_addresses(binary: Path, fission_bin: Path, limit: int) -> list[
     )
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
-        raise RuntimeError(f"fission_cli -l failed: {result.returncode}")
+        raise RuntimeError(f"fission_cli list failed: {result.returncode}")
 
     funcs = json.loads(result.stdout)
     if not isinstance(funcs, list):
-        raise RuntimeError("Expected JSON array from fission_cli -l --json")
+        raise RuntimeError("Expected JSON array from fission_cli list --json")
 
     return funcs[:limit]
 
@@ -142,12 +142,13 @@ def test_single_function(
     with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp:
         cmd = [
             str(fission_bin),
+            "decomp",
             str(binary),
-            "--decomp",
+            "--addr",
             addr,
             "--benchmark",
             "--ghidra-compat",
-            "-o",
+            "--output",
             tmp.name,
         ]
         env = make_fission_env(fission_bin)
@@ -228,9 +229,9 @@ def main() -> int:
         print("\nSuggested profiling commands:")
         if timed_out:
             first = timed_out[0]
-            print(f"  cargo flamegraph --bin fission_cli -- {binary} --decomp {first['address']}")
+            print(f"  cargo flamegraph --bin fission_cli -- decomp {binary} --addr {first['address']}")
             print(f"  # Or on macOS: xcrun xctrace record --template 'Time Profiler' -- \\")
-            print(f"  #   ./target/release/fission_cli {binary} --decomp {first['address']}")
+            print(f"  #   ./target/release/fission_cli decomp {binary} --addr {first['address']}")
 
     if failed and not all(r in timed_out for r in failed):
         print(f"\nFailed (exit != 0):")

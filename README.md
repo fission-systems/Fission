@@ -76,17 +76,17 @@ Fission maintains comprehensive, role-based documentation:
 
 ### For Researchers & Architects
 - [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
-- [`docs/DOCUMENTATION_HUB.md`](./docs/DOCUMENTATION_HUB.md) — Complete documentation index
 - [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
+- [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Canonical decompilation benchmark workflow
 
 ### For Operators & Users
 - [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
 - [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
 - [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
+- [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide
 
 ### Release & Changelog
-- [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md) — English releases
-- [`docs/changelog/CHANGELOG.ko.md`](./docs/changelog/CHANGELOG.ko.md) — Korean releases
+- [`docs/changelog/Legacy/CHANGELOG.md`](./docs/changelog/Legacy/CHANGELOG.md) — Historical release log
 
 ---
 
@@ -179,17 +179,27 @@ The compiled binary is available at: `target/release/fission_cli`
 
 ```bash
 # Display binary information
-./target/release/fission_cli <binary> --info
+./target/release/fission_cli info <binary>
 
 # Decompile a single function at address
-./target/release/fission_cli <binary> --decomp <address>
+./target/release/fission_cli decomp <binary> --addr <address>
 
-# Interactive REPL mode
-./target/release/fission_cli <binary>
+# List discovered functions
+./target/release/fission_cli list <binary> --json
 
 # Batch decompilation with limits
-./target/release/fission_cli <binary> --decomp-limit 100
+./target/release/fission_cli decomp <binary> --all --limit 100
+
+# Operator-facing inventory
+./target/release/fission_cli inventory function-facts <binary> --json
 ```
+
+Legacy flat invocations still work for one transition period, but canonical
+usage is now subcommand-based.
+
+For the full command model, subcommand ownership, operator inventory workflows,
+JSON guidance, and legacy compatibility rules, see
+[`docs/CLI.md`](./docs/CLI.md).
 
 ### Run Quality Assurance
 
@@ -257,6 +267,15 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py \
   --output-dir benchmark/artifacts/full_benchmark/<run-name> \
   --limit 50
 ```
+
+Canonical benchmark config and artifacts now live under:
+
+- [`benchmark/config/benchmark_corpus/`](./benchmark/config/benchmark_corpus/)
+- [`benchmark/artifacts/full_benchmark/`](./benchmark/artifacts/full_benchmark/)
+- [`benchmark/artifacts/automation/`](./benchmark/artifacts/automation/)
+
+Use `benchmark_compact_summary.json` for first-pass machine review and the
+verbose JSON/Markdown artifacts for deep debugging.
 
 ### Inspect Quality Reports
 

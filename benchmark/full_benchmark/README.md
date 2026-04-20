@@ -1,5 +1,9 @@
 # Batch Benchmark
 
+This is the canonical operator-facing benchmark guide for decompilation quality
+and Ghidra-parity work. Criterion/perf helpers under `scripts/benchmark/` are
+non-canonical and should be treated as microbenchmark tooling only.
+
 Canonical benchmark script root:
 
 - [`benchmark/full_benchmark`](/Users/sjkim1127/Fission/benchmark/full_benchmark)

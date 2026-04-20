@@ -1,4 +1,4 @@
-name: Run Benchmarks
+name: Run Canonical Corpus Benchmark
 
 on:
   workflow_call:
@@ -10,118 +10,107 @@ on:
       baseline_branch:
         required: false
         type: string
-        default: 'main'
+        default: "main"
+
+env:
+  CARGO_TERM_COLOR: always
+  GHIDRA_INSTALL_DIR: vendor/ghidra/ghidra_11.4.2_PUBLIC
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    name: Performance Benchmark
+    name: Canonical Corpus Benchmark
+    timeout-minutes: 120
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 50
+          submodules: recursive
           lfs: true
 
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust
+      - name: Setup Java for Ghidra
+        uses: actions/setup-java@v4
         with:
-          components: rustfmt,clippy
+          distribution: temurin
+          java-version: "21"
 
-      - name: Install Python dependencies
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install benchmark Python dependencies
         run: |
           python3 -m pip install --upgrade pip
+          python3 -m pip install -r benchmark/full_benchmark/requirements-benchmark.txt pyghidra
 
-      - name: Run Benchmarks (Current)
-        id: current
+      - name: Build fission-cli (release)
+        run: cargo build -p fission-cli --locked --release
+
+      - name: Run advisory smoke corpus benchmark
+        id: benchmark
         run: |
-          mkdir -p benchmark/results
-          
-          echo "Running fission-analysis benchmarks..."
-          cargo bench -p fission-analysis --bench benchmark --no-fail-fast -- --output-format bencher 2>&1 | \
-            tee benchmark/results/current_${{ github.sha }}.txt
-          
-          echo "current_result=benchmark/results/current_${{ github.sha }}.txt" >> $GITHUB_OUTPUT
-        env:
-          CARGO_INCREMENTAL: 0
-          RUST_BACKTRACE: 1
-          CARGO_TERM_COLOR: always
+          OUT_DIR="benchmark/artifacts/full_benchmark/ci-heavy-smoke-balanced-latest"
+          python3 benchmark/full_benchmark/full_decomp_benchmark.py \
+            --corpus-manifest benchmark/config/benchmark_corpus/smoke_corpus.json \
+            --fission-bin target/release/fission_cli \
+            --ghidra-dir "$GHIDRA_INSTALL_DIR" \
+            --output-dir "$OUT_DIR"
+          echo "output_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Generate Benchmark Report
-        id: report
+      - name: Publish benchmark summary to job summary
         run: |
-          python3 scripts/benchmark/analyze_benchmark.py \
-            --current benchmark/results/current_${{ github.sha }}.txt \
-            --output benchmark/results/report_${{ github.sha }}.md \
-            --commit ${{ github.sha }} \
-            --history-dir benchmark/history
-          
-          echo "report_file=benchmark/results/report_${{ github.sha }}.md" >> $GITHUB_OUTPUT
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Comment PR with Benchmark Results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const reportPath = '${{ steps.report.outputs.report_file }}';
-            
-            if (!fs.existsSync(reportPath)) {
-              console.log('Report file not found, skipping comment');
-              return;
-            }
-            
-            const report = fs.readFileSync(reportPath, 'utf8');
-            
-            // Check if report has regressions or is notable
-            const hasRegressions = report.includes('🔴') || report.includes('Performance Regressions');
-            
-            if (hasRegressions) {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: report
-              });
-            } else {
-              console.log('No significant regressions detected');
-            }
+          output_dir = Path("${{ steps.benchmark.outputs.output_dir }}")
+          summary = json.loads((output_dir / "benchmark_summary.json").read_text(encoding="utf-8"))
+          corpus = summary.get("corpus_summary", {}) or {}
+          blockers = summary.get("promotion_blockers", []) or []
+          arch = summary.get("arch_summary", {}) or {}
 
-      - name: Store Benchmark Results
+          lines = [
+              "## Canonical Corpus Benchmark",
+              "",
+              f"- benchmark status: {corpus.get('status', 'unknown')}",
+              f"- gate mode: {summary.get('gate_mode', 'unknown')}",
+              f"- release promotion eligibility: {summary.get('release_promotion_allowed', False)}",
+              f"- comparable to baseline: {summary.get('comparable_to_baseline', False)}",
+              f"- baseline artifact: {summary.get('baseline_artifact') or 'none'}",
+              "",
+              "### x86 / x64 Split",
+              "",
+          ]
+          for arch_name in ("x86", "x64"):
+              payload = arch.get(arch_name, {}) or {}
+              lines.append(
+                  f"- {arch_name}: binaries={payload.get('binary_count', 0)}, "
+                  f"weighted_avg_normalized_similarity={payload.get('weighted_avg_normalized_similarity', 0.0):.3f}"
+              )
+          if blockers:
+              lines.extend(["", "### Promotion Blockers", ""])
+              lines.extend([f"- {item}" for item in blockers[:20]])
+
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+          with open(summary_path, "a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Upload benchmark artifacts
         if: inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results-${{ github.sha }}
-          path: benchmark/results/
+          name: canonical-corpus-benchmark-${{ github.sha }}
+          path: ${{ steps.benchmark.outputs.output_dir }}
           retention-days: 30
-
-      - name: Update Performance History (main only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          python3 scripts/benchmark/update_history.py \
-            --result benchmark/results/current_${{ github.sha }}.txt \
-            --commit ${{ github.sha }} \
-            --branch ${{ github.ref }} \
-            --timestamp $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-            --history-dir benchmark/history
-
-      - name: Push Performance History
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          
-          if [ -d benchmark/history ]; then
-            git add benchmark/history/ 2>/dev/null || true
-            if git diff --cached --quiet; then
-              echo "No history changes to commit"
-            else
-              git commit -m "chore: update benchmark history for ${{ github.sha }}"
-              git push origin main || echo "Failed to push, might be a race condition"
-            fi
-          fi
-        continue-on-error: true
-
+          if-no-files-found: warn
