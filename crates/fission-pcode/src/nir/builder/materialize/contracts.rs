@@ -287,6 +287,33 @@ pub(super) struct MissingIncomingPredProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MissingNoPriorDefReason {
+    TrueNoPriorDef,
+    EntryDefaultCandidate,
+    DeadPredNoDef,
+    UndefinedIncoming,
+    StackSlotDefault,
+    RegisterDefault,
+    TempOnlyNoDef,
+    UnknownNoPriorDef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MissingNoPriorDefProof {
+    pub(super) merge_block: u64,
+    pub(super) pred_block: u64,
+    pub(super) pred_reaches_merge: bool,
+    pub(super) pred_is_entry: bool,
+    pub(super) pred_is_dead: bool,
+    pub(super) output_space: u64,
+    pub(super) output_size: u32,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) default_candidate: String,
+    pub(super) reason: MissingNoPriorDefReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -838,6 +865,7 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) missing_merge_binding_relation: BTreeMap<String, usize>,
     pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
+    pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,

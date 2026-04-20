@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` no-prior-def and entry-default incoming provenance tracing
+
+This wave stayed diagnostic-only. It does not invent default incoming values, synthesize merge bindings, or relax representative policy. The goal was to take the remaining `MissingBecauseNoPriorDef` and `MissingBecauseEntryDefault` slices under `MissingIncomingForSomePred` and expose whether they look like entry-default candidates, dead predecessors, temp-only residues, or true no-prior-def cases.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries no-prior-def provenance vocabulary:
+  - `MissingNoPriorDefReason`
+    - `TrueNoPriorDef`
+    - `EntryDefaultCandidate`
+    - `DeadPredNoDef`
+    - `UndefinedIncoming`
+    - `StackSlotDefault`
+    - `RegisterDefault`
+    - `TempOnlyNoDef`
+    - `UnknownNoPriorDef`
+  - `MissingNoPriorDefProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `missing_no_prior_def_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - no-prior-def semantic classification based on predecessor reachability, entry/default status, and output space
+  - `describe_missing_no_prior_def_proof(...)`
+  - conservative default-candidate tagging without changing release behavior
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `missing-no-prior-def-proof output=... merge_block=... pred_block=... pred_reaches_merge=... pred_is_entry=... pred_is_dead=... output_space=... output_size=... consumer_kind=... rhs_kind=... default_candidate=... reason=...`
+  - repartition summary family:
+    - `missing_no_prior_def_reason`
+  - the new proof is only emitted when `missing-incoming-pred-proof` already classifies the predecessor as `MissingBecauseNoPriorDef`, `MissingBecauseEntryDefault`, or `MissingBecauseDeadPred`
+
+Validation:
+
+- `cargo fmt --all`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo test -p fission-pcode missing_no_prior_def_reason_ --lib -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo build -p fission-cli`
+- targeted `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 ... --decomp 0x140008090`
+
 ### `0x140008090` dominating prior-def incoming proof tracing
 
 This wave stayed diagnostic-only. It does not reuse prior defs as merge incoming values, synthesize merge bindings, or relax representative policy. The goal was to take the dominant `MissingBecausePriorDefDominates` slice under `MissingIncomingForSomePred` and expose whether the selected prior definition is actually stable all the way to the merge.

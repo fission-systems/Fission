@@ -136,6 +136,10 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_incoming_pred_kind),
             ),
             (
+                "missing_no_prior_def_reason",
+                Self::format_materialize_owner_histogram(&summary.missing_no_prior_def_reason),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1151,8 +1155,67 @@ impl<'a> PreviewBuilder<'a> {
                     consumer_kind,
                     rhs_kind,
                 );
+            } else if matches!(
+                proof.incoming_kind,
+                MissingIncomingPredKind::MissingBecauseNoPriorDef
+                    | MissingIncomingPredKind::MissingBecauseEntryDefault
+                    | MissingIncomingPredKind::MissingBecauseDeadPred
+            ) {
+                self.trace_missing_no_prior_def_proof(
+                    merge_block,
+                    proof.pred_block,
+                    output,
+                    consumer_kind,
+                    rhs_kind,
+                );
             }
         }
+    }
+
+    pub(super) fn trace_missing_no_prior_def_proof(
+        &self,
+        merge_block: u64,
+        pred_block: u64,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_missing_no_prior_def_proof(
+            merge_block,
+            pred_block,
+            output,
+            consumer_kind,
+            rhs_kind,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.missing_no_prior_def_reason,
+                format!("{:?}", proof.reason),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "missing-no-prior-def-proof output=space:{} off:0x{:x} size:{} merge_block=0x{:x} pred_block=0x{:x} pred_reaches_merge={} pred_is_entry={} pred_is_dead={} output_space={} output_size={} consumer_kind={:?} rhs_kind={:?} default_candidate={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            proof.merge_block,
+            proof.pred_block,
+            proof.pred_reaches_merge,
+            proof.pred_is_entry,
+            proof.pred_is_dead,
+            proof.output_space,
+            proof.output_size,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.default_candidate,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_dominating_prior_def_incoming_proof(

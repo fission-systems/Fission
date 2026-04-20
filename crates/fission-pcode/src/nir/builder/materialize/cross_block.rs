@@ -719,6 +719,44 @@ impl<'a> PreviewBuilder<'a> {
         DominatingPriorDefProofResult::PriorDefStableToMerge
     }
 
+    fn classify_missing_no_prior_def_reason(
+        pred_is_entry: bool,
+        pred_is_dead: bool,
+        output: &Varnode,
+    ) -> (MissingNoPriorDefReason, String) {
+        if pred_is_dead {
+            return (
+                MissingNoPriorDefReason::DeadPredNoDef,
+                "dead-pred".to_string(),
+            );
+        }
+        if pred_is_entry {
+            return (
+                MissingNoPriorDefReason::EntryDefaultCandidate,
+                "entry-default".to_string(),
+            );
+        }
+        if output.space_id == REGISTER_SPACE_ID {
+            return (
+                MissingNoPriorDefReason::RegisterDefault,
+                "register-default".to_string(),
+            );
+        }
+        if output.space_id == UNIQUE_SPACE_ID && !output.is_constant {
+            return (
+                MissingNoPriorDefReason::TempOnlyNoDef,
+                "temp-only".to_string(),
+            );
+        }
+        if output.is_constant {
+            return (
+                MissingNoPriorDefReason::UndefinedIncoming,
+                "const-undef".to_string(),
+            );
+        }
+        (MissingNoPriorDefReason::TrueNoPriorDef, "none".to_string())
+    }
+
     pub(super) fn describe_missing_incoming_pred_proofs(
         &self,
         event_block: u64,
@@ -831,6 +869,51 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind,
             rhs_kind,
             proof_result,
+        })
+    }
+
+    pub(super) fn describe_missing_no_prior_def_proof(
+        &self,
+        merge_block: u64,
+        pred_block: u64,
+        output: &Varnode,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        rhs_kind: DisallowedSingleConsumerRhsKind,
+    ) -> Option<MissingNoPriorDefProof> {
+        let merge_block_idx = self.address_to_index.get(&merge_block).copied()?;
+        let pred_block_idx = self.address_to_index.get(&pred_block).copied()?;
+        let entry_block_addr = self.pcode.blocks.first()?.start_address;
+        let entry_block_idx = self.address_to_index.get(&entry_block_addr).copied()?;
+        let pred_block_ref = self.pcode.blocks.get(pred_block_idx)?;
+        if Self::first_output_redefinition_in_block_from(pred_block_ref, 0, output).is_some() {
+            return None;
+        }
+        if self
+            .best_prior_definition_for_missing_pred(pred_block_idx, output)
+            .is_some()
+        {
+            return None;
+        }
+        let pred_reaches_merge =
+            self.block_can_reach(pred_block_idx, merge_block_idx, merge_block_idx);
+        let pred_is_entry = pred_block == entry_block_addr;
+        let pred_is_dead = self
+            .shortest_forward_distance(entry_block_idx, pred_block_idx)
+            .is_none();
+        let (reason, default_candidate) =
+            Self::classify_missing_no_prior_def_reason(pred_is_entry, pred_is_dead, output);
+        Some(MissingNoPriorDefProof {
+            merge_block,
+            pred_block,
+            pred_reaches_merge,
+            pred_is_entry,
+            pred_is_dead,
+            output_space: output.space_id,
+            output_size: output.size,
+            consumer_kind,
+            rhs_kind,
+            default_candidate,
+            reason,
         })
     }
 
@@ -2754,5 +2837,56 @@ mod tests {
             result,
             DominatingPriorDefProofResult::PriorDefDoesNotDominateMerge
         );
+    }
+
+    #[test]
+    fn missing_no_prior_def_reason_marks_entry_default() {
+        let (reason, default_candidate) = PreviewBuilder::classify_missing_no_prior_def_reason(
+            true,
+            false,
+            &Varnode {
+                space_id: UNIQUE_SPACE_ID,
+                offset: 0x10,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+        );
+        assert_eq!(reason, MissingNoPriorDefReason::EntryDefaultCandidate);
+        assert_eq!(default_candidate, "entry-default");
+    }
+
+    #[test]
+    fn missing_no_prior_def_reason_marks_register_default() {
+        let (reason, default_candidate) = PreviewBuilder::classify_missing_no_prior_def_reason(
+            false,
+            false,
+            &Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x20,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+        );
+        assert_eq!(reason, MissingNoPriorDefReason::RegisterDefault);
+        assert_eq!(default_candidate, "register-default");
+    }
+
+    #[test]
+    fn missing_no_prior_def_reason_marks_temp_only() {
+        let (reason, default_candidate) = PreviewBuilder::classify_missing_no_prior_def_reason(
+            false,
+            false,
+            &Varnode {
+                space_id: UNIQUE_SPACE_ID,
+                offset: 0x44,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+        );
+        assert_eq!(reason, MissingNoPriorDefReason::TempOnlyNoDef);
+        assert_eq!(default_candidate, "temp-only");
     }
 }
