@@ -361,6 +361,194 @@ impl<'a> PreviewBuilder<'a> {
         AddressStableRequiredFamily::AddressExprUnknownBase
     }
 
+    fn classify_stack_address_base_reg(rhs: &HirExpr) -> StackAddressBaseReg {
+        fn classify_var_name(name: &str) -> StackAddressBaseReg {
+            match name {
+                "rsp" => StackAddressBaseReg::Rsp,
+                "rbp" => StackAddressBaseReg::Rbp,
+                "esp" => StackAddressBaseReg::Esp,
+                "ebp" => StackAddressBaseReg::Ebp,
+                _ => StackAddressBaseReg::Unknown,
+            }
+        }
+
+        fn merge_base_regs(
+            lhs: StackAddressBaseReg,
+            rhs: StackAddressBaseReg,
+        ) -> StackAddressBaseReg {
+            if lhs == rhs {
+                return lhs;
+            }
+            if lhs == StackAddressBaseReg::Unknown {
+                return rhs;
+            }
+            if rhs == StackAddressBaseReg::Unknown {
+                return lhs;
+            }
+            StackAddressBaseReg::Unknown
+        }
+
+        match rhs {
+            HirExpr::Var(name) => classify_var_name(name),
+            HirExpr::Const(..) | HirExpr::Call { .. } => StackAddressBaseReg::Unknown,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => {
+                Self::classify_stack_address_base_reg(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => merge_base_regs(
+                Self::classify_stack_address_base_reg(lhs),
+                Self::classify_stack_address_base_reg(rhs),
+            ),
+            HirExpr::PtrOffset { base, .. } => Self::classify_stack_address_base_reg(base),
+            HirExpr::Index { base, index, .. } => merge_base_regs(
+                Self::classify_stack_address_base_reg(base),
+                Self::classify_stack_address_base_reg(index),
+            ),
+        }
+    }
+
+    fn extract_stack_address_offset(rhs: &HirExpr) -> Option<i64> {
+        fn is_stack_base(expr: &HirExpr) -> bool {
+            PreviewBuilder::classify_stack_address_base_reg(expr) != StackAddressBaseReg::Unknown
+        }
+
+        match rhs {
+            HirExpr::Var(_) => is_stack_base(rhs).then_some(0),
+            HirExpr::Const(..)
+            | HirExpr::Unary { .. }
+            | HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. } => None,
+            HirExpr::Cast { expr, .. } => Self::extract_stack_address_offset(expr),
+            HirExpr::PtrOffset { base, offset } => is_stack_base(base).then_some(*offset),
+            HirExpr::Binary { op, lhs, rhs, .. } => match (op, lhs.as_ref(), rhs.as_ref()) {
+                (HirBinaryOp::Add, base, HirExpr::Const(offset, _)) if is_stack_base(base) => {
+                    Some(*offset)
+                }
+                (HirBinaryOp::Add, HirExpr::Const(offset, _), base) if is_stack_base(base) => {
+                    Some(*offset)
+                }
+                (HirBinaryOp::Sub, base, HirExpr::Const(offset, _)) if is_stack_base(base) => {
+                    Some(-*offset)
+                }
+                _ => None,
+            },
+        }
+    }
+
+    fn stack_address_frame_relative_candidate(rhs: &HirExpr) -> bool {
+        fn is_simple_frame_relative_expr(expr: &HirExpr) -> bool {
+            match expr {
+                HirExpr::Var(_) => true,
+                HirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
+                HirExpr::PtrOffset { base, .. } => is_simple_frame_relative_expr(base),
+                HirExpr::Binary { op, lhs, rhs, .. } => {
+                    matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub)
+                        && matches!(rhs.as_ref(), HirExpr::Const(..))
+                        && is_simple_frame_relative_expr(lhs)
+                }
+                _ => false,
+            }
+        }
+
+        Self::classify_address_stable_required_expr_kind(rhs)
+            == AddressStableRequiredExprKind::PureArithmetic
+            && Self::classify_address_stable_required_base_kind(rhs)
+                == AddressStableRequiredBaseKind::StackRelative
+            && is_simple_frame_relative_expr(rhs)
+    }
+
+    fn stack_base_reg_redefined_before_use(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        uses: &[(usize, &PcodeOp)],
+        base_reg: StackAddressBaseReg,
+    ) -> bool {
+        fn output_base_reg(builder: &PreviewBuilder<'_>, output: &Varnode) -> StackAddressBaseReg {
+            let name = match output.space_id {
+                UNIQUE_SPACE_ID => {
+                    crate::arch::x86::unique_x86_register_name(output.offset, output.size)
+                }
+                REGISTER_SPACE_ID if !builder.options.is_64bit => {
+                    crate::nir::support::x86_register_name(output.offset, output.size)
+                }
+                REGISTER_SPACE_ID => Some(crate::nir::support::register_name(
+                    output.offset,
+                    output.size,
+                )),
+                _ => None,
+            };
+            match name {
+                Some("rsp") => StackAddressBaseReg::Rsp,
+                Some("rbp") => StackAddressBaseReg::Rbp,
+                Some("esp") => StackAddressBaseReg::Esp,
+                Some("ebp") => StackAddressBaseReg::Ebp,
+                _ => StackAddressBaseReg::Unknown,
+            }
+        }
+
+        if base_reg == StackAddressBaseReg::Unknown {
+            return false;
+        }
+        let Some(first_use_idx) = uses.first().map(|(idx, _)| *idx) else {
+            return false;
+        };
+        for candidate in block
+            .ops
+            .iter()
+            .skip(op_idx + 1)
+            .take(first_use_idx.saturating_sub(op_idx + 1))
+        {
+            let Some(output) = candidate.output.as_ref() else {
+                continue;
+            };
+            if output_base_reg(self, output) == base_reg {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn classify_stack_address_stability_reason(
+        same_block_use_count: usize,
+        nonlocal_use_exists: bool,
+        crosses_call: bool,
+        crosses_store: bool,
+        rsp_redefined_before_use: bool,
+        frame_relative_candidate: bool,
+        base_reg: StackAddressBaseReg,
+    ) -> StackAddressStabilityReason {
+        if crosses_call {
+            return StackAddressStabilityReason::StackAddrCrossesCall;
+        }
+        if crosses_store {
+            return StackAddressStabilityReason::StackAddrCrossesStore;
+        }
+        if rsp_redefined_before_use {
+            return StackAddressStabilityReason::StackAddrRspMutatedBeforeUse;
+        }
+        if nonlocal_use_exists {
+            return StackAddressStabilityReason::StackAddrEscapes;
+        }
+        if same_block_use_count > 1 {
+            return StackAddressStabilityReason::StackAddrMultipleUse;
+        }
+        if frame_relative_candidate
+            && same_block_use_count == 1
+            && base_reg != StackAddressBaseReg::Unknown
+        {
+            return StackAddressStabilityReason::StackAddrFrameStable;
+        }
+        if same_block_use_count == 1 {
+            return StackAddressStabilityReason::StackAddrSingleUse;
+        }
+        StackAddressStabilityReason::StackAddrUnknown
+    }
+
     pub(super) fn describe_stable_representative_owner_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -542,6 +730,62 @@ impl<'a> PreviewBuilder<'a> {
             address_expr_kind,
             has_intervening_store,
             has_intervening_call,
+            reason,
+        })
+    }
+
+    pub(super) fn describe_stack_address_stability_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<StackAddressStabilityProof> {
+        let proof = self.describe_address_stable_required_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        )?;
+        if proof.reason != AddressStableRequiredFamily::AddressExprStackRelative {
+            return None;
+        }
+        if !matches!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::LoadAddr
+                | DisallowedSingleConsumerConsumerKind::StoreAddr
+        ) {
+            return None;
+        }
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let same_block_use_count = uses.len();
+        let nonlocal_use_exists = self.output_has_nonlocal_use(block, op_idx, output);
+        let base_reg = Self::classify_stack_address_base_reg(rhs);
+        let offset = Self::extract_stack_address_offset(rhs);
+        let frame_relative_candidate = Self::stack_address_frame_relative_candidate(rhs);
+        let rsp_redefined_before_use =
+            self.stack_base_reg_redefined_before_use(block, op_idx, &uses, base_reg);
+        let reason = Self::classify_stack_address_stability_reason(
+            same_block_use_count,
+            nonlocal_use_exists,
+            proof.has_intervening_call,
+            proof.has_intervening_store,
+            rsp_redefined_before_use,
+            frame_relative_candidate,
+            base_reg,
+        );
+        Some(StackAddressStabilityProof {
+            consumer_kind: proof.consumer_kind,
+            downstream_opcode: proof.downstream_opcode,
+            base_reg,
+            offset,
+            same_block_use_count,
+            crosses_call: proof.has_intervening_call,
+            crosses_store: proof.has_intervening_store,
+            rsp_redefined_before_use,
+            frame_relative_candidate,
             reason,
         })
     }
@@ -2770,6 +3014,10 @@ mod tests {
     use super::super::test_support::*;
     use super::*;
 
+    fn test_ptr() -> NirType {
+        NirType::Ptr(Box::new(NirType::Unknown))
+    }
+
     #[test]
     fn low_cost_builder_inline_accepts_single_use_load_chain() {
         let expr = HirExpr::Load {
@@ -4581,5 +4829,198 @@ mod tests {
             PreviewBuilder::classify_address_stable_required_expr_kind(&expr),
             AddressStableRequiredExprKind::PureArithmetic
         );
+    }
+
+    #[test]
+    fn stack_address_stability_reason_prefers_crosses_call() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            false,
+            true,
+            true,
+            true,
+            true,
+            StackAddressBaseReg::Rsp,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrCrossesCall);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_prefers_crosses_store() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            false,
+            false,
+            true,
+            true,
+            true,
+            StackAddressBaseReg::Rsp,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrCrossesStore);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_prefers_rsp_mutated_before_use() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            false,
+            false,
+            false,
+            true,
+            true,
+            StackAddressBaseReg::Rsp,
+        );
+        assert_eq!(
+            reason,
+            StackAddressStabilityReason::StackAddrRspMutatedBeforeUse
+        );
+    }
+
+    #[test]
+    fn stack_address_stability_reason_prefers_escapes_over_single_use() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            true,
+            false,
+            false,
+            false,
+            true,
+            StackAddressBaseReg::Rsp,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrEscapes);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_prefers_multiple_use() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            2,
+            false,
+            false,
+            false,
+            false,
+            true,
+            StackAddressBaseReg::Rsp,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrMultipleUse);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_classifies_frame_stable() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            false,
+            false,
+            false,
+            false,
+            true,
+            StackAddressBaseReg::Rbp,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrFrameStable);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_classifies_single_use() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            1,
+            false,
+            false,
+            false,
+            false,
+            false,
+            StackAddressBaseReg::Unknown,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrSingleUse);
+    }
+
+    #[test]
+    fn stack_address_stability_reason_falls_back_to_unknown() {
+        let reason = PreviewBuilder::classify_stack_address_stability_reason(
+            0,
+            false,
+            false,
+            false,
+            false,
+            false,
+            StackAddressBaseReg::Unknown,
+        );
+        assert_eq!(reason, StackAddressStabilityReason::StackAddrUnknown);
+    }
+
+    #[test]
+    fn stack_address_base_reg_recognizes_rsp() {
+        assert_eq!(
+            PreviewBuilder::classify_stack_address_base_reg(&HirExpr::Var("rsp".to_string())),
+            StackAddressBaseReg::Rsp
+        );
+    }
+
+    #[test]
+    fn stack_address_base_reg_recognizes_rbp() {
+        let expr = HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Cast {
+                ty: test_ptr(),
+                expr: Box::new(HirExpr::Var("rbp".to_string())),
+            }),
+            offset: 0x20,
+        };
+        assert_eq!(
+            PreviewBuilder::classify_stack_address_base_reg(&expr),
+            StackAddressBaseReg::Rbp
+        );
+    }
+
+    #[test]
+    fn stack_address_offset_extracts_add_const() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("rsp".to_string())),
+            rhs: Box::new(HirExpr::Const(0x28, int(64))),
+            ty: test_ptr(),
+        };
+        assert_eq!(
+            PreviewBuilder::extract_stack_address_offset(&expr),
+            Some(0x28)
+        );
+    }
+
+    #[test]
+    fn stack_address_offset_extracts_sub_const() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(HirExpr::Var("rbp".to_string())),
+            rhs: Box::new(HirExpr::Const(0x18, int(64))),
+            ty: test_ptr(),
+        };
+        assert_eq!(
+            PreviewBuilder::extract_stack_address_offset(&expr),
+            Some(-0x18)
+        );
+    }
+
+    #[test]
+    fn stack_address_frame_relative_candidate_accepts_ptr_offset() {
+        let expr = HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Cast {
+                ty: test_ptr(),
+                expr: Box::new(HirExpr::Var("rsp".to_string())),
+            }),
+            offset: 0x30,
+        };
+        assert!(PreviewBuilder::stack_address_frame_relative_candidate(
+            &expr
+        ));
+    }
+
+    #[test]
+    fn stack_address_frame_relative_candidate_rejects_complex_binary() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("rsp".to_string())),
+            rhs: Box::new(HirExpr::Var("xVar31".to_string())),
+            ty: test_ptr(),
+        };
+        assert!(!PreviewBuilder::stack_address_frame_relative_candidate(
+            &expr
+        ));
     }
 }

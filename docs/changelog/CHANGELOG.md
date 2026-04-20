@@ -8969,3 +8969,11 @@ Added `alias-stable-required-proof` trace/histograms on top of `ConsumerRequires
 - `release_path_changed: no`
 
 Added `address-stable-required-proof` trace/histograms on top of the `LoadAddrStableRequired` and `StoreAddrStableRequired` slices to separate stack/global/register-relative address expressions from nested load/call and intervening store/call crossing cases. No representative policy or release-path behavior changed.
+
+# 0x140008090 stack-relative address stability proof
+
+- `wave_type: diagnostic-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `stack-address-stability-proof` trace/histograms on top of the `AddressExprStackRelative` slice to separate single-use, multi-use, escaping, frame-relative, stack-pointer-mutation, and call/store-crossing stack-address families. No representative policy or release-path behavior changed.

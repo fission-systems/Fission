@@ -222,6 +222,20 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "stack_address_stability_reason",
+                Self::format_materialize_owner_histogram(&summary.stack_address_stability_reason),
+            ),
+            (
+                "stack_address_base_reg",
+                Self::format_materialize_owner_histogram(&summary.stack_address_base_reg),
+            ),
+            (
+                "stack_address_frame_relative_candidate",
+                Self::format_materialize_owner_histogram(
+                    &summary.stack_address_frame_relative_candidate,
+                ),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1769,6 +1783,65 @@ impl<'a> PreviewBuilder<'a> {
             proof.has_intervening_call,
             proof.rhs_has_load,
             proof.rhs_has_call,
+            proof.reason,
+        ));
+        if proof.reason == AddressStableRequiredFamily::AddressExprStackRelative {
+            self.trace_stack_address_stability_proof(block, op_idx, terminator_index, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_stack_address_stability_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_stack_address_stability_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stack_address_stability_reason,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stack_address_base_reg,
+                format!("{:?}", proof.base_reg),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.stack_address_frame_relative_candidate,
+                proof.frame_relative_candidate.to_string(),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "stack-address-stability-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} consumer_kind={:?} downstream_opcode={:?} rhs={} base_reg={:?} offset={:?} same_block_use_count={} crosses_call={} crosses_store={} rsp_redefined_before_use={} frame_relative_candidate={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_kind,
+            proof.downstream_opcode,
+            crate::nir::printer::print_expr(rhs),
+            proof.base_reg,
+            proof.offset,
+            proof.same_block_use_count,
+            proof.crosses_call,
+            proof.crosses_store,
+            proof.rsp_redefined_before_use,
+            proof.frame_relative_candidate,
             proof.reason,
         ));
     }

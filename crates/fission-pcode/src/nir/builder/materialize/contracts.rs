@@ -501,6 +501,41 @@ pub(super) struct AddressStableRequiredProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StackAddressStabilityReason {
+    StackAddrSingleUse,
+    StackAddrMultipleUse,
+    StackAddrEscapes,
+    StackAddrFrameStable,
+    StackAddrRspMutatedBeforeUse,
+    StackAddrCrossesCall,
+    StackAddrCrossesStore,
+    StackAddrUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StackAddressBaseReg {
+    Rsp,
+    Rbp,
+    Esp,
+    Ebp,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StackAddressStabilityProof {
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) downstream_opcode: Option<PcodeOpcode>,
+    pub(super) base_reg: StackAddressBaseReg,
+    pub(super) offset: Option<i64>,
+    pub(super) same_block_use_count: usize,
+    pub(super) crosses_call: bool,
+    pub(super) crosses_store: bool,
+    pub(super) rsp_redefined_before_use: bool,
+    pub(super) frame_relative_candidate: bool,
+    pub(super) reason: StackAddressStabilityReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -1068,6 +1103,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) address_stable_required_family: BTreeMap<String, usize>,
     pub(super) address_stable_required_base_kind: BTreeMap<String, usize>,
     pub(super) address_stable_required_expr_kind: BTreeMap<String, usize>,
+    pub(super) stack_address_stability_reason: BTreeMap<String, usize>,
+    pub(super) stack_address_base_reg: BTreeMap<String, usize>,
+    pub(super) stack_address_frame_relative_candidate: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
