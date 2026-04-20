@@ -265,6 +265,37 @@ pub(super) struct JoinMergeMissingProof {
     pub(super) reason: JoinMergeMissingReason,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum MergeBindingCandidateIncomingKind {
+    VarOrConst,
+    Predicate,
+    Arithmetic,
+    LoadLike,
+    CallLike,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MergeBindingCandidateResult {
+    MissingIncomingSemanticsRequired,
+    PhiLikeBindingCandidate,
+    IncomingKindsUnsafe,
+    InsufficientConflictingIncoming,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MergeBindingCandidateProof {
+    pub(super) merge_block: u64,
+    pub(super) predecessor_count: usize,
+    pub(super) missing_incoming_count: usize,
+    pub(super) conflicting_incoming_count: usize,
+    pub(super) incoming_value_kinds: Vec<MergeBindingCandidateIncomingKind>,
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) can_synthesize_phi_like_binding: bool,
+    pub(super) result: MergeBindingCandidateResult,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MissingIncomingPredKind {
     MissingBecauseNoPriorDef,
@@ -915,6 +946,8 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) single_consumer_load_rhs_alias_class: BTreeMap<String, usize>,
     pub(super) missing_merge_binding_relation: BTreeMap<String, usize>,
     pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
+    pub(super) merge_binding_candidate_result: BTreeMap<String, usize>,
+    pub(super) merge_binding_candidate_incoming_kind: BTreeMap<String, usize>,
     pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
     pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
     pub(super) temp_only_representative_reason: BTreeMap<String, usize>,

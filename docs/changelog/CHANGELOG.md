@@ -8926,3 +8926,11 @@ Canonical materialization rejection ownership now splits temp-only representativ
 - `release_path_changed: no`
 
 Added `stable-representative-owner-proof` trace/histograms to correlate `ConsumerRequiresStableRepresentative` sites with representative/root attribution, temp-only lifecycle, real merge ownership, and local predicate/store/alias consumers. No replacement policy or release-path materialization behavior changed.
+
+# 0x140008090 real merge-binding candidate proof
+
+- `wave_type: diagnostic-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `merge-binding-candidate-proof` trace/histograms on top of the real `JoinMergeMissing` bucket to separate missing-incoming semantics from narrow phi-like merge-binding candidates. No merge synthesis or release-path policy changed.

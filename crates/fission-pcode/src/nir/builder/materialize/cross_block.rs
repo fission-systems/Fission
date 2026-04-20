@@ -1,5 +1,6 @@
 use super::contracts::*;
 use super::*;
+use std::collections::BTreeSet;
 
 impl<'a> PreviewBuilder<'a> {
     fn best_prior_definition_for_missing_pred(
@@ -557,11 +558,64 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn classify_merge_binding_candidate_incoming_kind(
+        op: &PcodeOp,
+    ) -> MergeBindingCandidateIncomingKind {
+        match op.opcode {
+            PcodeOpcode::Copy
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::Piece
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt => MergeBindingCandidateIncomingKind::VarOrConst,
+            PcodeOpcode::BoolNegate
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr
+            | PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::IntCarry
+            | PcodeOpcode::IntSCarry
+            | PcodeOpcode::IntSBorrow => MergeBindingCandidateIncomingKind::Predicate,
+            PcodeOpcode::Load => MergeBindingCandidateIncomingKind::LoadLike,
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                MergeBindingCandidateIncomingKind::CallLike
+            }
+            PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::PopCount => MergeBindingCandidateIncomingKind::Arithmetic,
+            _ => MergeBindingCandidateIncomingKind::Unknown,
+        }
+    }
+
     fn collect_join_incoming_values(
         &self,
         merge_block_idx: usize,
         output: &Varnode,
-    ) -> Option<(Vec<u64>, Vec<String>, usize, bool, bool)> {
+    ) -> Option<(
+        Vec<u64>,
+        Vec<String>,
+        usize,
+        bool,
+        bool,
+        usize,
+        BTreeSet<MergeBindingCandidateIncomingKind>,
+    )> {
         let predecessor_idxs = self.predecessors.get(merge_block_idx)?.clone();
         let predecessor_blocks = predecessor_idxs
             .iter()
@@ -569,11 +623,16 @@ impl<'a> PreviewBuilder<'a> {
             .collect::<Vec<_>>();
         let mut incoming_values = Vec::new();
         let mut defined_values = Vec::new();
+        let mut incoming_value_kinds = BTreeSet::new();
 
         for pred_idx in predecessor_idxs {
             let pred_block = self.pcode.blocks.get(pred_idx)?;
             let pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
-                .map(|(_, op)| Self::format_incoming_value(op));
+                .map(|(_, op)| {
+                    incoming_value_kinds
+                        .insert(Self::classify_merge_binding_candidate_incoming_kind(op));
+                    Self::format_incoming_value(op)
+                });
             if let Some(value) = pred_value.clone() {
                 defined_values.push(value);
             }
@@ -594,6 +653,8 @@ impl<'a> PreviewBuilder<'a> {
             incoming_value_count,
             values_same_across_preds,
             has_conflicting_incoming,
+            distinct_values.len(),
+            incoming_value_kinds,
         ))
     }
 
@@ -649,6 +710,8 @@ impl<'a> PreviewBuilder<'a> {
             incoming_value_count,
             values_same_across_preds,
             has_conflicting_incoming,
+            _distinct_incoming_value_count,
+            _incoming_value_kinds,
         ) = self.collect_join_incoming_values(merge_block_idx, output)?;
         let has_missing_incoming = incoming_value_count < predecessor_blocks.len();
         let reason = Self::classify_join_merge_missing_reason(
@@ -670,6 +733,82 @@ impl<'a> PreviewBuilder<'a> {
             consumer_kind: proof.consumer_kind,
             rhs_kind: proof.rhs_kind,
             reason,
+        })
+    }
+
+    fn classify_merge_binding_candidate_result(
+        missing_incoming_count: usize,
+        conflicting_incoming_count: usize,
+        incoming_value_kinds: &BTreeSet<MergeBindingCandidateIncomingKind>,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+    ) -> MergeBindingCandidateResult {
+        if missing_incoming_count > 0 {
+            return MergeBindingCandidateResult::MissingIncomingSemanticsRequired;
+        }
+        if conflicting_incoming_count == 0 {
+            return MergeBindingCandidateResult::InsufficientConflictingIncoming;
+        }
+        let incoming_kinds_safe = incoming_value_kinds.iter().all(|kind| {
+            matches!(
+                kind,
+                MergeBindingCandidateIncomingKind::VarOrConst
+                    | MergeBindingCandidateIncomingKind::Predicate
+                    | MergeBindingCandidateIncomingKind::Arithmetic
+            )
+        });
+        let consumer_safe = matches!(
+            consumer_kind,
+            DisallowedSingleConsumerConsumerKind::OtherData
+                | DisallowedSingleConsumerConsumerKind::Predicate
+                | DisallowedSingleConsumerConsumerKind::StoreValue
+        );
+        if incoming_kinds_safe && consumer_safe {
+            return MergeBindingCandidateResult::PhiLikeBindingCandidate;
+        }
+        MergeBindingCandidateResult::IncomingKindsUnsafe
+    }
+
+    pub(super) fn describe_merge_binding_candidate_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<MergeBindingCandidateProof> {
+        let proof = self.describe_join_merge_missing_proof(block, op_idx, output, rhs)?;
+        let merge_block_idx = self.address_to_index.get(&proof.merge_block).copied()?;
+        let (
+            predecessor_blocks,
+            _incoming_values,
+            incoming_value_count,
+            _values_same_across_preds,
+            _has_conflicting_incoming,
+            distinct_incoming_value_count,
+            incoming_value_kinds,
+        ) = self.collect_join_incoming_values(merge_block_idx, output)?;
+        let missing_incoming_count = predecessor_blocks
+            .len()
+            .saturating_sub(incoming_value_count);
+        let conflicting_incoming_count = distinct_incoming_value_count.saturating_sub(1);
+        let result = Self::classify_merge_binding_candidate_result(
+            missing_incoming_count,
+            conflicting_incoming_count,
+            &incoming_value_kinds,
+            proof.consumer_kind,
+        );
+        Some(MergeBindingCandidateProof {
+            merge_block: proof.merge_block,
+            predecessor_count: predecessor_blocks.len(),
+            missing_incoming_count,
+            conflicting_incoming_count,
+            incoming_value_kinds: incoming_value_kinds.into_iter().collect(),
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            can_synthesize_phi_like_binding: matches!(
+                result,
+                MergeBindingCandidateResult::PhiLikeBindingCandidate
+            ),
+            result,
         })
     }
 
@@ -1960,6 +2099,7 @@ impl<'a> PreviewBuilder<'a> {
 mod tests {
     use super::super::test_support::*;
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn malformed_def_use_window_relation_marks_terminator_missing() {
@@ -2936,6 +3076,36 @@ mod tests {
             DisallowedSingleConsumerConsumerKind::StoreValue,
         );
         assert_eq!(reason, JoinMergeMissingReason::ConflictingIncomingValues);
+    }
+
+    #[test]
+    fn merge_binding_candidate_result_prefers_missing_incoming_semantics() {
+        let kinds = BTreeSet::from([MergeBindingCandidateIncomingKind::VarOrConst]);
+        let result = PreviewBuilder::classify_merge_binding_candidate_result(
+            1,
+            1,
+            &kinds,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(
+            result,
+            MergeBindingCandidateResult::MissingIncomingSemanticsRequired
+        );
+    }
+
+    #[test]
+    fn merge_binding_candidate_result_marks_phi_like_candidate_for_safe_conflicts() {
+        let kinds = BTreeSet::from([
+            MergeBindingCandidateIncomingKind::VarOrConst,
+            MergeBindingCandidateIncomingKind::Arithmetic,
+        ]);
+        let result = PreviewBuilder::classify_merge_binding_candidate_result(
+            0,
+            1,
+            &kinds,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(result, MergeBindingCandidateResult::PhiLikeBindingCandidate);
     }
 
     #[test]
