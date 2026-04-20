@@ -417,6 +417,122 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn collect_join_incoming_values(
+        &self,
+        merge_block_idx: usize,
+        output: &Varnode,
+    ) -> Option<(Vec<u64>, Vec<String>, usize, bool, bool)> {
+        let predecessor_idxs = self.predecessors.get(merge_block_idx)?.clone();
+        let predecessor_blocks = predecessor_idxs
+            .iter()
+            .filter_map(|idx| self.pcode.blocks.get(*idx).map(|block| block.start_address))
+            .collect::<Vec<_>>();
+        let mut incoming_values = Vec::new();
+        let mut defined_values = Vec::new();
+
+        for pred_idx in predecessor_idxs {
+            let pred_block = self.pcode.blocks.get(pred_idx)?;
+            let pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+                .map(|(_, op)| Self::format_incoming_value(op));
+            if let Some(value) = pred_value.clone() {
+                defined_values.push(value);
+            }
+            incoming_values.push(format!(
+                "pred=0x{:x}:{}",
+                pred_block.start_address,
+                pred_value.unwrap_or_else(|| "none".to_string())
+            ));
+        }
+
+        let incoming_value_count = defined_values.len();
+        let distinct_values = defined_values.iter().cloned().collect::<HashSet<_>>();
+        let values_same_across_preds = !defined_values.is_empty() && distinct_values.len() == 1;
+        let has_conflicting_incoming = distinct_values.len() > 1;
+        Some((
+            predecessor_blocks,
+            incoming_values,
+            incoming_value_count,
+            values_same_across_preds,
+            has_conflicting_incoming,
+        ))
+    }
+
+    fn classify_join_merge_missing_reason(
+        values_same_across_preds: bool,
+        has_missing_incoming: bool,
+        has_conflicting_incoming: bool,
+        incoming_value_count: usize,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+    ) -> JoinMergeMissingReason {
+        if values_same_across_preds && !has_missing_incoming {
+            return JoinMergeMissingReason::AllIncomingSame;
+        }
+        if has_missing_incoming {
+            return JoinMergeMissingReason::MissingIncomingForSomePred;
+        }
+        if has_conflicting_incoming {
+            return JoinMergeMissingReason::ConflictingIncomingValues;
+        }
+        if incoming_value_count == 1 {
+            return JoinMergeMissingReason::SinglePredValueOnly;
+        }
+        match consumer_kind {
+            DisallowedSingleConsumerConsumerKind::StoreValue => {
+                JoinMergeMissingReason::StoreValueMerge
+            }
+            DisallowedSingleConsumerConsumerKind::OtherData => {
+                JoinMergeMissingReason::OtherDataMerge
+            }
+            DisallowedSingleConsumerConsumerKind::Predicate
+            | DisallowedSingleConsumerConsumerKind::BranchCondition => {
+                JoinMergeMissingReason::PredicateMerge
+            }
+            _ => JoinMergeMissingReason::UnknownJoinMerge,
+        }
+    }
+
+    pub(super) fn describe_join_merge_missing_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<JoinMergeMissingProof> {
+        let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        if proof.relation != MissingMergeBindingRelation::JoinMergeMissing {
+            return None;
+        }
+        let merge_block_idx = self.address_to_index.get(&proof.merge_block).copied()?;
+        let (
+            predecessor_blocks,
+            incoming_values,
+            incoming_value_count,
+            values_same_across_preds,
+            has_conflicting_incoming,
+        ) = self.collect_join_incoming_values(merge_block_idx, output)?;
+        let has_missing_incoming = incoming_value_count < predecessor_blocks.len();
+        let reason = Self::classify_join_merge_missing_reason(
+            values_same_across_preds,
+            has_missing_incoming,
+            has_conflicting_incoming,
+            incoming_value_count,
+            proof.consumer_kind,
+        );
+        Some(JoinMergeMissingProof {
+            event_block: block.start_address,
+            merge_block: proof.merge_block,
+            predecessor_blocks,
+            incoming_value_count,
+            incoming_values,
+            values_same_across_preds,
+            has_missing_incoming,
+            has_conflicting_incoming,
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            reason,
+        })
+    }
+
     pub(super) fn describe_unknown_missing_merge_attribution(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -2250,5 +2366,41 @@ mod tests {
             DisallowedSingleConsumerConsumerKind::OtherData,
         );
         assert_eq!(reason, AmbiguousJoinPredReason::ConflictingIncomingValues);
+    }
+
+    #[test]
+    fn join_merge_missing_reason_prefers_all_incoming_same() {
+        let reason = PreviewBuilder::classify_join_merge_missing_reason(
+            true,
+            false,
+            false,
+            2,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(reason, JoinMergeMissingReason::AllIncomingSame);
+    }
+
+    #[test]
+    fn join_merge_missing_reason_prefers_missing_incoming() {
+        let reason = PreviewBuilder::classify_join_merge_missing_reason(
+            false,
+            true,
+            true,
+            1,
+            DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(reason, JoinMergeMissingReason::MissingIncomingForSomePred);
+    }
+
+    #[test]
+    fn join_merge_missing_reason_prefers_conflicting_incoming() {
+        let reason = PreviewBuilder::classify_join_merge_missing_reason(
+            false,
+            false,
+            true,
+            2,
+            DisallowedSingleConsumerConsumerKind::StoreValue,
+        );
+        assert_eq!(reason, JoinMergeMissingReason::ConflictingIncomingValues);
     }
 }

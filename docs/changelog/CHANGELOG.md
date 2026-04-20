@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-20 (latest)
 
+### `0x140008090` join-merge incoming-value proof tracing
+
+This wave stayed diagnostic-only. It does not synthesize merge bindings, relax representative requirements, or change the default release path. The goal was to split the real `JoinMergeMissing=265` bucket by predecessor incoming-value shape, separately from synthetic-root fallback attribution.
+
+- [`contracts.rs`](../../crates/fission-pcode/src/nir/builder/materialize/contracts.rs) now carries join-merge proof vocabulary:
+  - `JoinMergeMissingReason`
+    - `AllIncomingSame`
+    - `MissingIncomingForSomePred`
+    - `ConflictingIncomingValues`
+    - `SinglePredValueOnly`
+    - `StoreValueMerge`
+    - `OtherDataMerge`
+    - `PredicateMerge`
+    - `UnknownJoinMerge`
+  - `JoinMergeMissingProof`
+  - `MaterializeOwnerRepartition` now also tracks:
+    - `join_merge_missing_reason`
+- [`cross_block.rs`](../../crates/fission-pcode/src/nir/builder/materialize/cross_block.rs) now exposes:
+  - predecessor-local incoming value collection for actual join-merge candidates
+  - `describe_join_merge_missing_proof(...)`
+  - reason classification based on same-incoming, missing incoming, conflicting incoming, and consumer role
+- [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
+  - `join-merge-missing-proof output=... block=... op_seq=... event_block=... merge_block=... predecessor_count=... predecessor_blocks=[...] incoming_value_count=... incoming_values=[...] values_same_across_preds=... has_missing_incoming=... has_conflicting_incoming=... consumer_kind=... rhs_kind=... reason=...`
+  - repartition summary family:
+    - `join_merge_missing_reason`
+  - the new proof is only emitted for missing-merge sites already classified as `JoinMergeMissing`
+
+Validation:
+
+- `cargo fmt --all`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo test -p fission-pcode join_merge_missing_reason_ --lib -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-codex-validate cargo build -p fission-cli`
+- targeted `FISSION_PREVIEW_DIAG=1 FISSION_PREVIEW_DIAG_ADDR=0x140008090 ... --decomp 0x140008090`
+
 ### `0x140008090` ambiguous forward-join predecessor proof tracing
 
 This wave stayed diagnostic-only. It does not synthesize merge bindings, alter representative reuse, or change the default release path. The goal was to take the `ForwardJoinExistsButNotSelected -> JoinHasMultipleAmbiguousPreds=175` slice inside synthetic-root fallback attribution and expose predecessor/incoming-value shape before any merge-selection or binding policy is considered.

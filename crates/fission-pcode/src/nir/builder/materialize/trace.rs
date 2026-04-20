@@ -128,6 +128,10 @@ impl<'a> PreviewBuilder<'a> {
                 Self::format_materialize_owner_histogram(&summary.missing_merge_binding_relation),
             ),
             (
+                "join_merge_missing_reason",
+                Self::format_materialize_owner_histogram(&summary.join_merge_missing_reason),
+            ),
+            (
                 "unknown_missing_merge_attribution_reason",
                 Self::format_materialize_owner_histogram(
                     &summary.unknown_missing_merge_attribution_reason,
@@ -779,9 +783,61 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_kind,
             proof.relation,
         ));
+        if proof.relation == MissingMergeBindingRelation::JoinMergeMissing {
+            self.trace_join_merge_missing_proof(block, op_idx, output, rhs);
+        }
         if proof.relation == MissingMergeBindingRelation::UnknownMissingMerge {
             self.trace_unknown_missing_merge_attribution(block, op_idx, output, rhs);
         }
+    }
+
+    pub(super) fn trace_join_merge_missing_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_join_merge_missing_proof(block, op_idx, output, rhs) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.join_merge_missing_reason,
+                format!("{:?}", proof.reason),
+            );
+        }
+        let predecessor_blocks = proof
+            .predecessor_blocks
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let incoming_values = proof.incoming_values.join(" | ");
+        self.emit_ready_trace(format!(
+            "join-merge-missing-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} event_block=0x{:x} merge_block=0x{:x} predecessor_count={} predecessor_blocks=[{}] incoming_value_count={} incoming_values=[{}] values_same_across_preds={} has_missing_incoming={} has_conflicting_incoming={} consumer_kind={:?} rhs_kind={:?} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.event_block,
+            proof.merge_block,
+            proof.predecessor_blocks.len(),
+            predecessor_blocks,
+            proof.incoming_value_count,
+            incoming_values,
+            proof.values_same_across_preds,
+            proof.has_missing_incoming,
+            proof.has_conflicting_incoming,
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.reason,
+        ));
     }
 
     pub(super) fn trace_unknown_missing_merge_attribution(
