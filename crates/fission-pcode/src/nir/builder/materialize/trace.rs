@@ -206,6 +206,22 @@ impl<'a> PreviewBuilder<'a> {
                 ),
             ),
             (
+                "address_stable_required_family",
+                Self::format_materialize_owner_histogram(&summary.address_stable_required_family),
+            ),
+            (
+                "address_stable_required_base_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.address_stable_required_base_kind,
+                ),
+            ),
+            (
+                "address_stable_required_expr_kind",
+                Self::format_materialize_owner_histogram(
+                    &summary.address_stable_required_expr_kind,
+                ),
+            ),
+            (
                 "dominating_prior_def_proof_result",
                 Self::format_materialize_owner_histogram(
                     &summary.dominating_prior_def_proof_result,
@@ -1689,6 +1705,70 @@ impl<'a> PreviewBuilder<'a> {
             proof.rhs_has_load,
             proof.rhs_has_call,
             proof.requires_preserved_expr,
+            proof.reason,
+        ));
+        if matches!(
+            proof.reason,
+            AliasStableRequiredFamily::LoadAddrStableRequired
+                | AliasStableRequiredFamily::StoreAddrStableRequired
+        ) {
+            self.trace_address_stable_required_proof(block, op_idx, terminator_index, output, rhs);
+        }
+    }
+
+    pub(super) fn trace_address_stable_required_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let Some(proof) = self.describe_address_stable_required_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        ) else {
+            return;
+        };
+        {
+            let mut summary = self.materialize_owner_repartition.borrow_mut();
+            Self::bump_materialize_owner_histogram(
+                &mut summary.address_stable_required_family,
+                format!("{:?}", proof.reason),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.address_stable_required_base_kind,
+                format!("{:?}", proof.address_base_kind),
+            );
+            Self::bump_materialize_owner_histogram(
+                &mut summary.address_stable_required_expr_kind,
+                format!("{:?}", proof.address_expr_kind),
+            );
+        }
+        self.emit_ready_trace(format!(
+            "address-stable-required-proof output=space:{} off:0x{:x} size:{} block=0x{:x} op_seq={} consumer_kind={:?} rhs_kind={:?} downstream_opcode={:?} rhs={} address_base_kind={:?} address_expr_kind={:?} same_block_use_count={} has_intervening_store={} has_intervening_call={} rhs_has_load={} rhs_has_call={} reason={:?}",
+            output.space_id,
+            output.offset,
+            output.size,
+            block.start_address,
+            block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
+            proof.consumer_kind,
+            proof.rhs_kind,
+            proof.downstream_opcode,
+            crate::nir::printer::print_expr(rhs),
+            proof.address_base_kind,
+            proof.address_expr_kind,
+            proof.same_block_use_count,
+            proof.has_intervening_store,
+            proof.has_intervening_call,
+            proof.rhs_has_load,
+            proof.rhs_has_call,
             proof.reason,
         ));
     }

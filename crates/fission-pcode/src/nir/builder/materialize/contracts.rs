@@ -457,6 +457,50 @@ pub(super) struct AliasStableRequiredProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AddressStableRequiredFamily {
+    AddressExprHasLoad,
+    AddressExprHasCall,
+    AddressExprPureArithmetic,
+    AddressExprStackRelative,
+    AddressExprGlobalRelative,
+    AddressExprRegisterBase,
+    AddressExprUnknownBase,
+    AddressExprCrossesStore,
+    AddressExprCrossesCall,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AddressStableRequiredBaseKind {
+    StackRelative,
+    GlobalRelative,
+    RegisterBase,
+    UnknownBase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AddressStableRequiredExprKind {
+    PureArithmetic,
+    HasLoad,
+    HasCall,
+    UnknownAddressExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AddressStableRequiredProof {
+    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(super) downstream_opcode: Option<PcodeOpcode>,
+    pub(super) same_block_use_count: usize,
+    pub(super) rhs_has_load: bool,
+    pub(super) rhs_has_call: bool,
+    pub(super) address_base_kind: AddressStableRequiredBaseKind,
+    pub(super) address_expr_kind: AddressStableRequiredExprKind,
+    pub(super) has_intervening_store: bool,
+    pub(super) has_intervening_call: bool,
+    pub(super) reason: AddressStableRequiredFamily,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
@@ -1021,6 +1065,9 @@ pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
     pub(super) alias_stable_required_family: BTreeMap<String, usize>,
     pub(super) alias_stable_required_consumer_kind: BTreeMap<String, usize>,
     pub(super) alias_stable_required_downstream_opcode: BTreeMap<String, usize>,
+    pub(super) address_stable_required_family: BTreeMap<String, usize>,
+    pub(super) address_stable_required_base_kind: BTreeMap<String, usize>,
+    pub(super) address_stable_required_expr_kind: BTreeMap<String, usize>,
     pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
     pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,

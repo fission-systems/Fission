@@ -8961,3 +8961,11 @@ Added `missing-incoming-semantics-proof` trace/histograms on top of the real `Mi
 - `release_path_changed: no`
 
 Added `alias-stable-required-proof` trace/histograms on top of `ConsumerRequiresStableRepresentative -> AliasStableRequired` to split load-address, store-address, branch-indirect selector, other-data loadlike/copy, and arithmetic local stability families. No representative policy or release-path behavior changed.
+
+# 0x140008090 address stability proof
+
+- `wave_type: diagnostic-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+
+Added `address-stable-required-proof` trace/histograms on top of the `LoadAddrStableRequired` and `StoreAddrStableRequired` slices to separate stack/global/register-relative address expressions from nested load/call and intervening store/call crossing cases. No representative policy or release-path behavior changed.

@@ -166,6 +166,201 @@ impl<'a> PreviewBuilder<'a> {
         AliasStableRequiredFamily::UnknownAliasStable
     }
 
+    fn classify_address_stable_required_base_kind(rhs: &HirExpr) -> AddressStableRequiredBaseKind {
+        fn classify_var_name(name: &str) -> AddressStableRequiredBaseKind {
+            if name.starts_with("stack_")
+                || name.starts_with("local_")
+                || name.starts_with("home_")
+                || name.starts_with("arg_out_")
+                || name.starts_with("ret_scaffold_")
+                || matches!(name, "rsp" | "rbp" | "esp" | "ebp")
+            {
+                AddressStableRequiredBaseKind::StackRelative
+            } else if name.starts_with("DAT_") {
+                AddressStableRequiredBaseKind::GlobalRelative
+            } else if name.starts_with("param_")
+                || matches!(
+                    name,
+                    "rax"
+                        | "rbx"
+                        | "rcx"
+                        | "rdx"
+                        | "rsi"
+                        | "rdi"
+                        | "r8"
+                        | "r9"
+                        | "r10"
+                        | "r11"
+                        | "r12"
+                        | "r13"
+                        | "r14"
+                        | "r15"
+                        | "eax"
+                        | "ebx"
+                        | "ecx"
+                        | "edx"
+                        | "esi"
+                        | "edi"
+                        | "esp"
+                        | "ebp"
+                )
+                || name.starts_with("tmp_")
+                || name.starts_with("uVar")
+                || name.starts_with("xVar")
+                || name.starts_with("iVar")
+                || name.starts_with("bVar")
+                || name.starts_with("fVar")
+                || name.starts_with("auVar")
+                || name.starts_with("puVar")
+                || name.starts_with("pp")
+            {
+                AddressStableRequiredBaseKind::RegisterBase
+            } else {
+                AddressStableRequiredBaseKind::UnknownBase
+            }
+        }
+
+        fn merge_base_kinds(
+            lhs: AddressStableRequiredBaseKind,
+            rhs: AddressStableRequiredBaseKind,
+        ) -> AddressStableRequiredBaseKind {
+            if lhs == rhs {
+                return lhs;
+            }
+            if lhs == AddressStableRequiredBaseKind::UnknownBase {
+                return rhs;
+            }
+            if rhs == AddressStableRequiredBaseKind::UnknownBase {
+                return lhs;
+            }
+            AddressStableRequiredBaseKind::UnknownBase
+        }
+
+        match rhs {
+            HirExpr::Var(name) => classify_var_name(name),
+            HirExpr::Const(..) => AddressStableRequiredBaseKind::UnknownBase,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => {
+                Self::classify_address_stable_required_base_kind(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => merge_base_kinds(
+                Self::classify_address_stable_required_base_kind(lhs),
+                Self::classify_address_stable_required_base_kind(rhs),
+            ),
+            HirExpr::Call { .. } => AddressStableRequiredBaseKind::UnknownBase,
+            HirExpr::PtrOffset { base, .. } => {
+                Self::classify_address_stable_required_base_kind(base)
+            }
+            HirExpr::Index { base, index, .. } => merge_base_kinds(
+                Self::classify_address_stable_required_base_kind(base),
+                Self::classify_address_stable_required_base_kind(index),
+            ),
+        }
+    }
+
+    fn classify_address_stable_required_expr_kind(rhs: &HirExpr) -> AddressStableRequiredExprKind {
+        fn merge_expr_kinds(
+            lhs: AddressStableRequiredExprKind,
+            rhs: AddressStableRequiredExprKind,
+        ) -> AddressStableRequiredExprKind {
+            use AddressStableRequiredExprKind::*;
+            if lhs == HasCall || rhs == HasCall {
+                return HasCall;
+            }
+            if lhs == HasLoad || rhs == HasLoad {
+                return HasLoad;
+            }
+            if lhs == PureArithmetic && rhs == PureArithmetic {
+                return PureArithmetic;
+            }
+            UnknownAddressExpr
+        }
+
+        match rhs {
+            HirExpr::Var(_) | HirExpr::Const(..) => AddressStableRequiredExprKind::PureArithmetic,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::classify_address_stable_required_expr_kind(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => merge_expr_kinds(
+                Self::classify_address_stable_required_expr_kind(lhs),
+                Self::classify_address_stable_required_expr_kind(rhs),
+            ),
+            HirExpr::Call { .. } => AddressStableRequiredExprKind::HasCall,
+            HirExpr::Load { .. } | HirExpr::AggregateCopy { .. } => {
+                AddressStableRequiredExprKind::HasLoad
+            }
+            HirExpr::PtrOffset { base, .. } => {
+                Self::classify_address_stable_required_expr_kind(base)
+            }
+            HirExpr::Index { base, index, .. } => merge_expr_kinds(
+                Self::classify_address_stable_required_expr_kind(base),
+                Self::classify_address_stable_required_expr_kind(index),
+            ),
+        }
+    }
+
+    fn scan_intervening_address_stability_hazards(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        uses: &[(usize, &PcodeOp)],
+    ) -> (bool, bool) {
+        let Some(first_use_idx) = uses.first().map(|(idx, _)| *idx) else {
+            return (false, false);
+        };
+        let mut has_intervening_store = false;
+        let mut has_intervening_call = false;
+        for candidate in block
+            .ops
+            .iter()
+            .skip(op_idx + 1)
+            .take(first_use_idx.saturating_sub(op_idx + 1))
+        {
+            match candidate.opcode {
+                PcodeOpcode::Store => has_intervening_store = true,
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
+                    has_intervening_call = true;
+                }
+                _ => {}
+            }
+        }
+        (has_intervening_store, has_intervening_call)
+    }
+
+    fn classify_address_stable_required_family(
+        address_base_kind: AddressStableRequiredBaseKind,
+        address_expr_kind: AddressStableRequiredExprKind,
+        has_intervening_store: bool,
+        has_intervening_call: bool,
+    ) -> AddressStableRequiredFamily {
+        if address_expr_kind == AddressStableRequiredExprKind::HasLoad {
+            return AddressStableRequiredFamily::AddressExprHasLoad;
+        }
+        if address_expr_kind == AddressStableRequiredExprKind::HasCall {
+            return AddressStableRequiredFamily::AddressExprHasCall;
+        }
+        if has_intervening_call {
+            return AddressStableRequiredFamily::AddressExprCrossesCall;
+        }
+        if has_intervening_store {
+            return AddressStableRequiredFamily::AddressExprCrossesStore;
+        }
+        if address_base_kind == AddressStableRequiredBaseKind::StackRelative {
+            return AddressStableRequiredFamily::AddressExprStackRelative;
+        }
+        if address_base_kind == AddressStableRequiredBaseKind::GlobalRelative {
+            return AddressStableRequiredFamily::AddressExprGlobalRelative;
+        }
+        if address_base_kind == AddressStableRequiredBaseKind::RegisterBase {
+            return AddressStableRequiredFamily::AddressExprRegisterBase;
+        }
+        if address_expr_kind == AddressStableRequiredExprKind::PureArithmetic {
+            return AddressStableRequiredFamily::AddressExprPureArithmetic;
+        }
+        AddressStableRequiredFamily::AddressExprUnknownBase
+    }
+
     pub(super) fn describe_stable_representative_owner_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -299,6 +494,54 @@ impl<'a> PreviewBuilder<'a> {
             rhs_has_load,
             rhs_has_call,
             requires_preserved_expr,
+            reason,
+        })
+    }
+
+    pub(super) fn describe_address_stable_required_proof(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<AddressStableRequiredProof> {
+        let proof = self.describe_alias_stable_required_proof(
+            block,
+            op_idx,
+            terminator_index,
+            output,
+            rhs,
+        )?;
+        if !matches!(
+            proof.reason,
+            AliasStableRequiredFamily::LoadAddrStableRequired
+                | AliasStableRequiredFamily::StoreAddrStableRequired
+        ) {
+            return None;
+        }
+        let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
+        let (has_intervening_store, has_intervening_call) =
+            Self::scan_intervening_address_stability_hazards(block, op_idx, &uses);
+        let address_base_kind = Self::classify_address_stable_required_base_kind(rhs);
+        let address_expr_kind = Self::classify_address_stable_required_expr_kind(rhs);
+        let reason = Self::classify_address_stable_required_family(
+            address_base_kind,
+            address_expr_kind,
+            has_intervening_store,
+            has_intervening_call,
+        );
+        Some(AddressStableRequiredProof {
+            consumer_kind: proof.consumer_kind,
+            rhs_kind: proof.rhs_kind,
+            downstream_opcode: proof.downstream_opcode,
+            same_block_use_count: proof.same_block_use_count,
+            rhs_has_load: proof.rhs_has_load,
+            rhs_has_call: proof.rhs_has_call,
+            address_base_kind,
+            address_expr_kind,
+            has_intervening_store,
+            has_intervening_call,
             reason,
         })
     }
@@ -4168,5 +4411,175 @@ mod tests {
             None,
         );
         assert_eq!(family, AliasStableRequiredFamily::UnknownAliasStable);
+    }
+
+    #[test]
+    fn address_stable_required_family_prefers_expr_has_load() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::StackRelative,
+            AddressStableRequiredExprKind::HasLoad,
+            false,
+            false,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprHasLoad);
+    }
+
+    #[test]
+    fn address_stable_required_family_prefers_expr_has_call() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::GlobalRelative,
+            AddressStableRequiredExprKind::HasCall,
+            false,
+            false,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprHasCall);
+    }
+
+    #[test]
+    fn address_stable_required_family_prefers_crosses_call_over_base_kind() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::StackRelative,
+            AddressStableRequiredExprKind::PureArithmetic,
+            false,
+            true,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprCrossesCall);
+    }
+
+    #[test]
+    fn address_stable_required_family_prefers_crosses_store_over_base_kind() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::GlobalRelative,
+            AddressStableRequiredExprKind::PureArithmetic,
+            true,
+            false,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprCrossesStore);
+    }
+
+    #[test]
+    fn address_stable_required_family_classifies_stack_relative() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::StackRelative,
+            AddressStableRequiredExprKind::PureArithmetic,
+            false,
+            false,
+        );
+        assert_eq!(
+            family,
+            AddressStableRequiredFamily::AddressExprStackRelative
+        );
+    }
+
+    #[test]
+    fn address_stable_required_family_classifies_global_relative() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::GlobalRelative,
+            AddressStableRequiredExprKind::PureArithmetic,
+            false,
+            false,
+        );
+        assert_eq!(
+            family,
+            AddressStableRequiredFamily::AddressExprGlobalRelative
+        );
+    }
+
+    #[test]
+    fn address_stable_required_family_classifies_register_base() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::RegisterBase,
+            AddressStableRequiredExprKind::PureArithmetic,
+            false,
+            false,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprRegisterBase);
+    }
+
+    #[test]
+    fn address_stable_required_family_falls_back_to_unknown_base() {
+        let family = PreviewBuilder::classify_address_stable_required_family(
+            AddressStableRequiredBaseKind::UnknownBase,
+            AddressStableRequiredExprKind::UnknownAddressExpr,
+            false,
+            false,
+        );
+        assert_eq!(family, AddressStableRequiredFamily::AddressExprUnknownBase);
+    }
+
+    #[test]
+    fn address_stable_required_base_kind_recognizes_stack_like_names() {
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+                "home_20".to_string()
+            )),
+            AddressStableRequiredBaseKind::StackRelative
+        );
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+                "rsp".to_string()
+            )),
+            AddressStableRequiredBaseKind::StackRelative
+        );
+    }
+
+    #[test]
+    fn address_stable_required_base_kind_recognizes_dat_global() {
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+                "DAT_140008000".to_string()
+            )),
+            AddressStableRequiredBaseKind::GlobalRelative
+        );
+    }
+
+    #[test]
+    fn address_stable_required_expr_kind_recognizes_nested_load() {
+        let expr = HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("param_1".to_string())),
+                ty: NirType::Unknown,
+            }),
+            offset: 8,
+        };
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_expr_kind(&expr),
+            AddressStableRequiredExprKind::HasLoad
+        );
+    }
+
+    #[test]
+    fn address_stable_required_expr_kind_recognizes_nested_call() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Call {
+                target: "sub_140001000".to_string(),
+                args: vec![HirExpr::Var("param_1".to_string())],
+                ty: NirType::Unknown,
+            }),
+            rhs: Box::new(HirExpr::Const(4, NirType::Unknown)),
+            ty: NirType::Unknown,
+        };
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_expr_kind(&expr),
+            AddressStableRequiredExprKind::HasCall
+        );
+    }
+
+    #[test]
+    fn address_stable_required_expr_kind_recognizes_pure_ptr_arithmetic() {
+        let expr = HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("local_10".to_string())),
+                rhs: Box::new(HirExpr::Const(8, NirType::Unknown)),
+                ty: NirType::Unknown,
+            }),
+            offset: 4,
+        };
+        assert_eq!(
+            PreviewBuilder::classify_address_stable_required_expr_kind(&expr),
+            AddressStableRequiredExprKind::PureArithmetic
+        );
     }
 }
