@@ -99,6 +99,7 @@ artifacts/batch_benchmark_scripts/grand_finale_support/*
 !artifacts/batch_benchmark_scripts/grand_finale_support/metrics.py
 !artifacts/batch_benchmark_scripts/grand_finale_support/resource_monitor.py
 !artifacts/batch_benchmark_scripts/grand_finale_support/runners.py
+!artifacts/batch_benchmark_scripts/grand_finale_support/test_corpus_benchmark.py
 !artifacts/batch_benchmark_scripts/grand_finale_support/test_llm_advisory.py
 
 # User-specific utility scripts and tools
@@ -117,3 +118,8 @@ artifacts/batch_benchmark_scripts/grand_finale_support/*
 /.sisyphus/
 /.venv-bench/
 /config/
+!/config/
+!/config/benchmark_corpus/
+!/config/benchmark_corpus/parity_corpus.json
+!/config/benchmark_corpus/release_corpus.json
+!/config/benchmark_corpus/smoke_corpus.json

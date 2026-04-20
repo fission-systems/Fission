@@ -1,0 +1,58 @@
+{
+  "name": "fission-smoke-generalization",
+  "suite_tier": "smoke",
+  "gate_mode": "advisory",
+  "dynamic_watchlist_limit": 3,
+  "notes": "Fast multi-binary validation suite for local parity and regression checks.",
+  "entries": [
+    {
+      "id": "putty",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/putty.exe",
+      "ghidra_project_key": "putty",
+      "tags": ["windows", "pe", "x64", "gui", "large", "dispatcher-heavy"],
+      "seed_limit": 30,
+      "role": "primary_canary",
+      "row_fidelity_targets": [
+        {"address": "0x140001160", "role": "primary"},
+        {"address": "0x140008900", "role": "secondary"},
+        {"address": "0x140007da0", "role": "canary"},
+        {"address": "0x140008090", "role": "canary"},
+        {"address": "0x140006ef0", "role": "canary"},
+        {"address": "0x140006c20", "role": "canary"},
+        {"address": "0x140006fe0", "role": "canary"}
+      ]
+    },
+    {
+      "id": "cmake",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/cmake.exe",
+      "ghidra_project_key": "cmake",
+      "tags": ["windows", "pe", "x64", "console", "real-world", "cli-style-control-flow"],
+      "seed_limit": 20,
+      "role": "release_candidate"
+    },
+    {
+      "id": "sqlite3-linux",
+      "binary_path": "/Users/sjkim1127/Fission/samples/other/sqlite/sqlite-tools-linux-x64-3510300/sqlite3",
+      "ghidra_project_key": "sqlite3_linux",
+      "tags": ["linux", "elf", "x64", "pie", "stripped", "real-world"],
+      "seed_limit": 20,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "structs-linux-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/linux/x64/test_structs_classes_x64_O2",
+      "ghidra_project_key": "test_structs_classes_x64_o2",
+      "tags": ["linux", "elf", "x64", "struct-heavy", "debug-info"],
+      "seed_limit": 20,
+      "role": "release_candidate"
+    },
+    {
+      "id": "controlflow-macos-x64-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/macos/x64/test_control_flow_x64_O2",
+      "ghidra_project_key": "test_control_flow_macos_x64_o2",
+      "tags": ["macos", "macho", "x64", "small", "cfg-heavy"],
+      "seed_limit": 20,
+      "role": "smoke_sentinel"
+    }
+  ]
+}

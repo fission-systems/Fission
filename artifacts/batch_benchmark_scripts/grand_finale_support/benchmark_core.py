@@ -128,6 +128,9 @@ CORPUS_ROLE_ALIASES: dict[str, str] = {
 }
 CORPUS_RELEASE_WEIGHT_ROLES = frozenset({"primary_canary", "release_candidate"})
 CORPUS_REPORT_ONLY_ROLES = frozenset({"smoke_sentinel", "diagnostic_only"})
+CORPUS_SUITE_TIERS = frozenset({"smoke", "release", "parity"})
+CORPUS_GATE_MODES = frozenset({"advisory", "blocking"})
+DEFAULT_DYNAMIC_WATCHLIST_LIMIT = 5
 
 
 def select_row_fidelity_targets(role_filter: str) -> list[tuple[str, str]]:
@@ -405,12 +408,45 @@ def _normalize_corpus_role(value: Any) -> str:
     return "release_candidate"
 
 
+def _normalize_corpus_suite_tier(value: Any) -> str:
+    tier = str(value or "release").strip().lower().replace(" ", "_")
+    return tier if tier in CORPUS_SUITE_TIERS else "release"
+
+
+def _normalize_corpus_gate_mode(value: Any) -> str:
+    mode = str(value or "advisory").strip().lower().replace(" ", "_")
+    return mode if mode in CORPUS_GATE_MODES else "advisory"
+
+
 def load_corpus_manifest(manifest_path: Path) -> dict[str, Any]:
     resolved = manifest_path.expanduser().resolve()
     if not resolved.is_file():
         raise FileNotFoundError(f"corpus manifest not found: {resolved}")
     with resolved.open("r", encoding="utf-8") as fh:
         payload = json.load(fh)
+
+    suite_tier = (
+        _normalize_corpus_suite_tier(payload.get("suite_tier"))
+        if isinstance(payload, dict)
+        else "release"
+    )
+    gate_mode = (
+        _normalize_corpus_gate_mode(payload.get("gate_mode"))
+        if isinstance(payload, dict)
+        else "advisory"
+    )
+    dynamic_watchlist_limit = max(
+        _safe_int(
+            payload.get("dynamic_watchlist_limit") if isinstance(payload, dict) else None,
+            DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
+        ),
+        1,
+    )
+    notes = (
+        str(payload.get("notes", "")).strip()
+        if isinstance(payload, dict) and payload.get("notes") is not None
+        else ""
+    )
 
     raw_entries = payload.get("entries", payload) if isinstance(payload, dict) else payload
     if not isinstance(raw_entries, list) or not raw_entries:
@@ -461,6 +497,9 @@ def load_corpus_manifest(manifest_path: Path) -> dict[str, Any]:
                 "row_fidelity_targets": _normalize_manifest_row_targets(
                     raw_entry.get("row_fidelity_targets", [])
                 ),
+                "suite_tier": suite_tier,
+                "gate_mode": gate_mode,
+                "dynamic_watchlist_limit": dynamic_watchlist_limit,
             }
         )
 
@@ -472,6 +511,10 @@ def load_corpus_manifest(manifest_path: Path) -> dict[str, Any]:
     return {
         "path": str(resolved),
         "name": manifest_name or resolved.stem,
+        "suite_tier": suite_tier,
+        "gate_mode": gate_mode,
+        "dynamic_watchlist_limit": dynamic_watchlist_limit,
+        "notes": notes,
         "entries": normalized_entries,
     }
 
@@ -612,26 +655,21 @@ def _derive_dynamic_row_targets(
     baseline_summary_json: dict[str, Any],
     limit: int = 5,
 ) -> list[tuple[str, str]]:
-    explicit_rows = (
+    derived: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    degraded_rows = (
         _lookup_path(
             baseline_summary_json,
-            ("summary", "row_fidelity_targets", "pyghidra_vs_fission", "rows"),
+            ("baseline_regression_gate", "row_fidelity_gate", "rows"),
             [],
         )
         or []
     )
-    derived: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    if isinstance(explicit_rows, list):
-        explicit_present_rows = [
-            row
-            for row in explicit_rows
-            if isinstance(row, dict) and bool(row.get("present", True))
-        ]
-        if explicit_rows and not explicit_present_rows:
-            explicit_rows = []
-        for row in explicit_rows:
+    if isinstance(degraded_rows, list):
+        for row in degraded_rows:
             if not isinstance(row, dict):
+                continue
+            if str(row.get("status", "")).strip() != "degraded":
                 continue
             address = str(row.get("address", "")).strip()
             if not address:
@@ -640,7 +678,7 @@ def _derive_dynamic_row_targets(
             if canonical in seen:
                 continue
             seen.add(canonical)
-            derived.append((canonical, str(row.get("role", "watchlist")) or "watchlist"))
+            derived.append((canonical, str(row.get("role", "dynamic_degraded")) or "dynamic_degraded"))
             if len(derived) >= limit:
                 return derived
 
@@ -669,6 +707,60 @@ def _derive_dynamic_row_targets(
             if len(derived) >= limit:
                 break
     return derived
+
+
+def _resolve_binary_watchlist(
+    manifest_entry: dict[str, Any] | None,
+    baseline_summary_json: dict[str, Any] | None,
+    default_row_targets: list[tuple[str, str]],
+    dynamic_watchlist_limit: int,
+) -> dict[str, Any]:
+    if manifest_entry is None:
+        bootstrap_rows = list(default_row_targets)
+        dynamic_rows: list[tuple[str, str]] = []
+        final_rows = bootstrap_rows
+        watchlist_source = "explicit"
+    else:
+        bootstrap_rows = list(manifest_entry.get("row_fidelity_targets", []))
+        dynamic_rows = (
+            _derive_dynamic_row_targets(
+                baseline_summary_json,
+                limit=max(dynamic_watchlist_limit, 1),
+            )
+            if baseline_summary_json is not None
+            else []
+        )
+        final_rows = []
+        seen: set[str] = set()
+        for address, role in [*bootstrap_rows, *dynamic_rows]:
+            canonical = canonical_address(address)
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            final_rows.append((canonical, role))
+            if len(final_rows) >= max(dynamic_watchlist_limit, 1):
+                break
+        if bootstrap_rows and dynamic_rows:
+            watchlist_source = "mixed"
+        elif bootstrap_rows:
+            watchlist_source = "explicit"
+        else:
+            watchlist_source = "dynamic"
+    final_addresses = {canonical_address(address) for address, _ in final_rows}
+
+    return {
+        "rows": final_rows,
+        "watchlist_source": watchlist_source,
+        "bootstrap_row_targets": [
+            {"address": address, "role": role}
+            for address, role in bootstrap_rows
+        ],
+        "dynamic_watchlist_rows": [
+            {"address": address, "role": role}
+            for address, role in dynamic_rows
+            if canonical_address(address) in final_addresses
+        ],
+    }
 
 
 def _build_row_fidelity_gate(
@@ -2641,6 +2733,9 @@ def build_intersection_kpi_from_pair(pair: dict[str, Any]) -> dict[str, Any]:
 def build_row_fidelity_targets_snapshot(
     pair: dict[str, Any],
     row_targets: list[tuple[str, str]] | None = None,
+    watchlist_source: str = "explicit",
+    bootstrap_row_targets: list[dict[str, Any]] | None = None,
+    dynamic_watchlist_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rows = pair.get("comparisons", [])
     row_map = {
@@ -2722,6 +2817,9 @@ def build_row_fidelity_targets_snapshot(
             }
         )
     return {
+        "watchlist_source": watchlist_source,
+        "bootstrap_row_targets": list(bootstrap_row_targets or []),
+        "dynamic_watchlist_rows": list(dynamic_watchlist_rows or []),
         "target_count": len(targets),
         "present_count": sum(1 for row in target_rows if row.get("present")),
         "rows": target_rows,
@@ -3121,6 +3219,9 @@ def build_comparison(
     raw_similarity: bool,
     aggregate_similarity_mode: str,
     row_fidelity_targets_filter: list[tuple[str, str]] | None = None,
+    watchlist_source: str = "explicit",
+    bootstrap_row_targets: list[dict[str, Any]] | None = None,
+    dynamic_watchlist_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     pair_py_fission = build_pairwise_engine_comparison(
         "pyghidra",
@@ -3207,6 +3308,9 @@ def build_comparison(
         "pyghidra_vs_fission": build_row_fidelity_targets_snapshot(
             pair_py_fission,
             row_targets=row_fidelity_targets_filter,
+            watchlist_source=watchlist_source,
+            bootstrap_row_targets=bootstrap_row_targets,
+            dynamic_watchlist_rows=dynamic_watchlist_rows,
         ),
     }
     independent_top_n_coverage = build_address_alignment_summary(
@@ -3539,12 +3643,15 @@ def _derive_binary_row_targets(
     manifest_entry: dict[str, Any],
     baseline_summary_json: dict[str, Any] | None,
 ) -> list[tuple[str, str]]:
-    explicit = manifest_entry.get("row_fidelity_targets", [])
-    if explicit:
-        return list(explicit)
-    if baseline_summary_json is not None:
-        return _derive_dynamic_row_targets(baseline_summary_json)
-    return []
+    return _resolve_binary_watchlist(
+        manifest_entry=manifest_entry,
+        baseline_summary_json=baseline_summary_json,
+        default_row_targets=[],
+        dynamic_watchlist_limit=_safe_int(
+            manifest_entry.get("dynamic_watchlist_limit"),
+            DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
+        ),
+    )["rows"]
 
 
 def _entry_is_release_scoped(role: str) -> bool:
@@ -3619,6 +3726,7 @@ def build_corpus_assessment(
     manifest: dict[str, Any],
     binary_results: list[dict[str, Any]],
     baseline_summary_json: dict[str, Any] | None = None,
+    baseline_artifact: str | None = None,
 ) -> dict[str, Any]:
     binaries_payload: list[dict[str, Any]] = []
     row_gates: dict[str, dict[str, Any]] = {}
@@ -3633,6 +3741,12 @@ def build_corpus_assessment(
     direct_success_non_worse = 0
     release_candidate_count = 0
     release_eligible_count = 0
+    suite_tier = _normalize_corpus_suite_tier(manifest.get("suite_tier"))
+    gate_mode = _normalize_corpus_gate_mode(manifest.get("gate_mode"))
+    comparable_to_baseline = bool(
+        isinstance(baseline_summary_json, dict)
+        and baseline_summary_json.get("mode") == "corpus"
+    )
 
     for result in binary_results:
         entry = result["manifest_entry"]
@@ -3766,6 +3880,21 @@ def build_corpus_assessment(
                 "coverage_ratio_pct": round(_safe_float(coverage, 0.0), 3),
                 "direct_success": direct_success,
                 "row_fidelity_gate_status": row_gate.get("status", "unknown"),
+                "watchlist_source": _lookup_path(
+                    benchmark,
+                    ("summary", "row_fidelity_targets", "pyghidra_vs_fission", "watchlist_source"),
+                    "explicit",
+                ),
+                "bootstrap_row_targets": _lookup_path(
+                    benchmark,
+                    ("summary", "row_fidelity_targets", "pyghidra_vs_fission", "bootstrap_row_targets"),
+                    [],
+                ),
+                "dynamic_watchlist_rows": _lookup_path(
+                    benchmark,
+                    ("summary", "row_fidelity_targets", "pyghidra_vs_fission", "dynamic_watchlist_rows"),
+                    [],
+                ),
                 "non_worse_vs_baseline": non_worse,
                 "eligibility": eligibility,
             }
@@ -3902,13 +4031,39 @@ def build_corpus_assessment(
                     f"{_safe_int(row_regression_reasons.get(key), 0)}"
                 )
 
+    promotion_blockers: list[str] = []
+    if gate_mode != "blocking":
+        promotion_blockers.append("advisory_gate_mode")
+    if not comparable_to_baseline:
+        promotion_blockers.append("baseline_not_comparable")
+    promotion_blockers.extend(regressions)
+    release_promotion_allowed = (
+        gate_mode == "blocking"
+        and comparable_to_baseline
+        and status == "passed"
+        and not promotion_blockers
+    )
+
     return {
         "mode": "corpus",
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "suite_tier": suite_tier,
+        "gate_mode": gate_mode,
+        "comparable_to_baseline": comparable_to_baseline,
+        "baseline_artifact": baseline_artifact,
+        "release_promotion_allowed": release_promotion_allowed,
+        "promotion_blockers": promotion_blockers,
         "manifest": {
             "name": manifest["name"],
             "path": manifest["path"],
             "entry_count": len(manifest["entries"]),
+            "suite_tier": suite_tier,
+            "gate_mode": gate_mode,
+            "dynamic_watchlist_limit": _safe_int(
+                manifest.get("dynamic_watchlist_limit"),
+                DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
+            ),
+            "notes": str(manifest.get("notes", "") or ""),
         },
         "corpus_summary": {
             "binary_count": len(binary_results),
@@ -3922,6 +4077,12 @@ def build_corpus_assessment(
             "status": status,
             "regressions": regressions,
             "row_regression_reasons": row_regression_reasons,
+            "suite_tier": suite_tier,
+            "gate_mode": gate_mode,
+            "comparable_to_baseline": comparable_to_baseline,
+            "baseline_artifact": baseline_artifact,
+            "release_promotion_allowed": release_promotion_allowed,
+            "promotion_blockers": promotion_blockers,
         },
         "binaries": binaries_payload,
         "eligibility_per_binary": eligibility_by_binary,
@@ -4192,7 +4353,13 @@ def write_summary_files(
 
     row_targets = summary.get("row_fidelity_targets", {}).get("pyghidra_vs_fission", {})
     if row_targets:
-        lines.extend(["", "## Fixed Row Targets", ""])
+        lines.extend(["", "## Row Watchlist", ""])
+        lines.append(f"- Source: `{row_targets.get('watchlist_source', 'explicit')}`")
+        lines.append(
+            f"- Bootstrap rows: {len(row_targets.get('bootstrap_row_targets', []) or [])}; "
+            f"dynamic rows: {len(row_targets.get('dynamic_watchlist_rows', []) or [])}"
+        )
+        lines.append("")
         lines.extend(
             [
                 "| Role | Address | Similarity | Both success | Unsupported | Preserved | Dispatcher | Proof completed | Direct emit | Emit-ready failed | GT side-entry reject |",
@@ -4400,13 +4567,23 @@ def write_corpus_summary_files(
         "",
         f"- Generated: {corpus_summary.get('generated_at', 'unknown')}",
         f"- Manifest: `{corpus_summary.get('manifest', {}).get('path', '')}`",
+        f"- Suite tier: `{corpus_summary.get('suite_tier', corpus_summary.get('manifest', {}).get('suite_tier', 'release'))}`",
+        f"- Gate mode: `{corpus_summary.get('gate_mode', corpus_summary.get('manifest', {}).get('gate_mode', 'advisory'))}`",
         f"- Binary count: {int(corpus.get('binary_count', 0) or 0)}",
         f"- Release candidates: {int(corpus.get('release_candidate_count', 0) or 0)}",
         f"- Release eligible: {int(corpus.get('release_eligible_count', 0) or 0)}",
         f"- Weighted avg normalized similarity: {_safe_float(corpus.get('weighted_avg_normalized_similarity', 0.0), 0.0):.3f}%",
+        f"- Comparable to baseline: `{bool(corpus_summary.get('comparable_to_baseline', False))}`",
+        f"- Baseline artifact: `{corpus_summary.get('baseline_artifact') or 'none'}`",
+        f"- Release promotion allowed: `{bool(corpus_summary.get('release_promotion_allowed', False))}`",
         f"- Status: `{corpus.get('status', 'unknown')}`",
         "",
     ]
+    promotion_blockers = corpus_summary.get("promotion_blockers", [])
+    if promotion_blockers:
+        lines.extend(["## Promotion Blockers", ""])
+        lines.extend([f"- {item}" for item in promotion_blockers])
+        lines.append("")
     regressions = corpus.get("regressions", [])
     if regressions:
         lines.extend(["## Corpus Gate Regressions", ""])
@@ -4416,8 +4593,8 @@ def write_corpus_summary_files(
         [
             "## Per-Binary Summary",
             "",
-            "| ID | Role | Eligible | Weight | Avg norm sim | Coverage | Direct success | Row gate | Reason |",
-            "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |",
+            "| ID | Role | Eligible | Weight | Avg norm sim | Coverage | Direct success | Row gate | Watchlist | Reason |",
+            "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- |",
         ]
     )
     for item in corpus_summary.get("binaries", []):
@@ -4427,6 +4604,7 @@ def write_corpus_summary_files(
             f"{_safe_float(item.get('avg_normalized_similarity', 0.0), 0.0):.3f}% | "
             f"{_safe_float(item.get('coverage_ratio_pct', 0.0), 0.0):.3f}% | "
             f"`{item.get('direct_success', '')}` | `{item.get('row_fidelity_gate_status', 'unknown')}` | "
+            f"`{item.get('watchlist_source', 'unknown')}` | "
             f"`{eligibility.get('reason', 'unknown')}` |"
         )
 
@@ -4625,10 +4803,16 @@ def print_corpus_console_summary(
     print("\n=== Corpus Benchmark Summary ===")
     print(f"Manifest: {corpus_summary.get('manifest', {}).get('path', 'unknown')}")
     print(
+        f"suite_tier={corpus_summary.get('suite_tier', 'release')} | "
+        f"gate_mode={corpus_summary.get('gate_mode', 'advisory')} | "
         f"weighted_avg_normalized_similarity={_safe_float(corpus.get('weighted_avg_normalized_similarity', 0.0), 0.0):.3f}% | "
         f"release_candidates={int(corpus.get('release_candidate_count', 0) or 0)} | "
         f"release_eligible={int(corpus.get('release_eligible_count', 0) or 0)} | "
         f"status={corpus.get('status', 'unknown')}"
+    )
+    print(
+        f"comparable_to_baseline={bool(corpus_summary.get('comparable_to_baseline', False))} | "
+        f"release_promotion_allowed={bool(corpus_summary.get('release_promotion_allowed', False))}"
     )
     print(
         "row_regression_reasons="
@@ -4646,6 +4830,7 @@ def print_corpus_console_summary(
             f"coverage={_safe_float(item.get('coverage_ratio_pct', 0.0), 0.0):.3f}% "
             f"direct_success={item.get('direct_success', '')} "
             f"row_gate={item.get('row_fidelity_gate_status', 'unknown')} "
+            f"watchlist={item.get('watchlist_source', 'unknown')} "
             f"reason={eligibility.get('reason', 'unknown')}"
         )
     print(f"Artifacts: {output_dir}")
@@ -4699,17 +4884,19 @@ def run_single_benchmark(
     output_dir = ensure_dir(output_dir)
     previous_summary_payload = _load_previous_summary_payload(output_dir)
 
-    row_fidelity_targets_filter = (
-        list(manifest_entry.get("row_fidelity_targets", []))
-        if manifest_entry is not None and manifest_entry.get("row_fidelity_targets")
-        else select_row_fidelity_targets(
+    watchlist_metadata = _resolve_binary_watchlist(
+        manifest_entry=manifest_entry,
+        baseline_summary_json=baseline_summary_payload,
+        default_row_targets=select_row_fidelity_targets(
             str(getattr(args, "row_fidelity_role_filter", "all"))
-        )
+        ),
+        dynamic_watchlist_limit=_safe_int(
+            manifest_entry.get("dynamic_watchlist_limit") if manifest_entry is not None else None,
+            DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
+        ),
     )
-    baseline_row_targets = row_fidelity_targets_filter
-    if manifest_entry is not None and not manifest_entry.get("row_fidelity_targets"):
-        row_fidelity_targets_filter = []
-        baseline_row_targets = None
+    row_fidelity_targets_filter = list(watchlist_metadata["rows"])
+    baseline_row_targets = row_fidelity_targets_filter or None
 
     print(f"[*] Binary: {binary_path}")
     print(f"[*] Fission CLI: {fission_bin}")
@@ -4739,7 +4926,8 @@ def run_single_benchmark(
     print(
         "[*] Row-fidelity targets: "
         f"filter={getattr(args, 'row_fidelity_role_filter', 'manifest')}, "
-        f"count={len(row_fidelity_targets_filter)}"
+        f"count={len(row_fidelity_targets_filter)}, "
+        f"source={watchlist_metadata['watchlist_source']}"
     )
     if SIMILARITY_BACKEND != "rapidfuzz":
         print(
@@ -4831,6 +5019,9 @@ def run_single_benchmark(
         raw_similarity=bool(args.raw_similarity),
         aggregate_similarity_mode=args.aggregate_similarity_mode,
         row_fidelity_targets_filter=row_fidelity_targets_filter,
+        watchlist_source=str(watchlist_metadata["watchlist_source"]),
+        bootstrap_row_targets=list(watchlist_metadata["bootstrap_row_targets"]),
+        dynamic_watchlist_rows=list(watchlist_metadata["dynamic_watchlist_rows"]),
     )
     benchmark["summary"]["row_fidelity_role_filter"] = str(
         getattr(args, "row_fidelity_role_filter", "all")
@@ -4946,6 +5137,7 @@ def main() -> int:
             manifest,
             binary_results,
             baseline_summary_json=baseline_summary_payload,
+            baseline_artifact=str(baseline_dir) if baseline_dir is not None else None,
         )
         summary_json_path, summary_md_path = write_corpus_summary_files(output_dir, corpus_summary)
         maybe_generate_benchmark_llm_advisory(
@@ -4955,7 +5147,10 @@ def main() -> int:
             regression_gate_json_path=None,
         )
         print_corpus_console_summary(corpus_summary, output_dir)
-        if corpus_summary.get("corpus_summary", {}).get("status") == "failed":
+        if (
+            corpus_summary.get("gate_mode") == "blocking"
+            and corpus_summary.get("corpus_summary", {}).get("status") == "failed"
+        ):
             return 1
         return 0
 

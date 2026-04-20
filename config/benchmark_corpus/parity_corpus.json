@@ -1,0 +1,57 @@
+{
+  "name": "fission-ghidra-parity-workbench",
+  "suite_tier": "parity",
+  "gate_mode": "advisory",
+  "dynamic_watchlist_limit": 5,
+  "notes": "Reference-guided parity corpus for stack-relative addresses, merge/binding, alias-sensitive consumers, and flag/control surfacing.",
+  "entries": [
+    {
+      "id": "putty",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/putty.exe",
+      "ghidra_project_key": "putty",
+      "tags": ["windows", "pe", "x64", "gui", "large", "dispatcher-heavy", "indirect-heavy"],
+      "seed_limit": 40,
+      "role": "primary_canary"
+    },
+    {
+      "id": "string-memory-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_string_memory_x64_O2.exe",
+      "ghidra_project_key": "test_string_memory_x64_o2",
+      "tags": ["windows", "pe", "x64", "synthetic", "stack-heavy", "alias-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    },
+    {
+      "id": "controlflow-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_control_flow_x64_O2.exe",
+      "ghidra_project_key": "test_control_flow_x64_o2",
+      "tags": ["windows", "pe", "x64", "synthetic", "merge-heavy", "cfg-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    },
+    {
+      "id": "arith-idioms-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_arithmetic_idioms_x64_O2.exe",
+      "ghidra_project_key": "test_arithmetic_idioms_x64_o2",
+      "tags": ["windows", "pe", "x64", "synthetic", "flag-heavy", "idiom-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    },
+    {
+      "id": "sqlite3-linux",
+      "binary_path": "/Users/sjkim1127/Fission/samples/other/sqlite/sqlite-tools-linux-x64-3510300/sqlite3",
+      "ghidra_project_key": "sqlite3_linux",
+      "tags": ["linux", "elf", "x64", "pie", "stripped", "real-world", "alias-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    },
+    {
+      "id": "structs-win-o2",
+      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_structs_classes_x64_O2.exe",
+      "ghidra_project_key": "test_structs_classes_x64_o2",
+      "tags": ["windows", "pe", "x64", "synthetic", "struct-heavy"],
+      "seed_limit": 30,
+      "role": "release_candidate"
+    }
+  ]
+}
