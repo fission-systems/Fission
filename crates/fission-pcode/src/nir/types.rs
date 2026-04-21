@@ -696,6 +696,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub forced_linear_structuring_count: usize,
     #[serde(default)]
+    pub structuring_force_linear_explicit_count: usize,
+    #[serde(default)]
+    pub structuring_force_linear_irreducible_budget_count: usize,
+    #[serde(default)]
+    pub structuring_force_linear_extreme_budget_count: usize,
+    #[serde(default)]
     pub region_linearize_structuring_count: usize,
     #[serde(default)]
     pub region_linearize_rejected_non_structuring_failure_count: usize,
@@ -1120,6 +1126,12 @@ impl NirBuildStats {
         self.procedure_summary_tail_wrapper_count += other.procedure_summary_tail_wrapper_count;
         self.procedure_summary_import_thunk_count += other.procedure_summary_import_thunk_count;
         self.forced_linear_structuring_count += other.forced_linear_structuring_count;
+        self.structuring_force_linear_explicit_count +=
+            other.structuring_force_linear_explicit_count;
+        self.structuring_force_linear_irreducible_budget_count +=
+            other.structuring_force_linear_irreducible_budget_count;
+        self.structuring_force_linear_extreme_budget_count +=
+            other.structuring_force_linear_extreme_budget_count;
         self.region_linearize_structuring_count += other.region_linearize_structuring_count;
         self.region_linearize_rejected_non_structuring_failure_count +=
             other.region_linearize_rejected_non_structuring_failure_count;

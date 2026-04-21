@@ -174,6 +174,166 @@ Next owner after this wave:
 
 ---
 
+## 0.1 Structuring Admission Canonicalization For Windows Small C Samples
+
+### Scope
+
+This follow-up wave targeted the first unresolved sample-user-code owner after wrapper contraction:
+
+- canonical surface:
+  - `benchmark/full_benchmark/`
+  - `benchmark/binary/x86-64/window/small/binary/c`
+- primary owner:
+  - `crates/fission-pcode/src/nir/structuring/driver.rs`
+- representative row:
+  - `test_functions.exe @ 0x140001470`
+  - function name: `fibonacci`
+
+The goal in this wave was not to broadly relax structuring policy. The goal was to:
+
+- remove the old architecture-specific blanket force-linear admission
+- make force-linear fallback reasons explicit and typed
+- expose the fallback owner in `NirBuildStats`
+- validate the resulting owner split on the Windows small C corpus without regressing row fidelity
+
+### What changed
+
+The structuring driver now uses one canonical admission helper instead of scattered fallback heuristics:
+
+- added:
+  - `StructuringAdmissionReason`
+  - `StructuringAdmissionInput`
+  - `decide_structuring_admission(...)`
+- admission families are now:
+  - `GraphCollapse`
+  - `ExplicitForceLinear`
+  - `IrreducibleBudget`
+  - `ExtremeBudget`
+- removed the old x64-specific blanket admission that forced linear structuring for medium-sized 64-bit CFGs based only on block/op count
+
+Additive telemetry was also added to `NirBuildStats`:
+
+- `structuring_force_linear_explicit_count`
+- `structuring_force_linear_irreducible_budget_count`
+- `structuring_force_linear_extreme_budget_count`
+
+This keeps the policy owner inside `nir/structuring/` and avoids re-encoding fallback attribution in benchmark/reporting layers.
+
+### Validation result
+
+The shipped state in this wave keeps sample-corpus behavior non-worse.
+
+Windows small C 2-way corpus:
+
+- baseline artifact:
+  - `benchmark/artifacts/full_benchmark/windows-small-c-structuring-baseline`
+- trial artifact:
+  - `benchmark/artifacts/full_benchmark/windows-small-c-structuring-latest`
+- manifest:
+  - temporary six-binary Windows small C corpus covering:
+    - `test_functions.exe`
+    - `bitops_and_control_flow.exe`
+    - `function_pointers_and_strings.exe`
+    - `structs_and_pointers.exe`
+    - `array_operations.exe`
+    - `math_operations.exe`
+
+Corpus-level before/after:
+
+- weighted average normalized similarity:
+  - `37.602857 -> 37.604286`
+- x64 failed binaries:
+  - `0 -> 0`
+- `materialization_stabilized` total:
+  - `15104 -> 15097`
+- shape-drift totals:
+  - `generic_local_name_sum: 501 -> 493`
+  - `goto_total: 402 -> 383`
+  - `top_level_label_total: 287 -> 275`
+
+The corpus remained advisory-only, but the important result is:
+
+- `comparable_to_baseline=true`
+- no new failed rows
+- row-fidelity gates passed on all six binaries
+
+### Representative row readout
+
+`fibonacci @ 0x140001470` remains in the same coarse family, but the fallback owner is now explicit.
+
+Before:
+
+- `decomp_sec=0.235710`
+- `build_duration_ms=230`
+- `normalize_duration_ms=100`
+- `structuring_duration_ms=96`
+- `forced_linear_structuring_count=1`
+- `region_proof_candidate_count=7`
+- `region_proof_completed_count=0`
+- `region_emit_ready_failed_count=7`
+- `switch_emit_ready_failed_count=7`
+
+After:
+
+- `decomp_sec=0.243272`
+- `build_duration_ms=237`
+- `normalize_duration_ms=100`
+- `structuring_duration_ms=109`
+- `forced_linear_structuring_count=1`
+- `structuring_force_linear_explicit_count=0`
+- `structuring_force_linear_irreducible_budget_count=1`
+- `structuring_force_linear_extreme_budget_count=0`
+- `region_proof_candidate_count=7`
+- `region_proof_completed_count=0`
+- `region_emit_ready_failed_count=7`
+- `switch_emit_ready_failed_count=7`
+
+Interpretation:
+
+- this row is still not ready for graph-collapse broadening
+- the dominant owner is now explicitly narrowed to `IrreducibleBudget`
+- the next quality wave should target proof-carrying irreducible/region recovery, not another blanket admission widening
+
+### Negative result that was intentionally not shipped
+
+During validation, a broader irreducible admission trial was tested locally so `fibonacci` could bypass the linear fallback.
+
+That trial was rejected because it caused:
+
+- `row_fidelity_gate failed for 0x140001470`
+- `generic_local_name_sum: 311 -> 313` on `test_functions.exe`
+- `ReplacementPlanExplosion` on the representative row
+- `replacement_plan_candidate_count: 1258 -> 10978`
+- `structuring_duration_ms: 96 -> 926`
+
+That broadening is not in the final tree.
+
+The final shipped state stays fail-closed for that family and keeps only:
+
+- canonical owner cleanup
+- typed fallback attribution
+- additive telemetry
+
+### Duplicate-logic audit outcome
+
+Duplicate logic was reduced in this wave:
+
+- force-linear admission now has one canonical owner in `structuring/driver.rs`
+- the old medium-CFG x64 heuristic is no longer duplicated as an implicit architecture policy
+- benchmark/reporting now consume typed telemetry instead of reconstructing why a row fell back
+
+Next owner after this wave:
+
+- `Proof-Carrying Region Structuring`
+- specifically:
+  - irreducible SCC witness refinement
+  - guarded-tail rejection narrowing
+  - region legality / switch readiness subtype narrowing
+- not:
+  - another blanket graph-collapse admission broadening
+
+---
+
 ## 1. Benchmark Surface Canonicalization
 
 ### Canonical benchmark entrypoint

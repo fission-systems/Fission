@@ -13,6 +13,11 @@ impl<'a> PreviewBuilder<'a> {
             procedure_summary_tail_wrapper_count: self.procedure_summary_tail_wrapper_count,
             procedure_summary_import_thunk_count: self.procedure_summary_import_thunk_count,
             forced_linear_structuring_count: self.forced_linear_structuring_count,
+            structuring_force_linear_explicit_count: self.structuring_force_linear_explicit_count,
+            structuring_force_linear_irreducible_budget_count: self
+                .structuring_force_linear_irreducible_budget_count,
+            structuring_force_linear_extreme_budget_count: self
+                .structuring_force_linear_extreme_budget_count,
             region_linearize_structuring_count: self.region_linearize_structuring_count,
             region_linearize_rejected_non_structuring_failure_count: self
                 .region_linearize_rejected_non_structuring_failure_count,

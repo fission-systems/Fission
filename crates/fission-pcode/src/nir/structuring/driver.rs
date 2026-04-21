@@ -3,6 +3,58 @@ use super::graph::StructureNodeKind;
 use super::irreducible::compute_node_splits;
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuringAdmissionReason {
+    GraphCollapse,
+    ExplicitForceLinear,
+    IrreducibleBudget,
+    ExtremeBudget,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StructuringAdmissionInput {
+    block_count: usize,
+    total_ops: usize,
+    edge_count: usize,
+    multi_pred_blocks: usize,
+    max_predecessors: usize,
+    scc_irreducible_count: usize,
+    max_scc_component_size: usize,
+    explicit_force_linear: bool,
+}
+
+fn decide_structuring_admission(input: StructuringAdmissionInput) -> StructuringAdmissionReason {
+    if input.explicit_force_linear {
+        return StructuringAdmissionReason::ExplicitForceLinear;
+    }
+
+    // Keep an escape hatch for truly pathological CFGs, but stop forcing
+    // linear lowering for merely "large" reducible functions. That old
+    // blanket heuristic was degrading sample user-code quality on functions
+    // like `fibonacci`, which are complex but still structurally recoverable.
+    let extreme_budget = input.block_count > 192
+        || input.total_ops > 3_000
+        || (input.edge_count > input.block_count.saturating_mul(4)
+            && input.max_predecessors >= 6
+            && input.max_scc_component_size > 64);
+    if extreme_budget {
+        return StructuringAdmissionReason::ExtremeBudget;
+    }
+
+    let irreducible_budget = input.scc_irreducible_count > 0
+        && (input.block_count > 64
+            || input.total_ops > 900
+            || input.edge_count > input.block_count.saturating_mul(3)
+            || input.multi_pred_blocks > 16
+            || input.max_predecessors >= 5
+            || input.max_scc_component_size > 24);
+    if irreducible_budget {
+        return StructuringAdmissionReason::IrreducibleBudget;
+    }
+
+    StructuringAdmissionReason::GraphCollapse
+}
+
 impl<'a> PreviewBuilder<'a> {
     #[cfg(test)]
     fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
@@ -143,7 +195,6 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
-        let force_linear = self.should_force_linear_structuring();
         let (
             scc_component_count,
             scc_irreducible_count,
@@ -164,6 +215,9 @@ impl<'a> PreviewBuilder<'a> {
             .max(max_scc_component_size);
         self.structuring_irreducible_scc_count += scc_irreducible_count;
         self.structuring_irreducible_header_count += scc_irreducible_header_count;
+        let admission =
+            self.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
+        let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
 
         // Node-splitting for irreducible CFGs: when the SCC analysis shows
         // irreducible SCCs, attempt to make the CFG reducible by splitting
@@ -199,13 +253,26 @@ impl<'a> PreviewBuilder<'a> {
         }
         if force_linear {
             self.forced_linear_structuring_count += 1;
+            match admission {
+                StructuringAdmissionReason::ExplicitForceLinear => {
+                    self.structuring_force_linear_explicit_count += 1;
+                }
+                StructuringAdmissionReason::IrreducibleBudget => {
+                    self.structuring_force_linear_irreducible_budget_count += 1;
+                }
+                StructuringAdmissionReason::ExtremeBudget => {
+                    self.structuring_force_linear_extreme_budget_count += 1;
+                }
+                StructuringAdmissionReason::GraphCollapse => {}
+            }
             let result = self.build_proof_first_linear_multiblock_body();
             if diag {
                 eprintln!(
-                    "[DIAG] structuring linear done: elapsed={:.3}s success={} proof_first={}",
+                    "[DIAG] structuring linear done: elapsed={:.3}s success={} proof_first={} admission={:?}",
                     total_start.elapsed().as_secs_f64(),
                     result.is_ok(),
-                    true
+                    true,
+                    admission,
                 );
             }
             return result;
@@ -648,19 +715,13 @@ impl<'a> PreviewBuilder<'a> {
         Ok(finalize_structured_body(body))
     }
 
-    fn should_force_linear_structuring(&self) -> bool {
-        if self.options.force_linear_structuring {
-            return true;
-        }
+    fn structuring_admission_reason(
+        &self,
+        scc_irreducible_count: usize,
+        max_scc_component_size: usize,
+    ) -> StructuringAdmissionReason {
         let total_ops: usize = self.pcode.blocks.iter().map(|block| block.ops.len()).sum();
-        if self.pcode.blocks.len() > 80 {
-            return true;
-        }
-
-        if self.options.is_64bit && self.pcode.blocks.len() >= 28 && total_ops >= 350 {
-            return true;
-        }
-
+        let block_count = self.pcode.blocks.len();
         let edge_count: usize = self.successors.iter().map(Vec::len).sum();
         let multi_pred_blocks = self
             .predecessors
@@ -668,11 +729,16 @@ impl<'a> PreviewBuilder<'a> {
             .filter(|preds| preds.len() > 1)
             .count();
         let max_predecessors = self.predecessors.iter().map(Vec::len).max().unwrap_or(0);
-
-        self.pcode.blocks.len() > 32
-            && (edge_count > self.pcode.blocks.len().saturating_mul(2)
-                || multi_pred_blocks > 8
-                || max_predecessors >= 4)
+        decide_structuring_admission(StructuringAdmissionInput {
+            block_count,
+            total_ops,
+            edge_count,
+            multi_pred_blocks,
+            max_predecessors,
+            scc_irreducible_count,
+            max_scc_component_size,
+            explicit_force_linear: self.options.force_linear_structuring,
+        })
     }
 }
 
@@ -732,7 +798,10 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
 
 #[cfg(test)]
 mod tests {
-    use super::PreviewBuilder;
+    use super::{
+        PreviewBuilder, StructuringAdmissionInput, StructuringAdmissionReason,
+        decide_structuring_admission,
+    };
     use crate::PcodeFunction;
     use crate::nir::types::{
         HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
@@ -838,5 +907,65 @@ mod tests {
             ])
             .expect("legacy candidate");
         assert_eq!(selected.node.skip_to, 2);
+    }
+
+    #[test]
+    fn structuring_admission_prefers_graph_collapse_for_reducible_medium_cfg() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 31,
+            total_ops: 620,
+            edge_count: 58,
+            multi_pred_blocks: 10,
+            max_predecessors: 3,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 31,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::GraphCollapse);
+    }
+
+    #[test]
+    fn structuring_admission_forces_linear_for_irreducible_budget() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 72,
+            total_ops: 960,
+            edge_count: 220,
+            multi_pred_blocks: 18,
+            max_predecessors: 6,
+            scc_irreducible_count: 2,
+            max_scc_component_size: 28,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::IrreducibleBudget);
+    }
+
+    #[test]
+    fn structuring_admission_forces_linear_for_explicit_override() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 12,
+            total_ops: 80,
+            edge_count: 14,
+            multi_pred_blocks: 1,
+            max_predecessors: 2,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 4,
+            explicit_force_linear: true,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::ExplicitForceLinear);
+    }
+
+    #[test]
+    fn structuring_admission_forces_linear_for_extreme_budget() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 220,
+            total_ops: 3_400,
+            edge_count: 980,
+            multi_pred_blocks: 40,
+            max_predecessors: 8,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 80,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
     }
 }
