@@ -102,6 +102,11 @@ def _minimal_single_binary_summary(
                         "blockgraph_region_complete_count": 2,
                         "blockgraph_region_rejected_missing_follow_count": 1,
                         "blockgraph_region_rejected_must_emit_label_count": 1,
+                        "blockgraph_region_rejected_middle_ref_count": 1,
+                        "blockgraph_region_rejected_external_ref_count": 0,
+                        "blockgraph_region_rejected_join_owner_conflict_count": 0,
+                        "blockgraph_region_rejected_nonterminal_join_count": 0,
+                        "blockgraph_region_rejected_follow_owner_conflict_count": 0,
                         "blockgraph_region_rejected_emit_ready_count": 1,
                         "blockgraph_region_rejected_irreducible_count": 0,
                         "pass_metrics": {
@@ -418,6 +423,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
                 "blockgraph_region_complete_count": 3,
                 "blockgraph_region_rejected_missing_follow_count": 1,
                 "blockgraph_region_rejected_must_emit_label_count": 2,
+                "blockgraph_region_rejected_middle_ref_count": 1,
+                "blockgraph_region_rejected_external_ref_count": 1,
+                "blockgraph_region_rejected_join_owner_conflict_count": 1,
+                "blockgraph_region_rejected_nonterminal_join_count": 0,
+                "blockgraph_region_rejected_follow_owner_conflict_count": 0,
                 "blockgraph_region_rejected_emit_ready_count": 1,
             }
         )
@@ -425,6 +435,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["complete"], 3.0)
         self.assertEqual(metrics["rejected_missing_follow"], 1.0)
         self.assertEqual(metrics["rejected_must_emit_label"], 2.0)
+        self.assertEqual(metrics["rejected_middle_ref"], 1.0)
+        self.assertEqual(metrics["rejected_external_ref"], 1.0)
+        self.assertEqual(metrics["rejected_join_owner_conflict"], 1.0)
+        self.assertEqual(metrics["rejected_nonterminal_join"], 0.0)
+        self.assertEqual(metrics["rejected_follow_owner_conflict"], 0.0)
         self.assertEqual(metrics["rejected_emit_ready"], 1.0)
         self.assertEqual(metrics["rejected_irreducible"], 0.0)
 

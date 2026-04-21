@@ -200,6 +200,17 @@ BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("blockgraph_region_complete_count", "complete"),
     ("blockgraph_region_rejected_missing_follow_count", "rejected_missing_follow"),
     ("blockgraph_region_rejected_must_emit_label_count", "rejected_must_emit_label"),
+    ("blockgraph_region_rejected_middle_ref_count", "rejected_middle_ref"),
+    ("blockgraph_region_rejected_external_ref_count", "rejected_external_ref"),
+    (
+        "blockgraph_region_rejected_join_owner_conflict_count",
+        "rejected_join_owner_conflict",
+    ),
+    ("blockgraph_region_rejected_nonterminal_join_count", "rejected_nonterminal_join"),
+    (
+        "blockgraph_region_rejected_follow_owner_conflict_count",
+        "rejected_follow_owner_conflict",
+    ),
     ("blockgraph_region_rejected_emit_ready_count", "rejected_emit_ready"),
     ("blockgraph_region_rejected_irreducible_count", "rejected_irreducible"),
 )
@@ -2951,6 +2962,21 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         ),
         "blockgraph_region_rejected_must_emit_label_count": preview_stat_total(
             "blockgraph_region_rejected_must_emit_label_count"
+        ),
+        "blockgraph_region_rejected_middle_ref_count": preview_stat_total(
+            "blockgraph_region_rejected_middle_ref_count"
+        ),
+        "blockgraph_region_rejected_external_ref_count": preview_stat_total(
+            "blockgraph_region_rejected_external_ref_count"
+        ),
+        "blockgraph_region_rejected_join_owner_conflict_count": preview_stat_total(
+            "blockgraph_region_rejected_join_owner_conflict_count"
+        ),
+        "blockgraph_region_rejected_nonterminal_join_count": preview_stat_total(
+            "blockgraph_region_rejected_nonterminal_join_count"
+        ),
+        "blockgraph_region_rejected_follow_owner_conflict_count": preview_stat_total(
+            "blockgraph_region_rejected_follow_owner_conflict_count"
         ),
         "blockgraph_region_rejected_emit_ready_count": preview_stat_total(
             "blockgraph_region_rejected_emit_ready_count"

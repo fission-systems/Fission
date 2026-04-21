@@ -168,6 +168,34 @@ impl<'a> PreviewBuilder<'a> {
             .count()
     }
 
+    fn top_level_after_label_ref_is_dead_post_return(
+        body: &[HirStmt],
+        after_label_pos: usize,
+        label: &str,
+    ) -> bool {
+        let Some(HirStmt::Goto(target)) = body.get(after_label_pos) else {
+            return false;
+        };
+        if target != label {
+            return false;
+        }
+
+        let mut saw_terminal_return = false;
+        for stmt in &body[..after_label_pos] {
+            if is_ignorable_discovery_stmt(stmt)
+                || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+            {
+                continue;
+            }
+            match stmt {
+                HirStmt::Return(_) => saw_terminal_return = true,
+                _ => saw_terminal_return = false,
+            }
+        }
+
+        saw_terminal_return
+    }
+
     fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
         stmts: &mut Vec<HirStmt>,
         full_body: &[HirStmt],
@@ -298,6 +326,15 @@ impl<'a> PreviewBuilder<'a> {
                 );
             let effective_top_level_after_label_count = top_level_after_label_count
                 .saturating_sub(sink_equivalent_top_level_after_label_count);
+            let blocking_top_level_after_positions: Vec<usize> = top_level_after_positions
+                .iter()
+                .copied()
+                .filter(|pos| {
+                    !Self::local_after_label_ref_is_sink_equivalent(
+                        body, full_body, label, idx, *pos,
+                    ) && !Self::top_level_after_label_ref_is_dead_post_return(body, *pos, label)
+                })
+                .collect();
             if nested_before > 0 {
                 return Err(
                     GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors,
@@ -317,8 +354,8 @@ impl<'a> PreviewBuilder<'a> {
             {
                 if let HirStmt::Label(next_label) = &body[next_label_idx] {
                     nested_after_label_count == 0
-                        && !top_level_after_positions.is_empty()
-                        && top_level_after_positions
+                        && !blocking_top_level_after_positions.is_empty()
+                        && blocking_top_level_after_positions
                             .iter()
                             .all(|pos| *pos < next_label_idx)
                         && Self::is_local_alias_forward_segment_with_after_label_refs(
@@ -328,7 +365,10 @@ impl<'a> PreviewBuilder<'a> {
                     false
                 }
             } else {
-                false
+                nested_after_label_count == 0
+                    && !blocking_top_level_after_positions.is_empty()
+                    && Self::inferred_alias_forward_target_with_after_label_refs(segment, label)
+                        .is_some()
             };
 
             if self.guarded_tail_trace_enabled_for_current_fn()
@@ -365,19 +405,25 @@ impl<'a> PreviewBuilder<'a> {
                     segment_end,
                     label,
                 ) {
-                self.resolve_terminal_join_target(body, idx, label, referenced)
-                    .and_then(|(resolved_label, _)| {
-                        // Prefer forward-chain resolution if it goes beyond immediate next
-                        if let Some(next_label_idx) = next_label_idx {
-                            if let HirStmt::Label(next_label) = &body[next_label_idx] {
-                                if resolved_label != *label && resolved_label != next_label.as_str()
-                                {
-                                    return Some(resolved_label);
-                                }
+                let resolved = if next_label_idx.is_some() {
+                    self.resolve_terminal_join_target(body, idx, label, referenced)
+                        .map(|(resolved_label, _)| resolved_label)
+                } else {
+                    Self::inferred_alias_forward_target_with_after_label_refs(segment, label)
+                };
+                resolved.and_then(|resolved_label| {
+                    // Prefer forward-chain resolution if it goes beyond immediate next
+                    if let Some(next_label_idx) = next_label_idx {
+                        if let HirStmt::Label(next_label) = &body[next_label_idx] {
+                            if resolved_label != *label && resolved_label != next_label.as_str() {
+                                return Some(resolved_label);
                             }
                         }
-                        None
-                    })
+                    } else if resolved_label != *label {
+                        return Some(resolved_label);
+                    }
+                    None
+                })
             } else {
                 None
             };
@@ -613,27 +659,36 @@ impl<'a> PreviewBuilder<'a> {
                     if referenced.get(label).copied().unwrap_or(0) > 0 {
                         let local_ref_count = segment_ref_counts.get(label).copied().unwrap_or(0);
                         let total_ref_count = referenced.get(label).copied().unwrap_or(0);
+                        let terminalizable_target =
+                            Self::terminalizable_join_alias_target(&flattened, idx);
                         if total_ref_count > local_ref_count {
                             let (
                                 external_top_level_before,
                                 external_nested_before,
-                                external_refs_after,
-                            ) = Self::classify_external_alias_ref_sites(
+                                external_top_level_after,
+                                external_nested_after,
+                            ) = Self::classify_external_alias_ref_sites_detailed(
                                 full_body,
                                 segment_start,
                                 segment_start + flattened.len(),
                                 label,
                             );
-                            self.mark_alias_nonlocal_from_external_sites(
-                                external_top_level_before,
-                                external_nested_before,
-                                external_refs_after,
-                            );
-                            return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
+                            let external_refs_after =
+                                external_top_level_after + external_nested_after;
+                            let only_top_level_external_refs =
+                                external_nested_before == 0 && external_nested_after == 0;
+                            if !only_top_level_external_refs || terminalizable_target.is_none() {
+                                self.mark_alias_nonlocal_from_external_sites(
+                                    external_top_level_before,
+                                    external_nested_before,
+                                    external_refs_after,
+                                );
+                                return Err(
+                                    GuardedTailCanonicalizationFailure::AliasHasNonlocalRef,
+                                );
+                            }
                         }
-                        if let Some((next_label, next_idx)) =
-                            Self::terminalizable_join_alias_target(&flattened, idx)
-                        {
+                        if let Some((next_label, next_idx)) = terminalizable_target {
                             Self::rewrite_goto_label_in_stmts(&mut canonical, label, &next_label);
                             removed_any = true;
                             self.canonicalized_interleaved_join_use_count += 1;

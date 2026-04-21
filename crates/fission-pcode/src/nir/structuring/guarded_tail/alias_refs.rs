@@ -285,6 +285,46 @@ impl<'a> PreviewBuilder<'a> {
         saw_forward_goto
     }
 
+    pub(super) fn inferred_alias_forward_target_with_after_label_refs(
+        segment: &[HirStmt],
+        label: &str,
+    ) -> Option<String> {
+        let mut inferred_target = None::<String>;
+        let mut saw_forward_goto = false;
+
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt)
+                || Self::stmt_is_pure_value_expr(stmt)
+                || Self::stmt_is_pure_value_assign(stmt)
+            {
+                continue;
+            }
+
+            let HirStmt::Goto(target) = stmt else {
+                return None;
+            };
+            if target == label {
+                continue;
+            }
+
+            match inferred_target.as_deref() {
+                Some(existing) if existing != target => return None,
+                Some(_) => {}
+                None => inferred_target = Some(target.clone()),
+            }
+            saw_forward_goto = true;
+        }
+
+        let target = inferred_target?;
+        if !saw_forward_goto {
+            return None;
+        }
+        segment
+            .iter()
+            .all(|stmt| Self::stmt_is_alias_forward_safe(stmt, label, &target))
+            .then_some(target)
+    }
+
     pub(super) fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {

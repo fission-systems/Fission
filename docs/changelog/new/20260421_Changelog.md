@@ -1279,3 +1279,213 @@ env_gate: none
 duplicate semantic logic changed: no semantic repair added outside canonical owners
 next owner: BlockGraph/FlowBlock-style proof-carrying structuring, especially guarded-tail and region legality
 ```
+
+## Ghidra BlockGraph Must-Emit-Label Ownership And Guarded-Tail Canonicalization
+
+### Summary
+
+This wave moved the next Windows small C quality owner forward in two ways:
+
+- the residual guarded-tail / suffix-window crate failure family was fixed
+- `MustEmitLabelConflict` is no longer a single opaque benchmark bucket; it now projects subtype totals through the canonical structuring owner and the benchmark layer
+
+This is a behavior-changing quality wave, but it is still not promotion-ready. The sample corpus stayed quality-neutral while a new advisory blocker appeared in the failure-family distribution.
+
+### What changed
+
+Canonical owner stayed inside:
+
+- `crates/fission-pcode/src/nir/structuring/guarded_tail/`
+- `crates/fission-pcode/src/nir/types.rs`
+
+Behavioral guarded-tail / suffix-window fixes:
+
+- canonicalized forward-alias chains can now resolve a unique forward target even when the next label sits outside the currently canonicalized slice
+- suffix-window rejection precedence now prefers proof-first reasons:
+  - nested or nonlocal tail references
+  - side-effectful suffix payloads
+  - nonterminal goto targets
+  - unresolved alias redirects
+- candidate external-entry classification now skips the anchor statement itself, which avoids counting the candidate's own branch as an external entry
+- paired nested-boundary internalization is no longer double-counted when same-guard-family nested conditional entries already internalize the same shape
+
+Additive BlockGraph subtype telemetry was added to `NirBuildStats`:
+
+- `blockgraph_region_rejected_middle_ref_count`
+- `blockgraph_region_rejected_external_ref_count`
+- `blockgraph_region_rejected_join_owner_conflict_count`
+- `blockgraph_region_rejected_nonterminal_join_count`
+- `blockgraph_region_rejected_follow_owner_conflict_count`
+
+Benchmark/reporting now projects the same subtype totals through:
+
+- `benchmark_summary.json`
+- `benchmark_compact_summary.json`
+- corpus Markdown
+- console summaries
+
+This keeps the semantic owner in `fission-pcode`; benchmark code only reads and renders the counters.
+
+### Duplicate-logic audit
+
+Duplicate semantic logic was reduced in this wave:
+
+- suffix-window legality and alias-chain canonicalization now resolve through the shared guarded-tail owner instead of separate overlapping ad hoc checks
+- BlockGraph subtype counters are defined once in `NirBuildStats` and projected outward, rather than re-derived in Python
+- benchmark/reporting remains telemetry-only and does not perform semantic repair
+
+What did not change:
+
+- printer/layout code still does not own structuring legality
+- representative/materialization policy was not broadened here
+
+### Validation
+
+Passed:
+
+```text
+cargo test -p fission-pcode suffix_window -- --test-threads=1
+result: 63 passed, 0 failed
+
+cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+result: 51 passed, 0 failed
+
+cargo test -p fission-pcode -- --test-threads=1
+result: 664 passed, 0 failed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+result: 22 passed
+
+cargo check -p fission-pcode
+cargo check -p fission-automation
+cargo build -p fission-cli
+cargo build -p fission-cli --release
+```
+
+Net crate-level improvement:
+
+```text
+full-suite residual failures: 25 -> 0
+primary fixed family: guarded-tail / suffix-window / structuring candidate discovery
+```
+
+### Windows small C 2-way benchmark
+
+Benchmark contract used:
+
+```text
+runner:
+- benchmark/full_benchmark/full_decomp_benchmark.py
+
+manifest:
+- benchmark/config/benchmark_corpus/windows_small_c_samples.json
+
+baseline:
+- benchmark/artifacts/full_benchmark/windows-small-c-blockgraph-structuring-latest
+
+trial:
+- benchmark/artifacts/full_benchmark/windows-small-c-guarded-tail-ownership-latest
+
+first-pass artifact:
+- benchmark/artifacts/full_benchmark/windows-small-c-guarded-tail-ownership-latest/benchmark_compact_summary.json
+```
+
+Corpus quality result:
+
+```text
+weighted_avg_normalized_similarity: 37.604286 -> 37.604286
+x64 weighted_avg_normalized_similarity: 37.604 -> 37.604
+coverage_non_worse_count: 6 -> 6
+direct_success_non_worse_count: 6 -> 6
+new failed rows: 0
+top degraded rows: none
+row gates: passed for all 6 binaries
+```
+
+Owner / shape totals stayed flat:
+
+```text
+materialization_stabilized: 15097 -> 15097
+generic_local_name_sum: 493 -> 493
+generic_param_name_sum: 218 -> 218
+goto_total: 383 -> 383
+top_level_label_total: 275 -> 275
+synthetic_helper_call_total: 33 -> 33
+```
+
+BlockGraph proof totals became narrower:
+
+```text
+candidate: 426 -> 414
+complete: 0 -> 0
+rejected_must_emit_label: 426 -> 414
+rejected_external_ref: 0 -> 108
+rejected_join_owner_conflict: 0 -> 128
+rejected_middle_ref: 0 -> 24
+rejected_nonterminal_join: 0 -> 0
+rejected_follow_owner_conflict: 0 -> 0
+```
+
+Representative target rows:
+
+```text
+test_functions.exe:fibonacci @ 0x140001470
+- normalized_similarity: 11.65 -> 11.65
+- forced_linear_structuring_count: 1 -> 1
+- region_proof_candidate_count: 7 -> 7
+- region_proof_completed_count: 0 -> 0
+- region_emit_ready_failed_count: 7 -> 7
+- switch_emit_ready_failed_count: 7 -> 7
+
+math_operations.exe:fibonacci_memo @ 0x140001a90
+- blockgraph rejected_must_emit_label: 2
+
+function_pointers_and_strings.exe:compare_int_descending @ 0x140001470
+- unchanged targeted surface
+```
+
+### What improved
+
+Concrete improvements in this wave:
+
+- guarded-tail / suffix-window canonicalization and candidate-discovery regressions are gone at the crate-test level
+- `MustEmitLabelConflict` is no longer one opaque bucket in benchmark artifacts
+- the sample corpus remains stable with no new failed rows
+- `blockgraph_region_candidate_count` and `rejected_must_emit_label` both dropped:
+  - `426 -> 414`
+
+### What regressed
+
+The wave is still not promotion-ready.
+
+New advisory blocker:
+
+```text
+failure_family_distribution canonical_alias_interleave_conflict_count: 38 -> 50
+```
+
+This means the current guarded-tail canonicalization tightened one owner family but shifted pressure into alias-interleave rejection elsewhere. That is a real semantic owner signal, not a benchmark artifact issue.
+
+### Practical conclusion
+
+This wave closed the old residual test gap but did not yet deliver visible sample-corpus pseudocode quality uplift.
+
+The current state is:
+
+- test-family health improved materially
+- corpus similarity is neutral
+- `fibonacci` is still linearized
+- the next owner is narrower than before:
+  - `alias_interleave_conflict` inside the guarded-tail / BlockGraph ownership path
+
+### Final status
+
+```text
+wave_type: behavior-changing quality wave
+primary_owner: BlockGraph must-emit-label ownership + guarded-tail canonicalization
+behavior_changed: yes
+release_path_changed: no
+env_gate: none
+promotion impact: blocked
+next owner: canonical alias-interleave conflict reduction before any broader structuring acceptance
+```

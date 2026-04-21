@@ -56,6 +56,11 @@ SELECTED_BLOCKGRAPH_REGION_KEYS = (
     "complete",
     "rejected_missing_follow",
     "rejected_must_emit_label",
+    "rejected_middle_ref",
+    "rejected_external_ref",
+    "rejected_join_owner_conflict",
+    "rejected_nonterminal_join",
+    "rejected_follow_owner_conflict",
     "rejected_emit_ready",
     "rejected_irreducible",
 )

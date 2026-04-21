@@ -820,6 +820,21 @@ pub struct NirBuildStats {
     /// BlockGraph-style region proofs rejected because the target label must remain.
     #[serde(default)]
     pub blockgraph_region_rejected_must_emit_label_count: usize,
+    /// BlockGraph-style regions rejected because a surviving middle reference keeps the join label alive.
+    #[serde(default)]
+    pub blockgraph_region_rejected_middle_ref_count: usize,
+    /// BlockGraph-style regions rejected because a surviving external reference keeps the join label alive.
+    #[serde(default)]
+    pub blockgraph_region_rejected_external_ref_count: usize,
+    /// BlockGraph-style regions rejected because join-label ownership stays ambiguous.
+    #[serde(default)]
+    pub blockgraph_region_rejected_join_owner_conflict_count: usize,
+    /// BlockGraph-style regions rejected because the join target stays nonterminal.
+    #[serde(default)]
+    pub blockgraph_region_rejected_nonterminal_join_count: usize,
+    /// BlockGraph-style regions rejected because follow ownership stays ambiguous.
+    #[serde(default)]
+    pub blockgraph_region_rejected_follow_owner_conflict_count: usize,
     /// BlockGraph-style region proofs rejected by emit-ready or alias/side-entry legality.
     #[serde(default)]
     pub blockgraph_region_rejected_emit_ready_count: usize,
@@ -1247,6 +1262,16 @@ impl NirBuildStats {
             other.blockgraph_region_rejected_missing_follow_count;
         self.blockgraph_region_rejected_must_emit_label_count +=
             other.blockgraph_region_rejected_must_emit_label_count;
+        self.blockgraph_region_rejected_middle_ref_count +=
+            other.blockgraph_region_rejected_middle_ref_count;
+        self.blockgraph_region_rejected_external_ref_count +=
+            other.blockgraph_region_rejected_external_ref_count;
+        self.blockgraph_region_rejected_join_owner_conflict_count +=
+            other.blockgraph_region_rejected_join_owner_conflict_count;
+        self.blockgraph_region_rejected_nonterminal_join_count +=
+            other.blockgraph_region_rejected_nonterminal_join_count;
+        self.blockgraph_region_rejected_follow_owner_conflict_count +=
+            other.blockgraph_region_rejected_follow_owner_conflict_count;
         self.blockgraph_region_rejected_emit_ready_count +=
             other.blockgraph_region_rejected_emit_ready_count;
         self.blockgraph_region_rejected_irreducible_count +=

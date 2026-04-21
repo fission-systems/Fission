@@ -258,14 +258,17 @@ impl<'a> PreviewBuilder<'a> {
             PromotionGateRejection::MustEmitLabelSurvivingMiddleRef => {
                 self.rejected_must_emit_label += 1;
                 self.rejected_must_emit_label_surviving_middle_ref += 1;
+                self.blockgraph_region_rejected_middle_ref_count += 1;
             }
             PromotionGateRejection::MustEmitLabelSurvivingExternalRef => {
                 self.rejected_must_emit_label += 1;
                 self.rejected_must_emit_label_surviving_external_ref += 1;
+                self.blockgraph_region_rejected_external_ref_count += 1;
             }
             PromotionGateRejection::MustEmitLabelOwnerConflict => {
                 self.rejected_must_emit_label += 1;
                 self.rejected_must_emit_label_owner_conflict += 1;
+                self.blockgraph_region_rejected_join_owner_conflict_count += 1;
             }
             PromotionGateRejection::NotSinglePredSucc => self.rejected_not_single_pred_succ += 1,
             PromotionGateRejection::ExternalEntry => self.rejected_external_entry += 1,

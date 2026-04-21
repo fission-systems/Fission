@@ -640,11 +640,9 @@ impl<'a> PreviewBuilder<'a> {
                 return false;
             }
 
-            let Some(next_label_idx) =
-                (current_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
-            else {
-                return false;
-            };
+            let next_label_idx = (current_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .unwrap_or(body.len());
 
             let mut terminal_return = false;
             let mut terminal_goto = None::<String>;
@@ -653,6 +651,8 @@ impl<'a> PreviewBuilder<'a> {
                     HirStmt::Goto(target) => terminal_goto = Some(target.clone()),
                     HirStmt::Return(_) => terminal_return = true,
                     stmt if is_ignorable_discovery_stmt(stmt) => {}
+                    stmt if Self::stmt_is_pure_value_expr(stmt) => {}
+                    stmt if Self::stmt_is_pure_value_assign(stmt) => {}
                     HirStmt::Block(inner) if inner.is_empty() => {}
                     _ => return false,
                 }
@@ -702,7 +702,48 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(());
             }
-            if Self::top_level_label_definition_count_for_owned_tail(body, target) != 1 {
+            let next_stmt_label_idx = (stmt_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .unwrap_or(body.len());
+            for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
+                let trailing = &body[trailing_idx];
+                if is_ignorable_discovery_stmt(trailing)
+                    || matches!(trailing, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    continue;
+                }
+                if Self::suffix_stmt_has_nested_or_nonlocal_ref(trailing) {
+                    return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+                }
+                if !Self::stmt_is_pure_value_expr(trailing)
+                    && !Self::stmt_is_pure_value_assign(trailing)
+                    && !matches!(trailing, HirStmt::Goto(target) if target == next_label)
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
+                }
+            }
+            let label_count = Self::top_level_label_definition_count_for_owned_tail(body, target);
+            if label_count == 0 {
+                let terminal_label = body
+                    .get(terminal_label_idx)
+                    .and_then(|stmt| match stmt {
+                        HirStmt::Label(label) => Some(label.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or("");
+                return Err(if next_label == terminal_label {
+                    SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                        stmt_idx,
+                        label: target.clone(),
+                    }
+                } else {
+                    SuffixTailRejection::SuffixHasNonTerminalGoto {
+                        stmt_idx,
+                        target: target.clone(),
+                    }
+                });
+            }
+            if label_count != 1 {
                 return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
                     stmt_idx,
                     label: target.clone(),
@@ -839,7 +880,48 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(());
             }
-            if Self::top_level_label_definition_count_for_owned_tail(body, target) != 1 {
+            let next_stmt_label_idx = (stmt_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .unwrap_or(body.len());
+            for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
+                let trailing = &body[trailing_idx];
+                if is_ignorable_discovery_stmt(trailing)
+                    || matches!(trailing, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    continue;
+                }
+                if Self::suffix_stmt_has_nested_or_nonlocal_ref(trailing) {
+                    return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+                }
+                if !Self::stmt_is_pure_value_expr(trailing)
+                    && !Self::stmt_is_pure_value_assign(trailing)
+                    && !matches!(trailing, HirStmt::Goto(target) if target == next_label)
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
+                }
+            }
+            let label_count = Self::top_level_label_definition_count_for_owned_tail(body, target);
+            if label_count == 0 {
+                let terminal_label = body
+                    .get(terminal_label_idx)
+                    .and_then(|stmt| match stmt {
+                        HirStmt::Label(label) => Some(label.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or("");
+                return Err(if next_label == terminal_label {
+                    SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                        stmt_idx,
+                        label: target.clone(),
+                    }
+                } else {
+                    SuffixTailRejection::SuffixHasNonTerminalGoto {
+                        stmt_idx,
+                        target: target.clone(),
+                    }
+                });
+            }
+            if label_count != 1 {
                 return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
                     stmt_idx,
                     label: target.clone(),
@@ -1518,6 +1600,16 @@ impl<'a> PreviewBuilder<'a> {
         if !label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx) {
             return 0;
         }
+        if Self::count_internalized_guard_family_nested_conditional_entries(
+            body,
+            label,
+            anchor_idx,
+            current_label_idx,
+            terminal_label_idx,
+        ) > 0
+        {
+            return 0;
+        }
 
         let refs =
             Self::collect_nested_boundary_ref_traces(body, label, anchor_idx, terminal_label_idx);
@@ -1624,6 +1716,9 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<(ExternalEntryRefKind, usize)> {
         for (stmt_idx, stmt) in body.iter().enumerate() {
             if Self::stmt_contains_goto_label(stmt, label) == 0 {
+                continue;
+            }
+            if stmt_idx == anchor_idx {
                 continue;
             }
             if stmt_idx > anchor_idx
@@ -1746,6 +1841,13 @@ impl<'a> PreviewBuilder<'a> {
                     )
                 {
                     continue;
+                }
+                if rewrites == 0
+                    && next_label_idx == terminal_label_idx
+                    && !is_ignorable_discovery_stmt(stmt)
+                    && !matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
                 }
                 Self::classify_suffix_stmt(
                     stmt,
@@ -1873,6 +1975,13 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     continue;
                 }
+                if rewrites == 0
+                    && next_label_idx == terminal_label_idx
+                    && !is_ignorable_discovery_stmt(stmt)
+                    && !matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
+                }
                 self.classify_suffix_stmt_with_diag(
                     stmt,
                     body,
@@ -1905,20 +2014,24 @@ impl<'a> PreviewBuilder<'a> {
                 label: candidate_label.to_string(),
             });
         }
-        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
-            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                stmt_idx: candidate_label_idx,
-                label: candidate_label.to_string(),
-            });
-        }
-        Self::suffix_is_nonowned_terminal_tail(
+        let suffix_result = Self::suffix_is_nonowned_terminal_tail(
             body,
             anchor_idx,
             candidate_label,
             candidate_label_idx,
             terminal_label_idx,
             referenced,
-        )
+        );
+        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
+            return match suffix_result {
+                Err(SuffixTailRejection::SuffixHasExternalEntry { .. }) => suffix_result,
+                _ => Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: candidate_label_idx,
+                    label: candidate_label.to_string(),
+                }),
+            };
+        }
+        suffix_result
     }
 
     fn candidate_window_can_shrink_to_label_with_diag(
@@ -1936,20 +2049,24 @@ impl<'a> PreviewBuilder<'a> {
                 label: candidate_label.to_string(),
             });
         }
-        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
-            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                stmt_idx: candidate_label_idx,
-                label: candidate_label.to_string(),
-            });
-        }
-        self.suffix_is_nonowned_terminal_tail_with_diag(
+        let suffix_result = self.suffix_is_nonowned_terminal_tail_with_diag(
             body,
             anchor_idx,
             candidate_label,
             candidate_label_idx,
             terminal_label_idx,
             referenced,
-        )
+        );
+        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
+            return match suffix_result {
+                Err(SuffixTailRejection::SuffixHasExternalEntry { .. }) => suffix_result,
+                _ => Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: candidate_label_idx,
+                    label: candidate_label.to_string(),
+                }),
+            };
+        }
+        suffix_result
     }
 
     pub(super) fn find_earliest_owned_join_label(

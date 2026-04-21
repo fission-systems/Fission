@@ -86,6 +86,16 @@ impl<'a> PreviewBuilder<'a> {
                 .blockgraph_region_rejected_missing_follow_count,
             blockgraph_region_rejected_must_emit_label_count: self
                 .blockgraph_region_rejected_must_emit_label_count,
+            blockgraph_region_rejected_middle_ref_count: self
+                .blockgraph_region_rejected_middle_ref_count,
+            blockgraph_region_rejected_external_ref_count: self
+                .blockgraph_region_rejected_external_ref_count,
+            blockgraph_region_rejected_join_owner_conflict_count: self
+                .blockgraph_region_rejected_join_owner_conflict_count,
+            blockgraph_region_rejected_nonterminal_join_count: self
+                .blockgraph_region_rejected_nonterminal_join_count,
+            blockgraph_region_rejected_follow_owner_conflict_count: self
+                .blockgraph_region_rejected_follow_owner_conflict_count,
             blockgraph_region_rejected_emit_ready_count: self
                 .blockgraph_region_rejected_emit_ready_count,
             blockgraph_region_rejected_irreducible_count: self
