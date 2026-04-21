@@ -38,6 +38,72 @@ pub enum WrapperClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcedureControlEffect {
+    Returns,
+    TailJumps,
+    NonReturning,
+    IndirectOnly,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcedureMemoryEffect {
+    Pure,
+    StackLocal,
+    ReadsGlobal,
+    WritesGlobal,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcedureStackEffect {
+    Neutral,
+    FrameSetupOnly,
+    AffineDelta,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcedureReturnShape {
+    None,
+    ForwardedCallResult(CallTargetRef),
+    ForwardedTailTarget(CallTargetRef),
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcedureCallShape {
+    Leaf,
+    SingleTailWrapper,
+    WrapperChain,
+    General,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgForwardingRelation {
+    pub forwarded_param_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrapperContractionProof {
+    pub wrapper_class: WrapperClass,
+    pub target: CallTargetRef,
+    pub arg_forwarding: ArgForwardingRelation,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcedureSummary {
+    pub control_effect: ProcedureControlEffect,
+    pub memory_effect: ProcedureMemoryEffect,
+    pub stack_effect: ProcedureStackEffect,
+    pub return_shape: ProcedureReturnShape,
+    pub arg_forwarding: ArgForwardingRelation,
+    pub call_shape: ProcedureCallShape,
+    pub wrapper_contraction: Option<WrapperContractionProof>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummarySoundness {
     Pessimistic,
     Optimistic,
@@ -622,6 +688,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub max_structuring_scc_component_size: usize,
     #[serde(default)]
+    pub procedure_summary_contracted_count: usize,
+    #[serde(default)]
+    pub procedure_summary_tail_wrapper_count: usize,
+    #[serde(default)]
+    pub procedure_summary_import_thunk_count: usize,
+    #[serde(default)]
     pub forced_linear_structuring_count: usize,
     #[serde(default)]
     pub region_linearize_structuring_count: usize,
@@ -1044,6 +1116,9 @@ impl NirBuildStats {
         self.max_structuring_scc_component_size = self
             .max_structuring_scc_component_size
             .max(other.max_structuring_scc_component_size);
+        self.procedure_summary_contracted_count += other.procedure_summary_contracted_count;
+        self.procedure_summary_tail_wrapper_count += other.procedure_summary_tail_wrapper_count;
+        self.procedure_summary_import_thunk_count += other.procedure_summary_import_thunk_count;
         self.forced_linear_structuring_count += other.forced_linear_structuring_count;
         self.region_linearize_structuring_count += other.region_linearize_structuring_count;
         self.region_linearize_rejected_non_structuring_failure_count +=

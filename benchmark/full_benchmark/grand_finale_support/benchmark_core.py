@@ -133,6 +133,9 @@ CORPUS_GATE_MODES = frozenset({"advisory", "blocking"})
 DEFAULT_DYNAMIC_WATCHLIST_LIMIT = 5
 
 OWNER_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("procedure_summary_contracted_count", "procedure_summary_contracted"),
+    ("procedure_summary_tail_wrapper_count", "procedure_summary_tail_wrapper"),
+    ("procedure_summary_import_thunk_count", "procedure_summary_import_thunk"),
     ("replacement_plan_rejected_alias_unsafe_count", "alias_unsafe"),
     ("replacement_plan_rejected_missing_merge_count", "missing_merge"),
     ("replacement_plan_rejected_representative_root_attribution_count", "representative_root"),
@@ -491,6 +494,27 @@ def select_row_fidelity_targets(role_filter: str) -> list[tuple[str, str]]:
             if role in ("primary", "secondary")
         ]
     return list(ROW_FIDELITY_TARGETS)
+
+
+def _normalize_row_target_pairs(
+    rows: list[tuple[str, str]] | list[dict[str, Any]] | None,
+) -> list[tuple[str, str]]:
+    normalized: list[tuple[str, str]] = []
+    for row in list(rows or []):
+        if isinstance(row, dict):
+            address = str(row.get("address", "")).strip()
+            if not address:
+                continue
+            role = str(row.get("role", "canary") or "canary")
+            normalized.append((canonical_address(address), role))
+            continue
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            address = str(row[0]).strip()
+            if not address:
+                continue
+            role = str(row[1] or "canary")
+            normalized.append((canonical_address(address), role))
+    return normalized
 
 
 def _sanitize_output_component(value: str) -> str:
@@ -1205,7 +1229,11 @@ def _build_row_fidelity_gate(
     missing = 0
     failed_targets: list[str] = []
 
-    targets = row_targets or _derive_dynamic_row_targets(baseline_summary_json) or list(ROW_FIDELITY_TARGETS)
+    targets = (
+        _normalize_row_target_pairs(row_targets)
+        or _normalize_row_target_pairs(_derive_dynamic_row_targets(baseline_summary_json))
+        or list(ROW_FIDELITY_TARGETS)
+    )
 
     for address, role in targets:
         cur_row = cur_rows_map.get(address)
@@ -3088,7 +3116,11 @@ def build_row_fidelity_targets_snapshot(
         if isinstance(row, dict) and row.get("address")
     }
     target_rows: list[dict[str, Any]] = []
-    targets = list(ROW_FIDELITY_TARGETS) if row_targets is None else list(row_targets)
+    targets = (
+        list(ROW_FIDELITY_TARGETS)
+        if row_targets is None
+        else _normalize_row_target_pairs(row_targets)
+    )
     selected_reason_by_address: dict[str, str] = {}
     for row in list(bootstrap_row_targets or []) + list(dynamic_watchlist_rows or []):
         if not isinstance(row, dict):
@@ -4950,15 +4982,23 @@ def run_single_benchmark(
     watchlist_metadata = _resolve_binary_watchlist(
         manifest_entry=manifest_entry,
         baseline_summary_json=baseline_summary_payload,
-        default_row_targets=select_row_fidelity_targets(
-            str(getattr(args, "row_fidelity_role_filter", "all"))
+        default_row_targets=(
+            select_row_fidelity_targets(
+                str(getattr(args, "row_fidelity_role_filter", "all"))
+            )
+            if manifest_entry is not None
+            else []
         ),
         dynamic_watchlist_limit=_safe_int(
             manifest_entry.get("dynamic_watchlist_limit") if manifest_entry is not None else None,
             DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
         ),
     )
-    row_fidelity_targets_filter = list(watchlist_metadata["rows"])
+    row_fidelity_targets_filter = [
+        (str(row.get("address", "")), str(row.get("role", "canary")))
+        for row in list(watchlist_metadata["rows"])
+        if isinstance(row, dict) and row.get("address")
+    ]
     baseline_row_targets = row_fidelity_targets_filter or None
 
     print(f"[*] Binary: {binary_path}")

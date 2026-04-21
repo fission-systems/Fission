@@ -38,168 +38,35 @@ fn build_cfg_blocks(
     fission_sleigh::lifter::build_cfg_blocks(entry_address, ops)
 }
 
-fn decode_rust_sleigh_pcode(
-    lifter: &fission_sleigh::lifter::SleighLifter,
-    binary: &LoadedBinary,
-    func: &FunctionInfo,
-) -> Result<fission_pcode::PcodeFunction, FissionError> {
-    let max_bytes = if func.size > 0 {
-        usize::try_from(func.size)
-            .unwrap_or(0x4000)
-            .min(0x10000)
-            .max(1)
-    } else {
-        // No size recorded (scanner-discovered function): estimate from next function.
-        // The lifter stops at the first terminal instruction, so a generous window is safe.
-        binary
-            .function_after(func.address)
-            .and_then(|next| {
-                let dist = next.address.saturating_sub(func.address) as usize;
-                if dist > 0 {
-                    Some(dist.min(0x10000))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0x4000)
-    };
-
-    let bytes = binary.view_bytes(func.address, max_bytes).ok_or_else(|| {
-        FissionError::decompiler(format!(
-            "rust_sleigh: unable to read bytes at 0x{:x}",
-            func.address
-        ))
-    })?;
-    let instruction_limit = 512usize.max(max_bytes.min(4096));
-
-    let lifted = lifter
-        .lift_raw_pcode_function_with_decode_contract(
-            &bytes,
-            func.address,
-            fission_sleigh::lifter::LiftDecodeContract::decomp_function(instruction_limit),
-        )
-        .map_err(|err| {
-            FissionError::decompiler(format!(
-                "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
-                func.name, func.address, err
-            ))
-        })?;
-
-    Ok(lifted.function)
-}
-
-fn format_varnode_for_pcode(vn: &fission_pcode::Varnode) -> String {
-    if vn.is_constant {
-        format!("const(0x{:x}:{} )", vn.constant_val as u64, vn.size)
-    } else {
-        format!(
-            "v(space={},off=0x{:x},size={})",
-            vn.space_id, vn.offset, vn.size
-        )
-    }
-}
-
-fn render_pcode_text(func: &FunctionInfo, pcode: &fission_pcode::PcodeFunction) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// rust_sleigh direct pcode output: {}\n",
-        func.name
-    ));
-    for block in &pcode.blocks {
-        out.push_str(&format!(
-            "block_{} @ 0x{:x}\n",
-            block.index, block.start_address
-        ));
-        for op in &block.ops {
-            let out_vn = op
-                .output
-                .as_ref()
-                .map(format_varnode_for_pcode)
-                .unwrap_or_else(|| "-".to_string());
-            let in_vn = op
-                .inputs
-                .iter()
-                .map(format_varnode_for_pcode)
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push_str(&format!(
-                "  [{:04}] 0x{:x} {:?}  {} <- {}\n",
-                op.seq_num, op.address, op.opcode, out_vn, in_vn
-            ));
-        }
-    }
-    out
-}
-
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
 ) -> Result<RenderedCode, FissionError> {
-    let language = sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
+    let _language = sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
         FissionError::decompiler(format!(
             "rust_sleigh: unsupported arch_spec '{}'",
             binary.arch_spec
         ))
     })?;
-
-    let lifter = fission_sleigh::lifter::SleighLifter::new_for_language(language)
-        .map_err(|e| FissionError::decompiler(format!("rust_sleigh: {e:#}")))?;
-
-    let pcode = decode_rust_sleigh_pcode(&lifter, binary, func)?;
-
-    let mut options = fission_pcode::NirRenderOptions::from_loaded_binary(binary);
-    // rust-sleigh may target non-PE or non-x64 binaries (e.g., AArch64 Mach-O).
-    // Keep the NIR pipeline open and let semantic/structuring checks decide support.
-    options.pe_x64_only = false;
-    options.conservative_irreducible_fallback = true;
-    let selection = fission_decompiler_core::select_nir_output_from_prebuilt_pcode(
-        &pcode,
+    let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();
+    let result = fission_decompiler_core::decompile_with_rust_sleigh(
         binary,
         func.address,
         &func.name,
-        fission_decompiler_core::NirEngineMode::Nir,
+        &config,
         None,
-        options,
+        None,
     )
-    .map_err(|e| FissionError::decompiler(format!("rust_sleigh routing failed: {e}")))?;
-
-    let code = if let Some(code) = selection.nir_code {
-        code
-    } else {
-        let fallback_reason = selection.fallback_reason.unwrap_or_else(|| {
-            "nir skipped: function not supported by Fission NIR builder".to_string()
-        });
-        let lower = fallback_reason.to_ascii_lowercase();
-        let is_unsupported_arch = lower.contains("unsupported architecture in mlil-preview")
-            || matches!(
-                selection.fallback_kind_refined,
-                Some("preview_architecture_unsupported")
-            );
-        if is_unsupported_arch {
-            return Ok(RenderedCode {
-                code: render_pcode_text(func, &pcode),
-                postprocess_sec: 0.0,
-                engine_used: "rust_sleigh",
-                fell_back: true,
-                fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),
-                preview_build_stats: None,
-                preview_hint_stats: None,
-            });
-        }
-        return Err(FissionError::decompiler(format!(
-            "rust_sleigh render failed: {}",
-            fallback_reason
-        )));
-    };
+    .map_err(FissionError::decompiler)?;
 
     Ok(RenderedCode {
-        code,
+        code: result.code,
         postprocess_sec: 0.0,
         engine_used: "rust_sleigh",
-        fell_back: selection.fell_back,
-        fallback_reason: selection.fallback_reason,
-        preview_build_stats: selection.build_stats,
-        preview_hint_stats: selection.hint_stats,
+        fell_back: result.fell_back,
+        fallback_reason: result.fallback_reason,
+        preview_build_stats: result.build_stats,
+        preview_hint_stats: result.hint_stats,
     })
 }
 

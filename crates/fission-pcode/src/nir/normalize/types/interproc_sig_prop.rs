@@ -10,8 +10,8 @@
 
 use crate::nir::types::{
     CallEdgeKind, CallEffectSummary, CallSummary, CallTargetProvenance, CallTargetRef, HirExpr,
-    HirFunction, HirLValue, HirStmt, MemoryEffectRegion, NirType, PrototypeSummary,
-    SummarySoundness, WrapperClass, parse_call_target_address,
+    HirFunction, HirStmt, MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness,
+    WrapperClass, parse_call_target_address,
 };
 use indexmap::IndexMap;
 
@@ -19,7 +19,10 @@ use super::super::wave_stats::{
     add_call_effect_summary_refinements, add_interproc_constraint_rounds,
     add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
 };
-use super::callsite_type_prop::win_type_name_to_nir;
+use super::{
+    callsite_type_prop::win_type_name_to_nir, summarize_wrapper_hir_function,
+    summary_soundness_for_wrapper,
+};
 use fission_signatures::win_api::WIN_API_DB;
 
 fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
@@ -162,22 +165,6 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
     refinements
 }
 
-fn classify_wrapper_body(func: &HirFunction) -> Option<(WrapperClass, CallTargetRef)> {
-    match func.body.as_slice() {
-        [HirStmt::Return(Some(HirExpr::Call { target, .. }))] => {
-            Some((WrapperClass::TailForwarder, summary_seed(target)))
-        }
-        [
-            HirStmt::Assign {
-                lhs: HirLValue::Var(temp),
-                rhs: HirExpr::Call { target, .. },
-            },
-            HirStmt::Return(Some(HirExpr::Var(ret))),
-        ] if temp == ret => Some((WrapperClass::PureAdapter, summary_seed(target))),
-        _ => None,
-    }
-}
-
 fn scan_expr(
     expr: &HirExpr,
     arity_map: &mut IndexMap<String, usize>,
@@ -256,7 +243,7 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
     }
     let saw_summary_round = !summaries.is_empty();
     let mut improved = 0usize;
-    let wrapper_shape = classify_wrapper_body(func);
+    let wrapper_shape = summarize_wrapper_hir_function(func);
     let mut prototype_refinements = 0usize;
     let mut effect_refinements = 0usize;
     let mut wrapper_refinements = 0usize;
@@ -308,12 +295,17 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                         effect_refinements += 1;
                     }
                 }
-                if let Some((wrapper_class, wrapper_target)) = wrapper_shape.as_ref()
+                if let Some(procedure_summary) = wrapper_shape.as_ref()
                     && existing.effect_summary.wrapper_class == WrapperClass::None
                 {
-                    existing.effect_summary.wrapper_class = *wrapper_class;
-                    existing.effect_summary.wrapper_of = Some(wrapper_target.clone());
+                    let proof = procedure_summary
+                        .wrapper_contraction
+                        .as_ref()
+                        .expect("wrapper summary missing contraction proof");
+                    existing.effect_summary.wrapper_class = proof.wrapper_class;
+                    existing.effect_summary.wrapper_of = Some(proof.target.clone());
                     existing.effect_summary.confidence = existing.effect_summary.confidence.max(64);
+                    existing.prototype.soundness = summary_soundness_for_wrapper(procedure_summary);
                     wrapper_refinements += 1;
                 }
                 let target_symbol = existing.target.symbol.clone();
@@ -323,9 +315,14 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
                 let mut summary = summary;
                 let target_symbol = summary.target.symbol.clone();
                 prototype_refinements += apply_import_signature_seed(&mut summary, &target_symbol);
-                if let Some((wrapper_class, wrapper_target)) = wrapper_shape.as_ref() {
-                    summary.effect_summary.wrapper_class = *wrapper_class;
-                    summary.effect_summary.wrapper_of = Some(wrapper_target.clone());
+                if let Some(procedure_summary) = wrapper_shape.as_ref() {
+                    let proof = procedure_summary
+                        .wrapper_contraction
+                        .as_ref()
+                        .expect("wrapper summary missing contraction proof");
+                    summary.effect_summary.wrapper_class = proof.wrapper_class;
+                    summary.effect_summary.wrapper_of = Some(proof.target.clone());
+                    summary.prototype.soundness = summary_soundness_for_wrapper(procedure_summary);
                     summary.effect_summary.confidence = summary.effect_summary.confidence.max(64);
                     wrapper_refinements += 1;
                 }

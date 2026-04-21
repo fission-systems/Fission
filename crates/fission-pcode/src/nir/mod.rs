@@ -30,6 +30,29 @@ pub use self::telemetry::{
 pub use self::types::*;
 use self::{builder::*, cfg::*, normalize::*, printer::*, structuring::*};
 
+pub use self::normalize::{
+    summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
+};
+
+pub fn render_contracted_wrapper_summary(name: &str, summary: &ProcedureSummary) -> String {
+    let target = summary
+        .wrapper_contraction
+        .as_ref()
+        .map(|proof| proof.target.symbol.clone())
+        .unwrap_or_else(|| "unknown_target".to_string());
+    let mut hir = HirFunction {
+        name: name.to_string(),
+        return_type: NirType::Unknown,
+        ..HirFunction::default()
+    };
+    hir.body = vec![HirStmt::Return(Some(HirExpr::Call {
+        target,
+        args: Vec::new(),
+        ty: NirType::Unknown,
+    }))];
+    print_hir_function(&hir)
+}
+
 pub fn render_mlil_preview(
     pcode: &PcodeFunction,
     name: &str,

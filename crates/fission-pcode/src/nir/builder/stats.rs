@@ -9,6 +9,9 @@ impl<'a> PreviewBuilder<'a> {
             render_duration_ms: self.render_duration_ms,
             rendered_code_len: self.rendered_code_len,
             max_structuring_scc_component_size: self.max_structuring_scc_component_size,
+            procedure_summary_contracted_count: self.procedure_summary_contracted_count,
+            procedure_summary_tail_wrapper_count: self.procedure_summary_tail_wrapper_count,
+            procedure_summary_import_thunk_count: self.procedure_summary_import_thunk_count,
             forced_linear_structuring_count: self.forced_linear_structuring_count,
             region_linearize_structuring_count: self.region_linearize_structuring_count,
             region_linearize_rejected_non_structuring_failure_count: self

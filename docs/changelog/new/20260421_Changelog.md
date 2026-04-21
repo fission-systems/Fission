@@ -12,7 +12,165 @@ The main goals of this wave were:
 - stabilize the human-facing `fission_cli` subcommand surface
 - add a detailed CLI reference for evaluators and headless users
 
-No Rust decompiler algorithm behavior was intentionally changed in this wave.
+The initial maturity wave below did not intentionally change Rust decompiler semantics.
+The follow-up wrapper-contraction section added later in this changelog does change the explicit rust-sleigh decompilation path for proven wrapper families.
+
+---
+
+## 0. Wrapper Contraction And Explicit Pathological Function Relief
+
+### Scope
+
+This follow-up wave introduced a canonical wrapper-contraction path for zero-size direct tail wrappers and aligned the CLI rust-sleigh execution path to use the same owner.
+
+Primary target:
+
+- `test_functions.exe @ 0x140002d40`
+- function name: `register_frame_ctor`
+- prior family attribution: `ZeroSizeRuntimeWrapper`
+
+### What changed
+
+- Added typed procedure-summary vocabulary for wrapper contraction in `fission-pcode`.
+- Added a narrow direct-tail-wrapper proof for p-code / first-instruction decode.
+- Added additive telemetry:
+  - `procedure_summary_contracted_count`
+  - `procedure_summary_tail_wrapper_count`
+  - `procedure_summary_import_thunk_count`
+- Added an early wrapper probe in `fission-decompiler-core` that:
+  - decodes only the first instruction
+  - proves direct tail-wrapper shape
+  - emits a minimal synthetic wrapper HIR
+  - skips the giant normalize / structuring path entirely when the proof completes
+- Removed duplicate rust-sleigh rendering logic from the canonical CLI `decomp` execution path and routed it through `fission-decompiler-core`.
+
+This is the important ownership cleanup in this wave:
+
+- before: `crates/fission-cli/.../decompile_exec/run.rs` had its own local rust-sleigh render path
+- after: the canonical `decomp` path consumes the shared `fission-decompiler-core` rust-sleigh path, so wrapper contraction is not bypassed
+
+### Explicit pathological row improvement
+
+Before this wave, the explicit pathological wrapper row was dominated by giant-function cost:
+
+- wall time: roughly `247s`
+- `build_duration_ms=247793`
+- `normalize_duration_ms=155567`
+- `structuring_duration_ms=90686`
+- `render_duration_ms=4`
+- `replacement_plan_candidate_count=39381`
+- `materialization_stabilized_count=33633`
+
+After this wave:
+
+- command:
+  - `target/debug/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140002d40 --json`
+- wall time:
+  - `0.91s`
+- emitted code:
+  - `undefined register_frame_ctor() { return __gcc_register_frame(); }`
+- preview build stats on the explicit row:
+  - `procedure_summary_contracted_count=1`
+  - `procedure_summary_tail_wrapper_count=1`
+  - `procedure_summary_import_thunk_count=0`
+  - `replacement_plan_candidate_count=0`
+  - `materialization_stabilized_count=0`
+  - `normalize_duration_ms=0`
+  - `structuring_duration_ms=0`
+  - `rendered_code_len=71`
+
+Net effect:
+
+- explicit wrapper wall time dropped by well over `99%`
+- giant normalize / materialization / structuring explosion is bypassed for the proven wrapper family
+
+### Whole-binary throughput remained stable
+
+Filtered `--all --benchmark` on the Windows x86-64 small C set remained fast and crash-free:
+
+- `test_functions.exe`
+  - `functions_discovered_total=118`
+  - `functions_selected_total=78`
+  - `functions_excluded_import_count=39`
+  - `functions_excluded_runtime_wrapper_count=1`
+  - `wall_clock_sec=0.423465`
+- `bitops_and_control_flow.exe`
+  - `functions_discovered_total=120`
+  - `functions_selected_total=80`
+  - `functions_excluded_import_count=39`
+  - `functions_excluded_runtime_wrapper_count=1`
+  - `wall_clock_sec=0.300326`
+- `function_pointers_and_strings.exe`
+  - `functions_discovered_total=134`
+  - `functions_selected_total=91`
+  - `functions_excluded_import_count=42`
+  - `functions_excluded_runtime_wrapper_count=1`
+  - `wall_clock_sec=0.349343`
+
+### Same-axis benchmark result
+
+Validation surface:
+
+- benchmark script:
+  - `benchmark/full_benchmark/full_decomp_benchmark.py`
+- binary:
+  - `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe`
+- baseline:
+  - detached worktree at `HEAD`
+- run shape:
+  - `--limit 10`
+
+Baseline:
+
+- `avg_normalized_similarity=44.61`
+- `coverage_ratio_pct=100.0`
+- `both_success_count=10`
+- `fission wall_clock_sec=0.503874`
+- `fission total_decomp_sec=0.353872`
+
+Trial:
+
+- `avg_normalized_similarity=46.47`
+- `coverage_ratio_pct=100.0`
+- `both_success_count=10`
+- `fission wall_clock_sec=0.507712`
+- `fission total_decomp_sec=0.445924`
+- `baseline gate status=passed`
+- `comparable_to_baseline=true`
+
+Interpretation:
+
+- quality on the seeded same-axis benchmark was non-worse and improved on normalized similarity
+- whole-binary seeded timing stayed effectively flat
+- the meaningful speed win in this wave is the explicit pathological wrapper path, not the already-filtered whole-binary path
+
+### Benchmark contract fix discovered during validation
+
+Running a single-binary same-axis benchmark exposed two benchmark-side contract bugs:
+
+1. manifest-less single-binary runs were still injecting the fixed `putty` row-fidelity watchlist
+2. dynamic row-watchlist objects were passed into tuple-only row-fidelity code paths during baseline comparison
+
+Both were fixed in `benchmark/full_benchmark/grand_finale_support/benchmark_core.py`:
+
+- manifest-less single-binary runs now default to no fixed watchlist
+- row-fidelity targets are normalized before snapshot / baseline-gate evaluation
+
+This was necessary to make the same-axis benchmark result interpretable for `test_functions.exe`.
+
+### Duplicate-logic audit outcome
+
+Duplicate logic reduced in this wave:
+
+- wrapper summary classification is shared through `procedure_summary.rs`
+- the canonical CLI rust-sleigh decompile path now routes through `fission-decompiler-core`
+- the previous local rust-sleigh render implementation in `decompile_exec/run.rs` no longer bypasses wrapper contraction
+
+Next owner after this wave:
+
+- keep wrapper families under the shared procedure-summary owner
+- move next to broader interprocedural wrapper/adaptor summaries only if evidence shows additional zero-cost wrappers beyond the direct-tail family
+- do not reopen the previous giant explicit wrapper path unless a non-wrapper pathological family remains after summary contraction
 
 ---
 

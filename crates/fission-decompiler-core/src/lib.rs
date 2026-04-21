@@ -1,5 +1,9 @@
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, Varnode};
+use fission_pcode::{
+    NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, WrapperClass, Varnode,
+    render_contracted_wrapper_summary, summarize_direct_tail_wrapper_from_ops,
+};
+use std::time::Instant;
 use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
 use fission_static::analysis::decomp::facts::FactStore;
 
@@ -49,6 +53,9 @@ pub struct RustSleighDecompileConfig {
     pub continue_past_indirect_branch: bool,
     pub retry_on_decode_error: bool,
     pub use_next_function_distance_if_unknown: bool,
+    pub enable_wrapper_contraction_probe: bool,
+    pub wrapper_probe_max_bytes: usize,
+    pub wrapper_probe_instruction_limit: usize,
     pub nir_mode: NirEngineMode,
     pub nir_timeout_ms: Option<u64>,
     pub pe_x64_only: bool,
@@ -69,6 +76,9 @@ impl RustSleighDecompileConfig {
             continue_past_indirect_branch: true,
             retry_on_decode_error: true,
             use_next_function_distance_if_unknown: true,
+            enable_wrapper_contraction_probe: true,
+            wrapper_probe_max_bytes: 64,
+            wrapper_probe_instruction_limit: 16,
             nir_mode: NirEngineMode::Nir,
             nir_timeout_ms: None,
             pe_x64_only: false,
@@ -221,6 +231,93 @@ fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
         || lower.contains("unsupported opcode")
 }
 
+fn probe_wrapper_contraction(
+    binary: &LoadedBinary,
+    entry_address: u64,
+    name: &str,
+    function_size: usize,
+    config: &RustSleighDecompileConfig,
+    started_at: Instant,
+) -> Result<Option<RustSleighDecompileResult>, String> {
+    if !config.enable_wrapper_contraction_probe {
+        return Ok(None);
+    }
+    let probe_max_bytes = if function_size > 0 {
+        function_size.min(config.wrapper_probe_max_bytes.max(1))
+    } else if config.use_next_function_distance_if_unknown {
+        binary
+            .function_after(entry_address)
+            .and_then(|next| {
+                let dist = next.address.saturating_sub(entry_address) as usize;
+                (dist > 0).then_some(dist.min(config.wrapper_probe_max_bytes.max(1)))
+            })
+            .unwrap_or(config.wrapper_probe_max_bytes.max(1))
+    } else {
+        config.wrapper_probe_max_bytes.max(1)
+    }
+    .max(1);
+
+    let probe_bytes = match binary.view_bytes(entry_address, probe_max_bytes) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    let language = match sleigh_language_for_arch_spec(&binary.arch_spec) {
+        Some(language) => language,
+        None => return Ok(None),
+    };
+    let lifter = match SleighLifter::new_for_language(language) {
+        Ok(lifter) => lifter,
+        Err(_) => return Ok(None),
+    };
+    let probe_ops = match lifter.decode_and_lift_with_len(&probe_bytes, entry_address) {
+        Ok((ops, _)) => ops,
+        Err(_) => return Ok(None),
+    };
+
+    let Some(summary) = summarize_direct_tail_wrapper_from_ops(
+        &probe_ops,
+        entry_address,
+        |target| {
+            binary
+                .function_at(target)
+                .map(|func| func.name.clone())
+                .unwrap_or_else(|| format!("sub_{target:x}"))
+        },
+        |target| binary.function_at(target).is_some_and(|func| func.is_import),
+    ) else {
+        return Ok(None);
+    };
+
+    let render_start = Instant::now();
+    let code = render_contracted_wrapper_summary(name, &summary);
+    let mut build_stats = NirBuildStats {
+        build_duration_ms: started_at.elapsed().as_millis() as usize,
+        render_duration_ms: render_start.elapsed().as_millis() as usize,
+        rendered_code_len: code.len(),
+        procedure_summary_contracted_count: 1,
+        ..NirBuildStats::default()
+    };
+    if let Some(proof) = summary.wrapper_contraction.as_ref() {
+        match proof.wrapper_class {
+            WrapperClass::TailForwarder | WrapperClass::PureAdapter => {
+                build_stats.procedure_summary_tail_wrapper_count = 1;
+            }
+            WrapperClass::ImportThunk => {
+                build_stats.procedure_summary_import_thunk_count = 1;
+            }
+            WrapperClass::None => {}
+        }
+    }
+
+    Ok(Some(RustSleighDecompileResult {
+        code,
+        fell_back: false,
+        fallback_reason: None,
+        build_stats: Some(build_stats),
+        hint_stats: None,
+    }))
+}
+
 fn finish_rust_sleigh_render(
     binary: &LoadedBinary,
     entry_address: u64,
@@ -283,6 +380,7 @@ pub fn decompile_with_rust_sleigh(
     max_function_size: Option<u32>,
     max_instructions: Option<u32>,
 ) -> Result<RustSleighDecompileResult, String> {
+    let start = Instant::now();
     let entry_address = binary
         .function_at(address)
         .map(|f| f.address)
@@ -330,6 +428,17 @@ pub fn decompile_with_rust_sleigh(
         .unwrap_or(default_instruction_limit)
         .max(1)
         .min(config.instruction_budget_cap.max(1));
+
+    if let Some(summary_result) = probe_wrapper_contraction(
+        binary,
+        entry_address,
+        name,
+        function_size,
+        config,
+        start,
+    )? {
+        return Ok(summary_result);
+    }
 
     let pcode = decode_rust_sleigh_pcode(
         binary,
