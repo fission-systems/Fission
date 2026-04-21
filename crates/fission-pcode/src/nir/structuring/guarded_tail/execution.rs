@@ -666,6 +666,11 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         if !legality.is_complete_for(RegionKind::GuardedTail) {
+            self.record_guarded_tail_blockgraph_proof(
+                idx,
+                witness,
+                BlockGraphRegionProof::reason_from_legality(legality),
+            );
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[DIAG] guarded-tail verify idx={} label={} incomplete_legality",
@@ -689,6 +694,11 @@ impl<'a> PreviewBuilder<'a> {
                     20,
                 );
             }
+            self.record_guarded_tail_blockgraph_proof(
+                idx,
+                witness,
+                BlockGraphLegalityReason::MustEmitLabelConflict,
+            );
             return GuardedTailVerification {
                 region_legality: legality,
                 replacement_complete: false,
@@ -808,6 +818,11 @@ impl<'a> PreviewBuilder<'a> {
                         20,
                     );
                 }
+                self.record_guarded_tail_blockgraph_proof(
+                    idx,
+                    witness,
+                    BlockGraphLegalityReason::EmitReadyIncomplete,
+                );
                 return GuardedTailVerification {
                     region_legality: legality,
                     replacement_complete: false,
@@ -848,6 +863,11 @@ impl<'a> PreviewBuilder<'a> {
                     idx, witness.target_label, missing
                 );
             }
+            self.record_guarded_tail_blockgraph_proof(
+                idx,
+                witness,
+                BlockGraphLegalityReason::EmitReadyIncomplete,
+            );
             return GuardedTailVerification {
                 region_legality: legality,
                 replacement_complete: false,
@@ -868,6 +888,11 @@ impl<'a> PreviewBuilder<'a> {
                     exported_bindings.len()
                 );
             }
+            self.record_guarded_tail_blockgraph_proof(
+                idx,
+                witness,
+                BlockGraphLegalityReason::Complete,
+            );
             return GuardedTailVerification {
                 region_legality: legality,
                 replacement_complete: true,
@@ -938,6 +963,15 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
 
+        self.record_guarded_tail_blockgraph_proof(
+            idx,
+            witness,
+            if !removable_ops_legal {
+                BlockGraphLegalityReason::MustEmitLabelConflict
+            } else {
+                BlockGraphLegalityReason::EmitReadyIncomplete
+            },
+        );
         GuardedTailVerification {
             region_legality: legality,
             replacement_complete,

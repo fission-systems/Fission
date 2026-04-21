@@ -10,6 +10,128 @@ pub(crate) enum RegionKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockGraphRegionKind {
+    Sequence,
+    If,
+    IfElse,
+    Loop,
+    Switch,
+    GuardedTail,
+    Irreducible,
+}
+
+impl From<RegionKind> for BlockGraphRegionKind {
+    fn from(value: RegionKind) -> Self {
+        match value {
+            RegionKind::Switch => Self::Switch,
+            RegionKind::GuardedTail => Self::GuardedTail,
+            RegionKind::Conditional => Self::If,
+            RegionKind::Loop => Self::Loop,
+            RegionKind::Sequence => Self::Sequence,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockGraphLegalityReason {
+    Complete,
+    MissingFollow,
+    MissingPostdom,
+    SideEntry,
+    SideExit,
+    MustEmitLabelConflict,
+    AliasInterleave,
+    EmitReadyIncomplete,
+    IrreducibleScc,
+    Budget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockGraphRegionProof {
+    pub(crate) kind: BlockGraphRegionKind,
+    pub(crate) entry: usize,
+    pub(crate) members: Vec<usize>,
+    pub(crate) exits: Vec<usize>,
+    pub(crate) follow: Option<usize>,
+    pub(crate) immediate_postdom: Option<usize>,
+    pub(crate) scc_id: Option<usize>,
+    pub(crate) legality_reason: BlockGraphLegalityReason,
+    pub(crate) emit_ready: bool,
+}
+
+impl BlockGraphRegionProof {
+    pub(crate) fn new(
+        kind: BlockGraphRegionKind,
+        entry: usize,
+        members: Vec<usize>,
+        exits: Vec<usize>,
+        follow: Option<usize>,
+        immediate_postdom: Option<usize>,
+        scc_id: Option<usize>,
+        legality_reason: BlockGraphLegalityReason,
+    ) -> Self {
+        Self {
+            kind,
+            entry,
+            members,
+            exits,
+            follow,
+            immediate_postdom,
+            scc_id,
+            legality_reason,
+            emit_ready: matches!(legality_reason, BlockGraphLegalityReason::Complete),
+        }
+    }
+
+    pub(crate) fn guarded_tail(
+        entry: usize,
+        members: Vec<usize>,
+        follow: Option<usize>,
+        legality_reason: BlockGraphLegalityReason,
+    ) -> Self {
+        Self::new(
+            BlockGraphRegionKind::GuardedTail,
+            entry,
+            members,
+            follow.into_iter().collect(),
+            follow,
+            follow,
+            None,
+            legality_reason,
+        )
+    }
+
+    pub(crate) fn reason_from_legality(legality: RegionLegality) -> BlockGraphLegalityReason {
+        if !legality.terminal_join_present {
+            return BlockGraphLegalityReason::MissingFollow;
+        }
+        if !legality.follow_witness {
+            return BlockGraphLegalityReason::MissingFollow;
+        }
+        if !legality.postdom_witness {
+            return BlockGraphLegalityReason::MissingPostdom;
+        }
+        if !legality.entry_unique {
+            return BlockGraphLegalityReason::SideEntry;
+        }
+        if !legality.side_entry_free {
+            return BlockGraphLegalityReason::SideEntry;
+        }
+        if !legality.side_exit_legal {
+            return BlockGraphLegalityReason::SideExit;
+        }
+        if !legality.alias_interleave_legal {
+            return BlockGraphLegalityReason::AliasInterleave;
+        }
+        if legality.is_complete_for(RegionKind::GuardedTail) {
+            BlockGraphLegalityReason::Complete
+        } else {
+            BlockGraphLegalityReason::EmitReadyIncomplete
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RegionRejectionReason {
     MissingTerminalJoin,
     SideEntryConflict,
@@ -114,6 +236,47 @@ impl EmitReadyDecision {
             emit_ready: true,
             failure: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blockgraph_region_proof_records_complete_guarded_tail() {
+        let proof = BlockGraphRegionProof::guarded_tail(
+            2,
+            vec![2, 3],
+            Some(4),
+            BlockGraphLegalityReason::Complete,
+        );
+        assert_eq!(proof.kind, BlockGraphRegionKind::GuardedTail);
+        assert_eq!(proof.entry, 2);
+        assert_eq!(proof.exits, vec![4]);
+        assert_eq!(proof.follow, Some(4));
+        assert_eq!(proof.immediate_postdom, Some(4));
+        assert!(proof.emit_ready);
+    }
+
+    #[test]
+    fn blockgraph_region_reason_prefers_missing_follow() {
+        let legality = RegionLegality {
+            entry_unique: true,
+            terminal_join_present: true,
+            follow_witness: false,
+            postdom_witness: true,
+            side_entry_free: true,
+            side_exit_legal: true,
+            alias_interleave_legal: true,
+            selector_side_effect_free: false,
+            ordinal_domain_complete: false,
+            shared_tail_conflict_free: false,
+        };
+        assert_eq!(
+            BlockGraphRegionProof::reason_from_legality(legality),
+            BlockGraphLegalityReason::MissingFollow
+        );
     }
 }
 

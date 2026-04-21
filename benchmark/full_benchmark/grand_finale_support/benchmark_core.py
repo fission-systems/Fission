@@ -195,6 +195,15 @@ GHIDRA_ACTION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("ghidra_clean_room_pipeline_complete_count", "pipeline_complete"),
 )
 
+BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("blockgraph_region_candidate_count", "candidate"),
+    ("blockgraph_region_complete_count", "complete"),
+    ("blockgraph_region_rejected_missing_follow_count", "rejected_missing_follow"),
+    ("blockgraph_region_rejected_must_emit_label_count", "rejected_must_emit_label"),
+    ("blockgraph_region_rejected_emit_ready_count", "rejected_emit_ready"),
+    ("blockgraph_region_rejected_irreducible_count", "rejected_irreducible"),
+)
+
 GIANT_RENDERED_CODE_THRESHOLD = 100000
 GIANT_REPLACEMENT_THRESHOLD = 10000
 GIANT_MATERIALIZATION_THRESHOLD = 10000
@@ -226,6 +235,11 @@ def _extract_ghidra_action_metrics(preview_build_stats: dict[str, Any]) -> dict[
     return _extract_named_metrics(source, GHIDRA_ACTION_METRIC_SPECS)
 
 
+def _extract_blockgraph_region_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+    source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _extract_named_metrics(source, BLOCKGRAPH_REGION_METRIC_SPECS)
+
+
 def _aggregate_ghidra_action_metrics_from_entries(
     entries: dict[str, dict[str, Any]] | None,
 ) -> dict[str, float]:
@@ -237,6 +251,21 @@ def _aggregate_ghidra_action_metrics_from_entries(
         if not isinstance(preview_build_stats, dict):
             continue
         for key, alias in GHIDRA_ACTION_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
+
+
+def _aggregate_blockgraph_region_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in BLOCKGRAPH_REGION_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in BLOCKGRAPH_REGION_METRIC_SPECS:
             totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
     return dict(sorted(totals.items()))
 
@@ -492,6 +521,60 @@ def _build_giant_function_diagnostics(
         "max_materialization_stabilized_count": max_materialization_stabilized_count,
         "max_pathological_examples": examples[:MAX_PATHOLOGICAL_EXAMPLES],
     }
+
+
+TARGET_STRUCTURING_ROW_NAMES = frozenset({"fibonacci", "fibonacci_memo"})
+TARGET_STRUCTURING_ROW_ADDRESSES = frozenset({"0x140001470"})
+
+
+def _build_target_structuring_rows(
+    entries: dict[str, dict[str, Any]] | None,
+    *,
+    binary_id: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "")
+        address = canonical_address(str(entry.get("address") or "0x0"))
+        if name not in TARGET_STRUCTURING_ROW_NAMES and address not in TARGET_STRUCTURING_ROW_ADDRESSES:
+            continue
+        preview = entry.get("preview_build_stats") or {}
+        if not isinstance(preview, dict):
+            preview = {}
+        rows.append(
+            {
+                "binary_id": binary_id or entry.get("binary_id"),
+                "address": address,
+                "name": name,
+                "build_duration_ms": _safe_float(preview.get("build_duration_ms"), 0.0),
+                "normalize_duration_ms": _safe_float(preview.get("normalize_duration_ms"), 0.0),
+                "structuring_duration_ms": _safe_float(
+                    preview.get("structuring_duration_ms"), 0.0
+                ),
+                "render_duration_ms": _safe_float(preview.get("render_duration_ms"), 0.0),
+                "rendered_code_len": _safe_int(preview.get("rendered_code_len"), 0),
+                "forced_linear_structuring_count": _safe_int(
+                    preview.get("forced_linear_structuring_count"), 0
+                ),
+                "structuring_scc_component_count": _safe_int(
+                    preview.get("structuring_scc_component_count"), 0
+                ),
+                "blockgraph_region_metrics": _normalize_metric_map_for_json(
+                    _extract_blockgraph_region_metrics(preview)
+                ),
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            -_safe_float(row.get("structuring_duration_ms"), 0.0),
+            str(row.get("binary_id") or ""),
+            str(row.get("address") or ""),
+        )
+    )
+    return rows[:limit]
 
 
 def _derive_binary_arch(manifest_entry: dict[str, Any]) -> str:
@@ -2861,6 +2944,20 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         "dispatcher_proof_failed_count": preview_stat_total("dispatcher_proof_failed_count"),
         "conditional_region_candidate_count": preview_stat_total("conditional_region_candidate_count"),
         "conditional_region_promoted_count": preview_stat_total("conditional_region_promoted_count"),
+        "blockgraph_region_candidate_count": preview_stat_total("blockgraph_region_candidate_count"),
+        "blockgraph_region_complete_count": preview_stat_total("blockgraph_region_complete_count"),
+        "blockgraph_region_rejected_missing_follow_count": preview_stat_total(
+            "blockgraph_region_rejected_missing_follow_count"
+        ),
+        "blockgraph_region_rejected_must_emit_label_count": preview_stat_total(
+            "blockgraph_region_rejected_must_emit_label_count"
+        ),
+        "blockgraph_region_rejected_emit_ready_count": preview_stat_total(
+            "blockgraph_region_rejected_emit_ready_count"
+        ),
+        "blockgraph_region_rejected_irreducible_count": preview_stat_total(
+            "blockgraph_region_rejected_irreducible_count"
+        ),
         "guarded_tail_candidate_count": preview_stat_total("guarded_tail_candidate_count"),
         "guarded_tail_promoted_count": preview_stat_total("guarded_tail_promoted_count"),
         "guarded_tail_replacement_plan_rejected_missing_merge_count": preview_stat_total(
@@ -3721,7 +3818,15 @@ def build_comparison(
         ghidra_action_metrics = _normalize_metric_map_for_json(
             _aggregate_ghidra_action_metrics_from_entries(fission["entries"])
         )
+    blockgraph_region_metrics = _normalize_metric_map_for_json(
+        _extract_blockgraph_region_metrics(fission["meta"].get("preview_build_stats", {}))
+    )
+    if not any(blockgraph_region_metrics.values()):
+        blockgraph_region_metrics = _normalize_metric_map_for_json(
+            _aggregate_blockgraph_region_metrics_from_entries(fission["entries"])
+        )
     giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
+    target_structuring_rows = _build_target_structuring_rows(fission["entries"])
 
     engine_kpi = {
         "pyghidra": {
@@ -3802,6 +3907,10 @@ def build_comparison(
         "ghidra_action_metrics": {
             "fission": ghidra_action_metrics,
         },
+        "blockgraph_region_metrics": {
+            "fission": blockgraph_region_metrics,
+        },
+        "target_structuring_rows": target_structuring_rows,
         "giant_function_candidates": giant_function_diagnostics["giant_function_candidates"],
         "giant_function_speed_family_counts": giant_function_diagnostics[
             "giant_function_speed_family_counts"
@@ -4273,6 +4382,7 @@ def build_corpus_assessment(
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
     ghidra_action_metrics_per_binary: dict[str, dict[str, float]] = {}
+    blockgraph_region_metrics_per_binary: dict[str, dict[str, float]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
@@ -4366,6 +4476,38 @@ def build_corpus_assessment(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
+        blockgraph_region_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "blockgraph_region_metrics", "fission"), {})
+            if isinstance(
+                _lookup_path(benchmark, ("summary", "blockgraph_region_metrics", "fission"), {}),
+                dict,
+            )
+            else {}
+        )
+        if not any(blockgraph_region_metrics.values()):
+            blockgraph_region_metrics = _normalize_metric_map_for_json(
+                _extract_blockgraph_region_metrics(
+                    _lookup_path(
+                        benchmark,
+                        ("summary", "engines", "fission", "preview_build_stats"),
+                        {},
+                    )
+                )
+            )
+        if not any(blockgraph_region_metrics.values()):
+            blockgraph_region_metrics = _normalize_metric_map_for_json(
+                _aggregate_blockgraph_region_metrics_from_entries(
+                    _lookup_path(benchmark, ("engines", "fission", "entries"), {})
+                )
+            )
+        target_structuring_rows = list(
+            _lookup_path(benchmark, ("summary", "target_structuring_rows"), []) or []
+        )
+        if not target_structuring_rows:
+            target_structuring_rows = _build_target_structuring_rows(
+                _lookup_path(benchmark, ("engines", "fission", "entries"), {}),
+                binary_id=binary_id,
+            )
         giant_function_diagnostics = _lookup_path(
             benchmark,
             ("summary",),
@@ -4426,6 +4568,7 @@ def build_corpus_assessment(
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
         ghidra_action_metrics_per_binary[binary_id] = ghidra_action_metrics
+        blockgraph_region_metrics_per_binary[binary_id] = blockgraph_region_metrics
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
             giant_function_diagnostics["giant_function_speed_family_counts"]
         )
@@ -4628,6 +4771,8 @@ def build_corpus_assessment(
                 "shape_drift_metrics": shape_drift_metrics,
                 "normalize_pass_metrics": normalize_pass_metrics,
                 "ghidra_action_metrics": ghidra_action_metrics,
+                "blockgraph_region_metrics": blockgraph_region_metrics,
+                "target_structuring_rows": target_structuring_rows,
                 "giant_function_candidates": giant_function_diagnostics[
                     "giant_function_candidates"
                 ],
@@ -4664,6 +4809,9 @@ def build_corpus_assessment(
         normalize_pass_metrics_per_binary
     )
     ghidra_action_metric_totals = _merge_named_metric_totals(ghidra_action_metrics_per_binary)
+    blockgraph_region_metric_totals = _merge_named_metric_totals(
+        blockgraph_region_metrics_per_binary
+    )
     giant_function_speed_family_totals = _merge_count_maps(
         giant_function_speed_family_counts_per_binary
     )
@@ -4693,8 +4841,8 @@ def build_corpus_assessment(
     max_pathological_examples = sorted(
         (
             {
-                "binary_id": item.get("id"),
                 **example,
+                "binary_id": example.get("binary_id") or item.get("id"),
             }
             for item in binaries_payload
             for example in list(item.get("max_pathological_examples", []) or [])
@@ -4707,6 +4855,22 @@ def build_corpus_assessment(
             str(row.get("address", "")),
         ),
     )[:MAX_PATHOLOGICAL_EXAMPLES]
+    target_structuring_rows = sorted(
+        (
+            {
+                **row,
+                "binary_id": row.get("binary_id") or item.get("id"),
+            }
+            for item in binaries_payload
+            for row in list(item.get("target_structuring_rows", []) or [])
+            if isinstance(row, dict)
+        ),
+        key=lambda row: (
+            -_safe_float(row.get("structuring_duration_ms"), 0.0),
+            str(row.get("binary_id", "")),
+            str(row.get("address", "")),
+        ),
+    )[:10]
     arch_summary = _build_arch_summary(binaries_payload, eligibility_by_binary)
 
     status = "passed"
@@ -4926,7 +5090,14 @@ def build_corpus_assessment(
             "shape_drift_totals": shape_drift_totals,
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
             "ghidra_action_metric_totals": ghidra_action_metric_totals,
+            "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
+            "blockgraph_region_rejection_totals": {
+                key: value
+                for key, value in blockgraph_region_metric_totals.items()
+                if key.startswith("rejected_")
+            },
+            "target_structuring_rows": target_structuring_rows,
             "arch_summary": arch_summary,
             "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),
         },
@@ -4945,6 +5116,14 @@ def build_corpus_assessment(
         "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
         "ghidra_action_metric_totals": ghidra_action_metric_totals,
         "ghidra_action_metrics_per_binary": ghidra_action_metrics_per_binary,
+        "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
+        "blockgraph_region_metrics_per_binary": blockgraph_region_metrics_per_binary,
+        "blockgraph_region_rejection_totals": {
+            key: value
+            for key, value in blockgraph_region_metric_totals.items()
+            if key.startswith("rejected_")
+        },
+        "target_structuring_rows": target_structuring_rows,
         "giant_function_speed_family_totals": giant_function_speed_family_totals,
         "max_pathological_examples": max_pathological_examples,
         "arch_summary": arch_summary,

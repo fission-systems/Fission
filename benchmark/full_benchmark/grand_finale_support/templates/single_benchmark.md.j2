@@ -57,6 +57,27 @@ Clean-room owner mapping only; Fission remains Rust-native and does not depend o
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## BlockGraph Region Proof Metrics
+
+Ghidra `BlockGraph` / `FlowBlock` clean-room proof substrate counters. These are owner diagnostics, not a separate acceptance policy.
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in blockgraph_region_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+{% set target_structuring_rows = summary.get("target_structuring_rows", []) or [] %}
+{% if target_structuring_rows %}
+### Target Structuring Rows
+
+| Address | Name | Structuring ms | Forced linear | Rendered len |
+| --- | --- | ---: | ---: | ---: |
+{% for row in target_structuring_rows %}
+| `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | {{ "%.3f"|format(row.get("structuring_duration_ms", 0.0) | float) }} | {{ row.get("forced_linear_structuring_count", 0) }} | {{ row.get("rendered_code_len", 0) }} |
+{% endfor %}
+{% endif %}
+
 ## Giant Function Diagnostics
 
 - Candidates: {{ summary.get("giant_function_candidates", 0) }}

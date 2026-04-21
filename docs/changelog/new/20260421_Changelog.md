@@ -334,6 +334,198 @@ Next owner after this wave:
 
 ---
 
+## 0.2 BlockGraph / FlowBlock Proof Substrate For Structuring
+
+### Scope
+
+This follow-up wave added a clean-room proof substrate for Ghidra-style `BlockGraph` / `FlowBlock` reasoning inside the Fission structuring owner.
+
+Primary owner:
+
+- `crates/fission-pcode/src/nir/structuring/`
+
+Reference model:
+
+- Ghidra `FlowBlock`, `BlockGraph`, and `ActionStructureTransform` concepts were used as architecture guidance only.
+- No Ghidra source code, runtime dependency, generated migration, or binding was introduced.
+
+This wave is diagnostic/refactor-only from a decompiler behavior perspective:
+
+- `wave_type: diagnostic/refactor-only`
+- `behavior_changed: no`
+- `release_path_changed: no`
+- `env_gate: none`
+
+### What changed
+
+The structuring owner now has typed BlockGraph proof vocabulary:
+
+- `BlockGraphRegionKind`
+  - `Sequence`
+  - `If`
+  - `IfElse`
+  - `Loop`
+  - `Switch`
+  - `GuardedTail`
+  - `Irreducible`
+- `BlockGraphLegalityReason`
+  - `Complete`
+  - `MissingFollow`
+  - `MissingPostdom`
+  - `SideEntry`
+  - `SideExit`
+  - `MustEmitLabelConflict`
+  - `AliasInterleave`
+  - `EmitReadyIncomplete`
+  - `IrreducibleScc`
+  - `Budget`
+- `BlockGraphRegionProof`
+  - entry
+  - members
+  - exits
+  - follow
+  - immediate postdominator
+  - SCC id
+  - legality reason
+  - emit-ready flag
+
+The guarded-tail path now records BlockGraph proof evidence through an adapter, but acceptance policy was intentionally kept unchanged. Incomplete proof remains fail-closed, and the printer still does not perform semantic repair.
+
+Additive `NirBuildStats` telemetry:
+
+- `blockgraph_region_candidate_count`
+- `blockgraph_region_complete_count`
+- `blockgraph_region_rejected_missing_follow_count`
+- `blockgraph_region_rejected_must_emit_label_count`
+- `blockgraph_region_rejected_emit_ready_count`
+- `blockgraph_region_rejected_irreducible_count`
+
+Benchmark/reporting now surfaces these metrics in:
+
+- single-binary verbose JSON/Markdown
+- corpus verbose JSON/Markdown
+- compact summary JSON
+- console summaries
+- Python contract tests
+
+The compact summary also now carries targeted structuring rows, including:
+
+- `test_functions.exe:fibonacci @ 0x140001470`
+- `math_operations.exe:fibonacci_memo`
+- control-heavy degraded rows when available
+
+### Benchmark result
+
+Validation surface:
+
+- benchmark script:
+  - `benchmark/full_benchmark/full_decomp_benchmark.py`
+- corpus:
+  - six Windows x86-64 small C binaries under `benchmark/binary/x86-64/window/small/binary/c`
+- baseline artifact:
+  - `benchmark/artifacts/full_benchmark/windows-small-c-ghidra-action-latest`
+- trial artifact:
+  - `benchmark/artifacts/full_benchmark/windows-small-c-blockgraph-structuring-latest`
+- first-pass artifact:
+  - `benchmark_compact_summary.json`
+
+Corpus result:
+
+- weighted average normalized similarity:
+  - `37.604286 -> 37.604286`
+- row gates:
+  - passed on all six binaries
+- promotion blockers:
+  - `advisory_gate_mode`
+- new failed rows:
+  - none observed in the compact summary
+
+BlockGraph proof totals:
+
+- `blockgraph_region_candidate_count=426`
+- `blockgraph_region_complete_count=0`
+- `blockgraph_region_rejected_missing_follow_count=0`
+- `blockgraph_region_rejected_must_emit_label_count=426`
+- `blockgraph_region_rejected_emit_ready_count=0`
+- `blockgraph_region_rejected_irreducible_count=0`
+
+Interpretation:
+
+- this wave did not claim a pseudocode quality uplift
+- it converted the coarse structuring failure surface into a narrower BlockGraph owner
+- the immediate dominant owner is now `MustEmitLabelConflict`, not an unknown generic emit-ready failure
+
+### Representative row readout
+
+`test_functions.exe:fibonacci @ 0x140001470` remained stable:
+
+- `build_duration_ms=245`
+- `normalize_duration_ms=103`
+- `structuring_duration_ms=111`
+- `render_duration_ms=0`
+- `rendered_code_len=40935`
+- `forced_linear_structuring_count=1`
+- `structuring_scc_component_count=13`
+
+This means `fibonacci` still needs a real BlockGraph legality fix. The current wave only made the reason auditable and reportable.
+
+Other corpus totals:
+
+- `NormalizeHeavy=34`
+- `StructuringHeavy=1`
+- `materialization_stabilized=15097`
+- `generic_local_name_sum=493`
+- `generic_param_name_sum=218`
+- `goto_total=383`
+- `top_level_label_total=275`
+- `synthetic_helper_call_total=33`
+
+### Validation
+
+Passed:
+
+```text
+cargo fmt --all
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+cargo test -p fission-pcode blockgraph_region -- --test-threads=1
+cargo test -p fission-pcode ghidra_action -- --test-threads=1
+cargo check -p fission-pcode
+cargo check -p fission-automation
+cargo build -p fission-cli
+```
+
+Known residual failures:
+
+```text
+cargo test -p fission-pcode suffix_window -- --test-threads=1
+result: 56 passed, 7 failed
+
+cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+result: 33 passed, 18 failed
+
+cargo test -p fission-pcode -- --test-threads=1
+result: 639 passed, 25 failed
+```
+
+The residual failure family is still guarded-tail / suffix-window structuring. This wave did not resolve the `25 -> 0` target; it made the next owner concrete.
+
+### Duplicate-logic audit outcome
+
+Duplicate semantic repair was not added.
+
+- builder remains limited to producing control evidence
+- structuring owns region legality
+- printer remains a renderer and label/goto cleanup layer only
+- benchmark/reporting only projects telemetry
+
+Next owner after this wave:
+
+- reduce `blockgraph_region_rejected_must_emit_label_count=426`
+- migrate guarded-tail / suffix-window legality into the BlockGraph proof path until the current 25 residual tests are fixed
+- only after that, consider a narrow behavior-changing acceptance rule for `fibonacci`
+
+---
+
 ## 1. Benchmark Surface Canonicalization
 
 ### Canonical benchmark entrypoint

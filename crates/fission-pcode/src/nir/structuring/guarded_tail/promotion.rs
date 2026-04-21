@@ -128,6 +128,52 @@ impl<'a> PreviewBuilder<'a> {
         self.promotion_rejected_by_shape_count += 1;
     }
 
+    pub(super) fn record_blockgraph_region_proof(&mut self, proof: &BlockGraphRegionProof) {
+        self.blockgraph_region_candidate_count += 1;
+        match proof.legality_reason {
+            BlockGraphLegalityReason::Complete => {
+                self.blockgraph_region_complete_count += 1;
+            }
+            BlockGraphLegalityReason::MissingFollow | BlockGraphLegalityReason::MissingPostdom => {
+                self.blockgraph_region_rejected_missing_follow_count += 1;
+            }
+            BlockGraphLegalityReason::MustEmitLabelConflict => {
+                self.blockgraph_region_rejected_must_emit_label_count += 1;
+            }
+            BlockGraphLegalityReason::IrreducibleScc => {
+                self.blockgraph_region_rejected_irreducible_count += 1;
+            }
+            BlockGraphLegalityReason::SideEntry
+            | BlockGraphLegalityReason::SideExit
+            | BlockGraphLegalityReason::AliasInterleave
+            | BlockGraphLegalityReason::EmitReadyIncomplete
+            | BlockGraphLegalityReason::Budget => {
+                self.blockgraph_region_rejected_emit_ready_count += 1;
+            }
+        }
+    }
+
+    pub(super) fn record_guarded_tail_blockgraph_proof(
+        &mut self,
+        candidate_idx: usize,
+        witness: &RegionShapeWitness,
+        legality_reason: BlockGraphLegalityReason,
+    ) {
+        let members = if candidate_idx <= witness.label_idx {
+            (candidate_idx..=witness.label_idx).collect::<Vec<_>>()
+        } else {
+            vec![candidate_idx]
+        };
+        let follow = if witness.follow_witness {
+            witness.label_idx.checked_add(1)
+        } else {
+            None
+        };
+        let proof =
+            BlockGraphRegionProof::guarded_tail(candidate_idx, members, follow, legality_reason);
+        self.record_blockgraph_region_proof(&proof);
+    }
+
     fn mark_guarded_tail_witness_rejection(&mut self, reason: GuardedTailWitnessRejection) {
         match reason {
             GuardedTailWitnessRejection::MissingTerminalJoin => {

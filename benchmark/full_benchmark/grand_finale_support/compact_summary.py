@@ -51,6 +51,14 @@ SELECTED_GHIDRA_ACTION_KEYS = (
     "printc",
     "pipeline_complete",
 )
+SELECTED_BLOCKGRAPH_REGION_KEYS = (
+    "candidate",
+    "complete",
+    "rejected_missing_follow",
+    "rejected_must_emit_label",
+    "rejected_emit_ready",
+    "rejected_irreducible",
+)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -157,6 +165,10 @@ def build_single_compact_summary(
         (summary.ghidra_action_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
+    blockgraph_region_metrics = _normalize_metric_map(
+        (summary.blockgraph_region_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
+    )
     watchlist = ((summary.row_fidelity_targets or {}).get("pyghidra_vs_fission") or {})
     giant_function_speed_family_counts = {
         str(key): _safe_int(value, 0)
@@ -165,6 +177,11 @@ def build_single_compact_summary(
     max_pathological_examples = [
         dict(row)
         for row in list(summary.max_pathological_examples or [])[:MAX_COMPACT_ROWS]
+        if isinstance(row, dict)
+    ]
+    target_structuring_rows = [
+        dict(row)
+        for row in list(summary.target_structuring_rows or [])[:MAX_COMPACT_ROWS]
         if isinstance(row, dict)
     ]
     baseline_blockers = []
@@ -200,12 +217,14 @@ def build_single_compact_summary(
         shape_drift_metrics=shape_drift,
         normalize_pass_metrics=normalize_pass_metrics,
         ghidra_action_metrics=ghidra_action_metrics,
+        blockgraph_region_metrics=blockgraph_region_metrics,
         giant_function_speed_family_counts=giant_function_speed_family_counts,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
         baseline_blockers=baseline_blockers,
         top_regressions=top_regressions,
         top_row_examples=top_examples[:MAX_COMPACT_ROWS],
         max_pathological_examples=max_pathological_examples,
+        target_structuring_rows=target_structuring_rows,
     )
 
 
@@ -286,6 +305,10 @@ def build_corpus_compact_summary(
                     row.ghidra_action_metrics,
                     allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                 ),
+                "blockgraph_region_metrics": _normalize_metric_map(
+                    row.blockgraph_region_metrics,
+                    allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
+                ),
                 "eligibility_reason": str((row.eligibility or {}).get("reason") or "unknown"),
                 "weight": _safe_float(row.weight, 0.0),
             }
@@ -322,6 +345,10 @@ def build_corpus_compact_summary(
                     ghidra_action_metrics=_normalize_metric_map(
                         record["ghidra_action_metrics"],
                         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
+                    ),
+                    blockgraph_region_metrics=_normalize_metric_map(
+                        record["blockgraph_region_metrics"],
+                        allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
                     ),
                     eligibility_reason=str(record["eligibility_reason"]),
                 )
@@ -365,6 +392,10 @@ def build_corpus_compact_summary(
         artifact.ghidra_action_metric_totals,
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
+    blockgraph_region_totals = _normalize_metric_map(
+        artifact.blockgraph_region_metric_totals,
+        allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
+    )
     giant_function_speed_family_totals = {
         str(key): _safe_int(value, 0)
         for key, value in sorted((artifact.giant_function_speed_family_totals or {}).items())
@@ -372,6 +403,11 @@ def build_corpus_compact_summary(
     max_pathological_examples = [
         dict(row)
         for row in list(artifact.max_pathological_examples or [])[:MAX_COMPACT_ROWS]
+        if isinstance(row, dict)
+    ]
+    target_structuring_rows = [
+        dict(row)
+        for row in list(artifact.target_structuring_rows or [])[:MAX_COMPACT_ROWS]
         if isinstance(row, dict)
     ]
     if binary_df.empty:
@@ -398,6 +434,7 @@ def build_corpus_compact_summary(
         shape_drift_totals=shape_totals,
         normalize_pass_metric_totals=normalize_pass_totals,
         ghidra_action_metric_totals=ghidra_action_totals,
+        blockgraph_region_metric_totals=blockgraph_region_totals,
         giant_function_speed_family_totals=giant_function_speed_family_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)
@@ -406,6 +443,7 @@ def build_corpus_compact_summary(
         top_degraded_rows=degraded_rows,
         per_binary_rows=per_binary_rows,
         max_pathological_examples=max_pathological_examples,
+        target_structuring_rows=target_structuring_rows,
     )
 
 

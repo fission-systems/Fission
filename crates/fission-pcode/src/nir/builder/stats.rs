@@ -80,6 +80,16 @@ impl<'a> PreviewBuilder<'a> {
             region_proof_candidate_count: self.region_proof_candidate_count,
             region_proof_completed_count: self.region_proof_completed_count,
             region_emit_ready_failed_count: self.region_emit_ready_failed_count,
+            blockgraph_region_candidate_count: self.blockgraph_region_candidate_count,
+            blockgraph_region_complete_count: self.blockgraph_region_complete_count,
+            blockgraph_region_rejected_missing_follow_count: self
+                .blockgraph_region_rejected_missing_follow_count,
+            blockgraph_region_rejected_must_emit_label_count: self
+                .blockgraph_region_rejected_must_emit_label_count,
+            blockgraph_region_rejected_emit_ready_count: self
+                .blockgraph_region_rejected_emit_ready_count,
+            blockgraph_region_rejected_irreducible_count: self
+                .blockgraph_region_rejected_irreducible_count,
             conditional_region_candidate_count: self.conditional_region_candidate_count,
             conditional_region_promoted_count: self.conditional_region_promoted_count,
             guarded_tail_candidate_count: self.guarded_tail_candidate_count,

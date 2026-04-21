@@ -27,8 +27,8 @@ pub(crate) use graph::{StructureEdgeFlags, StructureGraph, StructureNode, Struct
 pub(crate) use linear::LinearBodyCachedOutcome;
 #[allow(unused_imports)]
 pub(crate) use regions::{
-    EmitReadyDecision, EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof,
-    RegionRejectionReason,
+    BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
+    EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
 };
 pub(crate) use surfacing::surface_structure_graph;
 

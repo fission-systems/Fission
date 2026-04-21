@@ -16,6 +16,7 @@ from grand_finale_support.benchmark_core import (
     _default_corpus_output_name,
     _derive_binary_arch,
     _derive_dynamic_row_targets,
+    _extract_blockgraph_region_metrics,
     _extract_ghidra_action_metrics,
     _extract_owner_metrics_from_engine_summary,
     _extract_selected_normalize_pass_metrics,
@@ -97,6 +98,12 @@ def _minimal_single_binary_summary(
                         "ghidra_action_blockgraph_structuring_count": 1,
                         "ghidra_action_printc_count": 1,
                         "ghidra_clean_room_pipeline_complete_count": 1,
+                        "blockgraph_region_candidate_count": 5,
+                        "blockgraph_region_complete_count": 2,
+                        "blockgraph_region_rejected_missing_follow_count": 1,
+                        "blockgraph_region_rejected_must_emit_label_count": 1,
+                        "blockgraph_region_rejected_emit_ready_count": 1,
+                        "blockgraph_region_rejected_irreducible_count": 0,
                         "pass_metrics": {
                             "wide_dead_assignment": {
                                 "total_time_ms": 12.0,
@@ -135,6 +142,16 @@ def _minimal_single_binary_summary(
                     "blockgraph_structuring": 1.0,
                     "printc": 1.0,
                     "pipeline_complete": 1.0,
+                }
+            },
+            "blockgraph_region_metrics": {
+                "fission": {
+                    "candidate": 5.0,
+                    "complete": 2.0,
+                    "rejected_missing_follow": 1.0,
+                    "rejected_must_emit_label": 1.0,
+                    "rejected_emit_ready": 1.0,
+                    "rejected_irreducible": 0.0,
                 }
             },
             "giant_function_candidates": 1,
@@ -394,6 +411,23 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["pipeline_complete"], 1.0)
         self.assertEqual(metrics["printc"], 0.0)
 
+    def test_extract_blockgraph_region_metrics(self) -> None:
+        metrics = _extract_blockgraph_region_metrics(
+            {
+                "blockgraph_region_candidate_count": 7,
+                "blockgraph_region_complete_count": 3,
+                "blockgraph_region_rejected_missing_follow_count": 1,
+                "blockgraph_region_rejected_must_emit_label_count": 2,
+                "blockgraph_region_rejected_emit_ready_count": 1,
+            }
+        )
+        self.assertEqual(metrics["candidate"], 7.0)
+        self.assertEqual(metrics["complete"], 3.0)
+        self.assertEqual(metrics["rejected_missing_follow"], 1.0)
+        self.assertEqual(metrics["rejected_must_emit_label"], 2.0)
+        self.assertEqual(metrics["rejected_emit_ready"], 1.0)
+        self.assertEqual(metrics["rejected_irreducible"], 0.0)
+
     def test_shape_drift_metric_counts_synthetic_helper_calls(self) -> None:
         metrics = collect_code_metrics(
             "int f(){ return __fission_merge2(x, y) + __fission_guard(tmp); }",
@@ -594,6 +628,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
             corpus["giant_function_speed_family_totals"]["RenderHeavy"],
             1,
         )
+        self.assertEqual(corpus["blockgraph_region_metric_totals"]["candidate"], 5)
+        self.assertEqual(
+            corpus["binaries"][0]["blockgraph_region_metrics"]["complete"],
+            2,
+        )
         self.assertEqual(
             corpus["max_pathological_examples"][0]["address"],
             "0x140002d40",
@@ -747,9 +786,14 @@ class CorpusBenchmarkTests(unittest.TestCase):
             12.0,
         )
         self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
+        self.assertEqual(payload["blockgraph_region_metric_totals"]["candidate"], 5.0)
         self.assertEqual(
             payload["per_binary_rows"][0]["ghidra_action_metrics"]["blockgraph_structuring"],
             1.0,
+        )
+        self.assertEqual(
+            payload["per_binary_rows"][0]["blockgraph_region_metrics"]["complete"],
+            2.0,
         )
         self.assertEqual(
             payload["giant_function_speed_family_totals"]["RenderHeavy"],

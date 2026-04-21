@@ -808,6 +808,24 @@ pub struct NirBuildStats {
     /// Region proofs that existed but failed emit-ready gating.
     #[serde(default)]
     pub region_emit_ready_failed_count: usize,
+    /// Ghidra BlockGraph-style region proof candidates considered by structuring.
+    #[serde(default)]
+    pub blockgraph_region_candidate_count: usize,
+    /// BlockGraph-style region proofs with complete legality and emit readiness.
+    #[serde(default)]
+    pub blockgraph_region_complete_count: usize,
+    /// BlockGraph-style region proofs rejected due to missing follow/postdom witness.
+    #[serde(default)]
+    pub blockgraph_region_rejected_missing_follow_count: usize,
+    /// BlockGraph-style region proofs rejected because the target label must remain.
+    #[serde(default)]
+    pub blockgraph_region_rejected_must_emit_label_count: usize,
+    /// BlockGraph-style region proofs rejected by emit-ready or alias/side-entry legality.
+    #[serde(default)]
+    pub blockgraph_region_rejected_emit_ready_count: usize,
+    /// BlockGraph-style region proofs rejected due to irreducible SCC evidence.
+    #[serde(default)]
+    pub blockgraph_region_rejected_irreducible_count: usize,
     /// Conditional region candidates considered by the structuring owner.
     #[serde(default)]
     pub conditional_region_candidate_count: usize,
@@ -1223,6 +1241,16 @@ impl NirBuildStats {
         self.region_proof_candidate_count += other.region_proof_candidate_count;
         self.region_proof_completed_count += other.region_proof_completed_count;
         self.region_emit_ready_failed_count += other.region_emit_ready_failed_count;
+        self.blockgraph_region_candidate_count += other.blockgraph_region_candidate_count;
+        self.blockgraph_region_complete_count += other.blockgraph_region_complete_count;
+        self.blockgraph_region_rejected_missing_follow_count +=
+            other.blockgraph_region_rejected_missing_follow_count;
+        self.blockgraph_region_rejected_must_emit_label_count +=
+            other.blockgraph_region_rejected_must_emit_label_count;
+        self.blockgraph_region_rejected_emit_ready_count +=
+            other.blockgraph_region_rejected_emit_ready_count;
+        self.blockgraph_region_rejected_irreducible_count +=
+            other.blockgraph_region_rejected_irreducible_count;
         self.conditional_region_candidate_count += other.conditional_region_candidate_count;
         self.conditional_region_promoted_count += other.conditional_region_promoted_count;
         self.guarded_tail_candidate_count += other.guarded_tail_candidate_count;

@@ -26,6 +26,7 @@ def print_single_benchmark_console(
     shape_metrics = ((summary.get("shape_drift_metrics") or {}).get("fission")) or {}
     normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
     ghidra_action_metrics = ((summary.get("ghidra_action_metrics") or {}).get("fission")) or {}
+    blockgraph_region_metrics = ((summary.get("blockgraph_region_metrics") or {}).get("fission")) or {}
     giant_family_counts = summary.get("giant_function_speed_family_counts", {}) or {}
 
     console.print(
@@ -73,6 +74,14 @@ def print_single_benchmark_console(
         action_table.add_row(key, f"{float(value):.3f}")
     if ghidra_action_metrics:
         console.print(action_table)
+
+    blockgraph_table = Table(title="BlockGraph Region Proof Metrics", show_header=True)
+    blockgraph_table.add_column("Metric")
+    blockgraph_table.add_column("Value", justify="right")
+    for key, value in sorted(blockgraph_region_metrics.items()):
+        blockgraph_table.add_row(key, f"{float(value):.3f}")
+    if blockgraph_region_metrics:
+        console.print(blockgraph_table)
 
     if giant_family_counts:
         giant_table = Table(title="Giant Function Families", show_header=True)
@@ -154,6 +163,15 @@ def print_corpus_benchmark_console(
         for key, value in sorted(ghidra_action_totals.items()):
             action_table.add_row(str(key), f"{float(value):.3f}")
         console.print(action_table)
+
+    blockgraph_totals = corpus_summary.get("blockgraph_region_metric_totals", {}) or {}
+    if blockgraph_totals:
+        blockgraph_table = Table(title="BlockGraph Region Proof Totals", show_header=True)
+        blockgraph_table.add_column("Metric")
+        blockgraph_table.add_column("Value", justify="right")
+        for key, value in sorted(blockgraph_totals.items()):
+            blockgraph_table.add_row(str(key), f"{float(value):.3f}")
+        console.print(blockgraph_table)
 
     giant_family_totals = corpus_summary.get("giant_function_speed_family_totals", {}) or {}
     if giant_family_totals:
