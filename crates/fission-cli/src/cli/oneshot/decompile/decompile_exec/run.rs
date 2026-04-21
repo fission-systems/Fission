@@ -208,6 +208,7 @@ fn run_rust_sleigh_decompilation(
     binary: &LoadedBinary,
     binary_data: &[u8],
     functions: &[&FunctionInfo],
+    selection_accounting: crate::cli::oneshot::function_select::BatchSelectionAccounting,
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
@@ -338,6 +339,11 @@ fn run_rust_sleigh_decompilation(
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
                 "engine": "rust-sleigh",
                 "function_count": functions.len(),
+                "functions_discovered_total": selection_accounting.functions_discovered_total,
+                "functions_selected_total": selection_accounting.functions_selected_total,
+                "functions_excluded_import_count": selection_accounting.functions_excluded_import_count,
+                "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
+                "include_nonuser_functions": selection_accounting.include_nonuser_functions,
                 "init_sec": 0.0,
                 "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
                 "total_postprocess_sec": (total_postprocess_secs * 1_000_000.0).round() / 1_000_000.0,
@@ -871,13 +877,9 @@ pub(crate) fn run_decompilation(
         eprintln!("[*] Decompilation engine = {:?}", engine_mode);
     }
 
-    let functions = collect_target_functions(
-        binary,
-        cli.address,
-        cli.addresses_file.as_deref(),
-        cli.decomp_all,
-        cli.decomp_limit,
-    );
+    let selected_functions = collect_target_functions(cli, binary);
+    let selection_accounting = selected_functions.accounting;
+    let functions = selected_functions.functions;
 
     if matches!(engine_mode, EngineMode::RustSleigh) {
         let effective_no_header = cli.no_header || cli.ghidra_compat;
@@ -899,6 +901,7 @@ pub(crate) fn run_decompilation(
                     binary,
                     binary_data,
                     &one,
+                    selection_accounting,
                     effective_no_header,
                     effective_no_warnings,
                     effective_json,
@@ -912,6 +915,7 @@ pub(crate) fn run_decompilation(
             binary,
             binary_data,
             &functions,
+            selection_accounting,
             effective_no_header,
             effective_no_warnings,
             effective_json,
@@ -1037,6 +1041,11 @@ pub(crate) fn run_decompilation(
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
                 "engine": cli.engine.as_deref().unwrap_or("auto"),
                 "function_count": functions.len(),
+                "functions_discovered_total": selection_accounting.functions_discovered_total,
+                "functions_selected_total": selection_accounting.functions_selected_total,
+                "functions_excluded_import_count": selection_accounting.functions_excluded_import_count,
+                "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
+                "include_nonuser_functions": selection_accounting.include_nonuser_functions,
                 "init_sec": (init_elapsed.as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
                 "prepare_timings": &prepare_timings,
                 "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,

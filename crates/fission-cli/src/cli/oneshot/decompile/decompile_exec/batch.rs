@@ -46,16 +46,21 @@ pub(crate) fn emit_preview_candidate_inventory(
         .unwrap_or("unknown")
         .to_string();
 
-    let mut functions = binary.functions.clone();
-    functions.sort_by_key(|func| func.address);
-    if let Some(address) = cli.address {
-        functions.retain(|func| func.address == address);
-    } else if let Some(limit) = cli.preview_candidate_limit {
-        functions.truncate(limit);
-    }
+    let selected_functions = select_candidate_functions(cli, binary)?;
+    let selection_accounting = selected_functions.accounting;
+    let functions = if cli.address.is_some() || cli.addresses_file.is_some() {
+        selected_functions.functions
+    } else {
+        let limit = cli.preview_candidate_limit.or(cli.functions_limit);
+        let mut functions = selected_functions.functions;
+        if let Some(limit) = limit {
+            functions.truncate(limit);
+        }
+        functions
+    };
 
     let mut candidates = Vec::with_capacity(functions.len());
-    for func in &functions {
+    for func in functions {
         candidates.push(preview_candidate_entry_with_recovery(
             &mut decomp,
             binary,
@@ -72,6 +77,12 @@ pub(crate) fn emit_preview_candidate_inventory(
         format: binary.format.clone(),
         arch_spec: binary.arch_spec.clone(),
         candidate_count: candidates.len(),
+        functions_discovered_total: selection_accounting.functions_discovered_total,
+        functions_selected_total: candidates.len(),
+        functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
+        functions_excluded_runtime_wrapper_count: selection_accounting
+            .functions_excluded_runtime_wrapper_count,
+        include_nonuser_functions: selection_accounting.include_nonuser_functions,
         candidates,
     };
     let json = serde_json::to_string_pretty(&report)
@@ -110,6 +121,8 @@ pub(crate) fn emit_preview_candidate_scan_batch(
         .to_string();
 
     let selected_functions = select_candidate_functions(cli, binary)?;
+    let selection_accounting = selected_functions.accounting;
+    let selected_functions = selected_functions.functions;
     let quiet_panic_hook = ScopedQuietPanicHook::install(quiet_batch_errors);
     let mut summary = PreviewCandidateScanSummary {
         binary: binary_name.clone(),
@@ -117,6 +130,12 @@ pub(crate) fn emit_preview_candidate_scan_batch(
         format: binary.format.clone(),
         arch_spec: binary.arch_spec.clone(),
         functions_total: selected_functions.len(),
+        functions_discovered_total: selection_accounting.functions_discovered_total,
+        functions_selected_total: selection_accounting.functions_selected_total,
+        functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
+        functions_excluded_runtime_wrapper_count: selection_accounting
+            .functions_excluded_runtime_wrapper_count,
+        include_nonuser_functions: selection_accounting.include_nonuser_functions,
         chunk_size,
         ..Default::default()
     };

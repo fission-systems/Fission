@@ -43,6 +43,7 @@ pub struct OneShotArgs {
     pub benchmark: bool,
     pub decomp_all: bool,
     pub decomp_limit: Option<usize>,
+    pub include_nonuser_functions: bool,
     pub timeout_ms: Option<u64>,
     pub format: Option<String>,
     pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
@@ -85,6 +86,7 @@ impl Default for OneShotArgs {
             benchmark: false,
             decomp_all: false,
             decomp_limit: None,
+            include_nonuser_functions: false,
             timeout_ms: None,
             format: None,
             function_discovery_profile: None,
@@ -237,8 +239,8 @@ struct DisasmArgs {
         .args(["addr", "all"])
 ))]
 #[command(
-    long_about = "Decompile one function or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--all` only for bounded batch-style local runs.",
-    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --all --limit 10 --json"
+    long_about = "Decompile one function or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--all` only for bounded batch-style local runs.\n\nBy default, `--all` filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
+    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --all --limit 10 --json\n  fission_cli decomp app.exe --all --include-nonuser-functions --json"
 )]
 struct DecompArgs {
     /// Path to the binary file to analyze
@@ -255,6 +257,10 @@ struct DecompArgs {
     /// With --all, limit to first N functions
     #[arg(long, value_name = "N")]
     limit: Option<usize>,
+
+    /// Include imported/runtime wrapper functions in batch selection
+    #[arg(long)]
+    include_nonuser_functions: bool,
 
     /// Decompilation profile (balanced|quality|speed|nir; mlil-preview is a deprecated alias)
     #[arg(long, value_name = "PROFILE")]
@@ -346,8 +352,8 @@ enum InventoryCommand {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Emit whole-binary function facts inventory as JSONL plus summary JSON.\n\nThis is an operator/batch surface used by automation and reporting lanes.",
-    after_help = "Examples:\n  fission_cli inventory function-facts app.exe --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory function-facts app.exe --addr 0x140001000 --summary-json summary.json"
+    long_about = "Emit whole-binary function facts inventory as JSONL plus summary JSON.\n\nThis is an operator/batch surface used by automation and reporting lanes.\n\nWhole-binary selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper by default. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
+    after_help = "Examples:\n  fission_cli inventory function-facts app.exe --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory function-facts app.exe --include-nonuser-functions --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory function-facts app.exe --addr 0x140001000 --summary-json summary.json"
 )]
 struct InventoryFunctionFactsArgs {
     /// Path to the binary file to analyze
@@ -364,6 +370,10 @@ struct InventoryFunctionFactsArgs {
     /// Limit number of functions selected
     #[arg(long, value_name = "N")]
     functions_limit: Option<usize>,
+
+    /// Include imported/runtime wrapper functions in batch selection
+    #[arg(long)]
+    include_nonuser_functions: bool,
 
     /// Batch chunk size
     #[arg(long, value_name = "N")]
@@ -408,8 +418,8 @@ struct InventoryFunctionFactsArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Emit preview candidate inventory rows or run preview candidate batch scans.\n\nThis surface exists for operator-grade corpus curation and candidate analysis, not normal interactive decompilation.",
-    after_help = "Examples:\n  fission_cli inventory preview-candidates app.exe --inventory\n  fission_cli inventory preview-candidates app.exe --batch --output-jsonl rows.jsonl --summary-json summary.json"
+    long_about = "Emit preview candidate inventory rows or run preview candidate batch scans.\n\nThis surface exists for operator-grade corpus curation and candidate analysis, not normal interactive decompilation.\n\nWhole-binary selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper by default. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
+    after_help = "Examples:\n  fission_cli inventory preview-candidates app.exe --inventory\n  fission_cli inventory preview-candidates app.exe --batch --output-jsonl rows.jsonl --summary-json summary.json\n  fission_cli inventory preview-candidates app.exe --batch --include-nonuser-functions --output-jsonl rows.jsonl --summary-json summary.json"
 )]
 struct InventoryPreviewCandidatesArgs {
     /// Path to the binary file to analyze
@@ -430,6 +440,10 @@ struct InventoryPreviewCandidatesArgs {
     /// Limit functions included in preview candidate inventory
     #[arg(long, value_name = "N")]
     preview_candidate_limit: Option<usize>,
+
+    /// Include imported/runtime wrapper functions in batch selection
+    #[arg(long)]
+    include_nonuser_functions: bool,
 
     /// File containing one hex function address per line
     #[arg(long, value_name = "FILE")]
@@ -581,6 +595,10 @@ struct LegacyCliArgs {
     #[arg(long, value_name = "N")]
     decomp_limit: Option<usize>,
 
+    /// Include imported/runtime wrapper functions in batch selection
+    #[arg(long)]
+    include_nonuser_functions: bool,
+
     /// Decompilation timeout per function in milliseconds (0 = no timeout)
     #[arg(long, value_name = "MS")]
     timeout_ms: Option<u64>,
@@ -703,6 +721,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
             args.address = decomp.addr;
             args.decomp_all = decomp.all;
             args.decomp_limit = decomp.limit;
+            args.include_nonuser_functions = decomp.include_nonuser_functions;
             args.profile = decomp.profile;
             args.engine = decomp.engine;
             args.compiler_id = decomp.compiler_id;
@@ -732,6 +751,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
                 args.address = facts.addr;
                 args.addresses_file = facts.addresses_file;
                 args.functions_limit = facts.functions_limit;
+                args.include_nonuser_functions = facts.include_nonuser_functions;
                 args.chunk_size = facts.chunk_size;
                 args.output_jsonl = facts.output_jsonl;
                 args.summary_json = facts.summary_json;
@@ -750,6 +770,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
                 args.preview_candidate_scan_batch = preview.batch;
                 args.address = preview.addr;
                 args.preview_candidate_limit = preview.preview_candidate_limit;
+                args.include_nonuser_functions = preview.include_nonuser_functions;
                 args.addresses_file = preview.addresses_file;
                 args.functions_limit = preview.functions_limit;
                 args.chunk_size = preview.chunk_size;
@@ -799,6 +820,7 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         benchmark: cli.benchmark,
         decomp_all: cli.decomp_all,
         decomp_limit: cli.decomp_limit,
+        include_nonuser_functions: cli.include_nonuser_functions,
         timeout_ms: cli.timeout_ms,
         format: cli.format,
         function_discovery_profile: cli.function_discovery_profile,
@@ -908,6 +930,19 @@ mod tests {
     }
 
     #[test]
+    fn canonical_decomp_all_can_include_nonuser_functions() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--all",
+            "--include-nonuser-functions",
+        ]);
+        assert!(parsed.args.decomp_all);
+        assert!(parsed.args.include_nonuser_functions);
+    }
+
+    #[test]
     fn canonical_inventory_function_facts_maps_to_inventory_surface() {
         let parsed = parse_canonical(&[
             "fission_cli",
@@ -925,6 +960,7 @@ mod tests {
             parsed.args.summary_json,
             Some(PathBuf::from("summary.json"))
         );
+        assert!(!parsed.args.include_nonuser_functions);
     }
 
     #[test]
@@ -941,6 +977,36 @@ mod tests {
         assert!(parsed.args.preview_candidate_scan_batch);
         assert!(!parsed.args.preview_candidate_inventory);
         assert_eq!(parsed.args.output_jsonl, Some(PathBuf::from("rows.jsonl")));
+    }
+
+    #[test]
+    fn canonical_inventory_surfaces_accept_include_nonuser_functions() {
+        let facts = parse_canonical(&[
+            "fission_cli",
+            "inventory",
+            "function-facts",
+            "bin.exe",
+            "--include-nonuser-functions",
+            "--output-jsonl",
+            "rows.jsonl",
+            "--summary-json",
+            "summary.json",
+        ]);
+        assert!(facts.args.emit_function_facts_inventory);
+        assert!(facts.args.include_nonuser_functions);
+
+        let preview = parse_canonical(&[
+            "fission_cli",
+            "inventory",
+            "preview-candidates",
+            "bin.exe",
+            "--batch",
+            "--include-nonuser-functions",
+            "--output-jsonl",
+            "rows.jsonl",
+        ]);
+        assert!(preview.args.preview_candidate_scan_batch);
+        assert!(preview.args.include_nonuser_functions);
     }
 
     #[test]
@@ -969,6 +1035,18 @@ mod tests {
         let parsed = parse_legacy(&["fission_cli", "bin.exe", "--decomp", "0x1400"]);
         assert_eq!(parsed.legacy_warning, Some(LegacyInvocationKind::Decomp));
         assert_eq!(parsed.args.address, Some(0x1400));
+    }
+
+    #[test]
+    fn legacy_batch_invocation_can_include_nonuser_functions() {
+        let parsed = parse_legacy(&[
+            "fission_cli",
+            "bin.exe",
+            "--decomp-all",
+            "--include-nonuser-functions",
+        ]);
+        assert!(parsed.args.decomp_all);
+        assert!(parsed.args.include_nonuser_functions);
     }
 
     #[test]

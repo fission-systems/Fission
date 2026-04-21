@@ -1,0 +1,10 @@
+Path: benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+Format: PE (binrw)
+Arch: x86_64 (64-bit)
+Entry: 0x140001400
+Image base: 0x140000000
+Sections: 18
+Functions: 118
+IAT: 39
+Imports: 39
+Exports: 0

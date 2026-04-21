@@ -1,5 +1,6 @@
 use crate::cli::args::parse_hex_address;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -46,6 +47,37 @@ fn should_filter_internal_candidate(func: &FunctionInfo, covering_end: u64) -> b
     extent_end <= covering_end
 }
 
+fn is_runtime_wrapper_zero_size(func: &FunctionInfo) -> bool {
+    func.size == 0 && func.name == "register_frame_ctor"
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BatchSelectionAccounting {
+    pub(crate) functions_discovered_total: usize,
+    pub(crate) functions_selected_total: usize,
+    pub(crate) functions_excluded_import_count: usize,
+    pub(crate) functions_excluded_runtime_wrapper_count: usize,
+    pub(crate) include_nonuser_functions: bool,
+}
+
+impl BatchSelectionAccounting {
+    pub(crate) fn exact(selected_total: usize, include_nonuser_functions: bool) -> Self {
+        Self {
+            functions_discovered_total: selected_total,
+            functions_selected_total: selected_total,
+            functions_excluded_import_count: 0,
+            functions_excluded_runtime_wrapper_count: 0,
+            include_nonuser_functions,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BatchFunctionSelection<'a> {
+    pub(crate) functions: Vec<&'a FunctionInfo>,
+    pub(crate) accounting: BatchSelectionAccounting,
+}
+
 pub(crate) fn canonical_functions_sorted<'a>(binary: &'a LoadedBinary) -> Vec<&'a FunctionInfo> {
     let deduped = dedupe_exact_functions(binary.functions_sorted());
     let mut filtered = Vec::with_capacity(deduped.len());
@@ -62,6 +94,44 @@ pub(crate) fn canonical_functions_sorted<'a>(binary: &'a LoadedBinary) -> Vec<&'
     }
 
     filtered
+}
+
+pub(crate) fn select_batch_functions<'a>(
+    binary: &'a LoadedBinary,
+    include_nonuser_functions: bool,
+    limit: Option<usize>,
+) -> BatchFunctionSelection<'a> {
+    let canonical = canonical_functions_sorted(binary);
+    let mut accounting = BatchSelectionAccounting {
+        functions_discovered_total: canonical.len(),
+        include_nonuser_functions,
+        ..BatchSelectionAccounting::default()
+    };
+
+    let mut selected = Vec::with_capacity(canonical.len());
+    for func in canonical {
+        if !include_nonuser_functions {
+            if func.is_import {
+                accounting.functions_excluded_import_count += 1;
+                continue;
+            }
+            if is_runtime_wrapper_zero_size(func) {
+                accounting.functions_excluded_runtime_wrapper_count += 1;
+                continue;
+            }
+        }
+        selected.push(func);
+    }
+
+    if let Some(limit) = limit {
+        selected.truncate(limit);
+    }
+    accounting.functions_selected_total = selected.len();
+
+    BatchFunctionSelection {
+        functions: selected,
+        accounting,
+    }
 }
 
 pub(crate) fn select_function_by_address<'a>(
@@ -108,6 +178,17 @@ pub(crate) fn select_functions_from_addresses_file<'a>(
         }
     }
     Ok(selected)
+}
+
+pub(crate) fn select_explicit_functions<'a>(
+    functions: Vec<&'a FunctionInfo>,
+    include_nonuser_functions: bool,
+) -> BatchFunctionSelection<'a> {
+    let accounting = BatchSelectionAccounting::exact(functions.len(), include_nonuser_functions);
+    BatchFunctionSelection {
+        functions,
+        accounting,
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +243,20 @@ mod tests {
             is_export: false,
             is_import: false,
         })
+        .add_function(FunctionInfo {
+            name: "register_frame_ctor".to_string(),
+            address: 0x1400010c0,
+            size: 0,
+            is_export: false,
+            is_import: false,
+        })
+        .add_function(FunctionInfo {
+            name: "puts".to_string(),
+            address: 0x140001100,
+            size: 0,
+            is_export: false,
+            is_import: true,
+        })
         .build()
         .expect("build binary")
     }
@@ -179,5 +274,57 @@ mod tests {
         let binary = test_binary();
         let func = select_function_by_address(&binary, 0x140001080).expect("selected");
         assert_eq!(func.name, "meaningful_name");
+    }
+
+    #[test]
+    fn batch_selector_excludes_imports_and_runtime_wrappers_by_default() {
+        let binary = test_binary();
+        let selected = select_batch_functions(&binary, false, None);
+        let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
+        assert_eq!(addrs, vec![0x140001000, 0x140001080]);
+        assert_eq!(selected.accounting.functions_discovered_total, 4);
+        assert_eq!(selected.accounting.functions_selected_total, 2);
+        assert_eq!(selected.accounting.functions_excluded_import_count, 1);
+        assert_eq!(
+            selected.accounting.functions_excluded_runtime_wrapper_count,
+            1
+        );
+        assert!(!selected.accounting.include_nonuser_functions);
+    }
+
+    #[test]
+    fn batch_selector_can_restore_nonuser_functions() {
+        let binary = test_binary();
+        let selected = select_batch_functions(&binary, true, None);
+        let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
+        assert_eq!(
+            addrs,
+            vec![0x140001000, 0x140001080, 0x1400010c0, 0x140001100]
+        );
+        assert_eq!(selected.accounting.functions_discovered_total, 4);
+        assert_eq!(selected.accounting.functions_selected_total, 4);
+        assert_eq!(selected.accounting.functions_excluded_import_count, 0);
+        assert_eq!(
+            selected.accounting.functions_excluded_runtime_wrapper_count,
+            0
+        );
+        assert!(selected.accounting.include_nonuser_functions);
+    }
+
+    #[test]
+    fn explicit_selection_accounting_bypasses_batch_filter() {
+        let binary = test_binary();
+        let functions = vec![
+            select_function_by_address(&binary, 0x140001080).expect("selected"),
+            binary.function_at(0x140001100).expect("import selected"),
+        ];
+        let selected = select_explicit_functions(functions, false);
+        assert_eq!(selected.accounting.functions_discovered_total, 2);
+        assert_eq!(selected.accounting.functions_selected_total, 2);
+        assert_eq!(selected.accounting.functions_excluded_import_count, 0);
+        assert_eq!(
+            selected.accounting.functions_excluded_runtime_wrapper_count,
+            0
+        );
     }
 }

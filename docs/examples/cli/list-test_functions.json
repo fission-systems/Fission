@@ -1,0 +1,22 @@
+[
+  {
+    "address": "0x140001000",
+    "name": "__mingw_invalidParameterHandler"
+  },
+  {
+    "address": "0x140001010",
+    "name": "__tmainCRTStartup"
+  },
+  {
+    "address": "0x140001450",
+    "name": "add"
+  },
+  {
+    "address": "0x140001470",
+    "name": "fibonacci"
+  },
+  {
+    "address": "0x140002cf0",
+    "name": "main"
+  }
+]

@@ -83,6 +83,7 @@ Fission maintains comprehensive, role-based documentation:
 - [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
 - [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
 - [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
+- [`docs/EVALUATION.md`](./docs/EVALUATION.md) — External headless evaluation path for CLI-first users
 - [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide
 
 ### Release & Changelog
@@ -200,6 +201,18 @@ usage is now subcommand-based.
 For the full command model, subcommand ownership, operator inventory workflows,
 JSON guidance, and legacy compatibility rules, see
 [`docs/CLI.md`](./docs/CLI.md).
+
+If you are evaluating Fission externally and want the shortest CLI-first path,
+use [`docs/EVALUATION.md`](./docs/EVALUATION.md). That guide is opinionated,
+Windows x64-first, and includes checked-in sample binaries plus example output
+payloads.
+
+Library-level use is possible at the Rust crate level, but the CLI is the
+current primary documented product surface.
+
+If you want comparative evaluation rather than a first manual CLI pass, use the
+canonical benchmark workflow in
+[`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md).
 
 ### Run Quality Assurance
 

@@ -1,0 +1,18 @@
+[
+  {
+    "address": "0x140001450",
+    "name": "add",
+    "engine_used": "rust_sleigh",
+    "fell_back": false,
+    "fallback_reason": null,
+    "code": "undefined add(ulonglong param_1, ulonglong param_2)\n{\n    ulonglong home_0;\n\n    return;\n}\n",
+    "preview_build_stats": {
+      "build_duration_ms": 1,
+      "materialization_stabilized_count": 2,
+      "replacement_plan_candidate_count": 8,
+      "replacement_plan_completed_count": 1,
+      "replacement_plan_rejected_alias_unsafe_count": 7,
+      "representative_downgrade_count": 1
+    }
+  }
+]

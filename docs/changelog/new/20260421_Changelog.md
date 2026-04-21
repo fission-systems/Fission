@@ -241,6 +241,152 @@ These updates reinforce:
 
 ---
 
+## 8. External Headless Evaluation Pack
+
+### New external evaluation guide
+
+A new evaluator-facing guide was added:
+
+- `docs/EVALUATION.md`
+
+This document is intended for external teams evaluating Fission from the CLI in a headless workflow.
+
+It explicitly covers:
+
+- current best-supported evaluation scope
+- Windows x64-first evaluation guidance
+- checked-in sample binaries
+- 30-minute first-pass CLI workflow
+- deeper inventory-oriented evaluation
+- benchmark as a second-stage activity rather than the first entrypoint
+- capability boundaries around CLI, Rust crate use, Sleigh, and Python bindings
+
+### Checked-in example outputs
+
+Small checked-in CLI example artifacts were added under:
+
+- `docs/examples/cli/`
+
+These examples show the expected shape of:
+
+- `info`
+- `list --json`
+- `decomp --addr`
+- `decomp --addr --json`
+- `inventory function-facts` summary JSON
+
+The purpose is to reduce evaluator uncertainty and make the CLI/output contract visible before running the tool.
+
+### README / CLI routing updates
+
+The public-facing docs were tightened so evaluators land on the right entrypoint faster.
+
+Files updated:
+
+- `README.md`
+- `docs/CLI.md`
+
+These updates now:
+
+- route external evaluators to `docs/EVALUATION.md`
+- keep `docs/CLI.md` as the detailed command reference
+- position the CLI as the primary documented product surface
+- separate manual CLI evaluation from benchmark workflows
+
+---
+
+## 9. Speed Bottleneck Wave 1: Batch Target Filtering
+
+### Goal
+
+This wave targeted whole-binary CLI/operator throughput rather than NIR/core pass internals.
+
+The focus was to stop sending obvious non-user functions through the full batch decompilation path by default.
+
+### New default batch-selection policy
+
+Whole-binary batch selection now filters the following by default:
+
+- imported functions (`is_import == true`)
+- zero-size runtime wrapper:
+  - `register_frame_ctor`
+
+This behavior applies to multi-function/operator surfaces such as:
+
+- `fission_cli decomp <binary> --all`
+- `fission_cli inventory function-facts ...`
+- shared batch/inventory selector paths used by preview-candidate workflows
+
+It does **not** change exact-address behavior for:
+
+- `--addr`
+- `--addresses-file`
+- `list`
+- `info`
+
+### New compatibility flag
+
+A new public CLI flag was added:
+
+- `--include-nonuser-functions`
+
+This restores the old whole-function-set behavior for batch/operator workflows when compatibility or forensics coverage is intentionally desired.
+
+### Shared selector/accounting
+
+The batch target policy is now centralized in the shared function-selection layer instead of being duplicated per command.
+
+This also introduced stable selection accounting fields such as:
+
+- `functions_discovered_total`
+- `functions_selected_total`
+- `functions_excluded_import_count`
+- `functions_excluded_runtime_wrapper_count`
+- `include_nonuser_functions`
+
+These counts now surface in:
+
+- `decomp --all --json --benchmark` metadata
+- inventory summary JSON
+- preview-candidate batch/inventory summary shapes where the selector contract is reused
+
+### Validation result
+
+The speed gain came from target-set reduction, not from any pass-level optimization.
+
+Measured whole-binary comparisons on the Windows x86-64 small C corpus showed:
+
+- `test_functions.exe`
+  - `258.55s -> 0.36s`
+  - selected `78 / 118`
+  - excluded imports `39`
+  - excluded runtime wrappers `1`
+- `bitops_and_control_flow.exe`
+  - `191.21s -> 0.25s`
+  - selected `80 / 120`
+  - excluded imports `39`
+  - excluded runtime wrappers `1`
+- `function_pointers_and_strings.exe`
+  - `245.04s -> 0.31s`
+  - selected `91 / 134`
+  - excluded imports `42`
+  - excluded runtime wrappers `1`
+
+These runs remained crash-free.
+
+### Important boundary
+
+This wave did **not** tune:
+
+- `wide_dead_assignment`
+- `sccp`
+- `jump_resolver`
+- `break_continue_recovery`
+
+It is a throughput admission/filtering change only, not a semantic optimization wave.
+
+---
+
 ## 8. What This Wave Explicitly Did Not Change
 
 This wave did **not** intentionally change:

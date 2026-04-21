@@ -3,8 +3,10 @@ use super::provenance::{
 };
 use super::schema::{FunctionFactsInventorySummary, write_inventory_summary};
 use crate::cli::args::OneShotArgs;
+#[cfg(not(feature = "native_decomp"))]
 use crate::cli::oneshot::function_select::{
-    canonical_functions_sorted, select_functions_from_addresses_file,
+    BatchFunctionSelection, select_batch_functions, select_explicit_functions,
+    select_function_by_address, select_functions_from_addresses_file,
 };
 use fission_decompiler_core::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -115,7 +117,9 @@ pub(crate) fn emit_function_facts_inventory(
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
         .to_string();
-    let functions = select_candidate_functions(cli, binary)?;
+    let functions = select_inventory_functions(cli, binary)?;
+    let selection_accounting = functions.accounting;
+    let functions = functions.functions;
 
     if let Some(parent) = output_jsonl.parent() {
         fs::create_dir_all(parent)?;
@@ -132,6 +136,12 @@ pub(crate) fn emit_function_facts_inventory(
         format: binary.format.clone(),
         arch_spec: binary.arch_spec.clone(),
         functions_total: functions.len(),
+        functions_discovered_total: selection_accounting.functions_discovered_total,
+        functions_selected_total: selection_accounting.functions_selected_total,
+        functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
+        functions_excluded_runtime_wrapper_count: selection_accounting
+            .functions_excluded_runtime_wrapper_count,
+        include_nonuser_functions: selection_accounting.include_nonuser_functions,
         chunk_size,
         ..Default::default()
     };
@@ -171,19 +181,30 @@ pub(crate) fn emit_function_facts_inventory(
 fn select_inventory_functions<'a>(
     cli: &OneShotArgs,
     binary: &'a LoadedBinary,
-) -> io::Result<Vec<&'a FunctionInfo>> {
+) -> io::Result<BatchFunctionSelection<'a>> {
     if let Some(address_file) = &cli.addresses_file {
-        return select_functions_from_addresses_file(binary, address_file);
+        let functions = select_functions_from_addresses_file(binary, address_file)?;
+        return Ok(select_explicit_functions(
+            functions,
+            cli.include_nonuser_functions,
+        ));
     }
 
-    let mut functions = canonical_functions_sorted(binary);
     if let Some(address) = cli.address {
-        functions.retain(|func| func.address == address);
-    } else if let Some(limit) = cli.functions_limit {
-        functions.truncate(limit);
+        let functions = select_function_by_address(binary, address)
+            .into_iter()
+            .collect();
+        return Ok(select_explicit_functions(
+            functions,
+            cli.include_nonuser_functions,
+        ));
     }
 
-    Ok(functions)
+    Ok(select_batch_functions(
+        binary,
+        cli.include_nonuser_functions,
+        cli.functions_limit,
+    ))
 }
 
 #[cfg(not(feature = "native_decomp"))]
@@ -983,6 +1004,8 @@ pub(crate) fn emit_function_facts_inventory(
         .unwrap_or("unknown")
         .to_string();
     let functions = select_inventory_functions(cli, binary)?;
+    let selection_accounting = functions.accounting;
+    let functions = functions.functions;
 
     if let Some(parent) = output_jsonl.parent() {
         fs::create_dir_all(parent)?;
@@ -999,6 +1022,12 @@ pub(crate) fn emit_function_facts_inventory(
         format: binary.format.clone(),
         arch_spec: binary.arch_spec.clone(),
         functions_total: functions.len(),
+        functions_discovered_total: selection_accounting.functions_discovered_total,
+        functions_selected_total: selection_accounting.functions_selected_total,
+        functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
+        functions_excluded_runtime_wrapper_count: selection_accounting
+            .functions_excluded_runtime_wrapper_count,
+        include_nonuser_functions: selection_accounting.include_nonuser_functions,
         chunk_size,
         ..Default::default()
     };

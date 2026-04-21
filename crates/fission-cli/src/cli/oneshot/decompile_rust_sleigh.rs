@@ -1,7 +1,8 @@
 use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::oneshot::function_select::{
-    canonical_functions_sorted, select_function_by_address, select_functions_from_addresses_file,
+    BatchFunctionSelection, select_batch_functions, select_explicit_functions,
+    select_function_by_address, select_functions_from_addresses_file,
 };
 use fission_core::FissionError;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -120,34 +121,30 @@ fn render_with_rust_sleigh(
     ))
 }
 
-fn collect_target_functions(cli: &OneShotArgs, binary: &LoadedBinary) -> Vec<FunctionInfo> {
+fn collect_target_functions<'a>(
+    cli: &OneShotArgs,
+    binary: &'a LoadedBinary,
+) -> BatchFunctionSelection<'a> {
     if let Some(addr) = cli.address {
         if let Some(func) =
             select_function_by_address(binary, addr).or_else(|| binary.function_at(addr))
         {
-            return vec![func.clone()];
+            return select_explicit_functions(vec![func], cli.include_nonuser_functions);
         }
-        return Vec::new();
+        return select_explicit_functions(vec![], cli.include_nonuser_functions);
     }
 
     if cli.decomp_all {
         if let Some(address_file) = &cli.addresses_file {
             if let Ok(functions) = select_functions_from_addresses_file(binary, address_file) {
-                return functions.into_iter().cloned().collect();
+                return select_explicit_functions(functions, cli.include_nonuser_functions);
             }
-            return Vec::new();
+            return select_explicit_functions(vec![], cli.include_nonuser_functions);
         }
-        let mut functions: Vec<FunctionInfo> = canonical_functions_sorted(binary)
-            .into_iter()
-            .cloned()
-            .collect();
-        if let Some(limit) = cli.decomp_limit {
-            functions.truncate(limit);
-        }
-        return functions;
+        return select_batch_functions(binary, cli.include_nonuser_functions, cli.decomp_limit);
     }
 
-    Vec::new()
+    select_explicit_functions(vec![], cli.include_nonuser_functions)
 }
 
 pub(crate) fn run_decompilation_rust_sleigh(
@@ -160,7 +157,13 @@ pub(crate) fn run_decompilation_rust_sleigh(
     }
 
     let init_start = std::time::Instant::now();
-    let functions = collect_target_functions(cli, binary);
+    let selected_functions = collect_target_functions(cli, binary);
+    let selection_accounting = selected_functions.accounting;
+    let functions = selected_functions
+        .functions
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
     if functions.is_empty() && cli.address.is_some() {
         let addr = cli.address.unwrap_or_default();
         let synthetic = vec![FunctionInfo {
@@ -170,15 +173,16 @@ pub(crate) fn run_decompilation_rust_sleigh(
             is_export: false,
             is_import: false,
         }];
-        return run_with_functions(cli, binary, &synthetic, init_start);
+        return run_with_functions(cli, binary, &synthetic, selection_accounting, init_start);
     }
-    run_with_functions(cli, binary, &functions, init_start)
+    run_with_functions(cli, binary, &functions, selection_accounting, init_start)
 }
 
 fn run_with_functions(
     cli: &OneShotArgs,
     binary: &LoadedBinary,
     functions: &[FunctionInfo],
+    selection_accounting: crate::cli::oneshot::function_select::BatchSelectionAccounting,
     init_start: std::time::Instant,
 ) -> io::Result<()> {
     let effective_no_header = cli.no_header || cli.ghidra_compat;
@@ -258,6 +262,11 @@ fn run_with_functions(
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
                 "engine": "rust-sleigh",
                 "function_count": results.len(),
+                "functions_discovered_total": selection_accounting.functions_discovered_total,
+                "functions_selected_total": selection_accounting.functions_selected_total,
+                "functions_excluded_import_count": selection_accounting.functions_excluded_import_count,
+                "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
+                "include_nonuser_functions": selection_accounting.include_nonuser_functions,
                 "init_sec": 0.0,
                 "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
                 "total_postprocess_sec": (total_postprocess_secs * 1_000_000.0).round() / 1_000_000.0,

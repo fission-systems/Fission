@@ -4,6 +4,8 @@
 
 `fission_cli` is the canonical headless product surface for Fission.
 
+If you are evaluating Fission from the outside and want the shortest first-run path, start with [EVALUATION.md](./EVALUATION.md). This document remains the detailed command reference.
+
 Use it when you want to:
 
 - inspect a binary from the terminal
@@ -240,6 +242,17 @@ Example:
 fission_cli decomp app.exe --all --limit 20 --function-discovery-profile balanced
 ```
 
+#### `--include-nonuser-functions`
+
+By default, `decomp --all` filters imported functions and the zero-size `register_frame_ctor`
+runtime wrapper so batch throughput reflects user-facing functions rather than CRT/runtime noise.
+
+Use this flag to restore compatibility/forensics coverage of those non-user functions:
+
+```bash
+fission_cli decomp app.exe --all --include-nonuser-functions --json
+```
+
 ### Output control
 
 #### `--json`
@@ -407,6 +420,10 @@ fission_cli inventory function-facts app.exe \
   --summary-json summary.json
 ```
 
+By default, whole-binary inventory selection also filters imported functions and the zero-size
+`register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` when you intentionally
+want full compatibility/forensics coverage.
+
 ### Restrict to one address
 
 ```bash
@@ -427,6 +444,7 @@ fission_cli inventory function-facts app.exe \
 ### Batch shaping options
 
 - `--functions-limit <N>`
+- `--include-nonuser-functions`
 - `--chunk-size <N>`
 - `--resume-from <FILE>`
 - `--quiet-batch-errors`
@@ -465,6 +483,7 @@ fission_cli inventory preview-candidates app.exe \
 
 - `--addr <ADDR>`
 - `--preview-candidate-limit <N>`
+- `--include-nonuser-functions`
 - `--addresses-file <FILE>`
 - `--functions-limit <N>`
 - `--chunk-size <N>`
