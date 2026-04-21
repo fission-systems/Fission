@@ -387,6 +387,86 @@ It is a throughput admission/filtering change only, not a semantic optimization 
 
 ---
 
+## 10. Speed Bottleneck Wave 2: `wide_dead_assignment` Rerun Admission Trial
+
+### Goal
+
+This wave targeted the remaining normalize-time bottleneck after batch filtering by narrowing only the **rerun** portion of `wide_dead_assignment`.
+
+The first `defuse_dead_assignment_pass` remains mandatory. Only reruns 2..6 are now gated.
+
+### Env gate
+
+This trial is protected by a new default-off env gate:
+
+- `FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION`
+
+When the gate is enabled:
+
+- first pass always runs
+- reruns are admitted only if:
+  - `count_hir_stmts(body) <= 220`
+  - `locals.len() <= 160`
+- otherwise reruns are skipped and the first-pass result is kept
+
+### New telemetry and reporting
+
+Trial-specific telemetry was added to `NirBuildStats`:
+
+- `wide_dead_assignment_rerun_admitted_count`
+- `wide_dead_assignment_rerun_skipped_by_admission_count`
+
+Benchmark/reporting now also surfaces selected normalize pass metrics for:
+
+- `wide_dead_assignment`
+- `sccp`
+- `jump_resolver`
+- `break_continue_recovery`
+
+These metrics now appear in:
+
+- benchmark verbose JSON/Markdown
+- compact summary JSON
+- console summary
+
+### Validation result
+
+This wave is **not promotion-ready**.
+
+Observed results:
+
+- Windows small C corpus `limit50` same-axis benchmark:
+  - quality stayed neutral
+  - weighted corpus similarity stayed unchanged at `37.400%`
+  - no new failed rows appeared
+- whole-binary filtered `decomp --all --json` runs:
+  - `test_functions.exe`: `0.40s -> 0.34s`
+  - `bitops_and_control_flow.exe`: `0.24s -> 0.23s`
+  - `function_pointers_and_strings.exe`: `0.29s -> 0.29s`
+  - selected row counts stayed unchanged
+- explicit pathological function check:
+  - `register_frame_ctor @ 0x140002d40`
+  - `252.25s -> 2164.06s`
+  - `wide_dead_assignment` pass time itself decreased slightly, but wall time regressed severely
+
+### Final status
+
+```text
+status: default-off negative env-gated result
+env_gate: FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION
+release_path_changed: no
+release promotion: no
+reason: quality stayed neutral, but targeted speed objective failed and explicit pathological function latency regressed badly
+```
+
+### Practical takeaway
+
+This trial shows that `wide_dead_assignment` rerun admission alone is not a safe next promotion candidate.
+
+The pass-level reporting added here remains useful, but the optimization result itself should stay default-off and be treated as a negative env-gated result.
+
+---
+
 ## 8. What This Wave Explicitly Did Not Change
 
 This wave did **not** intentionally change:

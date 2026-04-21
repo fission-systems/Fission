@@ -14,8 +14,12 @@ use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
 use super::super::*;
 use crate::nir::normalize::analysis::expr_key::pure_expr_key;
 use crate::nir::normalize::pipeline::normalize_expr;
+use crate::nir::normalize::wave_stats;
 use crate::nir::support::{expr_type, next_temp_name};
 use std::collections::HashMap;
+
+const WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT: usize = 220;
+const WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT: usize = 160;
 
 // ── DefUseMap ─────────────────────────────────────────────────────────────────
 
@@ -496,14 +500,72 @@ pub(crate) fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
 /// quiesces or the iteration budget is hit.  Intended after SCCP exposes temps
 /// whose only uses were folded away across the function.
 pub(crate) fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
-    let mut any = false;
-    for _ in 0..6 {
+    let first_changed = defuse_dead_assignment_pass(func);
+    if !first_changed {
+        return false;
+    }
+    if !wide_dead_assignment_rerun_admitted(func) {
+        if wide_dead_assignment_rerun_admission_enabled() {
+            wave_stats::add_wide_dead_assignment_rerun_skipped_by_admission(1);
+        }
+        return true;
+    }
+    if wide_dead_assignment_rerun_admission_enabled() {
+        wave_stats::add_wide_dead_assignment_rerun_admitted(1);
+    }
+    for _ in 1..6 {
         if !defuse_dead_assignment_pass(func) {
             break;
         }
-        any = true;
     }
-    any
+    true
+}
+
+fn wide_dead_assignment_rerun_admission_enabled() -> bool {
+    std::env::var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION")
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+        })
+        .unwrap_or(false)
+}
+
+fn wide_dead_assignment_rerun_admitted(func: &HirFunction) -> bool {
+    if !wide_dead_assignment_rerun_admission_enabled() {
+        return true;
+    }
+    count_hir_stmts_for_wide_dead_assignment(&func.body) <= WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT
+        && func.locals.len() <= WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT
+}
+
+fn count_hir_stmts_for_wide_dead_assignment(stmts: &[HirStmt]) -> usize {
+    fn count_stmt(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. } => {
+                1 + count_hir_stmts_for_wide_dead_assignment(stmts)
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                1 + cases
+                    .iter()
+                    .map(|case| count_hir_stmts_for_wide_dead_assignment(&case.body))
+                    .sum::<usize>()
+                    + count_hir_stmts_for_wide_dead_assignment(default)
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                1 + count_hir_stmts_for_wide_dead_assignment(then_body)
+                    + count_hir_stmts_for_wide_dead_assignment(else_body)
+            }
+            _ => 1,
+        }
+    }
+
+    stmts.iter().map(count_stmt).sum()
 }
 
 fn remove_dead_in_stmts(
@@ -674,6 +736,91 @@ fn count_any_mention_in_stmt(stmt: &HirStmt, name: &str) -> usize {
                     .map(|s| count_any_mention_in_stmt(s, name))
                     .sum::<usize>()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_binding(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn assign_dead_temp(name: &str, value: i64) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name.to_string()),
+            rhs: HirExpr::Const(
+                value,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        }
+    }
+
+    fn test_func(stmt_count: usize, local_count: usize) -> HirFunction {
+        let body = (0..stmt_count)
+            .map(|idx| assign_dead_temp(&format!("xVar{idx}"), idx as i64))
+            .collect();
+        let locals = (0..local_count)
+            .map(|idx| temp_binding(&format!("xVar{idx}")))
+            .collect();
+        HirFunction {
+            name: "wide_dead_assignment_test".to_string(),
+            params: Vec::new(),
+            locals,
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            calling_convention: Default::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    #[test]
+    fn wide_dead_assignment_rerun_admission_allows_small_function() {
+        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let func = test_func(10, 10);
+        assert!(wide_dead_assignment_rerun_admitted(&func));
+        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
+    }
+
+    #[test]
+    fn wide_dead_assignment_rerun_admission_skips_large_stmt_budget() {
+        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let func = test_func(221, 10);
+        assert!(!wide_dead_assignment_rerun_admitted(&func));
+        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
+    }
+
+    #[test]
+    fn wide_dead_assignment_rerun_admission_skips_large_local_budget() {
+        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let func = test_func(10, 161);
+        assert!(!wide_dead_assignment_rerun_admitted(&func));
+        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
+    }
+
+    #[test]
+    fn wide_dead_assignment_first_pass_still_runs_when_admission_skips() {
+        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let mut func = test_func(221, 221);
+        assert!(apply_wide_dead_assignment_pass(&mut func));
+        assert!(func.body.is_empty());
+        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
     }
 }
 

@@ -45,6 +45,14 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## Normalize Pass Totals
+
+| Metric | Total |
+| --- | ---: |
+{% for key, value in (payload.get("normalize_pass_metric_totals", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
 ## Watchlist Selection Reasons
 
 | Reason | Count |

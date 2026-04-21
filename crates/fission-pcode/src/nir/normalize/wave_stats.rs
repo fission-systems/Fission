@@ -318,6 +318,23 @@ pub(crate) fn add_sccp_skipped_by_admission(n: usize) {
     WAVE.with(|w| w.borrow_mut().sccp_skipped_by_admission_count += n);
 }
 
+pub(crate) fn add_wide_dead_assignment_rerun_admitted(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().wide_dead_assignment_rerun_admitted_count += n);
+}
+
+pub(crate) fn add_wide_dead_assignment_rerun_skipped_by_admission(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| {
+        w.borrow_mut()
+            .wide_dead_assignment_rerun_skipped_by_admission_count += n;
+    });
+}
+
 pub(crate) fn add_memory_fact_prefilter_skip(n: usize) {
     if n == 0 {
         return;

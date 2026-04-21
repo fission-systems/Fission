@@ -41,6 +41,7 @@ class VerboseSingleSummary(FlexibleModel):
     row_fidelity_targets: dict[str, Any] = Field(default_factory=dict)
     owner_metrics: dict[str, Any] = Field(default_factory=dict)
     shape_drift_metrics: dict[str, Any] = Field(default_factory=dict)
+    normalize_pass_metrics: dict[str, Any] = Field(default_factory=dict)
     engines: dict[str, Any] = Field(default_factory=dict)
     samples: dict[str, Any] = Field(default_factory=dict)
 
@@ -63,6 +64,7 @@ class VerboseCorpusBinaryRow(FlexibleModel):
     watchlist_diagnostics: dict[str, Any] = Field(default_factory=dict)
     owner_metrics: dict[str, Any] = Field(default_factory=dict)
     shape_drift_metrics: dict[str, Any] = Field(default_factory=dict)
+    normalize_pass_metrics: dict[str, Any] = Field(default_factory=dict)
     eligibility: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -93,6 +95,8 @@ class VerboseCorpusBenchmarkArtifact(FlexibleModel):
     owner_metric_totals_per_binary: dict[str, Any] = Field(default_factory=dict)
     shape_drift_totals: dict[str, Any] = Field(default_factory=dict)
     shape_drift_totals_per_binary: dict[str, Any] = Field(default_factory=dict)
+    normalize_pass_metric_totals: dict[str, Any] = Field(default_factory=dict)
+    normalize_pass_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
     arch_summary: dict[str, Any] = Field(default_factory=dict)
     watchlist_source_per_binary: dict[str, Any] = Field(default_factory=dict)
     watchlist_reason_counts: dict[str, Any] = Field(default_factory=dict)
@@ -122,6 +126,7 @@ class CompactBinaryRow(FlexibleModel):
     selected_watchlist_reasons: list[str] = Field(default_factory=list)
     owner_metrics: dict[str, float] = Field(default_factory=dict)
     shape_drift_metrics: dict[str, float] = Field(default_factory=dict)
+    normalize_pass_metrics: dict[str, float] = Field(default_factory=dict)
     eligibility_reason: str = "unknown"
 
 
@@ -148,6 +153,7 @@ class CompactSingleBenchmarkSummary(FlexibleModel):
     both_success_rate_pct: float = 0.0
     owner_metrics: dict[str, float] = Field(default_factory=dict)
     shape_drift_metrics: dict[str, float] = Field(default_factory=dict)
+    normalize_pass_metrics: dict[str, float] = Field(default_factory=dict)
     watchlist_diagnostics: dict[str, Any] = Field(default_factory=dict)
     baseline_blockers: list[str] = Field(default_factory=list)
     top_regressions: list[CompactRowExample] = Field(default_factory=list)
@@ -170,6 +176,7 @@ class CompactCorpusBenchmarkSummary(FlexibleModel):
     x64_summary: CompactArchSummary | None = None
     owner_metric_totals: dict[str, float] = Field(default_factory=dict)
     shape_drift_totals: dict[str, float] = Field(default_factory=dict)
+    normalize_pass_metric_totals: dict[str, float] = Field(default_factory=dict)
     watchlist_reason_counts: dict[str, int] = Field(default_factory=dict)
     top_degraded_rows: list[CompactRowExample] = Field(default_factory=list)
     per_binary_rows: list[CompactBinaryRow] = Field(default_factory=list)

@@ -174,6 +174,13 @@ CORPUS_GATE_SHAPE_KEYS = frozenset(
     }
 )
 
+SELECTED_NORMALIZE_PASSES = (
+    "wide_dead_assignment",
+    "sccp",
+    "jump_resolver",
+    "break_continue_recovery",
+)
+
 
 def _extract_named_metrics(
     source: dict[str, Any],
@@ -191,6 +198,49 @@ def _extract_owner_metrics_from_engine_summary(engine_summary: dict[str, Any]) -
 
 def _extract_shape_drift_metrics_from_engine_summary(engine_summary: dict[str, Any]) -> dict[str, float]:
     return _extract_named_metrics(engine_summary, SHAPE_DRIFT_METRIC_SPECS)
+
+
+def _extract_selected_normalize_pass_metrics(
+    preview_build_stats: dict[str, Any],
+) -> dict[str, dict[str, float]]:
+    pass_metrics = preview_build_stats.get("pass_metrics", {}) if isinstance(preview_build_stats, dict) else {}
+    if not isinstance(pass_metrics, dict):
+        return {}
+    selected: dict[str, dict[str, float]] = {}
+    for pass_name in SELECTED_NORMALIZE_PASSES:
+        raw = pass_metrics.get(pass_name, {})
+        if not isinstance(raw, dict):
+            raw = {}
+        selected[pass_name] = {
+            "total_time_ms": _safe_float(raw.get("total_time_ms"), 0.0),
+            "total_invocations": _safe_float(raw.get("total_invocations"), 0.0),
+            "changed_count": _safe_float(raw.get("changed_count"), 0.0),
+        }
+    return selected
+
+
+def _flatten_selected_normalize_pass_metrics(
+    selected_metrics: dict[str, dict[str, float]],
+) -> dict[str, float]:
+    flattened: dict[str, float] = {}
+    for pass_name in SELECTED_NORMALIZE_PASSES:
+        metrics = selected_metrics.get(pass_name, {})
+        flattened[f"{pass_name}_total_time_ms"] = _safe_float(metrics.get("total_time_ms"), 0.0)
+        flattened[f"{pass_name}_total_invocations"] = _safe_float(
+            metrics.get("total_invocations"), 0.0
+        )
+        flattened[f"{pass_name}_changed_count"] = _safe_float(metrics.get("changed_count"), 0.0)
+    return _normalize_metric_map_for_json(flattened)
+
+
+def _merge_normalize_pass_metric_totals(
+    per_binary_metrics: dict[str, dict[str, float]],
+) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for metrics in per_binary_metrics.values():
+        for key, value in metrics.items():
+            totals[key] = totals.get(key, 0.0) + _safe_float(value, 0.0)
+    return _normalize_metric_map_for_json(totals)
 
 
 def _merge_named_metric_totals(metric_maps: dict[str, dict[str, float]]) -> dict[str, float]:
@@ -3041,6 +3091,12 @@ def build_perf_admission_summary(fission_summary: dict[str, Any]) -> dict[str, A
         "sccp_skipped_by_admission_count": _safe_int(
             fission_summary.get("sccp_skipped_by_admission_count"), 0
         ),
+        "wide_dead_assignment_rerun_admitted_count": _safe_int(
+            fission_summary.get("wide_dead_assignment_rerun_admitted_count"), 0
+        ),
+        "wide_dead_assignment_rerun_skipped_by_admission_count": _safe_int(
+            fission_summary.get("wide_dead_assignment_rerun_skipped_by_admission_count"), 0
+        ),
         "memory_fact_prefilter_skip_count": _safe_int(
             fission_summary.get("memory_fact_prefilter_skip_count"), 0
         ),
@@ -3393,6 +3449,9 @@ def build_comparison(
     )
     owner_metrics = _extract_owner_metrics_from_engine_summary(fission_quality)
     shape_drift_metrics = _extract_shape_drift_metrics_from_engine_summary(fission_quality)
+    normalize_pass_metrics = _flatten_selected_normalize_pass_metrics(
+        _extract_selected_normalize_pass_metrics(fission["meta"].get("preview_build_stats", {}))
+    )
 
     engine_kpi = {
         "pyghidra": {
@@ -3466,6 +3525,9 @@ def build_comparison(
         },
         "shape_drift_metrics": {
             "fission": _normalize_metric_map_for_json(shape_drift_metrics),
+        },
+        "normalize_pass_metrics": {
+            "fission": normalize_pass_metrics,
         },
         "coverage": {
             "pyghidra_vs_fission": pair_py_fission["summary"],
@@ -3921,6 +3983,7 @@ def build_corpus_assessment(
     failure_family_distribution_per_binary: dict[str, dict[str, int]] = {}
     owner_metric_totals_per_binary: dict[str, dict[str, float]] = {}
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
+    normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
     watchlist_reason_by_binary_address: dict[str, dict[str, str]] = {}
@@ -3980,8 +4043,18 @@ def build_corpus_assessment(
                 for _key, alias in SHAPE_DRIFT_METRIC_SPECS
             }
         )
+        normalize_pass_metrics = _flatten_selected_normalize_pass_metrics(
+            _extract_selected_normalize_pass_metrics(
+                _lookup_path(
+                    benchmark,
+                    ("summary", "engines", "fission", "preview_build_stats"),
+                    {},
+                )
+            )
+        )
         owner_metric_totals_per_binary[binary_id] = owner_metrics
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
+        normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
         row_watchlist = _lookup_path(
             benchmark,
             ("summary", "row_fidelity_targets", "pyghidra_vs_fission"),
@@ -4179,6 +4252,7 @@ def build_corpus_assessment(
                 },
                 "owner_metrics": owner_metrics,
                 "shape_drift_metrics": shape_drift_metrics,
+                "normalize_pass_metrics": normalize_pass_metrics,
                 "non_worse_vs_baseline": non_worse,
                 "coverage_non_worse_vs_baseline": coverage_non_worse_vs_baseline,
                 "direct_success_non_worse_vs_baseline": direct_success_non_worse_vs_baseline,
@@ -4190,6 +4264,9 @@ def build_corpus_assessment(
     weighted_avg = weighted_avg_sum / max(total_weight, 1)
     owner_metric_totals = _merge_named_metric_totals(owner_metric_totals_per_binary)
     shape_drift_totals = _merge_named_metric_totals(shape_drift_totals_per_binary)
+    normalize_pass_metric_totals = _merge_normalize_pass_metric_totals(
+        normalize_pass_metrics_per_binary
+    )
     failure_family_distribution = _merge_failure_family_distribution(
         failure_family_distribution_per_binary
     )
@@ -4430,6 +4507,7 @@ def build_corpus_assessment(
             "promotion_blockers": promotion_blockers,
             "owner_metric_totals": owner_metric_totals,
             "shape_drift_totals": shape_drift_totals,
+            "normalize_pass_metric_totals": normalize_pass_metric_totals,
             "arch_summary": arch_summary,
             "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),
         },
@@ -4444,6 +4522,8 @@ def build_corpus_assessment(
         "owner_metric_totals_per_binary": owner_metric_totals_per_binary,
         "shape_drift_totals": shape_drift_totals,
         "shape_drift_totals_per_binary": shape_drift_totals_per_binary,
+        "normalize_pass_metric_totals": normalize_pass_metric_totals,
+        "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
         "arch_summary": arch_summary,
         "watchlist_source_per_binary": watchlist_source_per_binary,
         "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),

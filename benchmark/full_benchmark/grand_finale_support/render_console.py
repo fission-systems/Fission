@@ -24,6 +24,7 @@ def print_single_benchmark_console(
     coverage = (summary.get("coverage") or {}).get("pyghidra_vs_fission", {}) or {}
     owner_metrics = ((summary.get("owner_metrics") or {}).get("fission")) or {}
     shape_metrics = ((summary.get("shape_drift_metrics") or {}).get("fission")) or {}
+    normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
 
     console.print(
         Panel.fit(
@@ -54,6 +55,14 @@ def print_single_benchmark_console(
         shape_table.add_row(key, f"{float(value):.3f}")
     if shape_metrics:
         console.print(shape_table)
+
+    normalize_table = Table(title="Normalize Pass Metrics", show_header=True)
+    normalize_table.add_column("Metric")
+    normalize_table.add_column("Value", justify="right")
+    for key, value in sorted(normalize_pass_metrics.items()):
+        normalize_table.add_row(key, f"{float(value):.3f}")
+    if normalize_pass_metrics:
+        console.print(normalize_table)
 
     if baseline_gate:
         row_gate = (baseline_gate.get("row_fidelity_gate") or {})
@@ -109,6 +118,15 @@ def print_corpus_benchmark_console(
             ",".join(payload.get("failed_binary_ids", [])) or "none",
         )
     console.print(arch_table)
+
+    normalize_pass_totals = corpus_summary.get("normalize_pass_metric_totals", {}) or {}
+    if normalize_pass_totals:
+        normalize_table = Table(title="Normalize Pass Totals", show_header=True)
+        normalize_table.add_column("Metric")
+        normalize_table.add_column("Value", justify="right")
+        for key, value in sorted(normalize_pass_totals.items()):
+            normalize_table.add_row(key, f"{float(value):.3f}")
+        console.print(normalize_table)
 
     binary_table = Table(title="Per-Binary Summary", show_header=True)
     binary_table.add_column("ID")

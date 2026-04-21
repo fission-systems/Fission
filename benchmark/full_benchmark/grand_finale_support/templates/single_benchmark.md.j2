@@ -38,6 +38,15 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+{% set normalize_pass_metrics = (summary.normalize_pass_metrics or {}).get("fission", {}) or {} %}
+## Normalize Pass Metrics
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in normalize_pass_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
 ## Watchlist
 
 - Source: `{{ watchlist.get("watchlist_source", "unknown") }}`

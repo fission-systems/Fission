@@ -16,6 +16,7 @@ from grand_finale_support.benchmark_core import (
     _derive_binary_arch,
     _derive_dynamic_row_targets,
     _extract_owner_metrics_from_engine_summary,
+    _extract_selected_normalize_pass_metrics,
     _extract_shape_drift_metrics_from_engine_summary,
     _resolve_binary_watchlist,
     build_corpus_assessment,
@@ -85,6 +86,15 @@ def _minimal_single_binary_summary(
                     "heuristic_avg_line_length_mean": 0.0,
                     "heuristic_max_brace_nesting_mean": heuristic_max_brace_nesting_mean,
                     "synthetic_helper_call_total": synthetic_helper_call_total,
+                    "preview_build_stats": {
+                        "pass_metrics": {
+                            "wide_dead_assignment": {
+                                "total_time_ms": 12.0,
+                                "total_invocations": 3,
+                                "changed_count": 2,
+                            }
+                        }
+                    },
                 }
             },
             "owner_metrics": {"fission": {"alias_unsafe": float(owner_alias_unsafe)}},
@@ -96,6 +106,13 @@ def _minimal_single_binary_summary(
                         heuristic_max_brace_nesting_mean
                     ),
                     "synthetic_helper_call_total": float(synthetic_helper_call_total),
+                }
+            },
+            "normalize_pass_metrics": {
+                "fission": {
+                    "wide_dead_assignment_total_time_ms": 12.0,
+                    "wide_dead_assignment_total_invocations": 3.0,
+                    "wide_dead_assignment_changed_count": 2.0,
                 }
             },
             "coverage": {
@@ -261,6 +278,27 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["goto_total"], 1.0)
         self.assertEqual(metrics["generic_local_name_sum"], 2.0)
         self.assertEqual(metrics["synthetic_helper_call_total"], 3.0)
+
+    def test_extract_selected_normalize_pass_metrics(self) -> None:
+        stats = {
+            "pass_metrics": {
+                "wide_dead_assignment": {
+                    "total_time_ms": 12.5,
+                    "total_invocations": 4,
+                    "changed_count": 3,
+                },
+                "jump_resolver": {
+                    "total_time_ms": 2.0,
+                    "total_invocations": 1,
+                    "changed_count": 1,
+                },
+            }
+        }
+        metrics = _extract_selected_normalize_pass_metrics(stats)
+        self.assertEqual(metrics["wide_dead_assignment"]["total_time_ms"], 12.5)
+        self.assertEqual(metrics["wide_dead_assignment"]["total_invocations"], 4.0)
+        self.assertEqual(metrics["jump_resolver"]["changed_count"], 1.0)
+        self.assertEqual(metrics["sccp"]["total_time_ms"], 0.0)
 
     def test_shape_drift_metric_counts_synthetic_helper_calls(self) -> None:
         metrics = collect_code_metrics(
@@ -454,6 +492,10 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(corpus["binaries"][0]["arch"], "x64")
         self.assertEqual(corpus["owner_metric_totals"]["alias_unsafe"], 7)
         self.assertEqual(corpus["shape_drift_totals"]["generic_local_name_sum"], 4)
+        self.assertEqual(
+            corpus["normalize_pass_metric_totals"]["wide_dead_assignment_total_time_ms"],
+            12,
+        )
         self.assertIn("x64", corpus["arch_summary"])
         self.assertEqual(corpus["watchlist_source_per_binary"]["sample"], "mixed")
         self.assertEqual(corpus["watchlist_reason_counts"]["bootstrap_explicit"], 1)
@@ -598,6 +640,14 @@ class CorpusBenchmarkTests(unittest.TestCase):
         payload = compact.model_dump(mode="json")
         self.assertEqual(payload["summary_kind"], "compact_corpus_benchmark")
         self.assertEqual(payload["owner_metric_totals"]["alias_unsafe"], 7.0)
+        self.assertEqual(
+            payload["normalize_pass_metric_totals"]["wide_dead_assignment_total_time_ms"],
+            12.0,
+        )
+        self.assertEqual(
+            payload["per_binary_rows"][0]["normalize_pass_metrics"]["wide_dead_assignment_total_invocations"],
+            3.0,
+        )
         self.assertEqual(payload["per_binary_rows"][0]["id"], "sample")
 
     def test_render_corpus_markdown_and_console_smoke(self) -> None:
@@ -640,6 +690,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         markdown = render_corpus_benchmark_markdown(corpus)
         self.assertIn("## x86 / x64 Split", markdown)
+        self.assertIn("## Normalize Pass Totals", markdown)
         self.assertIn("benchmark_compact_summary.json", markdown)
 
         console = Console(record=True, width=140)

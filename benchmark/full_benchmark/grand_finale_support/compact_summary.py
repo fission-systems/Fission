@@ -27,6 +27,20 @@ SELECTED_SHAPE_DRIFT_KEYS = (
     "heuristic_max_brace_nesting_mean",
     "synthetic_helper_call_total",
 )
+SELECTED_NORMALIZE_PASS_KEYS = (
+    "wide_dead_assignment_total_time_ms",
+    "wide_dead_assignment_total_invocations",
+    "wide_dead_assignment_changed_count",
+    "sccp_total_time_ms",
+    "sccp_total_invocations",
+    "sccp_changed_count",
+    "jump_resolver_total_time_ms",
+    "jump_resolver_total_invocations",
+    "jump_resolver_changed_count",
+    "break_continue_recovery_total_time_ms",
+    "break_continue_recovery_total_invocations",
+    "break_continue_recovery_changed_count",
+)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -125,6 +139,10 @@ def build_single_compact_summary(
         (summary.shape_drift_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_SHAPE_DRIFT_KEYS,
     )
+    normalize_pass_metrics = _normalize_metric_map(
+        (summary.normalize_pass_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
+    )
     watchlist = ((summary.row_fidelity_targets or {}).get("pyghidra_vs_fission") or {})
     baseline_blockers = []
     if isinstance(regression_gate_payload, dict):
@@ -157,6 +175,7 @@ def build_single_compact_summary(
         both_success_rate_pct=_safe_float(inter.get("both_success_rate_pct"), 0.0),
         owner_metrics=owner_metrics,
         shape_drift_metrics=shape_drift,
+        normalize_pass_metrics=normalize_pass_metrics,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
         baseline_blockers=baseline_blockers,
         top_regressions=top_regressions,
@@ -233,6 +252,10 @@ def build_corpus_compact_summary(
                     row.shape_drift_metrics,
                     allowed_keys=SELECTED_SHAPE_DRIFT_KEYS,
                 ),
+                "normalize_pass_metrics": _normalize_metric_map(
+                    row.normalize_pass_metrics,
+                    allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
+                ),
                 "eligibility_reason": str((row.eligibility or {}).get("reason") or "unknown"),
                 "weight": _safe_float(row.weight, 0.0),
             }
@@ -261,6 +284,10 @@ def build_corpus_compact_summary(
                     shape_drift_metrics=_normalize_metric_map(
                         record["shape_drift_metrics"],
                         allowed_keys=SELECTED_SHAPE_DRIFT_KEYS,
+                    ),
+                    normalize_pass_metrics=_normalize_metric_map(
+                        record["normalize_pass_metrics"],
+                        allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
                     ),
                     eligibility_reason=str(record["eligibility_reason"]),
                 )
@@ -296,6 +323,10 @@ def build_corpus_compact_summary(
         artifact.shape_drift_totals,
         allowed_keys=SELECTED_SHAPE_DRIFT_KEYS,
     )
+    normalize_pass_totals = _normalize_metric_map(
+        artifact.normalize_pass_metric_totals,
+        allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
+    )
     if binary_df.empty:
         weighted_avg = _safe_float(artifact.corpus_summary.weighted_avg_normalized_similarity, 0.0)
     else:
@@ -318,6 +349,7 @@ def build_corpus_compact_summary(
         x64_summary=x64_summary,
         owner_metric_totals=owner_totals,
         shape_drift_totals=shape_totals,
+        normalize_pass_metric_totals=normalize_pass_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)
             for key, value in sorted((artifact.watchlist_reason_counts or {}).items())

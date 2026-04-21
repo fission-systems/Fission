@@ -219,6 +219,8 @@ impl<'a> PreviewBuilder<'a> {
             compare_chain_dispatcher_count: 0,
             candidate_scoped_jump_resolver_count: 0,
             sccp_skipped_by_admission_count: 0,
+            wide_dead_assignment_rerun_admitted_count: 0,
+            wide_dead_assignment_rerun_skipped_by_admission_count: 0,
             pe_admission_profile_mismatch_count: self.pe_admission_profile_mismatch_count,
             memory_fact_prefilter_skip_count: 0,
             aggregate_fields_skipped_by_admission_count: 0,

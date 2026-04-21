@@ -991,6 +991,12 @@ pub struct NirBuildStats {
     /// SCCP passes skipped because admission analysis found no useful control-flow seeds.
     #[serde(default)]
     pub sccp_skipped_by_admission_count: usize,
+    /// Wide dead-assignment reruns admitted after a successful first pass.
+    #[serde(default)]
+    pub wide_dead_assignment_rerun_admitted_count: usize,
+    /// Wide dead-assignment reruns skipped by explicit admission guards.
+    #[serde(default)]
+    pub wide_dead_assignment_rerun_skipped_by_admission_count: usize,
     /// Preview/render gating disagreed with the canonical target profile.
     #[serde(default)]
     pub pe_admission_profile_mismatch_count: usize,
@@ -1246,6 +1252,10 @@ impl NirBuildStats {
         self.compare_chain_dispatcher_count += other.compare_chain_dispatcher_count;
         self.candidate_scoped_jump_resolver_count += other.candidate_scoped_jump_resolver_count;
         self.sccp_skipped_by_admission_count += other.sccp_skipped_by_admission_count;
+        self.wide_dead_assignment_rerun_admitted_count +=
+            other.wide_dead_assignment_rerun_admitted_count;
+        self.wide_dead_assignment_rerun_skipped_by_admission_count +=
+            other.wide_dead_assignment_rerun_skipped_by_admission_count;
         self.pe_admission_profile_mismatch_count += other.pe_admission_profile_mismatch_count;
         self.memory_fact_prefilter_skip_count += other.memory_fact_prefilter_skip_count;
         self.aggregate_fields_skipped_by_admission_count +=
