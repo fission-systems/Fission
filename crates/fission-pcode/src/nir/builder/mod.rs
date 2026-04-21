@@ -206,7 +206,9 @@ impl<'a> PreviewBuilder<'a> {
                         .sum::<usize>()
                 );
             }
+            let structuring_start = std::time::Instant::now();
             body = self.build_multiblock_body()?;
+            self.structuring_duration_ms += structuring_start.elapsed().as_millis() as usize;
             if preview_builder_diag_enabled() {
                 eprintln!("[DIAG] build_hir multiblock_done: stmts={}", body.len());
             }

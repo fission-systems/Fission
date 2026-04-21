@@ -144,6 +144,15 @@ def build_single_compact_summary(
         allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
     )
     watchlist = ((summary.row_fidelity_targets or {}).get("pyghidra_vs_fission") or {})
+    giant_function_speed_family_counts = {
+        str(key): _safe_int(value, 0)
+        for key, value in sorted((summary.giant_function_speed_family_counts or {}).items())
+    }
+    max_pathological_examples = [
+        dict(row)
+        for row in list(summary.max_pathological_examples or [])[:MAX_COMPACT_ROWS]
+        if isinstance(row, dict)
+    ]
     baseline_blockers = []
     if isinstance(regression_gate_payload, dict):
         baseline_blockers = [str(item) for item in regression_gate_payload.get("regressions", [])]
@@ -176,10 +185,12 @@ def build_single_compact_summary(
         owner_metrics=owner_metrics,
         shape_drift_metrics=shape_drift,
         normalize_pass_metrics=normalize_pass_metrics,
+        giant_function_speed_family_counts=giant_function_speed_family_counts,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
         baseline_blockers=baseline_blockers,
         top_regressions=top_regressions,
         top_row_examples=top_examples[:MAX_COMPACT_ROWS],
+        max_pathological_examples=max_pathological_examples,
     )
 
 
@@ -327,6 +338,15 @@ def build_corpus_compact_summary(
         artifact.normalize_pass_metric_totals,
         allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
     )
+    giant_function_speed_family_totals = {
+        str(key): _safe_int(value, 0)
+        for key, value in sorted((artifact.giant_function_speed_family_totals or {}).items())
+    }
+    max_pathological_examples = [
+        dict(row)
+        for row in list(artifact.max_pathological_examples or [])[:MAX_COMPACT_ROWS]
+        if isinstance(row, dict)
+    ]
     if binary_df.empty:
         weighted_avg = _safe_float(artifact.corpus_summary.weighted_avg_normalized_similarity, 0.0)
     else:
@@ -350,12 +370,14 @@ def build_corpus_compact_summary(
         owner_metric_totals=owner_totals,
         shape_drift_totals=shape_totals,
         normalize_pass_metric_totals=normalize_pass_totals,
+        giant_function_speed_family_totals=giant_function_speed_family_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)
             for key, value in sorted((artifact.watchlist_reason_counts or {}).items())
         },
         top_degraded_rows=degraded_rows,
         per_binary_rows=per_binary_rows,
+        max_pathological_examples=max_pathological_examples,
     )
 
 

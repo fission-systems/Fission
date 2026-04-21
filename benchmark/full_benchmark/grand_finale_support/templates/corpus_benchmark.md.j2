@@ -53,6 +53,27 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## Giant Function Families
+
+| Family | Count |
+| --- | ---: |
+{% for key, value in (payload.get("giant_function_speed_family_totals", {}) or {})|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% else %}
+| `none` | 0 |
+{% endfor %}
+
+{% set pathological_examples = payload.get("max_pathological_examples", []) or [] %}
+{% if pathological_examples %}
+## Pathological Examples
+
+| Binary | Address | Name | Family | Build ms | Normalize ms | Structuring ms | Render ms | Rendered len |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+{% for row in pathological_examples %}
+| `{{ row.get("binary_id", "") }}` | `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | `{{ row.get("giant_function_speed_family", "") }}` | {{ "%.3f"|format(row.get("build_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("normalize_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("structuring_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("render_duration_ms", 0.0) | float) }} | {{ row.get("rendered_code_len", 0) }} |
+{% endfor %}
+{% endif %}
+
 ## Watchlist Selection Reasons
 
 | Reason | Count |

@@ -79,6 +79,7 @@ pub(super) fn attach_native_timing(entry: &mut serde_json::Value, decomp: &Decom
 pub(super) struct DecompEntry {
     pub(super) address: u64,
     pub(super) name: String,
+    pub(super) size: u64,
     pub(super) code: Result<RenderedCode, fission_core::FissionError>,
     pub(super) decomp_sec: f64,
     pub(super) postprocess_sec: f64,

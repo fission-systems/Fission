@@ -11,6 +11,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from grand_finale_support.benchmark_core import (
+    _build_giant_function_diagnostics,
     _default_binary_output_name,
     _default_corpus_output_name,
     _derive_binary_arch,
@@ -115,6 +116,30 @@ def _minimal_single_binary_summary(
                     "wide_dead_assignment_changed_count": 2.0,
                 }
             },
+            "giant_function_candidates": 1,
+            "giant_function_speed_family_counts": {"RenderHeavy": 1},
+            "max_rendered_code_len": 123456,
+            "max_structuring_scc_component_count": 222,
+            "max_replacement_plan_candidate_count": 33333,
+            "max_materialization_stabilized_count": 44444,
+            "max_pathological_examples": [
+                {
+                    "binary_id": "sample",
+                    "address": "0x140002d40",
+                    "name": "register_frame_ctor",
+                    "size": 0,
+                    "build_duration_ms": 252142.0,
+                    "normalize_duration_ms": 157759.0,
+                    "structuring_duration_ms": 64000.0,
+                    "render_duration_ms": 30000.0,
+                    "rendered_code_len": 452822,
+                    "forced_linear_structuring_count": 1,
+                    "structuring_scc_component_count": 228,
+                    "replacement_plan_candidate_count": 39381,
+                    "materialization_stabilized_count": 33633,
+                    "giant_function_speed_family": "MixedGiantFunction",
+                }
+            ],
             "coverage": {
                 "pyghidra_vs_fission": {
                     "coverage_ratio_pct": 100.0,
@@ -278,6 +303,37 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["goto_total"], 1.0)
         self.assertEqual(metrics["generic_local_name_sum"], 2.0)
         self.assertEqual(metrics["synthetic_helper_call_total"], 3.0)
+
+    def test_build_giant_function_diagnostics_classifies_zero_size_runtime_wrapper(self) -> None:
+        diagnostics = _build_giant_function_diagnostics(
+            {
+                "0x140002d40": {
+                    "address": "0x140002d40",
+                    "name": "register_frame_ctor",
+                    "size": 0,
+                    "preview_build_stats": {
+                        "build_duration_ms": 1000,
+                        "normalize_duration_ms": 400,
+                        "structuring_duration_ms": 300,
+                        "render_duration_ms": 300,
+                        "rendered_code_len": 120000,
+                        "forced_linear_structuring_count": 1,
+                        "structuring_scc_component_count": 200,
+                        "replacement_plan_candidate_count": 20000,
+                        "materialization_stabilized_count": 20000,
+                    },
+                }
+            }
+        )
+        self.assertEqual(diagnostics["giant_function_candidates"], 1)
+        self.assertEqual(
+            diagnostics["giant_function_speed_family_counts"]["ZeroSizeRuntimeWrapper"],
+            1,
+        )
+        self.assertEqual(
+            diagnostics["max_pathological_examples"][0]["giant_function_speed_family"],
+            "ZeroSizeRuntimeWrapper",
+        )
 
     def test_extract_selected_normalize_pass_metrics(self) -> None:
         stats = {
@@ -496,6 +552,14 @@ class CorpusBenchmarkTests(unittest.TestCase):
             corpus["normalize_pass_metric_totals"]["wide_dead_assignment_total_time_ms"],
             12,
         )
+        self.assertEqual(
+            corpus["giant_function_speed_family_totals"]["RenderHeavy"],
+            1,
+        )
+        self.assertEqual(
+            corpus["max_pathological_examples"][0]["address"],
+            "0x140002d40",
+        )
         self.assertIn("x64", corpus["arch_summary"])
         self.assertEqual(corpus["watchlist_source_per_binary"]["sample"], "mixed")
         self.assertEqual(corpus["watchlist_reason_counts"]["bootstrap_explicit"], 1)
@@ -645,6 +709,14 @@ class CorpusBenchmarkTests(unittest.TestCase):
             12.0,
         )
         self.assertEqual(
+            payload["giant_function_speed_family_totals"]["RenderHeavy"],
+            1,
+        )
+        self.assertEqual(
+            payload["max_pathological_examples"][0]["address"],
+            "0x140002d40",
+        )
+        self.assertEqual(
             payload["per_binary_rows"][0]["normalize_pass_metrics"]["wide_dead_assignment_total_invocations"],
             3.0,
         )
@@ -691,12 +763,14 @@ class CorpusBenchmarkTests(unittest.TestCase):
         markdown = render_corpus_benchmark_markdown(corpus)
         self.assertIn("## x86 / x64 Split", markdown)
         self.assertIn("## Normalize Pass Totals", markdown)
+        self.assertIn("## Giant Function Families", markdown)
         self.assertIn("benchmark_compact_summary.json", markdown)
 
         console = Console(record=True, width=140)
         print_corpus_benchmark_console(corpus, Path("/tmp/out"), console=console)
         rendered = console.export_text()
         self.assertIn("Corpus Benchmark", rendered)
+        self.assertIn("Giant Function Families", rendered)
 
 
 if __name__ == "__main__":

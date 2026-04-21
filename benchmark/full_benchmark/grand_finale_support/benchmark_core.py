@@ -181,6 +181,13 @@ SELECTED_NORMALIZE_PASSES = (
     "break_continue_recovery",
 )
 
+GIANT_RENDERED_CODE_THRESHOLD = 100000
+GIANT_REPLACEMENT_THRESHOLD = 10000
+GIANT_MATERIALIZATION_THRESHOLD = 10000
+GIANT_STRUCTURING_SCC_THRESHOLD = 128
+GIANT_STAGE_DOMINANCE_THRESHOLD = 0.5
+MAX_PATHOLOGICAL_EXAMPLES = 10
+
 
 def _extract_named_metrics(
     source: dict[str, Any],
@@ -254,10 +261,202 @@ def _merge_named_metric_totals(metric_maps: dict[str, dict[str, float]]) -> dict
     }
 
 
+def _merge_count_maps(count_maps: dict[str, dict[str, int]]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for metrics in count_maps.values():
+        for key, value in metrics.items():
+            totals[str(key)] = totals.get(str(key), 0) + _safe_int(value, 0)
+    return dict(sorted(totals.items()))
+
+
 def _normalize_metric_map_for_json(metrics: dict[str, float]) -> dict[str, float]:
     return {
         key: int(value) if abs(value - round(value)) <= 1e-9 else round(value, 6)
         for key, value in sorted(metrics.items())
+    }
+
+
+def _extract_stage_cost_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+    preview = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _normalize_metric_map_for_json(
+        {
+            "build_duration_ms": _safe_float(preview.get("build_duration_ms"), 0.0),
+            "normalize_duration_ms": _safe_float(preview.get("normalize_duration_ms"), 0.0),
+            "structuring_duration_ms": _safe_float(
+                preview.get("structuring_duration_ms"), 0.0
+            ),
+            "render_duration_ms": _safe_float(preview.get("render_duration_ms"), 0.0),
+            "rendered_code_len": _safe_float(preview.get("rendered_code_len"), 0.0),
+            "max_structuring_scc_component_size": _safe_float(
+                preview.get("max_structuring_scc_component_size"), 0.0
+            ),
+        }
+    )
+
+
+def _derive_giant_function_speed_family(entry: dict[str, Any]) -> dict[str, Any]:
+    preview_build_stats = entry.get("preview_build_stats") or {}
+    name = str(entry.get("name", "") or "")
+    size = _safe_int(entry.get("size"), -1)
+    build_duration_ms = _safe_float(preview_build_stats.get("build_duration_ms"), 0.0)
+    normalize_duration_ms = _safe_float(
+        preview_build_stats.get("normalize_duration_ms"), 0.0
+    )
+    structuring_duration_ms = _safe_float(
+        preview_build_stats.get("structuring_duration_ms"), 0.0
+    )
+    render_duration_ms = _safe_float(preview_build_stats.get("render_duration_ms"), 0.0)
+    rendered_code_len = _safe_int(preview_build_stats.get("rendered_code_len"), 0)
+    forced_linear_structuring_count = _safe_int(
+        preview_build_stats.get("forced_linear_structuring_count"), 0
+    )
+    structuring_scc_component_count = _safe_int(
+        preview_build_stats.get("structuring_scc_component_count"), 0
+    )
+    replacement_plan_candidate_count = _safe_int(
+        preview_build_stats.get("replacement_plan_candidate_count"), 0
+    )
+    materialization_stabilized_count = _safe_int(
+        preview_build_stats.get("materialization_stabilized_count"), 0
+    )
+    stage_total = normalize_duration_ms + structuring_duration_ms + render_duration_ms
+
+    zero_size_runtime_wrapper = size == 0 and name == "register_frame_ctor"
+    normalize_heavy = (
+        stage_total > 0.0
+        and normalize_duration_ms > (structuring_duration_ms + render_duration_ms)
+        and normalize_duration_ms >= stage_total * GIANT_STAGE_DOMINANCE_THRESHOLD
+    )
+    structuring_heavy = (
+        stage_total > 0.0
+        and structuring_duration_ms >= stage_total * GIANT_STAGE_DOMINANCE_THRESHOLD
+        and (
+            forced_linear_structuring_count > 0
+            or structuring_scc_component_count >= GIANT_STRUCTURING_SCC_THRESHOLD
+        )
+    )
+    render_heavy = (
+        stage_total > 0.0
+        and render_duration_ms >= stage_total * GIANT_STAGE_DOMINANCE_THRESHOLD
+        and rendered_code_len >= GIANT_RENDERED_CODE_THRESHOLD
+    )
+    replacement_explosion = (
+        replacement_plan_candidate_count >= GIANT_REPLACEMENT_THRESHOLD
+        or materialization_stabilized_count >= GIANT_MATERIALIZATION_THRESHOLD
+    )
+
+    active_reasons = sum(
+        int(flag)
+        for flag in (
+            normalize_heavy,
+            structuring_heavy,
+            render_heavy,
+            replacement_explosion,
+        )
+    )
+    if zero_size_runtime_wrapper:
+        family = "ZeroSizeRuntimeWrapper"
+    elif active_reasons >= 2:
+        family = "MixedGiantFunction"
+    elif normalize_heavy:
+        family = "NormalizeHeavy"
+    elif structuring_heavy:
+        family = "StructuringHeavy"
+    elif render_heavy:
+        family = "RenderHeavy"
+    elif replacement_explosion:
+        family = "ReplacementPlanExplosion"
+    else:
+        family = "UnknownGiantFunction"
+
+    is_candidate = (
+        zero_size_runtime_wrapper
+        or normalize_heavy
+        or structuring_heavy
+        or render_heavy
+        or replacement_explosion
+    )
+    return {
+        "binary_id": entry.get("binary_id"),
+        "address": entry.get("address"),
+        "name": name,
+        "size": size if size >= 0 else None,
+        "build_duration_ms": round(build_duration_ms, 6),
+        "normalize_duration_ms": round(normalize_duration_ms, 6),
+        "structuring_duration_ms": round(structuring_duration_ms, 6),
+        "render_duration_ms": round(render_duration_ms, 6),
+        "rendered_code_len": rendered_code_len,
+        "forced_linear_structuring_count": forced_linear_structuring_count,
+        "structuring_scc_component_count": structuring_scc_component_count,
+        "replacement_plan_candidate_count": replacement_plan_candidate_count,
+        "materialization_stabilized_count": materialization_stabilized_count,
+        "giant_function_speed_family": family,
+        "is_candidate": is_candidate,
+    }
+
+
+def _build_giant_function_diagnostics(
+    entries: dict[str, dict[str, Any]] | None,
+    *,
+    binary_id: str | None = None,
+) -> dict[str, Any]:
+    family_counts: dict[str, int] = {}
+    examples: list[dict[str, Any]] = []
+    max_rendered_code_len = 0
+    max_structuring_scc_component_count = 0
+    max_replacement_plan_candidate_count = 0
+    max_materialization_stabilized_count = 0
+
+    for raw_entry in (entries or {}).values():
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = dict(raw_entry)
+        if binary_id is not None:
+            entry["binary_id"] = binary_id
+        derived = _derive_giant_function_speed_family(entry)
+        max_rendered_code_len = max(
+            max_rendered_code_len,
+            _safe_int(derived.get("rendered_code_len"), 0),
+        )
+        max_structuring_scc_component_count = max(
+            max_structuring_scc_component_count,
+            _safe_int(derived.get("structuring_scc_component_count"), 0),
+        )
+        max_replacement_plan_candidate_count = max(
+            max_replacement_plan_candidate_count,
+            _safe_int(derived.get("replacement_plan_candidate_count"), 0),
+        )
+        max_materialization_stabilized_count = max(
+            max_materialization_stabilized_count,
+            _safe_int(derived.get("materialization_stabilized_count"), 0),
+        )
+        if not derived.get("is_candidate"):
+            continue
+        family = str(derived.get("giant_function_speed_family") or "UnknownGiantFunction")
+        family_counts[family] = family_counts.get(family, 0) + 1
+        examples.append(
+            {
+                key: value
+                for key, value in derived.items()
+                if key != "is_candidate"
+            }
+        )
+
+    examples.sort(
+        key=lambda row: (
+            -_safe_float(row.get("build_duration_ms"), 0.0),
+            -_safe_int(row.get("rendered_code_len"), 0),
+            str(row.get("address", "")),
+        )
+    )
+    return {
+        "giant_function_candidates": len(examples),
+        "giant_function_speed_family_counts": dict(sorted(family_counts.items())),
+        "max_rendered_code_len": max_rendered_code_len,
+        "max_structuring_scc_component_count": max_structuring_scc_component_count,
+        "max_replacement_plan_candidate_count": max_replacement_plan_candidate_count,
+        "max_materialization_stabilized_count": max_materialization_stabilized_count,
+        "max_pathological_examples": examples[:MAX_PATHOLOGICAL_EXAMPLES],
     }
 
 
@@ -3452,6 +3651,7 @@ def build_comparison(
     normalize_pass_metrics = _flatten_selected_normalize_pass_metrics(
         _extract_selected_normalize_pass_metrics(fission["meta"].get("preview_build_stats", {}))
     )
+    giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
 
     engine_kpi = {
         "pyghidra": {
@@ -3529,6 +3729,21 @@ def build_comparison(
         "normalize_pass_metrics": {
             "fission": normalize_pass_metrics,
         },
+        "giant_function_candidates": giant_function_diagnostics["giant_function_candidates"],
+        "giant_function_speed_family_counts": giant_function_diagnostics[
+            "giant_function_speed_family_counts"
+        ],
+        "max_rendered_code_len": giant_function_diagnostics["max_rendered_code_len"],
+        "max_structuring_scc_component_count": giant_function_diagnostics[
+            "max_structuring_scc_component_count"
+        ],
+        "max_replacement_plan_candidate_count": giant_function_diagnostics[
+            "max_replacement_plan_candidate_count"
+        ],
+        "max_materialization_stabilized_count": giant_function_diagnostics[
+            "max_materialization_stabilized_count"
+        ],
+        "max_pathological_examples": giant_function_diagnostics["max_pathological_examples"],
         "coverage": {
             "pyghidra_vs_fission": pair_py_fission["summary"],
             "independent_top_n_pyghidra_vs_fission": independent_top_n_coverage,
@@ -3984,6 +4199,7 @@ def build_corpus_assessment(
     owner_metric_totals_per_binary: dict[str, dict[str, float]] = {}
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
+    giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
     watchlist_reason_by_binary_address: dict[str, dict[str, str]] = {}
@@ -4052,9 +4268,68 @@ def build_corpus_assessment(
                 )
             )
         )
+        giant_function_diagnostics = _lookup_path(
+            benchmark,
+            ("summary",),
+            {},
+        )
+        if not isinstance(giant_function_diagnostics, dict):
+            giant_function_diagnostics = {}
+        giant_function_diagnostics = {
+            "giant_function_candidates": _safe_int(
+                giant_function_diagnostics.get("giant_function_candidates"),
+                0,
+            ),
+            "giant_function_speed_family_counts": dict(
+                sorted(
+                    (
+                        giant_function_diagnostics.get(
+                            "giant_function_speed_family_counts", {}
+                        )
+                        if isinstance(
+                            giant_function_diagnostics.get(
+                                "giant_function_speed_family_counts", {}
+                            ),
+                            dict,
+                        )
+                        else {}
+                    ).items()
+                )
+            ),
+            "max_rendered_code_len": _safe_int(
+                giant_function_diagnostics.get("max_rendered_code_len"),
+                0,
+            ),
+            "max_structuring_scc_component_count": _safe_int(
+                giant_function_diagnostics.get("max_structuring_scc_component_count"),
+                0,
+            ),
+            "max_replacement_plan_candidate_count": _safe_int(
+                giant_function_diagnostics.get("max_replacement_plan_candidate_count"),
+                0,
+            ),
+            "max_materialization_stabilized_count": _safe_int(
+                giant_function_diagnostics.get("max_materialization_stabilized_count"),
+                0,
+            ),
+            "max_pathological_examples": list(
+                giant_function_diagnostics.get("max_pathological_examples", []) or []
+            ),
+        }
+        if (
+            giant_function_diagnostics["giant_function_candidates"] <= 0
+            and not giant_function_diagnostics["giant_function_speed_family_counts"]
+        ):
+            giant_function_diagnostics = _build_giant_function_diagnostics(
+                _lookup_path(benchmark, ("engines", "fission", "entries"), {}),
+                binary_id=binary_id,
+            )
         owner_metric_totals_per_binary[binary_id] = owner_metrics
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
+        giant_function_speed_family_counts_per_binary[binary_id] = dict(
+            giant_function_diagnostics["giant_function_speed_family_counts"]
+        )
         row_watchlist = _lookup_path(
             benchmark,
             ("summary", "row_fidelity_targets", "pyghidra_vs_fission"),
@@ -4253,6 +4528,27 @@ def build_corpus_assessment(
                 "owner_metrics": owner_metrics,
                 "shape_drift_metrics": shape_drift_metrics,
                 "normalize_pass_metrics": normalize_pass_metrics,
+                "giant_function_candidates": giant_function_diagnostics[
+                    "giant_function_candidates"
+                ],
+                "giant_function_speed_family_counts": giant_function_diagnostics[
+                    "giant_function_speed_family_counts"
+                ],
+                "max_rendered_code_len": giant_function_diagnostics[
+                    "max_rendered_code_len"
+                ],
+                "max_structuring_scc_component_count": giant_function_diagnostics[
+                    "max_structuring_scc_component_count"
+                ],
+                "max_replacement_plan_candidate_count": giant_function_diagnostics[
+                    "max_replacement_plan_candidate_count"
+                ],
+                "max_materialization_stabilized_count": giant_function_diagnostics[
+                    "max_materialization_stabilized_count"
+                ],
+                "max_pathological_examples": giant_function_diagnostics[
+                    "max_pathological_examples"
+                ],
                 "non_worse_vs_baseline": non_worse,
                 "coverage_non_worse_vs_baseline": coverage_non_worse_vs_baseline,
                 "direct_success_non_worse_vs_baseline": direct_success_non_worse_vs_baseline,
@@ -4266,6 +4562,9 @@ def build_corpus_assessment(
     shape_drift_totals = _merge_named_metric_totals(shape_drift_totals_per_binary)
     normalize_pass_metric_totals = _merge_normalize_pass_metric_totals(
         normalize_pass_metrics_per_binary
+    )
+    giant_function_speed_family_totals = _merge_count_maps(
+        giant_function_speed_family_counts_per_binary
     )
     failure_family_distribution = _merge_failure_family_distribution(
         failure_family_distribution_per_binary
@@ -4290,6 +4589,23 @@ def build_corpus_assessment(
             row.get("address", ""),
         ),
     )[:20]
+    max_pathological_examples = sorted(
+        (
+            {
+                "binary_id": item.get("id"),
+                **example,
+            }
+            for item in binaries_payload
+            for example in list(item.get("max_pathological_examples", []) or [])
+            if isinstance(example, dict)
+        ),
+        key=lambda row: (
+            -_safe_float(row.get("build_duration_ms"), 0.0),
+            -_safe_int(row.get("rendered_code_len"), 0),
+            str(row.get("binary_id", "")),
+            str(row.get("address", "")),
+        ),
+    )[:MAX_PATHOLOGICAL_EXAMPLES]
     arch_summary = _build_arch_summary(binaries_payload, eligibility_by_binary)
 
     status = "passed"
@@ -4508,6 +4824,7 @@ def build_corpus_assessment(
             "owner_metric_totals": owner_metric_totals,
             "shape_drift_totals": shape_drift_totals,
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
+            "giant_function_speed_family_totals": giant_function_speed_family_totals,
             "arch_summary": arch_summary,
             "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),
         },
@@ -4524,6 +4841,8 @@ def build_corpus_assessment(
         "shape_drift_totals_per_binary": shape_drift_totals_per_binary,
         "normalize_pass_metric_totals": normalize_pass_metric_totals,
         "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
+        "giant_function_speed_family_totals": giant_function_speed_family_totals,
+        "max_pathological_examples": max_pathological_examples,
         "arch_summary": arch_summary,
         "watchlist_source_per_binary": watchlist_source_per_binary,
         "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),

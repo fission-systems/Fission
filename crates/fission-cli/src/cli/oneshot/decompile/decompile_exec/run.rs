@@ -239,6 +239,7 @@ fn run_rust_sleigh_decompilation(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
+                        "size": func.size,
                         "code": filtered,
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
@@ -282,6 +283,7 @@ fn run_rust_sleigh_decompilation(
                         let mut entry = serde_json::json!({
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
+                            "size": func.size,
                             "code": fallback,
                             "engine_used": "rust_sleigh",
                             "fell_back": true,
@@ -311,6 +313,7 @@ fn run_rust_sleigh_decompilation(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
+                        "size": func.size,
                         "engine_used": "rust_sleigh",
                         "fell_back": true,
                         "fallback_reason": fallback_reason_with_kind("rust_sleigh", &error_text),
@@ -429,6 +432,7 @@ fn run_sequential_decompilation<'a>(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
+                        "size": func.size,
                         "code": filtered,
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
@@ -474,6 +478,7 @@ fn run_sequential_decompilation<'a>(
                         let mut entry = serde_json::json!({
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
+                            "size": func.size,
                             "code": fallback,
                             "engine_used": NirEngineMode::Legacy.as_str(),
                             "fell_back": true,
@@ -509,6 +514,7 @@ fn run_sequential_decompilation<'a>(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
+                        "size": func.size,
                         "engine_used": match routing.engine_used {
                             NirEngineMode::Legacy => NirEngineMode::Legacy.as_str(),
                             NirEngineMode::Nir => NirEngineMode::Nir.as_str(),
@@ -619,6 +625,7 @@ fn run_parallel_decompilation<'a>(
             entries.push(DecompEntry {
                 address: func.address,
                 name: func.name.clone(),
+                size: func.size,
                 code: code_result,
                 decomp_sec,
                 postprocess_sec,
@@ -654,6 +661,7 @@ fn run_parallel_decompilation<'a>(
                     .map(|f| DecompEntry {
                         address: f.address,
                         name: f.name.clone(),
+                        size: f.size,
                         code: Err(fission_core::FissionError::decompiler("Prepare failed")),
                         decomp_sec: 0.0,
                         postprocess_sec: 0.0,
@@ -710,6 +718,7 @@ fn run_parallel_decompilation<'a>(
                 entries.push(DecompEntry {
                     address: func.address,
                     name: func.name.clone(),
+                    size: func.size,
                     code: code_result,
                     decomp_sec,
                     postprocess_sec,
@@ -752,6 +761,7 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
+                        "size": entry.size,
                         "code": filtered,
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
@@ -797,6 +807,7 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
+                        "size": entry.size,
                         "engine_used": NirEngineMode::Legacy.as_str(),
                         "fell_back": true,
                         "fallback_reason": fallback_reason_with_kind(classify_native_failure_kind(&e.to_string()), e.to_string()),

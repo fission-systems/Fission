@@ -25,6 +25,7 @@ def print_single_benchmark_console(
     owner_metrics = ((summary.get("owner_metrics") or {}).get("fission")) or {}
     shape_metrics = ((summary.get("shape_drift_metrics") or {}).get("fission")) or {}
     normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
+    giant_family_counts = summary.get("giant_function_speed_family_counts", {}) or {}
 
     console.print(
         Panel.fit(
@@ -63,6 +64,14 @@ def print_single_benchmark_console(
         normalize_table.add_row(key, f"{float(value):.3f}")
     if normalize_pass_metrics:
         console.print(normalize_table)
+
+    if giant_family_counts:
+        giant_table = Table(title="Giant Function Families", show_header=True)
+        giant_table.add_column("Family")
+        giant_table.add_column("Count", justify="right")
+        for key, value in sorted(giant_family_counts.items()):
+            giant_table.add_row(str(key), str(int(value)))
+        console.print(giant_table)
 
     if baseline_gate:
         row_gate = (baseline_gate.get("row_fidelity_gate") or {})
@@ -127,6 +136,15 @@ def print_corpus_benchmark_console(
         for key, value in sorted(normalize_pass_totals.items()):
             normalize_table.add_row(key, f"{float(value):.3f}")
         console.print(normalize_table)
+
+    giant_family_totals = corpus_summary.get("giant_function_speed_family_totals", {}) or {}
+    if giant_family_totals:
+        giant_table = Table(title="Giant Function Families", show_header=True)
+        giant_table.add_column("Family")
+        giant_table.add_column("Count", justify="right")
+        for key, value in sorted(giant_family_totals.items()):
+            giant_table.add_row(str(key), str(int(value)))
+        console.print(giant_table)
 
     binary_table = Table(title="Per-Binary Summary", show_header=True)
     binary_table.add_column("ID")

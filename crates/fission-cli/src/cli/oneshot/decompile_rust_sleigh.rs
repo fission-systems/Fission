@@ -338,6 +338,7 @@ fn make_internal_error_result(
     let mut entry = serde_json::json!({
         "address": format!("0x{:x}", func.address),
         "name": func.name,
+        "size": func.size,
         "engine_used": "rust_sleigh",
         "fell_back": true,
         "fallback_reason": "rust_sleigh:worker_internal_error",
@@ -493,6 +494,7 @@ fn render_one_function(
             let mut entry = serde_json::json!({
                 "address": format!("0x{:x}", func.address),
                 "name": func.name,
+                "size": func.size,
                 "code": code,
                 "engine_used": "rust_sleigh",
                 "fell_back": fell_back,
@@ -532,6 +534,7 @@ fn render_one_function(
                 let mut entry = serde_json::json!({
                     "address": format!("0x{:x}", func.address),
                     "name": func.name,
+                    "size": func.size,
                     "code": fallback,
                     "engine_used": "rust_sleigh",
                     "fell_back": true,
@@ -563,6 +566,7 @@ fn render_one_function(
                 let mut entry = serde_json::json!({
                     "address": format!("0x{:x}", func.address),
                     "name": func.name,
+                    "size": func.size,
                     "engine_used": "rust_sleigh",
                     "fell_back": true,
                     "fallback_reason": format!("rust_sleigh: {}", error_text),

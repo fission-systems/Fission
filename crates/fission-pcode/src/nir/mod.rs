@@ -196,7 +196,6 @@ pub fn render_mlil_preview_with_binary_and_context(
     build_stats.refresh_structuring_reason_families();
     build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
     build_stats.normalize_duration_ms = normalize_start.elapsed().as_millis() as usize;
-    telemetry::store_preview_build_stats(build_stats);
     if diag {
         eprintln!(
             "[DIAG] normalize stage done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
@@ -228,6 +227,9 @@ pub fn render_mlil_preview_with_binary_and_context(
     debug_log("print_start");
     let print_start = Instant::now();
     let rendered = print_hir_function(&hir);
+    build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
+    build_stats.rendered_code_len = rendered.len();
+    telemetry::store_preview_build_stats(build_stats);
     if diag {
         eprintln!(
             "[DIAG] print done: fn=0x{address:x} elapsed={:.3}s",

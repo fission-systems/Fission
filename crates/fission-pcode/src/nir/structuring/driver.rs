@@ -144,15 +144,24 @@ impl<'a> PreviewBuilder<'a> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
         let force_linear = self.should_force_linear_structuring();
-        let (scc_component_count, scc_irreducible_count, scc_irreducible_header_count) = {
+        let (
+            scc_component_count,
+            scc_irreducible_count,
+            scc_irreducible_header_count,
+            max_scc_component_size,
+        ) = {
             let scc = self.cfg_fact_cache().scc();
             (
                 scc.component_count(),
                 scc.irreducible_count(),
                 scc.irreducible_header_total_count(),
+                scc.max_component_size(),
             )
         };
         self.structuring_scc_component_count += scc_component_count;
+        self.max_structuring_scc_component_size = self
+            .max_structuring_scc_component_size
+            .max(max_scc_component_size);
         self.structuring_irreducible_scc_count += scc_irreducible_count;
         self.structuring_irreducible_header_count += scc_irreducible_header_count;
 

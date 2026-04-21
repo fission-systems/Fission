@@ -54,6 +54,15 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
                 "normalize_pass_metrics": {
                     "fission": {"wide_dead_assignment_total_time_ms": 12.0}
                 },
+                "giant_function_speed_family_counts": {"RenderHeavy": 1},
+                "max_pathological_examples": [
+                    {
+                        "address": "0x140002d40",
+                        "name": "register_frame_ctor",
+                        "giant_function_speed_family": "RenderHeavy",
+                        "rendered_code_len": 452822,
+                    }
+                ],
                 "engines": {"fission": {"function_count": 50}},
                 "samples": {"pyghidra_vs_fission_lowest_similarity": []},
                 "row_fidelity_targets": {
@@ -213,6 +222,8 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
         self.assertEqual(payload["owner_metrics"]["alias_unsafe"], 4.0)
         self.assertEqual(payload["shape_drift_metrics"]["generic_local_name_sum"], 3.0)
         self.assertEqual(payload["normalize_pass_metrics"]["wide_dead_assignment_total_time_ms"], 12.0)
+        self.assertEqual(payload["giant_function_speed_family_counts"]["RenderHeavy"], 1)
+        self.assertEqual(payload["max_pathological_examples"][0]["address"], "0x140002d40")
 
     def test_maybe_generate_benchmark_llm_advisory_prefers_compact_summary_when_present(self) -> None:
         summary_payload = self._single_summary_payload()
@@ -245,12 +256,14 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
         markdown = render_single_benchmark_markdown(payload)
         self.assertIn("## Owner Metrics", markdown)
         self.assertIn("## Normalize Pass Metrics", markdown)
+        self.assertIn("## Giant Function Diagnostics", markdown)
         self.assertIn("benchmark_compact_summary.json", markdown)
 
         console = Console(record=True, width=120)
         print_single_benchmark_console(payload["summary"], Path("/tmp/out"), console=console)
         rendered = console.export_text()
         self.assertIn("Whole Decomp Benchmark", rendered)
+        self.assertIn("Giant Function Families", rendered)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,14 @@ impl SccAnalysis {
         self.components.len()
     }
 
+    pub(crate) fn max_component_size(&self) -> usize {
+        self.components
+            .iter()
+            .map(|component| component.len())
+            .max()
+            .unwrap_or(0)
+    }
+
     #[cfg(test)]
     pub(crate) fn irreducible_components(&self) -> &[IrreducibleComponent] {
         &self.irreducible

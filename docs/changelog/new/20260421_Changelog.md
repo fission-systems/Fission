@@ -492,3 +492,124 @@ After this wave:
 - legacy CLI usage is still possible, but the intended migration path is now explicit
 
 This prepares the repo for the next phase of work, where decompilation-quality improvements can be evaluated against a more stable benchmark and operator surface.
+
+---
+
+## 11. Speed Bottleneck Wave 3: Giant Explicit Function Cost Decomposition
+
+### Goal
+
+This wave stayed **diagnostic-only** and targeted the remaining pathological speed owner after the batch filtering work.
+
+The observed bottleneck was no longer filtered whole-binary `--all` throughput. It was the explicit giant-function path, especially:
+
+- `test_functions.exe @ 0x140002d40`
+- `register_frame_ctor`
+
+The objective in this wave was to separate:
+
+- normalize cost
+- structuring cost
+- render cost
+- pathological replacement/materialization pressure
+
+without changing decompiler behavior.
+
+### New canonical telemetry
+
+`NirBuildStats` now records additional stage-level telemetry:
+
+- `structuring_duration_ms`
+- `render_duration_ms`
+- `rendered_code_len`
+- `max_structuring_scc_component_size`
+
+These were added additively. Existing fields such as:
+
+- `build_duration_ms`
+- `normalize_duration_ms`
+- `pass_metrics`
+- replacement/materialization counters
+
+retain their existing semantics.
+
+### New benchmark/reporting readout
+
+The benchmark/reporting layer now derives giant-function speed families from the raw telemetry.
+
+New derived families:
+
+- `ZeroSizeRuntimeWrapper`
+- `NormalizeHeavy`
+- `StructuringHeavy`
+- `RenderHeavy`
+- `ReplacementPlanExplosion`
+- `MixedGiantFunction`
+- `UnknownGiantFunction`
+
+Per-binary and corpus summaries now surface:
+
+- `giant_function_candidates`
+- `giant_function_speed_family_counts`
+- `giant_function_speed_family_totals`
+- `max_rendered_code_len`
+- `max_structuring_scc_component_count`
+- `max_replacement_plan_candidate_count`
+- `max_materialization_stabilized_count`
+- capped `max_pathological_examples`
+
+This readout is available in:
+
+- verbose JSON/Markdown
+- compact summary JSON
+- console summary
+
+### Live diagnostic result
+
+The filtered whole-binary path remained stable and fast:
+
+- `test_functions.exe`: `78` selected rows, crash-free
+- `bitops_and_control_flow.exe`: `80` selected rows, crash-free
+- `function_pointers_and_strings.exe`: `91` selected rows, crash-free
+
+The explicit pathological target remained crash-free and now carries full owner telemetry:
+
+```text
+binary: test_functions.exe
+addr: 0x140002d40
+name: register_frame_ctor
+size: 0
+build_duration_ms: 247793
+normalize_duration_ms: 155567
+structuring_duration_ms: 90686
+render_duration_ms: 4
+rendered_code_len: 452822
+structuring_scc_component_count: 228
+max_structuring_scc_component_size: 17
+replacement_plan_candidate_count: 39381
+materialization_stabilized_count: 33633
+giant_function_speed_family: ZeroSizeRuntimeWrapper
+```
+
+### Practical conclusion
+
+This wave closed a key ambiguity:
+
+- the pathological explicit-function cost is **not** render-dominant in wall time
+- normalize remains the largest stage
+- structuring is also materially large
+- replacement/materialization pressure is extreme
+- the current pathological family is now narrowly attributable as:
+  - `ZeroSizeRuntimeWrapper`
+
+This is enough evidence to avoid guessing at the next policy wave. The next speed step should target the explicit pathological family directly, not reopen general filtered `--all` throughput work.
+
+### Final status
+
+```text
+wave_type: diagnostic-only
+behavior_changed: no
+release_path_changed: no
+env_gate: none
+promotion impact: none
+```

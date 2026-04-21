@@ -47,6 +47,36 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## Giant Function Diagnostics
+
+- Candidates: {{ summary.get("giant_function_candidates", 0) }}
+- Max rendered code len: {{ summary.get("max_rendered_code_len", 0) }}
+- Max structuring SCC component count: {{ summary.get("max_structuring_scc_component_count", 0) }}
+- Max replacement plan candidate count: {{ summary.get("max_replacement_plan_candidate_count", 0) }}
+- Max materialization stabilized count: {{ summary.get("max_materialization_stabilized_count", 0) }}
+
+{% set giant_families = summary.get("giant_function_speed_family_counts", {}) or {} %}
+{% if giant_families %}
+### Giant Function Families
+
+| Family | Count |
+| --- | ---: |
+{% for key, value in giant_families|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% endfor %}
+{% endif %}
+
+{% set pathological_examples = summary.get("max_pathological_examples", []) or [] %}
+{% if pathological_examples %}
+### Pathological Examples
+
+| Address | Name | Family | Build ms | Normalize ms | Structuring ms | Render ms | Rendered len |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+{% for row in pathological_examples %}
+| `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | `{{ row.get("giant_function_speed_family", "") }}` | {{ "%.3f"|format(row.get("build_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("normalize_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("structuring_duration_ms", 0.0) | float) }} | {{ "%.3f"|format(row.get("render_duration_ms", 0.0) | float) }} | {{ row.get("rendered_code_len", 0) }} |
+{% endfor %}
+{% endif %}
+
 ## Watchlist
 
 - Source: `{{ watchlist.get("watchlist_source", "unknown") }}`

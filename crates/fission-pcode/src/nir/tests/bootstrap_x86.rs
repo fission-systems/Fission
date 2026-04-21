@@ -905,6 +905,190 @@ fn preview_unresolved_cbranch_uses_unique_non_fallthrough_successor() {
     }
 }
 
+#[test]
+fn preview_build_stats_records_structuring_duration() {
+    let cond = uniq(0x361, 1);
+    let direct_target = Varnode {
+        space_id: 1,
+        offset: 0x5020,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5000,
+                        output: Some(cond.clone()),
+                        inputs: vec![reg(0x08, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5001,
+                        output: None,
+                        inputs: vec![direct_target, cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5010,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5020,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let _ = render_mlil_preview(
+        &func,
+        "x86_structuring_stats",
+        0x5000,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    let stats = take_last_preview_build_stats().expect("preview build stats");
+    assert_eq!(stats.max_structuring_scc_component_size, 1);
+    assert!(stats.structuring_scc_component_count >= 1);
+    assert!(stats.structuring_duration_ms <= stats.build_duration_ms);
+}
+
+#[test]
+fn preview_build_stats_records_render_duration() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x503000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x503000,
+                output: None,
+                inputs: vec![cst(0, 4), cst(7, 4)],
+                asm_mnemonic: None,
+            }],
+        }],
+    };
+
+    let start = std::time::Instant::now();
+    let _ = render_mlil_preview(
+        &func,
+        "x86_render_duration",
+        0x503000,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    let elapsed_ms = start.elapsed().as_millis() as usize;
+    let stats = take_last_preview_build_stats().expect("preview build stats");
+    assert!(stats.render_duration_ms <= elapsed_ms);
+}
+
+#[test]
+fn preview_build_stats_records_rendered_code_len() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x504000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x504000,
+                output: None,
+                inputs: vec![cst(0, 4), cst(9, 4)],
+                asm_mnemonic: None,
+            }],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "x86_render_len", 0x504000, &preview_options_x86())
+        .expect("preview render");
+    let stats = take_last_preview_build_stats().expect("preview build stats");
+    assert_eq!(stats.rendered_code_len, code.len());
+}
+
+#[test]
+fn preview_build_stats_records_max_structuring_scc_component_size() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x505000,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x505000,
+                    output: None,
+                    inputs: vec![cst(0x505020, 4), reg(0x206, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x505010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x505010,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x505020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x505020,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let _ = render_mlil_preview(&func, "x86_scc_size", 0x505000, &preview_options_x86())
+        .expect("preview render");
+    let stats = take_last_preview_build_stats().expect("preview build stats");
+    assert_eq!(stats.max_structuring_scc_component_size, 1);
+}
+
 fn lower_x86_cond_expr(func: &PcodeFunction) -> HirExpr {
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(func, &options, None);

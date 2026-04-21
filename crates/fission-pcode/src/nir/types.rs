@@ -614,6 +614,14 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub normalize_duration_ms: usize,
     #[serde(default)]
+    pub structuring_duration_ms: usize,
+    #[serde(default)]
+    pub render_duration_ms: usize,
+    #[serde(default)]
+    pub rendered_code_len: usize,
+    #[serde(default)]
+    pub max_structuring_scc_component_size: usize,
+    #[serde(default)]
     pub forced_linear_structuring_count: usize,
     #[serde(default)]
     pub region_linearize_structuring_count: usize,
@@ -1030,6 +1038,12 @@ impl NirBuildStats {
     pub fn merge_assign(&mut self, other: &Self) {
         self.build_duration_ms += other.build_duration_ms;
         self.normalize_duration_ms += other.normalize_duration_ms;
+        self.structuring_duration_ms += other.structuring_duration_ms;
+        self.render_duration_ms += other.render_duration_ms;
+        self.rendered_code_len += other.rendered_code_len;
+        self.max_structuring_scc_component_size = self
+            .max_structuring_scc_component_size
+            .max(other.max_structuring_scc_component_size);
         self.forced_linear_structuring_count += other.forced_linear_structuring_count;
         self.region_linearize_structuring_count += other.region_linearize_structuring_count;
         self.region_linearize_rejected_non_structuring_failure_count +=
