@@ -41,6 +41,16 @@ SELECTED_NORMALIZE_PASS_KEYS = (
     "break_continue_recovery_total_invocations",
     "break_continue_recovery_changed_count",
 )
+SELECTED_GHIDRA_ACTION_KEYS = (
+    "stage_count",
+    "funcdata_build",
+    "heritage_value_recovery",
+    "normalize",
+    "prototype_types",
+    "blockgraph_structuring",
+    "printc",
+    "pipeline_complete",
+)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -143,6 +153,10 @@ def build_single_compact_summary(
         (summary.normalize_pass_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
     )
+    ghidra_action_metrics = _normalize_metric_map(
+        (summary.ghidra_action_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
+    )
     watchlist = ((summary.row_fidelity_targets or {}).get("pyghidra_vs_fission") or {})
     giant_function_speed_family_counts = {
         str(key): _safe_int(value, 0)
@@ -185,6 +199,7 @@ def build_single_compact_summary(
         owner_metrics=owner_metrics,
         shape_drift_metrics=shape_drift,
         normalize_pass_metrics=normalize_pass_metrics,
+        ghidra_action_metrics=ghidra_action_metrics,
         giant_function_speed_family_counts=giant_function_speed_family_counts,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
         baseline_blockers=baseline_blockers,
@@ -267,6 +282,10 @@ def build_corpus_compact_summary(
                     row.normalize_pass_metrics,
                     allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
                 ),
+                "ghidra_action_metrics": _normalize_metric_map(
+                    row.ghidra_action_metrics,
+                    allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
+                ),
                 "eligibility_reason": str((row.eligibility or {}).get("reason") or "unknown"),
                 "weight": _safe_float(row.weight, 0.0),
             }
@@ -299,6 +318,10 @@ def build_corpus_compact_summary(
                     normalize_pass_metrics=_normalize_metric_map(
                         record["normalize_pass_metrics"],
                         allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
+                    ),
+                    ghidra_action_metrics=_normalize_metric_map(
+                        record["ghidra_action_metrics"],
+                        allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                     ),
                     eligibility_reason=str(record["eligibility_reason"]),
                 )
@@ -338,6 +361,10 @@ def build_corpus_compact_summary(
         artifact.normalize_pass_metric_totals,
         allowed_keys=SELECTED_NORMALIZE_PASS_KEYS,
     )
+    ghidra_action_totals = _normalize_metric_map(
+        artifact.ghidra_action_metric_totals,
+        allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
+    )
     giant_function_speed_family_totals = {
         str(key): _safe_int(value, 0)
         for key, value in sorted((artifact.giant_function_speed_family_totals or {}).items())
@@ -370,6 +397,7 @@ def build_corpus_compact_summary(
         owner_metric_totals=owner_totals,
         shape_drift_totals=shape_totals,
         normalize_pass_metric_totals=normalize_pass_totals,
+        ghidra_action_metric_totals=ghidra_action_totals,
         giant_function_speed_family_totals=giant_function_speed_family_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)

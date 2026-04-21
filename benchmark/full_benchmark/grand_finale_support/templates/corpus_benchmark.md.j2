@@ -53,6 +53,16 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## Ghidra Concept Stage Totals
+
+Clean-room owner mapping only; Fission remains Rust-native and does not depend on Ghidra runtime code.
+
+| Metric | Total |
+| --- | ---: |
+{% for key, value in (payload.get("ghidra_action_metric_totals", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
 ## Giant Function Families
 
 | Family | Count |

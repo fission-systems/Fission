@@ -931,3 +931,159 @@ release_path_changed: no
 env_gate: none
 promotion impact: none
 ```
+
+## Ghidra Clean-Room Action Pipeline Telemetry
+
+### Summary
+
+This wave starts the Ghidra 1:1 clean-room migration spine without changing decompiler behavior. The goal is to make Fission's Rust-native per-function path observable through Ghidra-style owner boundaries:
+
+```text
+FuncdataBuild
+HeritageValueRecovery
+Normalize
+PrototypeTypes
+BlockGraphStructuring
+PrintC
+```
+
+This is a clean-room conceptual mapping only. No Ghidra runtime dependency, code copy, or release-path behavior change was introduced.
+
+### Implementation
+
+Added a new internal action pipeline vocabulary under `fission-pcode`:
+
+- `GhidraActionConcept`
+- `GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE`
+- `record_ghidra_action_stage(...)`
+- `record_ghidra_clean_room_pipeline_complete(...)`
+
+Added additive `NirBuildStats` counters:
+
+- `ghidra_action_stage_count`
+- `ghidra_action_funcdata_build_count`
+- `ghidra_action_heritage_value_recovery_count`
+- `ghidra_action_normalize_count`
+- `ghidra_action_prototype_types_count`
+- `ghidra_action_blockgraph_structuring_count`
+- `ghidra_action_printc_count`
+- `ghidra_clean_room_pipeline_complete_count`
+
+The benchmark/reporting pipeline now surfaces the same counters in:
+
+- single-binary verbose JSON/Markdown
+- corpus verbose JSON/Markdown
+- compact summary JSON
+- console summaries
+- Python contract tests
+
+### Benchmark result
+
+Benchmark command used the Windows small C parity corpus:
+
+```text
+benchmark/full_benchmark/full_decomp_benchmark.py
+samples: benchmark/binary/x86-64/window/small/binary/c
+artifact: benchmark/artifacts/full_benchmark/windows-small-c-ghidra-action-latest
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-structuring-baseline
+```
+
+Quality remained neutral:
+
+```text
+weighted_avg_normalized_similarity: 37.602857 -> 37.604286
+x64 weighted_avg_normalized_similarity: 37.604
+row gates: passed for all 6 binaries
+failed binaries: none
+new failed rows: none observed in compact/corpus summary
+```
+
+Per-binary readout:
+
+```text
+test-functions: 37.280, passed
+bitops-control-flow: 36.740, passed
+function-pointers-strings: 39.790, passed
+structs-pointers: 38.260, passed
+array-operations: 36.740, passed
+math-operations: 37.140, passed
+```
+
+New Ghidra action totals:
+
+```text
+stage_count: 1678
+funcdata_build: 294
+heritage_value_recovery: 294
+normalize: 294
+prototype_types: 294
+blockgraph_structuring: 208
+printc: 294
+pipeline_complete: 294
+```
+
+Owner/shape totals:
+
+```text
+materialization_stabilized: 15104 -> 15097
+generic_local_name_sum: 501 -> 493
+generic_param_name_sum: 218 -> 218
+goto_total: 402 -> 383
+top_level_label_total: 287 -> 275
+synthetic_helper_call_total: 33 -> 33
+```
+
+Giant-function family totals:
+
+```text
+NormalizeHeavy: 36 -> 34
+StructuringHeavy: 0 -> 1
+```
+
+Advisory promotion remains blocked, as expected for this diagnostic/refactor wave:
+
+```text
+gate_mode: advisory
+release_promotion_allowed: false
+promotion_blockers:
+- advisory_gate_mode
+- failure_family_distribution canonical_must_emit_label_conflict_count: 1076 -> 1112
+- failure_family_distribution canonical_emit_ready_failed_count: 1016 -> 1034
+```
+
+The failure-family blockers confirm the next quality owner is still structuring/region legality, not the action telemetry itself.
+
+### Validation
+
+Passed:
+
+```text
+cargo fmt --all
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+cargo test -p fission-pcode ghidra_action -- --test-threads=1
+cargo check -p fission-pcode
+cargo check -p fission-automation
+cargo build -p fission-cli
+```
+
+Known residual failure:
+
+```text
+cargo test -p fission-pcode -- --test-threads=1
+result: 637 passed, 25 failed
+failure owner: guarded-tail / suffix-window structuring tests
+```
+
+This failure group predates the action telemetry wave and remains the next structuring owner to fix. The new Ghidra action tests pass independently.
+
+### Final status
+
+```text
+wave_type: diagnostic/refactor-only
+primary_owner: Ghidra clean-room action pipeline telemetry
+behavior_changed: no
+release_path_changed: no
+env_gate: none
+duplicate semantic logic changed: no semantic repair added outside canonical owners
+next owner: BlockGraph/FlowBlock-style proof-carrying structuring, especially guarded-tail and region legality
+```

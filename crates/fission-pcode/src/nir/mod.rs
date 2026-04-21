@@ -5,6 +5,7 @@ use std::time::Instant;
 
 mod abi;
 mod abstract_location;
+mod action_pipeline;
 mod builder;
 mod cfg;
 mod normalize;
@@ -28,7 +29,7 @@ pub use self::telemetry::{
     take_last_preview_hint_stats,
 };
 pub use self::types::*;
-use self::{builder::*, cfg::*, normalize::*, printer::*, structuring::*};
+use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, printer::*, structuring::*};
 
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
@@ -145,6 +146,11 @@ pub fn render_mlil_preview_with_binary_and_context(
         err
     })?;
     let mut build_stats = builder.preview_build_stats();
+    record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::FuncdataBuild);
+    record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::HeritageValueRecovery);
+    if pcode.blocks.len() > 1 || build_stats.structuring_duration_ms > 0 {
+        record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::BlockGraphStructuring);
+    }
     if diag {
         eprintln!(
             "[DIAG] build_hir done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
@@ -159,6 +165,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     debug_log("normalize_start");
     let normalize_start = Instant::now();
     normalize_hir_function(&mut hir);
+    record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
+    record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
     build_stats.merge_assign(&normalize::take_normalize_wave_stats());
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
     build_stats.promotion_candidate_count += normalized_discovery_stats.promotion_candidate_count;
@@ -250,6 +258,8 @@ pub fn render_mlil_preview_with_binary_and_context(
     debug_log("print_start");
     let print_start = Instant::now();
     let rendered = print_hir_function(&hir);
+    record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
+    record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
     build_stats.rendered_code_len = rendered.len();
     telemetry::store_preview_build_stats(build_stats);

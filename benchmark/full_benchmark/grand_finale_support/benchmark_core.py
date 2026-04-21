@@ -184,6 +184,17 @@ SELECTED_NORMALIZE_PASSES = (
     "break_continue_recovery",
 )
 
+GHIDRA_ACTION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("ghidra_action_stage_count", "stage_count"),
+    ("ghidra_action_funcdata_build_count", "funcdata_build"),
+    ("ghidra_action_heritage_value_recovery_count", "heritage_value_recovery"),
+    ("ghidra_action_normalize_count", "normalize"),
+    ("ghidra_action_prototype_types_count", "prototype_types"),
+    ("ghidra_action_blockgraph_structuring_count", "blockgraph_structuring"),
+    ("ghidra_action_printc_count", "printc"),
+    ("ghidra_clean_room_pipeline_complete_count", "pipeline_complete"),
+)
+
 GIANT_RENDERED_CODE_THRESHOLD = 100000
 GIANT_REPLACEMENT_THRESHOLD = 10000
 GIANT_MATERIALIZATION_THRESHOLD = 10000
@@ -208,6 +219,26 @@ def _extract_owner_metrics_from_engine_summary(engine_summary: dict[str, Any]) -
 
 def _extract_shape_drift_metrics_from_engine_summary(engine_summary: dict[str, Any]) -> dict[str, float]:
     return _extract_named_metrics(engine_summary, SHAPE_DRIFT_METRIC_SPECS)
+
+
+def _extract_ghidra_action_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+    source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _extract_named_metrics(source, GHIDRA_ACTION_METRIC_SPECS)
+
+
+def _aggregate_ghidra_action_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in GHIDRA_ACTION_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in GHIDRA_ACTION_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
 
 
 def _extract_selected_normalize_pass_metrics(
@@ -3683,6 +3714,13 @@ def build_comparison(
     normalize_pass_metrics = _flatten_selected_normalize_pass_metrics(
         _extract_selected_normalize_pass_metrics(fission["meta"].get("preview_build_stats", {}))
     )
+    ghidra_action_metrics = _normalize_metric_map_for_json(
+        _extract_ghidra_action_metrics(fission["meta"].get("preview_build_stats", {}))
+    )
+    if not any(ghidra_action_metrics.values()):
+        ghidra_action_metrics = _normalize_metric_map_for_json(
+            _aggregate_ghidra_action_metrics_from_entries(fission["entries"])
+        )
     giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
 
     engine_kpi = {
@@ -3760,6 +3798,9 @@ def build_comparison(
         },
         "normalize_pass_metrics": {
             "fission": normalize_pass_metrics,
+        },
+        "ghidra_action_metrics": {
+            "fission": ghidra_action_metrics,
         },
         "giant_function_candidates": giant_function_diagnostics["giant_function_candidates"],
         "giant_function_speed_family_counts": giant_function_diagnostics[
@@ -4231,6 +4272,7 @@ def build_corpus_assessment(
     owner_metric_totals_per_binary: dict[str, dict[str, float]] = {}
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
+    ghidra_action_metrics_per_binary: dict[str, dict[str, float]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
@@ -4300,6 +4342,30 @@ def build_corpus_assessment(
                 )
             )
         )
+        ghidra_action_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "ghidra_action_metrics", "fission"), {})
+            if isinstance(
+                _lookup_path(benchmark, ("summary", "ghidra_action_metrics", "fission"), {}),
+                dict,
+            )
+            else {}
+        )
+        if not any(ghidra_action_metrics.values()):
+            ghidra_action_metrics = _normalize_metric_map_for_json(
+                _extract_ghidra_action_metrics(
+                    _lookup_path(
+                        benchmark,
+                        ("summary", "engines", "fission", "preview_build_stats"),
+                        {},
+                    )
+                )
+            )
+        if not any(ghidra_action_metrics.values()):
+            ghidra_action_metrics = _normalize_metric_map_for_json(
+                _aggregate_ghidra_action_metrics_from_entries(
+                    _lookup_path(benchmark, ("engines", "fission", "entries"), {})
+                )
+            )
         giant_function_diagnostics = _lookup_path(
             benchmark,
             ("summary",),
@@ -4359,6 +4425,7 @@ def build_corpus_assessment(
         owner_metric_totals_per_binary[binary_id] = owner_metrics
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
+        ghidra_action_metrics_per_binary[binary_id] = ghidra_action_metrics
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
             giant_function_diagnostics["giant_function_speed_family_counts"]
         )
@@ -4560,6 +4627,7 @@ def build_corpus_assessment(
                 "owner_metrics": owner_metrics,
                 "shape_drift_metrics": shape_drift_metrics,
                 "normalize_pass_metrics": normalize_pass_metrics,
+                "ghidra_action_metrics": ghidra_action_metrics,
                 "giant_function_candidates": giant_function_diagnostics[
                     "giant_function_candidates"
                 ],
@@ -4595,6 +4663,7 @@ def build_corpus_assessment(
     normalize_pass_metric_totals = _merge_normalize_pass_metric_totals(
         normalize_pass_metrics_per_binary
     )
+    ghidra_action_metric_totals = _merge_named_metric_totals(ghidra_action_metrics_per_binary)
     giant_function_speed_family_totals = _merge_count_maps(
         giant_function_speed_family_counts_per_binary
     )
@@ -4856,6 +4925,7 @@ def build_corpus_assessment(
             "owner_metric_totals": owner_metric_totals,
             "shape_drift_totals": shape_drift_totals,
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
+            "ghidra_action_metric_totals": ghidra_action_metric_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
             "arch_summary": arch_summary,
             "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),
@@ -4873,6 +4943,8 @@ def build_corpus_assessment(
         "shape_drift_totals_per_binary": shape_drift_totals_per_binary,
         "normalize_pass_metric_totals": normalize_pass_metric_totals,
         "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
+        "ghidra_action_metric_totals": ghidra_action_metric_totals,
+        "ghidra_action_metrics_per_binary": ghidra_action_metrics_per_binary,
         "giant_function_speed_family_totals": giant_function_speed_family_totals,
         "max_pathological_examples": max_pathological_examples,
         "arch_summary": arch_summary,

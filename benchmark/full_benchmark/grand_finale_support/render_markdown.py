@@ -38,6 +38,7 @@ def render_single_benchmark_markdown(benchmark: dict[str, Any]) -> str:
         coverage=coverage,
         owner_metrics=(summary.owner_metrics or {}).get("fission", {}),
         shape_drift_metrics=(summary.shape_drift_metrics or {}).get("fission", {}),
+        ghidra_action_metrics=(summary.ghidra_action_metrics or {}).get("fission", {}),
         watchlist=watchlist,
         baseline_gate=benchmark.get("baseline_regression_gate") or {},
     ).rstrip() + "\n"

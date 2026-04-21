@@ -687,6 +687,30 @@ pub struct NirBuildStats {
     pub rendered_code_len: usize,
     #[serde(default)]
     pub max_structuring_scc_component_size: usize,
+    /// Total clean-room Ghidra-concept stages observed in this function build.
+    #[serde(default)]
+    pub ghidra_action_stage_count: usize,
+    /// Fission builder stage corresponding to Ghidra `Funcdata` construction.
+    #[serde(default)]
+    pub ghidra_action_funcdata_build_count: usize,
+    /// Fission value/representative stage corresponding to Ghidra `Heritage`.
+    #[serde(default)]
+    pub ghidra_action_heritage_value_recovery_count: usize,
+    /// Fission normalize stage corresponding to Ghidra's core action pipeline.
+    #[serde(default)]
+    pub ghidra_action_normalize_count: usize,
+    /// Fission type/prototype stage corresponding to Ghidra `FuncProto` work.
+    #[serde(default)]
+    pub ghidra_action_prototype_types_count: usize,
+    /// Fission structuring stage corresponding to Ghidra `FlowBlock`/`BlockGraph`.
+    #[serde(default)]
+    pub ghidra_action_blockgraph_structuring_count: usize,
+    /// Fission final renderer stage corresponding to Ghidra `PrintC`.
+    #[serde(default)]
+    pub ghidra_action_printc_count: usize,
+    /// Completed Rust-native pipeline count after all clean-room stage records.
+    #[serde(default)]
+    pub ghidra_clean_room_pipeline_complete_count: usize,
     #[serde(default)]
     pub procedure_summary_contracted_count: usize,
     #[serde(default)]
@@ -1122,6 +1146,17 @@ impl NirBuildStats {
         self.max_structuring_scc_component_size = self
             .max_structuring_scc_component_size
             .max(other.max_structuring_scc_component_size);
+        self.ghidra_action_stage_count += other.ghidra_action_stage_count;
+        self.ghidra_action_funcdata_build_count += other.ghidra_action_funcdata_build_count;
+        self.ghidra_action_heritage_value_recovery_count +=
+            other.ghidra_action_heritage_value_recovery_count;
+        self.ghidra_action_normalize_count += other.ghidra_action_normalize_count;
+        self.ghidra_action_prototype_types_count += other.ghidra_action_prototype_types_count;
+        self.ghidra_action_blockgraph_structuring_count +=
+            other.ghidra_action_blockgraph_structuring_count;
+        self.ghidra_action_printc_count += other.ghidra_action_printc_count;
+        self.ghidra_clean_room_pipeline_complete_count +=
+            other.ghidra_clean_room_pipeline_complete_count;
         self.procedure_summary_contracted_count += other.procedure_summary_contracted_count;
         self.procedure_summary_tail_wrapper_count += other.procedure_summary_tail_wrapper_count;
         self.procedure_summary_import_thunk_count += other.procedure_summary_import_thunk_count;

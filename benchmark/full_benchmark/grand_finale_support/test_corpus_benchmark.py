@@ -16,6 +16,7 @@ from grand_finale_support.benchmark_core import (
     _default_corpus_output_name,
     _derive_binary_arch,
     _derive_dynamic_row_targets,
+    _extract_ghidra_action_metrics,
     _extract_owner_metrics_from_engine_summary,
     _extract_selected_normalize_pass_metrics,
     _extract_shape_drift_metrics_from_engine_summary,
@@ -88,6 +89,14 @@ def _minimal_single_binary_summary(
                     "heuristic_max_brace_nesting_mean": heuristic_max_brace_nesting_mean,
                     "synthetic_helper_call_total": synthetic_helper_call_total,
                     "preview_build_stats": {
+                        "ghidra_action_stage_count": 6,
+                        "ghidra_action_funcdata_build_count": 1,
+                        "ghidra_action_heritage_value_recovery_count": 1,
+                        "ghidra_action_normalize_count": 1,
+                        "ghidra_action_prototype_types_count": 1,
+                        "ghidra_action_blockgraph_structuring_count": 1,
+                        "ghidra_action_printc_count": 1,
+                        "ghidra_clean_room_pipeline_complete_count": 1,
                         "pass_metrics": {
                             "wide_dead_assignment": {
                                 "total_time_ms": 12.0,
@@ -114,6 +123,18 @@ def _minimal_single_binary_summary(
                     "wide_dead_assignment_total_time_ms": 12.0,
                     "wide_dead_assignment_total_invocations": 3.0,
                     "wide_dead_assignment_changed_count": 2.0,
+                }
+            },
+            "ghidra_action_metrics": {
+                "fission": {
+                    "stage_count": 6.0,
+                    "funcdata_build": 1.0,
+                    "heritage_value_recovery": 1.0,
+                    "normalize": 1.0,
+                    "prototype_types": 1.0,
+                    "blockgraph_structuring": 1.0,
+                    "printc": 1.0,
+                    "pipeline_complete": 1.0,
                 }
             },
             "giant_function_candidates": 1,
@@ -355,6 +376,23 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["wide_dead_assignment"]["total_invocations"], 4.0)
         self.assertEqual(metrics["jump_resolver"]["changed_count"], 1.0)
         self.assertEqual(metrics["sccp"]["total_time_ms"], 0.0)
+
+    def test_extract_ghidra_action_metrics(self) -> None:
+        metrics = _extract_ghidra_action_metrics(
+            {
+                "ghidra_action_stage_count": 6,
+                "ghidra_action_funcdata_build_count": 1,
+                "ghidra_action_heritage_value_recovery_count": 1,
+                "ghidra_action_blockgraph_structuring_count": 1,
+                "ghidra_clean_room_pipeline_complete_count": 1,
+            }
+        )
+        self.assertEqual(metrics["stage_count"], 6.0)
+        self.assertEqual(metrics["funcdata_build"], 1.0)
+        self.assertEqual(metrics["heritage_value_recovery"], 1.0)
+        self.assertEqual(metrics["blockgraph_structuring"], 1.0)
+        self.assertEqual(metrics["pipeline_complete"], 1.0)
+        self.assertEqual(metrics["printc"], 0.0)
 
     def test_shape_drift_metric_counts_synthetic_helper_calls(self) -> None:
         metrics = collect_code_metrics(
@@ -707,6 +745,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             payload["normalize_pass_metric_totals"]["wide_dead_assignment_total_time_ms"],
             12.0,
+        )
+        self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
+        self.assertEqual(
+            payload["per_binary_rows"][0]["ghidra_action_metrics"]["blockgraph_structuring"],
+            1.0,
         )
         self.assertEqual(
             payload["giant_function_speed_family_totals"]["RenderHeavy"],

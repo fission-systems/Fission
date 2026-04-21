@@ -25,6 +25,7 @@ def print_single_benchmark_console(
     owner_metrics = ((summary.get("owner_metrics") or {}).get("fission")) or {}
     shape_metrics = ((summary.get("shape_drift_metrics") or {}).get("fission")) or {}
     normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
+    ghidra_action_metrics = ((summary.get("ghidra_action_metrics") or {}).get("fission")) or {}
     giant_family_counts = summary.get("giant_function_speed_family_counts", {}) or {}
 
     console.print(
@@ -64,6 +65,14 @@ def print_single_benchmark_console(
         normalize_table.add_row(key, f"{float(value):.3f}")
     if normalize_pass_metrics:
         console.print(normalize_table)
+
+    action_table = Table(title="Ghidra Concept Stage Metrics", show_header=True)
+    action_table.add_column("Metric")
+    action_table.add_column("Value", justify="right")
+    for key, value in sorted(ghidra_action_metrics.items()):
+        action_table.add_row(key, f"{float(value):.3f}")
+    if ghidra_action_metrics:
+        console.print(action_table)
 
     if giant_family_counts:
         giant_table = Table(title="Giant Function Families", show_header=True)
@@ -136,6 +145,15 @@ def print_corpus_benchmark_console(
         for key, value in sorted(normalize_pass_totals.items()):
             normalize_table.add_row(key, f"{float(value):.3f}")
         console.print(normalize_table)
+
+    ghidra_action_totals = corpus_summary.get("ghidra_action_metric_totals", {}) or {}
+    if ghidra_action_totals:
+        action_table = Table(title="Ghidra Concept Stage Totals", show_header=True)
+        action_table.add_column("Metric")
+        action_table.add_column("Value", justify="right")
+        for key, value in sorted(ghidra_action_totals.items()):
+            action_table.add_row(str(key), f"{float(value):.3f}")
+        console.print(action_table)
 
     giant_family_totals = corpus_summary.get("giant_function_speed_family_totals", {}) or {}
     if giant_family_totals:
