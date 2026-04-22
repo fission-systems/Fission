@@ -561,3 +561,165 @@ artifact_contract_added:
   - unchanged_target_rows
 next owner: BlockGraph / guarded-tail semantic acceptance, not benchmark instrumentation
 ```
+
+---
+
+## 4. Guarded-Tail Join-Owner Reclassification At Must-Emit-Label Gate
+
+### Summary
+
+This wave implemented the next narrow clean-room migration slice under the canonical guarded-tail owner:
+
+- owner: `crates/fission-pcode/src/nir/structuring/guarded_tail/`
+- focus: `MustEmitLabel` gate classification
+- scope: same-guard-family nested-before refs before a guarded-tail candidate
+
+The goal was not to broaden structuring generally. It was to stop collapsing all pre-candidate nested refs into the same external-reference bucket.
+
+### What changed
+
+The `MustEmitLabel` gate now classifies outside refs with more structure:
+
+- top-level-before
+- nested-before
+- top-level-after
+- nested-after
+
+Narrow admission added:
+
+- same-guard-family nested-before refs are internalized for join-owner accounting
+- unrelated nested-before refs stay fail-closed and are now counted as `owner_conflict`
+
+Concrete implementation points:
+
+- `promotion.rs`
+  - replaced the old raw `outside_refs` threshold logic with typed site accounting
+- `promotion_graph.rs`
+  - added `internalized_guard_family_nested_before_refs_for_join_owner(...)`
+- `suffix_window.rs`
+  - reused `exprs_share_guard_family(...)` across the guarded-tail owner
+- `structuring_guarded_tail.rs`
+  - updated the discovery regression to expect `owner_conflict` for the unresolved nested-before family
+
+### Validation
+
+Rust validation for this wave:
+
+```text
+cargo test -p fission-pcode must_emit_label_internalizes_same_guard_family_nested_before_owner -- --nocapture
+- passed
+
+cargo test -p fission-pcode must_emit_label_rejects_unrelated_nested_before_owner -- --nocapture
+- passed
+
+cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+- 52 passed / 0 failed
+
+cargo test -p fission-pcode suffix_window -- --test-threads=1
+- 63 passed / 0 failed
+
+cargo check -p fission-pcode
+- passed
+
+cargo check -p fission-automation
+- passed
+
+cargo build -p fission-cli --release
+- passed
+```
+
+### Windows small C 2-way benchmark
+
+Baseline:
+
+- `benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest`
+
+Trial:
+
+- `benchmark/artifacts/full_benchmark/windows-small-c-join-owner-latest`
+
+Corpus headline:
+
+```text
+weighted_avg_normalized_similarity: 37.604286 -> 37.604286
+new failed rows: 0
+release_promotion_allowed: false -> false
+```
+
+What moved:
+
+```text
+blockgraph candidate: 414 -> 418
+blockgraph rejected_external_ref: 108 -> 0
+blockgraph rejected_join_owner_conflict: 128 -> 232
+blockgraph rejected_must_emit_label: 414 -> 418
+```
+
+What did not move:
+
+```text
+alias_has_nonlocal_ref: 56 -> 56
+alias_has_nonlocal_ref_nested_before: 24 -> 24
+alias_has_nonlocal_ref_external_before: 18 -> 18
+alias_interleave_conflict: 50 -> 50
+```
+
+Representative canary rows remained byte-stable:
+
+```text
+test_functions:fibonacci @ 0x140001470
+- current_normalized_similarity: 11.65 -> 11.65
+- code_changed: false
+- forced_linear_structuring_count: 1 -> 1
+
+math_operations:fibonacci_memo @ 0x140001a90
+- current_normalized_similarity: 15.36 -> 15.36
+- code_changed: false
+```
+
+### Reading of the result
+
+This wave produced a real owner shift, but not a quality uplift.
+
+What improved:
+
+- `MustEmitLabel` no longer hides unresolved nested-before cases inside `rejected_external_ref`
+- the benchmark proves the current bottleneck is classification/ownership, not measurement blindness
+- same-guard-family nested-before refs now have an explicit acceptance path at the promotion gate
+
+What did not improve:
+
+- no current Windows small C row changed rendered output
+- `blockgraph_region_complete_count` is still `0`
+- `fibonacci` is still linearized
+
+Practical interpretation:
+
+- the benchmark is measuring correctly
+- the current wave reclassified the remaining blocker more accurately
+- the next owner is the unresolved `join_owner_conflict` family, not generic benchmark infrastructure
+
+### Duplicate-logic audit
+
+The change stayed inside the canonical guarded-tail owner:
+
+- no printer-side repair
+- no CLI-side repair
+- no benchmark-script semantic patching
+
+Remaining duplication status:
+
+- guard-family relation checking is shared via `exprs_share_guard_family(...)`
+- join-owner pre-candidate scanning still exists as a promotion-gate-specific helper because the promotion window is candidate-anchored, not alias-segment-anchored
+
+### Final status
+
+```text
+wave_type: behavior-changing owner reclassification
+primary_owner: guarded-tail MustEmitLabel join-owner gate
+behavior_changed: yes
+release_path_changed: no
+env_gate: none
+promotion impact: neutral on current Windows small C corpus
+next owner: BlockGraph join/follow ownership completion for unresolved join_owner_conflict
+```

@@ -2,6 +2,24 @@ use super::*;
 use crate::nir::structuring::SccAnalysis;
 
 impl<'a> PreviewBuilder<'a> {
+    pub(super) fn internalized_guard_family_nested_before_refs_for_join_owner(
+        body: &[HirStmt],
+        if_idx: usize,
+        label: &str,
+        candidate_cond: &HirExpr,
+    ) -> usize {
+        body.iter()
+            .take(if_idx)
+            .filter(|stmt| {
+                Self::stmt_contains_goto_label(stmt, label) > 0
+                    && Self::stmt_is_single_branch_if_to_label(stmt, label)
+                        .is_some_and(|entry_cond| {
+                            Self::exprs_share_guard_family(candidate_cond, entry_cond)
+                        })
+            })
+            .count()
+    }
+
     pub(super) fn surviving_label_refs_after_guarded_tail_promotion(
         body: &[HirStmt],
         middle: &[HirStmt],

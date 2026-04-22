@@ -2005,7 +2005,7 @@ fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection
 
     assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
     assert!(
-        stats.rejected_must_emit_label_surviving_external_ref >= 1,
+        stats.rejected_must_emit_label_owner_conflict >= 1,
         "{stats:#?}"
     );
 }

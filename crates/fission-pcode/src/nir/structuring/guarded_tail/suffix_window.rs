@@ -1244,7 +1244,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
+    pub(super) fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
         if lhs == rhs {
             return true;
         }

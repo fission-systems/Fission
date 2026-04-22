@@ -88,7 +88,7 @@ impl<'a> PreviewBuilder<'a> {
         if_idx: usize,
         label_idx: usize,
         label: &str,
-        outside_refs: usize,
+        _outside_refs: usize,
         middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
         let effective_middle_refs =
@@ -96,14 +96,38 @@ impl<'a> PreviewBuilder<'a> {
         if effective_middle_refs > 0 {
             return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
         }
-        if outside_refs > 1 {
-            if Self::outside_refs_preserve_forward_owner(body, if_idx, label_idx, label) {
+        let (top_level_before, nested_before, top_level_after, nested_after) =
+            Self::classify_external_alias_ref_sites_detailed(body, if_idx, label_idx + 1, label);
+        let candidate_cond = match body.get(if_idx) {
+            Some(HirStmt::If { cond, .. }) => Some(cond),
+            _ => None,
+        };
+        let internalized_nested_before = candidate_cond
+            .map(|cond| {
+                Self::internalized_guard_family_nested_before_refs_for_join_owner(
+                    body, if_idx, label, cond,
+                )
+            })
+            .unwrap_or(0)
+            .min(nested_before);
+        let effective_nested_before = nested_before.saturating_sub(internalized_nested_before);
+        let effective_outside_refs =
+            top_level_before + effective_nested_before + top_level_after + nested_after;
+
+        if top_level_after + nested_after > 0 {
+            return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
+        }
+        if effective_nested_before > 0 {
+            return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
+        }
+        if effective_outside_refs > 1 {
+            if top_level_before == effective_outside_refs {
                 return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
             }
             return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
         }
-        if outside_refs == 1 {
-            if Self::outside_refs_are_elidable_next_flow(body, if_idx, label_idx, label) {
+        if effective_outside_refs == 1 {
+            if top_level_before == 1 {
                 return None;
             }
             return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
@@ -376,5 +400,76 @@ impl<'a> PreviewBuilder<'a> {
             self.promoted_region_count += 1;
         }
         accepted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nir::{HirExpr, HirStmt, HirUnaryOp, NirType};
+
+    #[test]
+    fn must_emit_label_internalizes_same_guard_family_nested_before_owner() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("join".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("join".to_string()),
+            HirStmt::Label("join".to_string()),
+            HirStmt::Goto("end".to_string()),
+            HirStmt::Label("end".to_string()),
+            HirStmt::Return(None),
+        ];
+        let middle = vec![HirStmt::Goto("join".to_string())];
+
+        let rejection =
+            PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);
+
+        assert_eq!(rejection, None);
+    }
+
+    #[test]
+    fn must_emit_label_rejects_unrelated_nested_before_owner() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("outer".to_string()),
+                then_body: vec![HirStmt::Goto("join".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("join".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("join".to_string()),
+            HirStmt::Label("join".to_string()),
+            HirStmt::Goto("end".to_string()),
+            HirStmt::Label("end".to_string()),
+            HirStmt::Return(None),
+        ];
+        let middle = vec![HirStmt::Goto("join".to_string())];
+
+        let rejection =
+            PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);
+
+        assert_eq!(
+            rejection,
+            Some(PromotionGateRejection::MustEmitLabelOwnerConflict)
+        );
     }
 }
