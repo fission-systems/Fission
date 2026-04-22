@@ -11,6 +11,8 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from grand_finale_support.benchmark_core import (
+    _annotate_target_structuring_rows,
+    _build_target_structuring_rows,
     _build_giant_function_diagnostics,
     _default_binary_output_name,
     _default_corpus_output_name,
@@ -22,6 +24,7 @@ from grand_finale_support.benchmark_core import (
     _extract_owner_metrics_from_engine_summary,
     _extract_selected_normalize_pass_metrics,
     _extract_shape_drift_metrics_from_engine_summary,
+    _refresh_single_summary_target_rows_from_row_gate,
     _resolve_binary_watchlist,
     build_corpus_assessment,
     compare_with_previous_summary,
@@ -208,6 +211,21 @@ def _minimal_single_binary_summary(
                     "giant_function_speed_family": "MixedGiantFunction",
                 }
             ],
+            "target_structuring_rows": [
+                {
+                    "binary_id": "sample",
+                    "address": "0x140001470",
+                    "name": "fibonacci",
+                    "current_normalized_similarity": avg_similarity,
+                    "previous_normalized_similarity": avg_similarity,
+                    "normalized_similarity_delta": 0.0,
+                    "row_gate_status": "unchanged",
+                    "code_changed": False,
+                    "structuring_duration_ms": 33.0,
+                    "forced_linear_structuring_count": 1,
+                    "rendered_code_len": 40935,
+                }
+            ],
             "coverage": {
                 "pyghidra_vs_fission": {
                     "coverage_ratio_pct": 100.0,
@@ -219,15 +237,37 @@ def _minimal_single_binary_summary(
             "row_fidelity_targets": {
                 "pyghidra_vs_fission": {
                     "watchlist_source": "dynamic",
+                    "canonical_quality_rows": [
+                        {
+                            "address": "0x140001470",
+                            "name": "fibonacci",
+                            "role": "canonical_quality",
+                            "selected_because": "canonical_quality",
+                        }
+                    ],
                     "bootstrap_row_targets": [],
                     "dynamic_watchlist_rows": [],
                     "watchlist_diagnostics": {
                         "watchlist_source": "dynamic",
+                        "canonical_quality_row_count": 1,
                         "bootstrap_row_target_count": 0,
                         "dynamic_watchlist_row_count": 0,
-                        "selected_because_counts": {},
+                        "selected_because_counts": {"canonical_quality": 1},
                     },
-                    "rows": [],
+                    "rows": [
+                        {
+                            "address": "0x140001470",
+                            "role": "canonical_quality",
+                            "status": "unchanged",
+                            "previous_normalized_similarity": avg_similarity,
+                            "current_normalized_similarity": avg_similarity,
+                            "normalized_similarity_delta": 0.0,
+                            "failure_reasons": [],
+                            "previous_code_sha256": "baseline-hash",
+                            "current_code_sha256": "baseline-hash",
+                            "code_changed": False,
+                        }
+                    ],
                 }
             },
         },
@@ -237,6 +277,86 @@ def _minimal_single_binary_summary(
 
 
 class CorpusBenchmarkTests(unittest.TestCase):
+    def test_annotate_target_structuring_rows_attaches_row_gate_delta_fields(self) -> None:
+        rows = [
+            {
+                "binary_id": "sample",
+                "address": "0x140001470",
+                "name": "fibonacci",
+                "structuring_duration_ms": 33.0,
+                "forced_linear_structuring_count": 1,
+                "rendered_code_len": 40935,
+            }
+        ]
+        row_gate = {
+            "rows": [
+                {
+                    "address": "0x140001470",
+                    "role": "dynamic_low_similarity",
+                    "status": "unchanged",
+                    "previous_normalized_similarity": 11.65,
+                    "current_normalized_similarity": 11.65,
+                    "normalized_similarity_delta": 0.0,
+                    "failure_reasons": [],
+                }
+            ]
+        }
+
+        annotated = _annotate_target_structuring_rows(rows, row_gate=row_gate)
+
+        self.assertEqual(annotated[0]["watchlist_role"], "dynamic_low_similarity")
+        self.assertEqual(annotated[0]["row_gate_status"], "unchanged")
+        self.assertEqual(annotated[0]["previous_normalized_similarity"], 11.65)
+        self.assertEqual(annotated[0]["current_normalized_similarity"], 11.65)
+        self.assertEqual(annotated[0]["normalized_similarity_delta"], 0.0)
+
+    def test_build_target_structuring_rows_does_not_overmatch_shared_addresses_across_binaries(self) -> None:
+        entries = {
+            "0x140001470": {
+                "address": "0x140001470",
+                "name": "compare_int_descending",
+                "preview_build_stats": {"structuring_duration_ms": 0.0},
+            }
+        }
+        rows = _build_target_structuring_rows(entries, binary_id="function-pointers-strings")
+        self.assertEqual(rows, [])
+
+    def test_refresh_single_summary_target_rows_from_row_gate_populates_unchanged_rows(self) -> None:
+        benchmark = {
+            "summary": {
+                "target_structuring_rows": [
+                    {
+                        "address": "0x140001470",
+                        "name": "fibonacci",
+                        "structuring_duration_ms": 33.0,
+                    }
+                ]
+            }
+        }
+        row_gate = {
+            "rows": [
+                {
+                    "address": "0x140001470",
+                    "role": "canonical_quality",
+                    "status": "unchanged",
+                    "previous_normalized_similarity": 11.65,
+                    "current_normalized_similarity": 11.65,
+                    "normalized_similarity_delta": 0.0,
+                    "failure_reasons": [],
+                    "previous_code_sha256": "same-hash",
+                    "current_code_sha256": "same-hash",
+                    "code_changed": False,
+                }
+            ]
+        }
+
+        _refresh_single_summary_target_rows_from_row_gate(benchmark, row_gate)
+
+        row = benchmark["summary"]["target_structuring_rows"][0]
+        self.assertEqual(row["row_gate_status"], "unchanged")
+        self.assertFalse(row["code_changed"])
+        self.assertEqual(benchmark["summary"]["unchanged_target_rows"][0]["name"], "fibonacci")
+
     def test_checked_in_corpus_manifests_include_required_suite_metadata(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         manifest_dir = repo_root / "benchmark" / "config" / "benchmark_corpus"
@@ -318,6 +438,51 @@ class CorpusBenchmarkTests(unittest.TestCase):
             self.assertEqual(loaded["dynamic_watchlist_limit"], 3)
             self.assertEqual(loaded["notes"], "reference-guided")
             self.assertEqual(loaded["entries"][0]["suite_tier"], "parity")
+
+    def test_load_corpus_manifest_keeps_canonical_quality_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            binary = tmp / "sample.exe"
+            binary.write_bytes(b"MZ")
+            manifest = tmp / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "entries": [
+                            {
+                                "id": "sample",
+                                "binary_path": str(binary),
+                                "ghidra_project_key": "sample",
+                                "tags": ["x64"],
+                                "seed_limit": 20,
+                                "role": "release_candidate",
+                                "canonical_quality_rows": [
+                                    {
+                                        "address": "0x140001470",
+                                        "name": "fibonacci",
+                                        "role": "canonical_quality",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = load_corpus_manifest(manifest)
+
+            self.assertEqual(
+                loaded["entries"][0]["canonical_quality_rows"],
+                [
+                    {
+                        "address": "0x140001470",
+                        "name": "fibonacci",
+                        "role": "canonical_quality",
+                        "selected_because": "canonical_quality",
+                    }
+                ],
+            )
 
     def test_load_corpus_manifest_defaults_legacy_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -587,6 +752,13 @@ class CorpusBenchmarkTests(unittest.TestCase):
 
     def test_resolve_binary_watchlist_labels_mixed_sources(self) -> None:
         manifest_entry = {
+            "canonical_quality_rows": [
+                {
+                    "address": "0x140001470",
+                    "name": "fibonacci",
+                    "role": "canonical_quality",
+                }
+            ],
             "row_fidelity_targets": [("0x140001160", "primary")],
         }
         baseline = {
@@ -608,6 +780,10 @@ class CorpusBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(watchlist["watchlist_source"], "mixed")
         self.assertEqual(
+            watchlist["canonical_quality_rows"][0]["selected_because"],
+            "canonical_quality",
+        )
+        self.assertEqual(
             watchlist["bootstrap_row_targets"][0]["selected_because"],
             "bootstrap_explicit",
         )
@@ -617,7 +793,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(
             watchlist["watchlist_diagnostics"]["selected_because_counts"],
-            {"baseline_degraded": 1, "bootstrap_explicit": 1},
+            {"baseline_degraded": 1, "bootstrap_explicit": 1, "canonical_quality": 1},
+        )
+        self.assertEqual(
+            watchlist["watchlist_diagnostics"]["canonical_quality_row_count"],
+            1,
         )
 
     def test_build_corpus_assessment_emits_arch_owner_shape_and_watchlist_fields(self) -> None:
@@ -871,6 +1051,8 @@ class CorpusBenchmarkTests(unittest.TestCase):
             payload["per_binary_rows"][0]["alias_interleave_metrics"]["alias_not_fallthrough"],
             3.0,
         )
+        self.assertEqual(payload["unchanged_target_rows"][0]["name"], "fibonacci")
+        self.assertFalse(payload["unchanged_target_rows"][0]["code_changed"])
         self.assertEqual(
             payload["giant_function_speed_family_totals"]["RenderHeavy"],
             1,
@@ -927,6 +1109,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertIn("## x86 / x64 Split", markdown)
         self.assertIn("## Normalize Pass Totals", markdown)
         self.assertIn("## Giant Function Families", markdown)
+        self.assertIn("### Unchanged Target Rows", markdown)
         self.assertIn("benchmark_compact_summary.json", markdown)
 
         console = Console(record=True, width=140)

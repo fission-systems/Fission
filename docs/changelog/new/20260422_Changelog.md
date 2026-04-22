@@ -355,3 +355,209 @@ env_gate: none
 promotion impact: neutral on current corpus
 next owner: NestedBeforeExternalOwner -> MustEmitLabel join/follow ownership
 ```
+
+---
+
+## 3. Benchmark Measurement Readout Tightening For Target Structuring Rows
+
+### Summary
+
+This follow-up wave checked whether the benchmark was failing to measure quality movement on the current Windows small C owner.
+
+The answer is:
+
+- the benchmark was **not blind** to `fibonacci`
+- the target row was already being measured by row-fidelity gate
+- but the compact/Markdown artifact was too coarse to show that quickly
+- and one target-row selector path was overmatching a shared bare address across binaries
+
+### What changed
+
+Two additive reporting fixes were introduced.
+
+First, target structuring rows now carry baseline/current quality readout:
+
+- `previous_normalized_similarity`
+- `current_normalized_similarity`
+- `normalized_similarity_delta`
+- `row_gate_status`
+- `watchlist_role`
+- `failure_reasons`
+
+This is now projected through:
+
+- corpus compact summary
+- single-binary compact summary
+- corpus Markdown
+- single-binary Markdown
+
+Second, the target-row selector no longer overmatches a shared address globally across the corpus.
+
+Previous bug:
+
+- `0x140001470` was treated as a global target address
+- this incorrectly pulled `function_pointers_and_strings.exe:compare_int_descending`
+  into `target_structuring_rows`
+
+Current contract:
+
+- name-based target rows remain supported for:
+  - `fibonacci`
+  - `fibonacci_memo`
+- address-based targeting is now binary-scoped for the known canary row
+
+### Validation
+
+Python contract passed:
+
+```text
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+- 25 passed / 0 failed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+- 7 passed / 0 failed
+```
+
+Added checks:
+
+- target structuring rows inherit row-gate delta fields
+- shared-address rows from unrelated binaries no longer overmatch
+
+### Windows small C benchmark readout
+
+New artifact:
+
+- `benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest/benchmark_compact_summary.json`
+
+The updated compact readout now shows the real state directly:
+
+```text
+test_functions:fibonacci @ 0x140001470
+- current_normalized_similarity: 11.65
+- previous_normalized_similarity: 11.65
+- normalized_similarity_delta: 0.00
+- row_gate_status: unchanged
+- forced_linear_structuring_count: 1
+
+math_operations:fibonacci_memo @ 0x140001a90
+- current_normalized_similarity: 15.36
+- previous_normalized_similarity: 15.36
+- normalized_similarity_delta: 0.00
+- row_gate_status: unchanged
+```
+
+Important conclusion:
+
+- the benchmark was already measuring the current canary rows correctly
+- the current semantic wave simply did not change their emitted pseudocode
+- the measurement gap was primarily artifact readability and target-row selector precision
+
+Corpus headline remains unchanged:
+
+```text
+weighted_avg_normalized_similarity: 37.604286 -> 37.604286
+new failed rows: 0
+```
+
+### Final status
+
+```text
+wave_type: additive benchmark contract tightening
+primary_owner: benchmark target-row readout and selector precision
+behavior_changed: no decompiler semantic change
+release_path_changed: no
+env_gate: none
+practical_result: benchmark now shows target-row no-change explicitly instead of forcing manual row-gate inspection
+next owner: NestedBeforeExternalOwner semantic acceptance, not more telemetry
+```
+
+### Follow-up completion: canonical quality rows + code hash + verbose summary parity
+
+The initial target-row delta tightening exposed one real implementation gap:
+
+- `build_comparison()` was wired for `canonical_quality_rows` only partially
+- single-binary verbose summaries were written before `target_structuring_rows` were re-annotated from baseline row-gate
+- as a result, compact summary had the right answer, but single-binary verbose summary could still hide unchanged target rows
+
+That follow-up is now closed.
+
+Additional changes:
+
+- manifest-owned `canonical_quality_rows` added to:
+  - `benchmark/config/benchmark_corpus/windows_small_c_samples.json`
+- row-fidelity snapshot now preserves:
+  - `canonical_quality_rows`
+  - `canonical_quality_row_count`
+- target rows now project:
+  - `current_code_sha256`
+  - `previous_code_sha256`
+  - `code_changed`
+- compact summary now emits:
+  - `unchanged_target_rows`
+- verbose corpus + verbose single benchmark summaries now also emit:
+  - `Unchanged Target Rows`
+
+### Validation
+
+Python contracts after the follow-up:
+
+```text
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+- 27 passed / 0 failed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+- 7 passed / 0 failed
+```
+
+Revalidated artifact:
+
+- `benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest/benchmark_compact_summary.json`
+
+Representative target rows now show explicit no-change evidence:
+
+```text
+test_functions:fibonacci @ 0x140001470
+- current_normalized_similarity: 11.65
+- previous_normalized_similarity: 11.65
+- normalized_similarity_delta: 0.00
+- code_changed: false
+- current_code_sha256 == previous_code_sha256
+
+math_operations:fibonacci_memo @ 0x140001a90
+- current_normalized_similarity: 15.36
+- previous_normalized_similarity: 15.36
+- normalized_similarity_delta: 0.00
+- code_changed: false
+- current_code_sha256 == previous_code_sha256
+```
+
+Corpus headline remains:
+
+```text
+weighted_avg_normalized_similarity: 37.604286
+new_failed_rows: 0
+```
+
+Interpretation:
+
+- the benchmark was not under-measuring the current quality wave
+- the canary rows truly did not change
+- the remaining bottleneck is semantic owner movement, not benchmark visibility
+
+### Final status for today
+
+```text
+wave_type: benchmark contract tightening
+primary_owner: target-row measurement fidelity
+behavior_changed: no decompiler semantic change
+release_path_changed: no
+env_gate: none
+artifact_contract_added:
+  - canonical_quality_rows
+  - canonical_quality_row_count
+  - current_code_sha256
+  - previous_code_sha256
+  - code_changed
+  - unchanged_target_rows
+next owner: BlockGraph / guarded-tail semantic acceptance, not benchmark instrumentation
+```

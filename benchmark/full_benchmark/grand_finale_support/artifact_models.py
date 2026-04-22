@@ -46,6 +46,7 @@ class VerboseSingleSummary(FlexibleModel):
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
     alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
     engines: dict[str, Any] = Field(default_factory=dict)
@@ -75,6 +76,7 @@ class VerboseCorpusBinaryRow(FlexibleModel):
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
     alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
     eligibility: dict[str, Any] = Field(default_factory=dict)
@@ -89,6 +91,8 @@ class VerboseCorpusSummary(FlexibleModel):
     direct_success_non_worse_count: int = 0
     regressions: list[str] = Field(default_factory=list)
     row_regression_reasons: dict[str, Any] = Field(default_factory=dict)
+    target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     status: str | None = None
 
 
@@ -117,6 +121,7 @@ class VerboseCorpusBenchmarkArtifact(FlexibleModel):
     alias_interleave_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_rejection_totals: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_totals: dict[str, Any] = Field(default_factory=dict)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
     arch_summary: dict[str, Any] = Field(default_factory=dict)
@@ -189,6 +194,7 @@ class CompactSingleBenchmarkSummary(FlexibleModel):
     top_row_examples: list[CompactRowExample] = Field(default_factory=list)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CompactCorpusBenchmarkSummary(FlexibleModel):
@@ -217,3 +223,4 @@ class CompactCorpusBenchmarkSummary(FlexibleModel):
     per_binary_rows: list[CompactBinaryRow] = Field(default_factory=list)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
+    unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)

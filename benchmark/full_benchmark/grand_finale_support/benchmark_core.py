@@ -599,6 +599,143 @@ def _build_giant_function_diagnostics(
 
 TARGET_STRUCTURING_ROW_NAMES = frozenset({"fibonacci", "fibonacci_memo"})
 TARGET_STRUCTURING_ROW_ADDRESSES = frozenset({"0x140001470"})
+TARGET_STRUCTURING_ROW_BINARY_ADDRESSES = frozenset(
+    {
+        ("test-functions", "0x140001470"),
+        ("test_functions", "0x140001470"),
+    }
+)
+
+
+def _index_row_fidelity_gate_rows_by_address(row_gate: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    rows = row_gate.get("rows", []) if isinstance(row_gate, dict) else []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        address = canonical_address(str(row.get("address") or "0x0"))
+        indexed[address] = row
+    return indexed
+
+
+def _index_pairwise_comparisons_by_address(comparisons: Any) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    if isinstance(comparisons, dict):
+        iterable = comparisons.values()
+    elif isinstance(comparisons, list):
+        iterable = comparisons
+    else:
+        iterable = []
+    for row in iterable:
+        if not isinstance(row, dict):
+            continue
+        address = canonical_address(str(row.get("address") or "0x0"))
+        indexed[address] = row
+    return indexed
+
+
+def _hash_code_text(value: Any) -> str | None:
+    text = str(value or "")
+    if not text:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _entry_code_sha256(entry: dict[str, Any] | None) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    for key in ("code", "rendered_text", "text"):
+        digest = _hash_code_text(entry.get(key))
+        if digest:
+            return digest
+    return None
+
+
+def _annotate_target_structuring_rows(
+    rows: list[dict[str, Any]] | None,
+    *,
+    row_gate: dict[str, Any] | None = None,
+    pairwise_comparisons: Any = None,
+    engine_entries: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    gate_rows_by_address = _index_row_fidelity_gate_rows_by_address(row_gate)
+    pairwise_by_address = _index_pairwise_comparisons_by_address(pairwise_comparisons)
+    engine_entries = engine_entries if isinstance(engine_entries, dict) else {}
+    annotated: list[dict[str, Any]] = []
+    for row in list(rows or []):
+        if not isinstance(row, dict):
+            continue
+        address = canonical_address(str(row.get("address") or "0x0"))
+        annotated_row = dict(row)
+        current_code_sha256 = _entry_code_sha256(engine_entries.get(address))
+        if current_code_sha256:
+            annotated_row["current_code_sha256"] = current_code_sha256
+        pairwise_row = pairwise_by_address.get(address, {})
+        gate_row = gate_rows_by_address.get(address, {})
+        if isinstance(pairwise_row, dict):
+            annotated_row["current_normalized_similarity"] = _safe_float(
+                pairwise_row.get("normalized_similarity"),
+                _safe_float(annotated_row.get("current_normalized_similarity"), 0.0),
+            )
+            annotated_row["current_fission_success"] = bool(
+                pairwise_row.get("fission_success", annotated_row.get("current_fission_success", False))
+            )
+            annotated_row["current_pyghidra_success"] = bool(
+                pairwise_row.get("pyghidra_success", annotated_row.get("current_pyghidra_success", False))
+            )
+        if isinstance(gate_row, dict):
+            annotated_row["watchlist_role"] = str(
+                gate_row.get("role") or annotated_row.get("watchlist_role") or ""
+            )
+            annotated_row["row_gate_status"] = str(
+                gate_row.get("status") or annotated_row.get("row_gate_status") or "unknown"
+            )
+            annotated_row["previous_normalized_similarity"] = _safe_float(
+                gate_row.get("previous_normalized_similarity"),
+                _safe_float(annotated_row.get("previous_normalized_similarity"), 0.0),
+            )
+            annotated_row["current_normalized_similarity"] = _safe_float(
+                gate_row.get("current_normalized_similarity"),
+                _safe_float(annotated_row.get("current_normalized_similarity"), 0.0),
+            )
+            annotated_row["normalized_similarity_delta"] = _safe_float(
+                gate_row.get("normalized_similarity_delta"),
+                _safe_float(annotated_row.get("normalized_similarity_delta"), 0.0),
+            )
+            annotated_row["failure_reasons"] = [
+                str(reason)
+                for reason in list(gate_row.get("failure_reasons", []) or [])
+                if str(reason)
+            ]
+            if gate_row.get("previous_code_sha256") is not None:
+                annotated_row["previous_code_sha256"] = gate_row.get("previous_code_sha256")
+            if gate_row.get("current_code_sha256") is not None:
+                annotated_row["current_code_sha256"] = gate_row.get("current_code_sha256")
+            if gate_row.get("code_changed") is not None:
+                annotated_row["code_changed"] = bool(gate_row.get("code_changed"))
+        annotated.append(annotated_row)
+    return annotated
+
+
+def _refresh_single_summary_target_rows_from_row_gate(
+    benchmark: dict[str, Any],
+    row_gate: dict[str, Any] | None = None,
+) -> None:
+    if not isinstance(benchmark, dict):
+        return
+    summary = benchmark.get("summary")
+    if not isinstance(summary, dict):
+        return
+    annotated_rows = _annotate_target_structuring_rows(
+        list(summary.get("target_structuring_rows", []) or []),
+        row_gate=row_gate,
+    )
+    summary["target_structuring_rows"] = annotated_rows
+    summary["unchanged_target_rows"] = [
+        dict(row)
+        for row in annotated_rows
+        if str(row.get("row_gate_status") or "").strip() == "unchanged"
+    ]
 
 
 def _build_target_structuring_rows(
@@ -613,7 +750,13 @@ def _build_target_structuring_rows(
             continue
         name = str(entry.get("name") or "")
         address = canonical_address(str(entry.get("address") or "0x0"))
-        if name not in TARGET_STRUCTURING_ROW_NAMES and address not in TARGET_STRUCTURING_ROW_ADDRESSES:
+        matches_named_target = name in TARGET_STRUCTURING_ROW_NAMES
+        matches_address_target = False
+        if binary_id:
+            matches_address_target = (str(binary_id), address) in TARGET_STRUCTURING_ROW_BINARY_ADDRESSES
+        else:
+            matches_address_target = address in TARGET_STRUCTURING_ROW_ADDRESSES
+        if not matches_named_target and not matches_address_target:
             continue
         preview = entry.get("preview_build_stats") or {}
         if not isinstance(preview, dict):
@@ -639,6 +782,7 @@ def _build_target_structuring_rows(
                 "blockgraph_region_metrics": _normalize_metric_map_for_json(
                     _extract_blockgraph_region_metrics(preview)
                 ),
+                "current_code_sha256": _entry_code_sha256(entry),
             }
         )
     rows.sort(
@@ -998,6 +1142,27 @@ def _normalize_manifest_row_targets(value: Any) -> list[tuple[str, str]]:
     return rows
 
 
+def _normalize_manifest_canonical_quality_rows(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        address = str(item.get("address", "")).strip()
+        if not address:
+            continue
+        rows.append(
+            {
+                "address": canonical_address(address),
+                "role": str(item.get("role", "canonical_quality")).strip() or "canonical_quality",
+                "name": str(item.get("name", "")).strip(),
+                "selected_because": "canonical_quality",
+            }
+        )
+    return rows
+
+
 def _normalize_corpus_role(value: Any) -> str:
     role = str(value or "release_candidate").strip().lower().replace(" ", "_")
     role = CORPUS_ROLE_ALIASES.get(role, role)
@@ -1096,6 +1261,9 @@ def load_corpus_manifest(manifest_path: Path) -> dict[str, Any]:
                 ),
                 "row_fidelity_targets": _normalize_manifest_row_targets(
                     raw_entry.get("row_fidelity_targets", [])
+                ),
+                "canonical_quality_rows": _normalize_manifest_canonical_quality_rows(
+                    raw_entry.get("canonical_quality_rows", [])
                 ),
                 "suite_tier": suite_tier,
                 "gate_mode": gate_mode,
@@ -1328,6 +1496,7 @@ def _resolve_binary_watchlist(
     dynamic_watchlist_limit: int,
 ) -> dict[str, Any]:
     if manifest_entry is None:
+        canonical_quality_rows: list[dict[str, str]] = []
         bootstrap_rows = [
             {
                 "address": canonical_address(address),
@@ -1340,6 +1509,16 @@ def _resolve_binary_watchlist(
         final_rows = [(row["address"], row["role"]) for row in bootstrap_rows]
         watchlist_source = "explicit"
     else:
+        canonical_quality_rows = [
+            {
+                "address": canonical_address(str(row.get("address", ""))),
+                "role": str(row.get("role", "canonical_quality") or "canonical_quality"),
+                "selected_because": "canonical_quality",
+                "name": str(row.get("name", "") or ""),
+            }
+            for row in list(manifest_entry.get("canonical_quality_rows", []) or [])
+            if isinstance(row, dict) and str(row.get("address", "")).strip()
+        ]
         bootstrap_rows = [
             {
                 "address": canonical_address(address),
@@ -1358,7 +1537,7 @@ def _resolve_binary_watchlist(
         )
         final_rows = []
         seen: set[str] = set()
-        for row in [*bootstrap_rows, *dynamic_rows]:
+        for row in [*canonical_quality_rows, *bootstrap_rows, *dynamic_rows]:
             canonical = canonical_address(row["address"])
             if canonical in seen:
                 continue
@@ -1366,13 +1545,16 @@ def _resolve_binary_watchlist(
             final_rows.append((canonical, str(row["role"])))
             if len(final_rows) >= max(dynamic_watchlist_limit, 1):
                 break
-        if bootstrap_rows and dynamic_rows:
+        if (canonical_quality_rows or bootstrap_rows) and dynamic_rows:
             watchlist_source = "mixed"
-        elif bootstrap_rows:
+        elif canonical_quality_rows or bootstrap_rows:
             watchlist_source = "explicit"
         else:
             watchlist_source = "dynamic"
     final_addresses = {canonical_address(address) for address, _ in final_rows}
+    canonical_quality_rows_final = [
+        row for row in canonical_quality_rows if canonical_address(row["address"]) in final_addresses
+    ]
     bootstrap_rows_final = [
         row for row in bootstrap_rows if canonical_address(row["address"]) in final_addresses
     ]
@@ -1380,7 +1562,7 @@ def _resolve_binary_watchlist(
         row for row in dynamic_rows if canonical_address(row["address"]) in final_addresses
     ]
     selected_because_counts: dict[str, int] = {}
-    for row in [*bootstrap_rows_final, *dynamic_rows_final]:
+    for row in [*canonical_quality_rows_final, *bootstrap_rows_final, *dynamic_rows_final]:
         reason = str(row.get("selected_because", "") or "")
         if not reason:
             continue
@@ -1389,10 +1571,12 @@ def _resolve_binary_watchlist(
     return {
         "rows": final_rows,
         "watchlist_source": watchlist_source,
+        "canonical_quality_rows": canonical_quality_rows_final,
         "bootstrap_row_targets": bootstrap_rows_final,
         "dynamic_watchlist_rows": dynamic_rows_final,
         "watchlist_diagnostics": {
             "watchlist_source": watchlist_source,
+            "canonical_quality_row_count": len(canonical_quality_rows_final),
             "bootstrap_row_target_count": len(bootstrap_rows_final),
             "dynamic_watchlist_row_count": len(dynamic_rows_final),
             "selected_because_counts": dict(sorted(selected_because_counts.items())),
@@ -1486,6 +1670,8 @@ def _build_row_fidelity_gate(
             "normalized_similarity_delta": round(delta, 3),
             "previous_fission_success": base_success,
             "current_fission_success": cur_success,
+            "previous_code_sha256": _entry_code_sha256(base_fission_entries.get(address)),
+            "current_code_sha256": _entry_code_sha256(cur_fission_entries.get(address)),
             "previous_unsupported_indirect_control_count": _safe_int(
                 base_stats.get("unsupported_indirect_control_count"), 0
             ),
@@ -1601,6 +1787,11 @@ def _build_row_fidelity_gate(
                 cur_stats.get("representative_downgrade_join_conflict_count"), 0
             ),
         }
+        row_result["code_changed"] = (
+            row_result["previous_code_sha256"] != row_result["current_code_sha256"]
+            if row_result["previous_code_sha256"] and row_result["current_code_sha256"]
+            else False
+        )
         row_result["canonical_rejection_reasons"] = (
             _classify_row_regression_reasons(row_result) if status == "degraded" else []
         )
@@ -3349,6 +3540,7 @@ def build_row_fidelity_targets_snapshot(
     pair: dict[str, Any],
     row_targets: list[tuple[str, str]] | None = None,
     watchlist_source: str = "explicit",
+    canonical_quality_rows: list[dict[str, Any]] | None = None,
     bootstrap_row_targets: list[dict[str, Any]] | None = None,
     dynamic_watchlist_rows: list[dict[str, Any]] | None = None,
     watchlist_diagnostics: dict[str, Any] | None = None,
@@ -3366,7 +3558,11 @@ def build_row_fidelity_targets_snapshot(
         else _normalize_row_target_pairs(row_targets)
     )
     selected_reason_by_address: dict[str, str] = {}
-    for row in list(bootstrap_row_targets or []) + list(dynamic_watchlist_rows or []):
+    for row in (
+        list(canonical_quality_rows or [])
+        + list(bootstrap_row_targets or [])
+        + list(dynamic_watchlist_rows or [])
+    ):
         if not isinstance(row, dict):
             continue
         address = row.get("address")
@@ -3456,6 +3652,7 @@ def build_row_fidelity_targets_snapshot(
         )
     return {
         "watchlist_source": watchlist_source,
+        "canonical_quality_rows": list(canonical_quality_rows or []),
         "bootstrap_row_targets": list(bootstrap_row_targets or []),
         "dynamic_watchlist_rows": list(dynamic_watchlist_rows or []),
         "watchlist_diagnostics": dict(watchlist_diagnostics or {}),
@@ -3865,6 +4062,7 @@ def build_comparison(
     aggregate_similarity_mode: str,
     row_fidelity_targets_filter: list[tuple[str, str]] | None = None,
     watchlist_source: str = "explicit",
+    canonical_quality_rows: list[dict[str, Any]] | None = None,
     bootstrap_row_targets: list[dict[str, Any]] | None = None,
     dynamic_watchlist_rows: list[dict[str, Any]] | None = None,
     watchlist_diagnostics: list[dict[str, Any]] | dict[str, Any] | None = None,
@@ -3949,7 +4147,16 @@ def build_comparison(
             _aggregate_alias_interleave_metrics_from_entries(fission["entries"])
         )
     giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
-    target_structuring_rows = _build_target_structuring_rows(fission["entries"])
+    target_structuring_rows = _annotate_target_structuring_rows(
+        _build_target_structuring_rows(fission["entries"], binary_id=binary_path.stem),
+        pairwise_comparisons=pair_py_fission.get("comparisons"),
+        engine_entries=fission["entries"],
+    )
+    unchanged_target_rows = [
+        dict(row)
+        for row in target_structuring_rows
+        if str(row.get("row_gate_status") or "").strip() == "unchanged"
+    ]
 
     engine_kpi = {
         "pyghidra": {
@@ -3983,6 +4190,7 @@ def build_comparison(
             pair_py_fission,
             row_targets=row_fidelity_targets_filter,
             watchlist_source=watchlist_source,
+            canonical_quality_rows=canonical_quality_rows,
             bootstrap_row_targets=bootstrap_row_targets,
             dynamic_watchlist_rows=dynamic_watchlist_rows,
             watchlist_diagnostics=watchlist_diagnostics if isinstance(watchlist_diagnostics, dict) else None,
@@ -4037,6 +4245,7 @@ def build_comparison(
             "fission": alias_interleave_metrics,
         },
         "target_structuring_rows": target_structuring_rows,
+        "unchanged_target_rows": unchanged_target_rows,
         "giant_function_candidates": giant_function_diagnostics["giant_function_candidates"],
         "giant_function_speed_family_counts": giant_function_diagnostics[
             "giant_function_speed_family_counts"
@@ -4908,6 +5117,11 @@ def build_corpus_assessment(
             else:
                 direct_success_non_worse_vs_baseline = False
 
+        target_structuring_rows = _annotate_target_structuring_rows(
+            list(benchmark.get("summary", {}).get("target_structuring_rows", []) or []),
+            row_gate=row_gate,
+        )
+
         binaries_payload.append(
             {
                 "id": binary_id,
@@ -4931,6 +5145,13 @@ def build_corpus_assessment(
                 "dynamic_watchlist_rows": row_watchlist.get("dynamic_watchlist_rows", []),
                 "watchlist_diagnostics": {
                     "watchlist_source": watchlist_source,
+                    "canonical_quality_row_count": _safe_int(
+                        watchlist_diagnostics.get(
+                            "canonical_quality_row_count",
+                            len(row_watchlist.get("canonical_quality_rows", []) or []),
+                        ),
+                        len(row_watchlist.get("canonical_quality_rows", []) or []),
+                    ),
                     "bootstrap_row_target_count": _safe_int(
                         watchlist_diagnostics.get(
                             "bootstrap_row_target_count",
@@ -5063,6 +5284,11 @@ def build_corpus_assessment(
             str(row.get("address", "")),
         ),
     )[:10]
+    unchanged_target_rows = [
+        dict(row)
+        for row in target_structuring_rows
+        if str(row.get("row_gate_status") or "").strip() == "unchanged"
+    ]
     arch_summary = _build_arch_summary(binaries_payload, eligibility_by_binary)
 
     status = "passed"
@@ -5291,6 +5517,7 @@ def build_corpus_assessment(
                 if key.startswith("rejected_")
             },
             "target_structuring_rows": target_structuring_rows,
+            "unchanged_target_rows": unchanged_target_rows,
             "arch_summary": arch_summary,
             "watchlist_reason_counts": dict(sorted(watchlist_reason_counts.items())),
         },
@@ -5319,6 +5546,7 @@ def build_corpus_assessment(
             if key.startswith("rejected_")
         },
         "target_structuring_rows": target_structuring_rows,
+        "unchanged_target_rows": unchanged_target_rows,
         "giant_function_speed_family_totals": giant_function_speed_family_totals,
         "max_pathological_examples": max_pathological_examples,
         "arch_summary": arch_summary,
@@ -5569,6 +5797,7 @@ def run_single_benchmark(
         aggregate_similarity_mode=args.aggregate_similarity_mode,
         row_fidelity_targets_filter=row_fidelity_targets_filter,
         watchlist_source=str(watchlist_metadata["watchlist_source"]),
+        canonical_quality_rows=list(watchlist_metadata.get("canonical_quality_rows", [])),
         bootstrap_row_targets=list(watchlist_metadata["bootstrap_row_targets"]),
         dynamic_watchlist_rows=list(watchlist_metadata["dynamic_watchlist_rows"]),
         watchlist_diagnostics=dict(watchlist_metadata.get("watchlist_diagnostics", {})),
@@ -5582,6 +5811,12 @@ def run_single_benchmark(
             baseline_summary_payload,
             float(getattr(args, "regression_threshold", 2.0)),
             row_targets=baseline_row_targets,
+        )
+        _refresh_single_summary_target_rows_from_row_gate(
+            benchmark,
+            benchmark["baseline_regression_gate"].get("row_fidelity_gate")
+            if isinstance(benchmark.get("baseline_regression_gate"), dict)
+            else None,
         )
     summary_json_path, summary_md_path = write_summary_files(output_dir, benchmark)
     print_console_summary(

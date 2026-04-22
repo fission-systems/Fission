@@ -126,6 +126,46 @@ def _normalize_metric_map(metrics: dict[str, Any], *, allowed_keys: tuple[str, .
     return dict(sorted(normalized.items()))
 
 
+def _annotate_target_structuring_rows_with_row_gate(
+    rows: list[dict[str, Any]] | None,
+    row_gate: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    gate_rows = row_gate.get("rows", []) if isinstance(row_gate, dict) else []
+    for gate_row in gate_rows if isinstance(gate_rows, list) else []:
+        if not isinstance(gate_row, dict):
+            continue
+        indexed[str(gate_row.get("address") or "").lower()] = gate_row
+    annotated: list[dict[str, Any]] = []
+    for row in list(rows or []):
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        gate_row = indexed.get(str(item.get("address") or "").lower(), {})
+        if isinstance(gate_row, dict) and gate_row:
+            item["watchlist_role"] = str(gate_row.get("role") or item.get("watchlist_role") or "")
+            item["row_gate_status"] = str(gate_row.get("status") or item.get("row_gate_status") or "unknown")
+            item["previous_normalized_similarity"] = _safe_float(
+                gate_row.get("previous_normalized_similarity"),
+                _safe_float(item.get("previous_normalized_similarity"), 0.0),
+            )
+            item["current_normalized_similarity"] = _safe_float(
+                gate_row.get("current_normalized_similarity"),
+                _safe_float(item.get("current_normalized_similarity"), 0.0),
+            )
+            item["normalized_similarity_delta"] = _safe_float(
+                gate_row.get("normalized_similarity_delta"),
+                _safe_float(item.get("normalized_similarity_delta"), 0.0),
+            )
+            item["failure_reasons"] = [
+                str(reason)
+                for reason in list(gate_row.get("failure_reasons", []) or [])
+                if str(reason)
+            ]
+        annotated.append(item)
+    return annotated
+
+
 def _compact_row_example(row: dict[str, Any]) -> CompactRowExample:
     return CompactRowExample(
         address=row.get("address"),
@@ -208,6 +248,15 @@ def build_single_compact_summary(
     baseline_blockers = []
     if isinstance(regression_gate_payload, dict):
         baseline_blockers = [str(item) for item in regression_gate_payload.get("regressions", [])]
+        target_structuring_rows = _annotate_target_structuring_rows_with_row_gate(
+            target_structuring_rows,
+            regression_gate_payload.get("row_fidelity_gate"),
+        )
+    unchanged_target_rows = [
+        dict(row)
+        for row in target_structuring_rows
+        if str(row.get("row_gate_status") or "").strip() == "unchanged"
+    ][:MAX_COMPACT_ROWS]
 
     top_regressions = []
     if isinstance(delta_payload, dict):
@@ -247,6 +296,7 @@ def build_single_compact_summary(
         top_row_examples=top_examples[:MAX_COMPACT_ROWS],
         max_pathological_examples=max_pathological_examples,
         target_structuring_rows=target_structuring_rows,
+        unchanged_target_rows=unchanged_target_rows,
     )
 
 
@@ -444,6 +494,11 @@ def build_corpus_compact_summary(
         for row in list(artifact.target_structuring_rows or [])[:MAX_COMPACT_ROWS]
         if isinstance(row, dict)
     ]
+    unchanged_target_rows = [
+        dict(row)
+        for row in target_structuring_rows
+        if str(row.get("row_gate_status") or "").strip() == "unchanged"
+    ][:MAX_COMPACT_ROWS]
     if binary_df.empty:
         weighted_avg = _safe_float(artifact.corpus_summary.weighted_avg_normalized_similarity, 0.0)
     else:
@@ -479,6 +534,7 @@ def build_corpus_compact_summary(
         per_binary_rows=per_binary_rows,
         max_pathological_examples=max_pathological_examples,
         target_structuring_rows=target_structuring_rows,
+        unchanged_target_rows=unchanged_target_rows,
     )
 
 

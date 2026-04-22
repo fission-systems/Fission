@@ -63,6 +63,16 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
                         "rendered_code_len": 452822,
                     }
                 ],
+                "target_structuring_rows": [
+                    {
+                        "address": "0x140001470",
+                        "name": "fibonacci",
+                        "structuring_duration_ms": 33.0,
+                        "forced_linear_structuring_count": 1,
+                        "rendered_code_len": 40935,
+                        "current_normalized_similarity": 11.65,
+                    }
+                ],
                 "engines": {"fission": {"function_count": 50}},
                 "samples": {"pyghidra_vs_fission_lowest_similarity": []},
                 "row_fidelity_targets": {
@@ -225,6 +235,34 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
         self.assertEqual(payload["giant_function_speed_family_counts"]["RenderHeavy"], 1)
         self.assertEqual(payload["max_pathological_examples"][0]["address"], "0x140002d40")
 
+    def test_build_single_compact_summary_attaches_target_row_delta_from_regression_gate(self) -> None:
+        compact = build_single_compact_summary(
+            self._single_summary_payload(),
+            regression_gate_payload={
+                "row_fidelity_gate": {
+                    "rows": [
+                        {
+                            "address": "0x140001470",
+                            "role": "dynamic_low_similarity",
+                            "status": "unchanged",
+                            "previous_normalized_similarity": 11.65,
+                            "current_normalized_similarity": 11.65,
+                            "normalized_similarity_delta": 0.0,
+                            "failure_reasons": [],
+                        }
+                    ]
+                }
+            },
+        )
+        payload = compact.model_dump(mode="json")
+        row = payload["target_structuring_rows"][0]
+        self.assertEqual(row["watchlist_role"], "dynamic_low_similarity")
+        self.assertEqual(row["row_gate_status"], "unchanged")
+        self.assertEqual(row["previous_normalized_similarity"], 11.65)
+        self.assertEqual(row["current_normalized_similarity"], 11.65)
+        self.assertEqual(row["normalized_similarity_delta"], 0.0)
+        self.assertEqual(payload["unchanged_target_rows"][0]["name"], "fibonacci")
+
     def test_maybe_generate_benchmark_llm_advisory_prefers_compact_summary_when_present(self) -> None:
         summary_payload = self._single_summary_payload()
         compact_payload = build_single_compact_summary(summary_payload).model_dump(mode="json")
@@ -253,10 +291,20 @@ class BenchmarkLlmAdvisoryTests(unittest.TestCase):
 
     def test_render_single_markdown_and_console_smoke(self) -> None:
         payload = self._single_summary_payload()
+        payload["summary"]["unchanged_target_rows"] = [
+            {
+                "address": "0x140001470",
+                "name": "fibonacci",
+                "current_normalized_similarity": 11.65,
+                "previous_normalized_similarity": 11.65,
+                "normalized_similarity_delta": 0.0,
+            }
+        ]
         markdown = render_single_benchmark_markdown(payload)
         self.assertIn("## Owner Metrics", markdown)
         self.assertIn("## Normalize Pass Metrics", markdown)
         self.assertIn("## Giant Function Diagnostics", markdown)
+        self.assertIn("### Unchanged Target Rows", markdown)
         self.assertIn("benchmark_compact_summary.json", markdown)
 
         console = Console(record=True, width=120)

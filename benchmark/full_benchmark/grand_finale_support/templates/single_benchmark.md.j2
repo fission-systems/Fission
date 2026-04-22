@@ -82,10 +82,21 @@ Guarded-tail canonicalization blocker breakdown. These counters narrow `alias_in
 {% if target_structuring_rows %}
 ### Target Structuring Rows
 
-| Address | Name | Structuring ms | Forced linear | Rendered len |
-| --- | --- | ---: | ---: | ---: |
+| Address | Name | Current sim | Previous sim | Delta | Status | Code changed | Structuring ms | Forced linear | Rendered len |
+| --- | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |
 {% for row in target_structuring_rows %}
-| `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | {{ "%.3f"|format(row.get("structuring_duration_ms", 0.0) | float) }} | {{ row.get("forced_linear_structuring_count", 0) }} | {{ row.get("rendered_code_len", 0) }} |
+| `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | {{ "%.2f"|format(row.get("current_normalized_similarity", 0.0) | float) }} | {{ "%.2f"|format(row.get("previous_normalized_similarity", 0.0) | float) }} | {{ "%.2f"|format(row.get("normalized_similarity_delta", 0.0) | float) }} | `{{ row.get("row_gate_status", "") }}` | `{{ row.get("code_changed", false) }}` | {{ "%.3f"|format(row.get("structuring_duration_ms", 0.0) | float) }} | {{ row.get("forced_linear_structuring_count", 0) }} | {{ row.get("rendered_code_len", 0) }} |
+{% endfor %}
+{% endif %}
+
+{% set unchanged_target_rows = summary.get("unchanged_target_rows", []) or [] %}
+{% if unchanged_target_rows %}
+### Unchanged Target Rows
+
+| Address | Name | Current sim | Previous sim | Delta |
+| --- | --- | ---: | ---: | ---: |
+{% for row in unchanged_target_rows %}
+| `{{ row.get("address", "") }}` | `{{ row.get("name", "") }}` | {{ "%.2f"|format(row.get("current_normalized_similarity", 0.0) | float) }} | {{ "%.2f"|format(row.get("previous_normalized_similarity", 0.0) | float) }} | {{ "%.2f"|format(row.get("normalized_similarity_delta", 0.0) | float) }} |
 {% endfor %}
 {% endif %}
 

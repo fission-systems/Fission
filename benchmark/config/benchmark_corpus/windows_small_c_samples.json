@@ -10,6 +10,13 @@
       "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
       "ghidra_project_key": "test_functions",
       "tags": ["windows", "pe", "x64", "small-c", "control-heavy"],
+      "canonical_quality_rows": [
+        {
+          "address": "0x140001470",
+          "name": "fibonacci",
+          "role": "canonical_quality"
+        }
+      ],
       "seed_limit": 50,
       "role": "primary_canary",
       "weight": 2
@@ -55,6 +62,13 @@
       "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/math_operations.exe",
       "ghidra_project_key": "math_operations",
       "tags": ["windows", "pe", "x64", "small-c", "math-heavy"],
+      "canonical_quality_rows": [
+        {
+          "address": "0x140001a90",
+          "name": "fibonacci_memo",
+          "role": "canonical_quality"
+        }
+      ],
       "seed_limit": 50,
       "role": "release_candidate",
       "weight": 1
