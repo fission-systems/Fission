@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
@@ -285,8 +286,39 @@ impl SleighLifter {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("specs/languages")
     }
 
+    fn find_spec_path_recursive(dir: &Path, language_name: &str) -> Option<PathBuf> {
+        let mut entries = fs::read_dir(dir).ok()?.collect::<Result<Vec<_>, _>>().ok()?;
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = Self::find_spec_path_recursive(&path, language_name) {
+                    return Some(found);
+                }
+                continue;
+            }
+
+            let is_target = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name == format!("{language_name}.slaspec"))
+                .unwrap_or(false);
+            if is_target {
+                return Some(path);
+            }
+        }
+
+        None
+    }
+
+    pub fn find_spec_path_for(language_name: &str) -> Option<PathBuf> {
+        Self::find_spec_path_recursive(&Self::spec_dir(), language_name)
+    }
+
     pub fn spec_path_for(language_name: &str) -> PathBuf {
-        Self::spec_dir().join(format!("{}.slaspec", language_name))
+        Self::find_spec_path_for(language_name)
+            .unwrap_or_else(|| Self::spec_dir().join(format!("{}.slaspec", language_name)))
     }
 
     pub fn new_for_language(language_name: &str) -> Result<Self> {
@@ -626,5 +658,17 @@ mod tests {
             cbranch.inputs[1].offset,
             jcc_pred.output.as_ref().expect("predicate output").offset
         );
+    }
+
+    #[test]
+    fn spec_lookup_finds_x86_in_arch_subdirectory() {
+        let path = SleighLifter::find_spec_path_for("x86-64").expect("x86-64 spec path");
+        assert!(path.ends_with("specs/languages/x86/x86-64.slaspec"));
+    }
+
+    #[test]
+    fn spec_lookup_finds_aarch64_in_arch_subdirectory() {
+        let path = SleighLifter::find_spec_path_for("AARCH64").expect("AARCH64 spec path");
+        assert!(path.ends_with("specs/languages/aarch64/AARCH64.slaspec"));
     }
 }

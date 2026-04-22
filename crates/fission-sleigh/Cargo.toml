@@ -7,3 +7,7 @@ edition = "2021"
 anyhow = "1.0.102"
 fission-pcode = { path = "../fission-pcode" }
 tracing = "0.1"
+
+[dev-dependencies]
+fission-loader = { path = "../fission-loader" }
+tempfile = "3.23.0"

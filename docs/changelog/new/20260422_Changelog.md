@@ -1222,3 +1222,172 @@ Do not broaden `FISSION_ENABLE_MIR_BLOCKGRAPH` admission further. The next wave 
 2. prove smallest-complete-owner follow selection,
 3. isolate/snapshot builder state for failed MIR BlockGraph trials,
 4. only then allow graph-collapse output to survive fail-closed fallback.
+
+---
+
+## 4. fission-sleigh x86-64 Front-End Migration: compiler-only wave
+
+### Summary
+
+This wave starts the clean-room Sleigh front-end migration inside `fission-sleigh` with `x86-64` fixed as the first consumer.
+
+Scope was intentionally limited to compiler-only ownership:
+
+- tokenizer
+- preprocessor
+- parser
+- compile-time inventory / pattern graph / semantic action IR
+- deterministic generated artifact emission
+- non-runtime equivalence harness
+
+The canonical runtime path did not change.
+
+### Why x86-64 first
+
+`x86-64` is the correct first migration target because the canonical validation surface is already the Windows small C corpus:
+
+- `benchmark/config/benchmark_corpus/windows_small_c_samples.json`
+- `benchmark/binary/x86-64/window/small/binary/c`
+
+This lets the front-end migration use the same sample family that already drives quality and throughput decisions.
+
+### What changed
+
+New compiler-only owner tree:
+
+- `crates/fission-sleigh/src/compiler/mod.rs`
+- `crates/fission-sleigh/src/compiler/token.rs`
+- `crates/fission-sleigh/src/compiler/preprocessor.rs`
+- `crates/fission-sleigh/src/compiler/ast.rs`
+- `crates/fission-sleigh/src/compiler/ir.rs`
+- `crates/fission-sleigh/src/compiler/codegen.rs`
+- `crates/fission-sleigh/src/compiler/equivalence.rs`
+
+New generated artifact path:
+
+- `crates/fission-sleigh/generated/x86/`
+
+New regeneration entrypoint:
+
+- `cargo run -p fission-sleigh --example generate_x86_frontend`
+
+Generated artifacts now checked in:
+
+- `include_expanded_manifest.json`
+- `parsed_inventory.json`
+- `normalized_pattern_graph.json`
+- `semantic_action_ir.txt`
+- `generated_frontend.rs`
+
+### Front-end contract in this wave
+
+The clean-room compiler currently does all of the following for `x86-64.slaspec`:
+
+- resolves the checked-in include graph
+- evaluates `@define`, `@ifdef`, `@ifndef`, `@else`, `@endif`
+- parses `define`, `macro`, `with`, and constructor blocks into AST
+- compiles constructor inventory and pcodeop inventory
+- emits deterministic generated artifacts
+
+The wave does **not** yet do:
+
+- runtime decode from compiled tables
+- replacement of the hand-written x86 lifter
+- CLI behavior change
+- benchmark semantic output change
+
+### Equivalence harness
+
+The new equivalence harness is intentionally compiler-only and fail-closed.
+
+Current comparison behavior:
+
+- runs existing hand-lifter decode/lift on sampled x86-64 instruction windows
+- records decode length, control-flow class, and emitted pcode opcode sequence
+- reports generated-front-end side as:
+  - `unsupported_generated_semantic`
+
+This is the correct behavior for this wave because runtime semantic execution from compiled spec tables has not been enabled yet.
+
+Sample sources validated:
+
+- fixed x86 unit seeds
+- function-entry windows sampled from:
+  - `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe`
+
+### Determinism / checked-in output
+
+New compiler tests now enforce:
+
+- x86 include graph resolution
+- conditional preprocessing correctness
+- AST discovery of with-blocks and constructors
+- compile-time pcodeop / pattern inventory generation
+- deterministic artifact rendering
+- checked-in generated artifacts exactly matching renderer output
+
+This closes the previous gap where generated output could exist without being verified against the checked-in tree.
+
+### Validation
+
+Passed:
+
+```text
+cargo test -p fission-sleigh
+cargo run -p fission-sleigh --example generate_x86_frontend
+cargo check -p fission-cli
+```
+
+Observed result:
+
+```text
+fission-sleigh: 307 passed / 0 failed
+generated artifact root: crates/fission-sleigh/generated/x86
+```
+
+### Artifact shape
+
+Generated artifact sizes in the current snapshot:
+
+```text
+include_expanded_manifest.json: 573 bytes
+generated_frontend.rs: 24,961 bytes
+semantic_action_ir.txt: 432,676 bytes
+normalized_pattern_graph.json: 669,507 bytes
+parsed_inventory.json: 730,095 bytes
+```
+
+This is large but still repo-manageable for a compiler-only artifact set. No runtime path consumes these files yet.
+
+### What improved
+
+- `fission-sleigh` now has a real clean-room compiler spine instead of only hand-written lift code.
+- `x86-64` migration has a deterministic, repo-tracked generated output contract.
+- front-end validation is now anchored to the same Windows x86-64 sample family used elsewhere in Fission.
+- the compiler-only equivalence harness makes the “not integrated yet” state explicit instead of silently implying parity.
+
+### What did not improve
+
+- runtime decode/lift behavior is unchanged
+- benchmark quality numbers are unchanged by design
+- generated front-end still reports `unsupported_generated_semantic` because execution tables are not wired in this wave
+
+### Duplicate-logic audit
+
+This wave intentionally avoided duplicating runtime semantics.
+
+- existing hand-lifter remains the only executable semantic owner
+- compiler-only front-end owns spec parsing / inventory / generated output
+- equivalence harness projects differences without pretending to be a second runtime decoder
+
+### Next owner
+
+Do not replace the hand-lifter yet.
+
+The next migration wave should implement x86-64 compiled front-end execution in this order:
+
+1. constructor/table lookup from compiled pattern graph
+2. decode-length parity for sampled instruction windows
+3. control-flow class parity
+4. pcode opcode / varnode-shape parity buckets
+5. only then consider execution-path swap behind an env gate

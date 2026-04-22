@@ -9,7 +9,8 @@ Scope: crates/fission-sleigh
 
 Current ownership:
 
-- language/spec path resolution (`specs/languages/*.slaspec`)
+- language/spec path resolution (`specs/languages/<arch>/*.slaspec`)
+- compiler-only Sleigh front-end generation (`src/compiler/`, `generated/x86/`)
 - direct instruction length decoding and control-flow lifting (no external Sleigh runtime dependency)
 - producing `fission-pcode::PcodeOp` streams consumed by NIR rendering
 
@@ -19,6 +20,14 @@ Current ownership:
 crates/fission-sleigh/
 ├── src/
 │   ├── lib.rs
+│   ├── compiler/
+│   │   ├── mod.rs             # Compiler-only entrypoints and x86-64 wave orchestration
+│   │   ├── token.rs           # Handwritten line tokenizer
+│   │   ├── preprocessor.rs    # @include/@define/conditional expansion
+│   │   ├── ast.rs             # Constructor / macro / with-block AST
+│   │   ├── ir.rs              # Compiled inventory + pattern graph + semantic IR
+│   │   ├── codegen.rs         # Deterministic generated artifact renderer
+│   │   └── equivalence.rs     # Compiler-only bucketed equivalence report
 │   └── lifter/
 │       ├── mod.rs             # Public SleighLifter API and dispatch
 │       ├── common.rs          # Shared varnode/temp utilities
@@ -32,16 +41,28 @@ crates/fission-sleigh/
 │           └── control.rs     # x86 control-flow decode
 └── specs/
    └── languages/             # Local Sleigh spec set used for language resolution
+       ├── aarch64/
+       ├── arm32/
+       ├── mips/
+       ├── powerpc/
+       ├── riscv/
+       └── x86/
+└── generated/
+   └── x86/                   # Repo-tracked compiler-only output for x86-64
 ```
 
 ## Ownership Rules
 
 1. Keep this crate dependency-free for Sleigh execution.
    - Do not reintroduce `sleigh-rs` or equivalent runtime dependencies.
+   - Treat `vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors/*/data/languages/`
+     as the canonical spec source when refreshing checked-in SLEIGH files.
 2. Keep decode behavior deterministic.
    - Length decode and control-flow lifting must be stable for the same bytes/address.
+   - Compiler-generated artifacts must be byte-stable for the same checked-in spec snapshot.
 3. Fix semantics at the canonical owner.
    - Sleigh-to-pcode mapping changes belong here, not CLI output layers.
+   - Compiler-only front-end changes belong under `src/compiler/`, not benchmark or CLI glue.
 4. Use vendor implementations as references only.
    - Borrow invariants and ideas, but keep executable logic owned in this crate.
 
@@ -55,6 +76,8 @@ crates/fission-sleigh/
 
 ```bash
 cargo check -p fission-sleigh
+cargo test -p fission-sleigh
+cargo run -p fission-sleigh --example generate_x86_frontend
 ```
 
 When changes affect CLI routing behavior:

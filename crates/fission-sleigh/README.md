@@ -1,14 +1,21 @@
 # fission-sleigh
 
 `fission-sleigh` is Fission's Rust-native Sleigh lifting crate.
-It resolves local `.slaspec` files and lifts instruction bytes into `fission-pcode` operations without a runtime Sleigh dependency.
+It resolves local `.slaspec` files from architecture-organized spec folders and lifts instruction bytes into `fission-pcode` operations without a runtime Sleigh dependency.
+It now also owns a clean-room compiler-only Sleigh front-end wave for deterministic spec preprocessing, AST/inventory compilation, generated artifact emission, and non-runtime x86-64 equivalence reporting.
 
 ## What this crate owns
 
-- Local language/spec path resolution from `specs/languages/*.slaspec`
+- Local language/spec path resolution from `specs/languages/<arch>/*.slaspec`
 - Instruction-level decode + lift (`decode_and_lift`, `decode_and_lift_with_len`)
 - Function-level lifting contract with stop reason metadata
 - Basic block reconstruction from p-code control flow (`build_cfg_blocks`)
+- Compiler-only Sleigh front-end spine (`compiler/`)
+  - tokenize
+  - preprocess (`@include`, `@define`, conditional guards)
+  - parse (constructor / macro / with-block AST)
+  - compile (inventory + pattern graph + semantic action IR)
+  - deterministic codegen into `generated/x86/`
 - Architecture paths:
   - AArch64 semantic/control lifting
   - x86 length/control/semantic lifting
@@ -32,6 +39,14 @@ Supporting types/functions:
 crates/fission-sleigh/
 ├── src/
 │   ├── lib.rs
+│   ├── compiler/
+│   │   ├── mod.rs
+│   │   ├── token.rs
+│   │   ├── preprocessor.rs
+│   │   ├── ast.rs
+│   │   ├── ir.rs
+│   │   ├── codegen.rs
+│   │   └── equivalence.rs
 │   └── lifter/
 │       ├── mod.rs
 │       ├── common.rs
@@ -56,8 +71,16 @@ crates/fission-sleigh/
 │               ├── alu.rs
 │               ├── addressing.rs
 │               └── tests.rs
-└── specs/
-    └── languages/
+├── specs/
+│   └── languages/
+│       ├── aarch64/
+│       ├── arm32/
+│       ├── mips/
+│       ├── powerpc/
+│       ├── riscv/
+│       └── x86/
+└── generated/
+    └── x86/
 ```
 
 ## Quick usage
@@ -66,7 +89,7 @@ crates/fission-sleigh/
 use fission_sleigh::lifter::SleighLifter;
 
 fn main() -> anyhow::Result<()> {
-    // Example language names available in specs/languages:
+    // Example language names available in specs/languages/<arch>/:
     // - "x86-64"
     // - "AARCH64"
     let lifter = SleighLifter::new_for_language("x86-64")?;
@@ -94,7 +117,9 @@ fn main() -> anyhow::Result<()> {
 ## Spec resolution behavior
 
 - `SleighLifter::new_for_language("<name>")` looks for:
-  - `crates/fission-sleigh/specs/languages/<name>.slaspec`
+  - `crates/fission-sleigh/specs/languages/**/<name>.slaspec`
+- The checked-in spec tree is mirrored from:
+  - `vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors/*/data/languages/`
 - `SleighLifter::new(path)` infers language name from the file stem.
 
 ## Validation
@@ -104,6 +129,7 @@ From repository root:
 ```bash
 cargo check -p fission-sleigh
 cargo test -p fission-sleigh
+cargo run -p fission-sleigh --example generate_x86_frontend
 ```
 
 When changes may affect decompilation routing behavior:
@@ -117,3 +143,4 @@ cargo check -p fission-cli
 - This crate intentionally avoids a runtime Sleigh engine dependency.
 - Outputs are designed to be deterministic for the same input bytes/address.
 - Semantic correctness fixes should be made in this crate (not CLI/UI layers).
+- The first clean-room migration consumer is `x86-64.slaspec`; generated front-end output is checked in under `crates/fission-sleigh/generated/x86/` but is not yet the canonical runtime decoder path.
