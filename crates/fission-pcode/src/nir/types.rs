@@ -711,6 +711,30 @@ pub struct NirBuildStats {
     /// Completed Rust-native pipeline count after all clean-room stage records.
     #[serde(default)]
     pub ghidra_clean_room_pipeline_complete_count: usize,
+    /// Shadow MIR projection count for the Ghidra-style semantic working state.
+    #[serde(default)]
+    pub mir_enabled_count: usize,
+    /// Functions observed by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_function_count: usize,
+    /// Basic block-shaped units observed by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_block_count: usize,
+    /// Value nodes observed by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_value_count: usize,
+    /// Memory regions observed by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_memory_region_count: usize,
+    /// Join proof records emitted by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_join_proof_count: usize,
+    /// Region proof records emitted by the shadow MIR projection.
+    #[serde(default)]
+    pub mir_region_proof_count: usize,
+    /// Time spent projecting current HIR into shadow MIR.
+    #[serde(default)]
+    pub mir_projection_duration_ms: usize,
     #[serde(default)]
     pub procedure_summary_contracted_count: usize,
     #[serde(default)]
@@ -1190,6 +1214,14 @@ impl NirBuildStats {
         self.ghidra_action_printc_count += other.ghidra_action_printc_count;
         self.ghidra_clean_room_pipeline_complete_count +=
             other.ghidra_clean_room_pipeline_complete_count;
+        self.mir_enabled_count += other.mir_enabled_count;
+        self.mir_function_count += other.mir_function_count;
+        self.mir_block_count += other.mir_block_count;
+        self.mir_value_count += other.mir_value_count;
+        self.mir_memory_region_count += other.mir_memory_region_count;
+        self.mir_join_proof_count += other.mir_join_proof_count;
+        self.mir_region_proof_count += other.mir_region_proof_count;
+        self.mir_projection_duration_ms += other.mir_projection_duration_ms;
         self.procedure_summary_contracted_count += other.procedure_summary_contracted_count;
         self.procedure_summary_tail_wrapper_count += other.procedure_summary_tail_wrapper_count;
         self.procedure_summary_import_thunk_count += other.procedure_summary_import_thunk_count;

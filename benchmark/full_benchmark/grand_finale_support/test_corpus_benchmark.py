@@ -21,6 +21,7 @@ from grand_finale_support.benchmark_core import (
     _extract_alias_interleave_metrics,
     _extract_blockgraph_region_metrics,
     _extract_ghidra_action_metrics,
+    _extract_mir_metrics,
     _extract_owner_metrics_from_engine_summary,
     _extract_selected_normalize_pass_metrics,
     _extract_shape_drift_metrics_from_engine_summary,
@@ -65,6 +66,16 @@ def _minimal_single_binary_summary(
                             "direct_success_rate_pct": 100.0,
                         },
                         "performance_kpi": {"throughput_func_per_sec": 1.0},
+                        "cpu_kpi": {
+                            "process_cpu_seconds": 0.75,
+                            "process_cpu_user_sec": 0.6,
+                            "process_cpu_system_sec": 0.15,
+                            "process_cpu_utilization_pct": 75.0,
+                            "process_effective_parallelism": 0.75,
+                            "func_per_cpu_second": 13.333,
+                            "worker_count": 4,
+                            "available_parallelism": 14,
+                        },
                     }
                 },
             },
@@ -102,6 +113,14 @@ def _minimal_single_binary_summary(
                         "ghidra_action_blockgraph_structuring_count": 1,
                         "ghidra_action_printc_count": 1,
                         "ghidra_clean_room_pipeline_complete_count": 1,
+                        "mir_enabled_count": 1,
+                        "mir_function_count": 1,
+                        "mir_block_count": 1,
+                        "mir_value_count": 9,
+                        "mir_memory_region_count": 2,
+                        "mir_join_proof_count": 1,
+                        "mir_region_proof_count": 1,
+                        "mir_projection_duration_ms": 3,
                         "blockgraph_region_candidate_count": 5,
                         "blockgraph_region_complete_count": 2,
                         "blockgraph_region_rejected_missing_follow_count": 1,
@@ -163,6 +182,18 @@ def _minimal_single_binary_summary(
                     "pipeline_complete": 1.0,
                 }
             },
+            "mir_metrics": {
+                "fission": {
+                    "enabled": 1.0,
+                    "function": 1.0,
+                    "block": 1.0,
+                    "value": 9.0,
+                    "memory_region": 2.0,
+                    "join_proof": 1.0,
+                    "region_proof": 1.0,
+                    "projection_duration_ms": 3.0,
+                }
+            },
             "blockgraph_region_metrics": {
                 "fission": {
                     "candidate": 5.0,
@@ -185,6 +216,18 @@ def _minimal_single_binary_summary(
                     "alias_not_fallthrough_nested_after_label": 1.0,
                     "alias_has_multiple_internal_predecessors": 1.0,
                     "payload_crosses_join": 2.0,
+                }
+            },
+            "cpu_metrics": {
+                "fission": {
+                    "process_cpu_seconds": 0.75,
+                    "process_cpu_user_sec": 0.6,
+                    "process_cpu_system_sec": 0.15,
+                    "process_cpu_utilization_pct": 75.0,
+                    "process_effective_parallelism": 0.75,
+                    "func_per_cpu_second": 13.333,
+                    "worker_count": 4,
+                    "available_parallelism": 14,
                 }
             },
             "giant_function_candidates": 1,
@@ -606,6 +649,28 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["pipeline_complete"], 1.0)
         self.assertEqual(metrics["printc"], 0.0)
 
+    def test_extract_mir_metrics(self) -> None:
+        metrics = _extract_mir_metrics(
+            {
+                "mir_enabled_count": 1,
+                "mir_function_count": 1,
+                "mir_block_count": 3,
+                "mir_value_count": 21,
+                "mir_memory_region_count": 4,
+                "mir_join_proof_count": 2,
+                "mir_region_proof_count": 5,
+                "mir_projection_duration_ms": 7,
+            }
+        )
+        self.assertEqual(metrics["enabled"], 1.0)
+        self.assertEqual(metrics["function"], 1.0)
+        self.assertEqual(metrics["block"], 3.0)
+        self.assertEqual(metrics["value"], 21.0)
+        self.assertEqual(metrics["memory_region"], 4.0)
+        self.assertEqual(metrics["join_proof"], 2.0)
+        self.assertEqual(metrics["region_proof"], 5.0)
+        self.assertEqual(metrics["projection_duration_ms"], 7.0)
+
     def test_extract_blockgraph_region_metrics(self) -> None:
         metrics = _extract_blockgraph_region_metrics(
             {
@@ -876,6 +941,8 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(corpus["blockgraph_region_metric_totals"]["candidate"], 5)
         self.assertEqual(corpus["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4)
+        self.assertEqual(corpus["mir_metric_totals"]["value"], 9)
+        self.assertEqual(corpus["binaries"][0]["mir_metrics"]["memory_region"], 2)
         self.assertEqual(
             corpus["binaries"][0]["blockgraph_region_metrics"]["complete"],
             2,
@@ -884,6 +951,8 @@ class CorpusBenchmarkTests(unittest.TestCase):
             corpus["binaries"][0]["alias_interleave_metrics"]["alias_has_nonlocal_ref_nested_before"],
             2,
         )
+        self.assertEqual(corpus["cpu_metric_totals"]["process_cpu_seconds"], 0.75)
+        self.assertEqual(corpus["binaries"][0]["cpu_metrics"]["worker_count"], 4)
         self.assertEqual(
             corpus["max_pathological_examples"][0]["address"],
             "0x140002d40",
@@ -1037,12 +1106,15 @@ class CorpusBenchmarkTests(unittest.TestCase):
             12.0,
         )
         self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
+        self.assertEqual(payload["mir_metric_totals"]["value"], 9.0)
         self.assertEqual(payload["blockgraph_region_metric_totals"]["candidate"], 5.0)
         self.assertEqual(payload["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4.0)
+        self.assertEqual(payload["cpu_metric_totals"]["process_cpu_seconds"], 0.75)
         self.assertEqual(
             payload["per_binary_rows"][0]["ghidra_action_metrics"]["blockgraph_structuring"],
             1.0,
         )
+        self.assertEqual(payload["per_binary_rows"][0]["mir_metrics"]["block"], 1.0)
         self.assertEqual(
             payload["per_binary_rows"][0]["blockgraph_region_metrics"]["complete"],
             2.0,
@@ -1051,6 +1123,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
             payload["per_binary_rows"][0]["alias_interleave_metrics"]["alias_not_fallthrough"],
             3.0,
         )
+        self.assertEqual(payload["per_binary_rows"][0]["cpu_metrics"]["worker_count"], 4.0)
         self.assertEqual(payload["unchanged_target_rows"][0]["name"], "fibonacci")
         self.assertFalse(payload["unchanged_target_rows"][0]["code_changed"])
         self.assertEqual(

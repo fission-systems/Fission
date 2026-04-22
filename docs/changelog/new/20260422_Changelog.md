@@ -723,3 +723,305 @@ env_gate: none
 promotion impact: neutral on current Windows small C corpus
 next owner: BlockGraph join/follow ownership completion for unresolved join_owner_conflict
 ```
+
+---
+
+## 5. CLI Process CPU / Worker Telemetry For Parallel Decompilation
+
+### Summary
+
+This wave added first-class process CPU and worker readout to the CLI benchmark JSON path so hot-machine / fan-noise reports can be separated from actual Fission CPU behavior.
+
+The immediate investigation found:
+
+- no active `fission_cli`, benchmark, Ghidra Java, cargo, or rustc process during the heat report
+- the dominant CPU process was VS Code `Code Helper (Plugin)` PID `19578`
+- that process was tied to the Continue extension and `.continue/index/index.sqlite-shm`
+
+So the current heat event was not caused by a running Fission decompilation job.
+
+### What changed
+
+`fission_cli decomp ... --json --benchmark` now emits additive `_meta` fields:
+
+- `worker_count`
+- `worker_fanout_enabled`
+- `available_parallelism`
+- `worker_env_requested`
+- `decomp_stack_mb`
+- `cpu_user_sec`
+- `cpu_system_sec`
+- `cpu_total_sec`
+- `cpu_utilization_pct`
+- `effective_parallelism`
+
+The CPU values are process-local and come from `getrusage(RUSAGE_SELF)` on Unix/macOS. They are intentionally independent from the benchmark wrapper sampler, which can miss short Fission runs.
+
+Benchmark summaries now project those values into:
+
+- verbose single-binary summary
+- verbose corpus summary
+- compact single-binary summary
+- compact corpus summary
+- per-binary compact rows
+
+### Validation
+
+Rust / Python validation:
+
+```text
+cargo check -p fission-cli
+- passed
+
+cargo build -p fission-cli --release
+- passed
+
+cargo check -p fission-automation
+- passed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+- 27 passed / 0 failed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+- 7 passed / 0 failed
+```
+
+Live worker scaling probe:
+
+Target:
+
+- `benchmark/binary/x86-64/window/small/binary/c/array_operations.exe`
+
+Command shape:
+
+- `fission_cli decomp <binary> --all --json --benchmark --include-nonuser-functions`
+
+Measured `_meta` results:
+
+```text
+workers=1
+- function_count: 127
+- wall_clock_sec: 1.441615
+- cpu_total_sec: 1.289221
+- cpu_utilization_pct: 89.429
+- effective_parallelism: 0.894
+- total_decomp_sec: 1.422880
+
+workers=2
+- function_count: 127
+- wall_clock_sec: 1.160407
+- cpu_total_sec: 1.275793
+- cpu_utilization_pct: 109.944
+- effective_parallelism: 1.099
+- total_decomp_sec: 1.327213
+
+workers=4
+- function_count: 127
+- wall_clock_sec: 1.096661
+- cpu_total_sec: 1.379144
+- cpu_utilization_pct: 125.758
+- effective_parallelism: 1.258
+- total_decomp_sec: 1.403092
+
+workers=8
+- function_count: 127
+- wall_clock_sec: 1.129866
+- cpu_total_sec: 1.773962
+- cpu_utilization_pct: 157.006
+- effective_parallelism: 1.570
+- total_decomp_sec: 2.042907
+```
+
+### Reading of the result
+
+What improved:
+
+- Fission now reports its own process CPU consumption and parallelism directly in benchmark JSON.
+- The compact AI-facing artifact can distinguish wall-clock speed from total CPU burn.
+- Worker fan-out can now be evaluated as a throughput/CPU-efficiency tradeoff instead of guessed from wall time.
+
+What did not change:
+
+- no decompiler semantic behavior changed
+- no worker scheduling policy changed
+- no quality metric changed
+
+Practical interpretation:
+
+- current small C corpus runs are not showing an infinite-loop / runaway CPU signature
+- the workload has limited parallel efficiency at high worker counts
+- `workers=4` gave the best wall time in this probe
+- `workers=8` increased total CPU seconds and effective parallelism but did not improve wall time
+
+### Final status
+
+```text
+wave_type: diagnostic/reporting
+primary_owner: fission-cli benchmark metadata + benchmark compact projection
+behavior_changed: no decompiler semantic change
+release_path_changed: no
+env_gate: none
+practical_result: CPU usage is now measurable per Fission run; current heat report points outside Fission
+next owner: adaptive worker policy and per-function progress guards
+```
+
+## 6. MIR Shadow Contract Wave 1
+
+### Scope
+
+This wave introduces the first internal MIR contract between current NIR/HIR normalization and final HIR printing.
+
+```text
+wave_type: behavior-preserving shadow contract
+primary_owner: crates/fission-pcode/src/nir/mir
+behavior_changed: no semantic output change intended
+release_path_changed: no
+env_gate: none
+```
+
+The new MIR layer is intentionally shadow-only. It projects the current normalized `HirFunction` into `MirFunction` for telemetry and ownership-boundary validation, but does not round-trip back into HIR and does not feed the printer.
+
+### Added Internal Contract
+
+New internal owner:
+
+- `crates/fission-pcode/src/nir/mir/`
+
+Initial MIR concepts:
+
+- `MirFunction`
+- `MirBlock`
+- `MirValueId`
+- `MirStmt`
+- `MirTerminator`
+- `MirValueKind`
+- `MirMemoryRegion`
+- `MirJoinProof`
+- `MirRegionProof`
+- `MirLoweringStats`
+
+Telemetry added to `NirBuildStats`:
+
+- `mir_enabled_count`
+- `mir_function_count`
+- `mir_block_count`
+- `mir_value_count`
+- `mir_memory_region_count`
+- `mir_join_proof_count`
+- `mir_region_proof_count`
+- `mir_projection_duration_ms`
+
+Benchmark reporting now exposes MIR metrics in:
+
+- verbose single-binary summary
+- verbose corpus summary
+- compact single-binary summary
+- compact corpus summary
+- console summary
+- per-binary compact rows
+
+### Validation
+
+Rust / Python validation:
+
+```text
+cargo test -p fission-pcode mir_ -- --test-threads=1
+- passed: 3 passed / 0 failed
+
+cargo test -p fission-pcode -- --test-threads=1
+- passed: 672 passed / 0 failed
+
+cargo check -p fission-pcode
+- passed
+
+cargo check -p fission-automation
+- passed
+
+cargo build -p fission-cli --release
+- passed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+- passed: 28 passed / 0 failed
+
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+- passed: 7 passed / 0 failed
+```
+
+Live targeted validation:
+
+Target:
+
+- `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe`
+- function: `fibonacci @ 0x140001470`
+
+Observed `preview_build_stats`:
+
+```text
+mir_enabled_count: 1
+mir_function_count: 1
+mir_block_count: 1
+mir_value_count: 3639
+mir_memory_region_count: 0
+mir_join_proof_count: 86
+mir_region_proof_count: 21
+mir_projection_duration_ms: 0
+rendered code length: 40935
+```
+
+Windows small C 2-way benchmark:
+
+```text
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-nested-before-ownership-latest
+trial: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+weighted_avg_normalized_similarity: 37.604%
+x64 weighted_avg_normalized_similarity: 37.604%
+row gates: 6 / 6 passed
+direct_success: 6 / 6 non-worse
+coverage: 6 / 6 non-worse
+target rows code_changed: false for fibonacci and fibonacci_memo
+```
+
+MIR corpus totals:
+
+```text
+enabled: 294
+function: 294
+block: 294
+value: 9066
+memory_region: 324
+join_proof: 658
+region_proof: 407
+projection_duration_ms: 0
+```
+
+### Reading of the Result
+
+What improved:
+
+- Fission now has a concrete internal MIR owner boundary that maps to Ghidra-style `Funcdata` / `Heritage` / `BlockGraph` working-state responsibilities.
+- Benchmark artifacts can now confirm whether MIR projection is active and how much semantic surface it sees.
+- The compact AI-facing artifact now exposes `mir_metric_totals`, so future MIR materialization or BlockGraph experiments can be compared without opening full artifacts.
+
+What did not change:
+
+- no CLI syntax changed
+- no HIR output path changed
+- no representative/materialization policy moved yet
+- no BlockGraph acceptance changed yet
+- sample quality stayed neutral rather than improving
+
+Promotion status:
+
+```text
+status: blocked
+reason: corpus gate reported failure_family_distribution canonical_must_emit_label_conflict_count 1088 -> 1092
+interpretation: this wave is shadow-only and target rows remained code_changed=false, so the blocker is treated as existing/parallel failure-family drift rather than MIR output mutation
+```
+
+### Next Owner
+
+The next MIR wave should not broaden structuring heuristics. It should move one narrow representative/materialization read-only decision into MIR behind an env gate:
+
+- `FISSION_ENABLE_MIR_MATERIALIZATION`
+- target metric: `materialization_stabilized_count`
+- acceptance: weighted similarity neutral, new failed rows `0`, and no increase in `canonical_must_emit_label_conflict_count`

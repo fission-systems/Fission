@@ -51,6 +51,16 @@ SELECTED_GHIDRA_ACTION_KEYS = (
     "printc",
     "pipeline_complete",
 )
+SELECTED_MIR_KEYS = (
+    "enabled",
+    "function",
+    "block",
+    "value",
+    "memory_region",
+    "join_proof",
+    "region_proof",
+    "projection_duration_ms",
+)
 SELECTED_BLOCKGRAPH_REGION_KEYS = (
     "candidate",
     "complete",
@@ -75,6 +85,16 @@ SELECTED_ALIAS_INTERLEAVE_KEYS = (
     "alias_not_fallthrough_nested_after_label",
     "alias_has_multiple_internal_predecessors",
     "payload_crosses_join",
+)
+SELECTED_CPU_KEYS = (
+    "process_cpu_seconds",
+    "process_cpu_user_sec",
+    "process_cpu_system_sec",
+    "process_cpu_utilization_pct",
+    "process_effective_parallelism",
+    "func_per_cpu_second",
+    "worker_count",
+    "available_parallelism",
 )
 
 
@@ -222,6 +242,10 @@ def build_single_compact_summary(
         (summary.ghidra_action_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
+    mir_metrics = _normalize_metric_map(
+        (summary.mir_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_MIR_KEYS,
+    )
     blockgraph_region_metrics = _normalize_metric_map(
         (summary.blockgraph_region_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
@@ -229,6 +253,13 @@ def build_single_compact_summary(
     alias_interleave_metrics = _normalize_metric_map(
         (summary.alias_interleave_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+    )
+    kpi_engines = (((summary_payload.get("summary") or {}).get("kpi") or {}).get("engines") or {})
+    fission_kpi = kpi_engines.get("fission", {}) if isinstance(kpi_engines, dict) else {}
+    fission_cpu_kpi = fission_kpi.get("cpu_kpi", {}) if isinstance(fission_kpi, dict) else {}
+    cpu_metrics = _normalize_metric_map(
+        fission_cpu_kpi,
+        allowed_keys=SELECTED_CPU_KEYS,
     )
     watchlist = ((summary.row_fidelity_targets or {}).get("pyghidra_vs_fission") or {})
     giant_function_speed_family_counts = {
@@ -287,8 +318,10 @@ def build_single_compact_summary(
         shape_drift_metrics=shape_drift,
         normalize_pass_metrics=normalize_pass_metrics,
         ghidra_action_metrics=ghidra_action_metrics,
+        mir_metrics=mir_metrics,
         blockgraph_region_metrics=blockgraph_region_metrics,
         alias_interleave_metrics=alias_interleave_metrics,
+        cpu_metrics=cpu_metrics,
         giant_function_speed_family_counts=giant_function_speed_family_counts,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
         baseline_blockers=baseline_blockers,
@@ -377,6 +410,10 @@ def build_corpus_compact_summary(
                     row.ghidra_action_metrics,
                     allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                 ),
+                "mir_metrics": _normalize_metric_map(
+                    row.mir_metrics,
+                    allowed_keys=SELECTED_MIR_KEYS,
+                ),
                 "blockgraph_region_metrics": _normalize_metric_map(
                     row.blockgraph_region_metrics,
                     allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
@@ -384,6 +421,10 @@ def build_corpus_compact_summary(
                 "alias_interleave_metrics": _normalize_metric_map(
                     row.alias_interleave_metrics,
                     allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+                ),
+                "cpu_metrics": _normalize_metric_map(
+                    row.cpu_metrics,
+                    allowed_keys=SELECTED_CPU_KEYS,
                 ),
                 "eligibility_reason": str((row.eligibility or {}).get("reason") or "unknown"),
                 "weight": _safe_float(row.weight, 0.0),
@@ -422,6 +463,10 @@ def build_corpus_compact_summary(
                         record["ghidra_action_metrics"],
                         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                     ),
+                    mir_metrics=_normalize_metric_map(
+                        record["mir_metrics"],
+                        allowed_keys=SELECTED_MIR_KEYS,
+                    ),
                     blockgraph_region_metrics=_normalize_metric_map(
                         record["blockgraph_region_metrics"],
                         allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
@@ -429,6 +474,10 @@ def build_corpus_compact_summary(
                     alias_interleave_metrics=_normalize_metric_map(
                         record["alias_interleave_metrics"],
                         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+                    ),
+                    cpu_metrics=_normalize_metric_map(
+                        record["cpu_metrics"],
+                        allowed_keys=SELECTED_CPU_KEYS,
                     ),
                     eligibility_reason=str(record["eligibility_reason"]),
                 )
@@ -472,6 +521,10 @@ def build_corpus_compact_summary(
         artifact.ghidra_action_metric_totals,
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
+    mir_totals = _normalize_metric_map(
+        artifact.mir_metric_totals,
+        allowed_keys=SELECTED_MIR_KEYS,
+    )
     blockgraph_region_totals = _normalize_metric_map(
         artifact.blockgraph_region_metric_totals,
         allowed_keys=SELECTED_BLOCKGRAPH_REGION_KEYS,
@@ -479,6 +532,10 @@ def build_corpus_compact_summary(
     alias_interleave_totals = _normalize_metric_map(
         artifact.alias_interleave_metric_totals,
         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+    )
+    cpu_metric_totals = _normalize_metric_map(
+        artifact.cpu_metric_totals,
+        allowed_keys=SELECTED_CPU_KEYS,
     )
     giant_function_speed_family_totals = {
         str(key): _safe_int(value, 0)
@@ -523,8 +580,10 @@ def build_corpus_compact_summary(
         shape_drift_totals=shape_totals,
         normalize_pass_metric_totals=normalize_pass_totals,
         ghidra_action_metric_totals=ghidra_action_totals,
+        mir_metric_totals=mir_totals,
         blockgraph_region_metric_totals=blockgraph_region_totals,
         alias_interleave_metric_totals=alias_interleave_totals,
+        cpu_metric_totals=cpu_metric_totals,
         giant_function_speed_family_totals=giant_function_speed_family_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)

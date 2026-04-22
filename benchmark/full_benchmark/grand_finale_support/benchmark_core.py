@@ -195,6 +195,17 @@ GHIDRA_ACTION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("ghidra_clean_room_pipeline_complete_count", "pipeline_complete"),
 )
 
+MIR_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("mir_enabled_count", "enabled"),
+    ("mir_function_count", "function"),
+    ("mir_block_count", "block"),
+    ("mir_value_count", "value"),
+    ("mir_memory_region_count", "memory_region"),
+    ("mir_join_proof_count", "join_proof"),
+    ("mir_region_proof_count", "region_proof"),
+    ("mir_projection_duration_ms", "projection_duration_ms"),
+)
+
 BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("blockgraph_region_candidate_count", "candidate"),
     ("blockgraph_region_complete_count", "complete"),
@@ -289,6 +300,11 @@ def _extract_ghidra_action_metrics(preview_build_stats: dict[str, Any]) -> dict[
     return _extract_named_metrics(source, GHIDRA_ACTION_METRIC_SPECS)
 
 
+def _extract_mir_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+    source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _extract_named_metrics(source, MIR_METRIC_SPECS)
+
+
 def _extract_blockgraph_region_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
     source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
     return _extract_named_metrics(source, BLOCKGRAPH_REGION_METRIC_SPECS)
@@ -310,6 +326,21 @@ def _aggregate_ghidra_action_metrics_from_entries(
         if not isinstance(preview_build_stats, dict):
             continue
         for key, alias in GHIDRA_ACTION_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
+
+
+def _aggregate_mir_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in MIR_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in MIR_METRIC_SPECS:
             totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
     return dict(sorted(totals.items()))
 
@@ -396,6 +427,35 @@ def _merge_named_metric_totals(metric_maps: dict[str, dict[str, float]]) -> dict
         key: int(value) if abs(value - round(value)) <= 1e-9 else round(value, 6)
         for key, value in sorted(totals.items())
     }
+
+
+def _merge_cpu_metric_totals(metric_maps: dict[str, dict[str, float]]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    max_keys = {
+        "process_cpu_utilization_pct",
+        "process_effective_parallelism",
+        "worker_count",
+        "available_parallelism",
+    }
+    mean_keys = {"func_per_cpu_second"}
+    mean_acc: dict[str, list[float]] = {key: [] for key in mean_keys}
+
+    for metrics in metric_maps.values():
+        for key, value in metrics.items():
+            value_f = _safe_float(value, 0.0)
+            if key in max_keys:
+                totals[key] = max(totals.get(key, 0.0), value_f)
+            elif key in mean_keys:
+                if value_f > 0.0:
+                    mean_acc[key].append(value_f)
+            else:
+                totals[key] = totals.get(key, 0.0) + value_f
+
+    for key, values in mean_acc.items():
+        if values:
+            totals[key] = sum(values) / len(values)
+
+    return _normalize_metric_map_for_json(totals)
 
 
 def _merge_count_maps(count_maps: dict[str, dict[str, int]]) -> dict[str, int]:
@@ -3410,16 +3470,34 @@ def summarize_engine_memory_kpi(resources: dict[str, Any], function_count: int) 
     }
 
 
-def summarize_engine_cpu_kpi(resources: dict[str, Any], wall_sec: float, function_count: int) -> dict[str, float]:
+def summarize_engine_cpu_kpi(
+    resources: dict[str, Any],
+    wall_sec: float,
+    function_count: int,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    meta = meta or {}
     avg_cpu_pct = float(resources.get("avg_cpu_pct", 0.0) or 0.0)
     max_cpu_pct = float(resources.get("max_cpu_pct", 0.0) or 0.0)
     activity_delta = resources.get("macos_activity_delta", {}) if resources else {}
     estimated_cpu_seconds = max(float(wall_sec or 0.0) * (avg_cpu_pct / 100.0), 0.0)
+    process_cpu_seconds = _safe_float(meta.get("cpu_total_sec"), 0.0)
+    cpu_seconds_for_efficiency = process_cpu_seconds if process_cpu_seconds > 0.0 else estimated_cpu_seconds
+    worker_count = _safe_int(meta.get("worker_count"), 0)
+    available_parallelism = _safe_int(meta.get("available_parallelism"), 0)
     return {
         "avg_cpu_pct": round(avg_cpu_pct, 3),
         "max_cpu_pct": round(max_cpu_pct, 3),
         "estimated_cpu_seconds": round(estimated_cpu_seconds, 6),
-        "func_per_cpu_second": round(function_count / max(estimated_cpu_seconds, 1e-9), 3),
+        "process_cpu_seconds": round(process_cpu_seconds, 6),
+        "process_cpu_user_sec": round(_safe_float(meta.get("cpu_user_sec"), 0.0), 6),
+        "process_cpu_system_sec": round(_safe_float(meta.get("cpu_system_sec"), 0.0), 6),
+        "process_cpu_utilization_pct": round(_safe_float(meta.get("cpu_utilization_pct"), 0.0), 3),
+        "process_effective_parallelism": round(_safe_float(meta.get("effective_parallelism"), 0.0), 3),
+        "func_per_cpu_second": round(function_count / max(cpu_seconds_for_efficiency, 1e-9), 3),
+        "worker_count": worker_count,
+        "available_parallelism": available_parallelism,
+        "worker_fanout_enabled": bool(meta.get("worker_fanout_enabled", False)),
         "cpu_user_pct_delta": round(float(activity_delta.get("cpu_user_pct", 0.0) or 0.0), 3),
         "cpu_sys_pct_delta": round(float(activity_delta.get("cpu_sys_pct", 0.0) or 0.0), 3),
         "cpu_idle_pct_delta": round(float(activity_delta.get("cpu_idle_pct", 0.0) or 0.0), 3),
@@ -4091,6 +4169,7 @@ def build_comparison(
         py_resources,
         float(pyghidra["meta"].get("wall_clock_sec", 0.0) or 0.0),
         len(pyghidra["entries"]),
+        pyghidra["meta"],
     )
     py_quality_kpi = summarize_engine_quality_kpi(
         function_count=len(pyghidra["entries"]),
@@ -4111,6 +4190,7 @@ def build_comparison(
         fission_resources,
         float(fission["meta"].get("wall_clock_sec", 0.0) or 0.0),
         len(fission["entries"]),
+        fission["meta"],
     )
     fission_quality_kpi = summarize_engine_quality_kpi(
         function_count=len(fission["entries"]),
@@ -4131,6 +4211,13 @@ def build_comparison(
     if not any(ghidra_action_metrics.values()):
         ghidra_action_metrics = _normalize_metric_map_for_json(
             _aggregate_ghidra_action_metrics_from_entries(fission["entries"])
+        )
+    mir_metrics = _normalize_metric_map_for_json(
+        _extract_mir_metrics(fission["meta"].get("preview_build_stats", {}))
+    )
+    if not any(mir_metrics.values()):
+        mir_metrics = _normalize_metric_map_for_json(
+            _aggregate_mir_metrics_from_entries(fission["entries"])
         )
     blockgraph_region_metrics = _normalize_metric_map_for_json(
         _extract_blockgraph_region_metrics(fission["meta"].get("preview_build_stats", {}))
@@ -4238,11 +4325,17 @@ def build_comparison(
         "ghidra_action_metrics": {
             "fission": ghidra_action_metrics,
         },
+        "mir_metrics": {
+            "fission": mir_metrics,
+        },
         "blockgraph_region_metrics": {
             "fission": blockgraph_region_metrics,
         },
         "alias_interleave_metrics": {
             "fission": alias_interleave_metrics,
+        },
+        "cpu_metrics": {
+            "fission": fission_cpu_kpi,
         },
         "target_structuring_rows": target_structuring_rows,
         "unchanged_target_rows": unchanged_target_rows,
@@ -4292,6 +4385,14 @@ def build_comparison(
                 "total_decomp_sec": round(float(fission["meta"].get("total_decomp_sec", 0.0)), 6),
                 "postprocess_sec": round(float(fission["meta"].get("total_postprocess_sec", 0.0)), 6),
                 "wall_sec": round(float(fission["meta"].get("wall_clock_sec", 0.0)), 6),
+                "cpu_total_sec": round(_safe_float(fission["meta"].get("cpu_total_sec"), 0.0), 6),
+                "cpu_user_sec": round(_safe_float(fission["meta"].get("cpu_user_sec"), 0.0), 6),
+                "cpu_system_sec": round(_safe_float(fission["meta"].get("cpu_system_sec"), 0.0), 6),
+                "cpu_utilization_pct": round(_safe_float(fission["meta"].get("cpu_utilization_pct"), 0.0), 3),
+                "effective_parallelism": round(_safe_float(fission["meta"].get("effective_parallelism"), 0.0), 3),
+                "worker_count": _safe_int(fission["meta"].get("worker_count"), 0),
+                "available_parallelism": _safe_int(fission["meta"].get("available_parallelism"), 0),
+                "worker_fanout_enabled": bool(fission["meta"].get("worker_fanout_enabled", False)),
                 "wall_speedup_vs_pyghidra": round(
                     float(pyghidra["meta"].get("wall_clock_sec", 0.0))
                     / max(float(fission["meta"].get("wall_clock_sec", 0.0)), 1e-9),
@@ -4753,8 +4854,10 @@ def build_corpus_assessment(
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
     ghidra_action_metrics_per_binary: dict[str, dict[str, float]] = {}
+    mir_metrics_per_binary: dict[str, dict[str, float]] = {}
     blockgraph_region_metrics_per_binary: dict[str, dict[str, float]] = {}
     alias_interleave_metrics_per_binary: dict[str, dict[str, float]] = {}
+    cpu_metrics_per_binary: dict[str, dict[str, float]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
@@ -4848,6 +4951,30 @@ def build_corpus_assessment(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
+        mir_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "mir_metrics", "fission"), {})
+            if isinstance(
+                _lookup_path(benchmark, ("summary", "mir_metrics", "fission"), {}),
+                dict,
+            )
+            else {}
+        )
+        if not any(mir_metrics.values()):
+            mir_metrics = _normalize_metric_map_for_json(
+                _extract_mir_metrics(
+                    _lookup_path(
+                        benchmark,
+                        ("summary", "engines", "fission", "preview_build_stats"),
+                        {},
+                    )
+                )
+            )
+        if not any(mir_metrics.values()):
+            mir_metrics = _normalize_metric_map_for_json(
+                _aggregate_mir_metrics_from_entries(
+                    _lookup_path(benchmark, ("engines", "fission", "entries"), {})
+                )
+            )
         blockgraph_region_metrics = _normalize_metric_map_for_json(
             _lookup_path(benchmark, ("summary", "blockgraph_region_metrics", "fission"), {})
             if isinstance(
@@ -4896,6 +5023,14 @@ def build_corpus_assessment(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
+        cpu_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "kpi", "engines", "fission", "cpu_kpi"), {})
+            if isinstance(
+                _lookup_path(benchmark, ("summary", "kpi", "engines", "fission", "cpu_kpi"), {}),
+                dict,
+            )
+            else {}
+        )
         target_structuring_rows = list(
             _lookup_path(benchmark, ("summary", "target_structuring_rows"), []) or []
         )
@@ -4964,8 +5099,10 @@ def build_corpus_assessment(
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
         ghidra_action_metrics_per_binary[binary_id] = ghidra_action_metrics
+        mir_metrics_per_binary[binary_id] = mir_metrics
         blockgraph_region_metrics_per_binary[binary_id] = blockgraph_region_metrics
         alias_interleave_metrics_per_binary[binary_id] = alias_interleave_metrics
+        cpu_metrics_per_binary[binary_id] = cpu_metrics
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
             giant_function_diagnostics["giant_function_speed_family_counts"]
         )
@@ -5180,8 +5317,10 @@ def build_corpus_assessment(
                 "shape_drift_metrics": shape_drift_metrics,
                 "normalize_pass_metrics": normalize_pass_metrics,
                 "ghidra_action_metrics": ghidra_action_metrics,
+                "mir_metrics": mir_metrics,
                 "blockgraph_region_metrics": blockgraph_region_metrics,
                 "alias_interleave_metrics": alias_interleave_metrics,
+                "cpu_metrics": cpu_metrics,
                 "target_structuring_rows": target_structuring_rows,
                 "giant_function_candidates": giant_function_diagnostics[
                     "giant_function_candidates"
@@ -5219,12 +5358,14 @@ def build_corpus_assessment(
         normalize_pass_metrics_per_binary
     )
     ghidra_action_metric_totals = _merge_named_metric_totals(ghidra_action_metrics_per_binary)
+    mir_metric_totals = _merge_named_metric_totals(mir_metrics_per_binary)
     blockgraph_region_metric_totals = _merge_named_metric_totals(
         blockgraph_region_metrics_per_binary
     )
     alias_interleave_metric_totals = _merge_named_metric_totals(
         alias_interleave_metrics_per_binary
     )
+    cpu_metric_totals = _merge_cpu_metric_totals(cpu_metrics_per_binary)
     giant_function_speed_family_totals = _merge_count_maps(
         giant_function_speed_family_counts_per_binary
     )
@@ -5508,8 +5649,10 @@ def build_corpus_assessment(
             "shape_drift_totals": shape_drift_totals,
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
             "ghidra_action_metric_totals": ghidra_action_metric_totals,
+            "mir_metric_totals": mir_metric_totals,
             "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
             "alias_interleave_metric_totals": alias_interleave_metric_totals,
+            "cpu_metric_totals": cpu_metric_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
             "blockgraph_region_rejection_totals": {
                 key: value
@@ -5536,10 +5679,14 @@ def build_corpus_assessment(
         "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
         "ghidra_action_metric_totals": ghidra_action_metric_totals,
         "ghidra_action_metrics_per_binary": ghidra_action_metrics_per_binary,
+        "mir_metric_totals": mir_metric_totals,
+        "mir_metrics_per_binary": mir_metrics_per_binary,
         "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
         "blockgraph_region_metrics_per_binary": blockgraph_region_metrics_per_binary,
         "alias_interleave_metric_totals": alias_interleave_metric_totals,
         "alias_interleave_metrics_per_binary": alias_interleave_metrics_per_binary,
+        "cpu_metric_totals": cpu_metric_totals,
+        "cpu_metrics_per_binary": cpu_metrics_per_binary,
         "blockgraph_region_rejection_totals": {
             key: value
             for key, value in blockgraph_region_metric_totals.items()

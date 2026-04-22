@@ -8,6 +8,7 @@ mod abstract_location;
 mod action_pipeline;
 mod builder;
 mod cfg;
+mod mir;
 mod normalize;
 mod piece;
 mod printer;
@@ -29,7 +30,9 @@ pub use self::telemetry::{
     take_last_preview_hint_stats,
 };
 pub use self::types::*;
-use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, printer::*, structuring::*};
+use self::{
+    action_pipeline::*, builder::*, cfg::*, mir::*, normalize::*, printer::*, structuring::*,
+};
 
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
@@ -252,6 +255,14 @@ pub fn render_mlil_preview_with_binary_and_context(
         }
         debug_log("type_hints_done");
     }
+    debug_log("mir_shadow_projection_start");
+    let mir_projection_start = Instant::now();
+    let (_shadow_mir, mir_lowering_stats) = project_hir_to_mir(&hir);
+    mir_lowering_stats.apply_to_build_stats(
+        &mut build_stats,
+        mir_projection_start.elapsed().as_millis() as usize,
+    );
+    debug_log("mir_shadow_projection_done");
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }

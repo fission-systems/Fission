@@ -57,6 +57,16 @@ Clean-room owner mapping only; Fission remains Rust-native and does not depend o
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+## MIR Shadow Metrics
+
+Behavior-preserving projection from current HIR into the internal MIR contract. These counters are diagnostic-only in this wave.
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in mir_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
 ## BlockGraph Region Proof Metrics
 
 Ghidra `BlockGraph` / `FlowBlock` clean-room proof substrate counters. These are owner diagnostics, not a separate acceptance policy.

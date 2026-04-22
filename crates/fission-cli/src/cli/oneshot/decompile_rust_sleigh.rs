@@ -29,6 +29,21 @@ struct FunctionRenderResult {
     json_entry: serde_json::Value,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ProcessCpuSnapshot {
+    user_sec: f64,
+    system_sec: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProcessCpuDelta {
+    user_sec: f64,
+    system_sec: f64,
+    total_sec: f64,
+    utilization_pct: f64,
+    effective_parallelism: f64,
+}
+
 fn should_use_assembly_fallback(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("preview_timeout")
@@ -185,6 +200,7 @@ fn run_with_functions(
     selection_accounting: crate::cli::oneshot::function_select::BatchSelectionAccounting,
     init_start: std::time::Instant,
 ) -> io::Result<()> {
+    let cpu_start = capture_process_cpu_snapshot();
     let effective_no_header = cli.no_header || cli.ghidra_compat;
     let effective_json = cli.json || cli.benchmark;
     let config = RenderConfig {
@@ -193,14 +209,22 @@ fn run_with_functions(
         effective_no_warnings: cli.no_warnings || cli.ghidra_compat,
     };
     let stack_size_bytes = resolve_decomp_stack_size_bytes();
+    let available_parallelism = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let worker_env_requested = std::env::var("FISSION_RUST_DECOMP_WORKERS").ok();
 
     let use_worker_fanout = cli.decomp_all && functions.len() > 1;
+    let worker_count = if use_worker_fanout {
+        resolve_worker_count(functions.len())
+    } else {
+        1
+    };
     let mut results = if use_worker_fanout {
-        let workers = resolve_worker_count(functions.len());
         if cli.verbose {
             eprintln!(
                 "[*] Rust-only decomp-all worker fan-out/fan-in: workers={}, functions={}, stack_mb={}",
-                workers,
+                worker_count,
                 functions.len(),
                 stack_size_bytes / (1024 * 1024)
             );
@@ -209,7 +233,7 @@ fn run_with_functions(
             Arc::new(binary.clone()),
             functions,
             config,
-            workers,
+            worker_count,
             stack_size_bytes,
         )
     } else {
@@ -255,6 +279,10 @@ fn run_with_functions(
     }
 
     let final_output = if cli.benchmark {
+        let wall_clock_sec = round_six(init_start.elapsed().as_secs_f64());
+        let cpu_delta = cpu_start.and_then(|start| {
+            capture_process_cpu_snapshot().map(|end| process_cpu_delta(start, end, wall_clock_sec))
+        });
         let envelope = serde_json::json!({
             "_meta": {
                 "tool": "fission",
@@ -262,15 +290,25 @@ fn run_with_functions(
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
                 "engine": "rust-sleigh",
                 "function_count": results.len(),
+                "worker_count": worker_count,
+                "worker_fanout_enabled": use_worker_fanout,
+                "available_parallelism": available_parallelism,
+                "worker_env_requested": worker_env_requested,
+                "decomp_stack_mb": stack_size_bytes / (1024 * 1024),
                 "functions_discovered_total": selection_accounting.functions_discovered_total,
                 "functions_selected_total": selection_accounting.functions_selected_total,
                 "functions_excluded_import_count": selection_accounting.functions_excluded_import_count,
                 "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
                 "include_nonuser_functions": selection_accounting.include_nonuser_functions,
                 "init_sec": 0.0,
-                "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
-                "total_postprocess_sec": (total_postprocess_secs * 1_000_000.0).round() / 1_000_000.0,
-                "wall_clock_sec": (init_start.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
+                "total_decomp_sec": round_six(total_decomp_secs),
+                "total_postprocess_sec": round_six(total_postprocess_secs),
+                "wall_clock_sec": wall_clock_sec,
+                "cpu_user_sec": cpu_delta.map(|delta| round_six(delta.user_sec)),
+                "cpu_system_sec": cpu_delta.map(|delta| round_six(delta.system_sec)),
+                "cpu_total_sec": cpu_delta.map(|delta| round_six(delta.total_sec)),
+                "cpu_utilization_pct": cpu_delta.map(|delta| round_three(delta.utilization_pct)),
+                "effective_parallelism": cpu_delta.map(|delta| round_three(delta.effective_parallelism)),
             },
             "functions": json_results,
         });
@@ -294,6 +332,56 @@ fn run_with_functions(
     }
 
     Ok(())
+}
+
+fn round_six(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
+fn round_three(value: f64) -> f64 {
+    (value * 1_000.0).round() / 1_000.0
+}
+
+fn process_cpu_delta(
+    start: ProcessCpuSnapshot,
+    end: ProcessCpuSnapshot,
+    wall_clock_sec: f64,
+) -> ProcessCpuDelta {
+    let user_sec = (end.user_sec - start.user_sec).max(0.0);
+    let system_sec = (end.system_sec - start.system_sec).max(0.0);
+    let total_sec = user_sec + system_sec;
+    let wall = wall_clock_sec.max(1e-9);
+    ProcessCpuDelta {
+        user_sec,
+        system_sec,
+        total_sec,
+        utilization_pct: (total_sec / wall) * 100.0,
+        effective_parallelism: total_sec / wall,
+    }
+}
+
+#[cfg(unix)]
+fn capture_process_cpu_snapshot() -> Option<ProcessCpuSnapshot> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    let usage = unsafe { usage.assume_init() };
+    Some(ProcessCpuSnapshot {
+        user_sec: timeval_to_seconds(usage.ru_utime),
+        system_sec: timeval_to_seconds(usage.ru_stime),
+    })
+}
+
+#[cfg(unix)]
+fn timeval_to_seconds(value: libc::timeval) -> f64 {
+    value.tv_sec as f64 + (value.tv_usec as f64 / 1_000_000.0)
+}
+
+#[cfg(not(unix))]
+fn capture_process_cpu_snapshot() -> Option<ProcessCpuSnapshot> {
+    None
 }
 
 fn resolve_worker_count(total_functions: usize) -> usize {
