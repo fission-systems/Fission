@@ -12,6 +12,7 @@ pub(crate) struct MirFunction {
     pub memory_regions: Vec<MirMemoryRegion>,
     pub join_proofs: Vec<MirJoinProof>,
     pub region_proofs: Vec<MirRegionProof>,
+    pub block_graph: MirBlockGraph,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +103,42 @@ pub(crate) struct MirRegionProof {
     pub status: MirProofStatus,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MirBlockGraph {
+    pub candidates: Vec<MirRegionCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MirRegionCandidate {
+    pub entry: u32,
+    pub members: Vec<u32>,
+    pub exits: Vec<u32>,
+    pub follow: Option<u32>,
+    pub join_proof: MirJoinOwnershipProof,
+    pub follow_proof: MirFollowOwnershipProof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MirJoinConflictKind {
+    MustEmitLabel,
+    JoinOwnerConflict,
+    SideEntry,
+    SideExit,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MirJoinOwnershipProof {
+    pub status: MirProofStatus,
+    pub conflict: Option<MirJoinConflictKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MirFollowOwnershipProof {
+    pub status: MirProofStatus,
+    pub follow: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct MirLoweringStats {
     pub function_count: usize,
@@ -146,6 +183,7 @@ pub(crate) fn project_hir_to_mir(func: &HirFunction) -> (MirFunction, MirLowerin
         memory_regions: projector.memory_regions,
         join_proofs: projector.join_proofs,
         region_proofs: projector.region_proofs,
+        block_graph: MirBlockGraph::default(),
     };
     let stats = MirLoweringStats {
         function_count: 1,
@@ -465,5 +503,58 @@ mod tests {
         let _ = project_hir_to_mir(&func);
 
         assert_eq!(func, before);
+    }
+
+    #[test]
+    fn mir_blockgraph_candidate_records_complete_join_follow() {
+        let candidate = MirRegionCandidate {
+            entry: 0,
+            members: vec![0, 1],
+            exits: vec![2],
+            follow: Some(2),
+            join_proof: MirJoinOwnershipProof {
+                status: MirProofStatus::Complete,
+                conflict: None,
+            },
+            follow_proof: MirFollowOwnershipProof {
+                status: MirProofStatus::Complete,
+                follow: Some(2),
+            },
+        };
+        let graph = MirBlockGraph {
+            candidates: vec![candidate],
+        };
+
+        assert_eq!(graph.candidates.len(), 1);
+        assert_eq!(
+            graph.candidates[0].join_proof.status,
+            MirProofStatus::Complete
+        );
+        assert_eq!(graph.candidates[0].follow_proof.follow, Some(2));
+    }
+
+    #[test]
+    fn mir_blockgraph_candidate_stays_incomplete_on_join_conflict() {
+        let candidate = MirRegionCandidate {
+            entry: 0,
+            members: vec![0, 1],
+            exits: vec![1],
+            follow: None,
+            join_proof: MirJoinOwnershipProof {
+                status: MirProofStatus::Incomplete,
+                conflict: Some(MirJoinConflictKind::JoinOwnerConflict),
+            },
+            follow_proof: MirFollowOwnershipProof {
+                status: MirProofStatus::Incomplete,
+                follow: None,
+            },
+        };
+
+        assert_eq!(candidate.join_proof.status, MirProofStatus::Incomplete);
+        assert_eq!(
+            candidate.join_proof.conflict,
+            Some(MirJoinConflictKind::JoinOwnerConflict)
+        );
+        assert_eq!(candidate.follow_proof.follow, None);
     }
 }

@@ -735,6 +735,15 @@ pub struct NirBuildStats {
     /// Time spent projecting current HIR into shadow MIR.
     #[serde(default)]
     pub mir_projection_duration_ms: usize,
+    /// Env-gated MIR BlockGraph admission policy was evaluated for this function.
+    #[serde(default)]
+    pub mir_blockgraph_admission_enabled_count: usize,
+    /// MIR BlockGraph admitted an irreducible-budget function into graph collapse.
+    #[serde(default)]
+    pub mir_blockgraph_irreducible_budget_bypass_count: usize,
+    /// MIR BlockGraph intentionally left an extreme-budget function fail-closed.
+    #[serde(default)]
+    pub mir_blockgraph_extreme_budget_blocked_count: usize,
     #[serde(default)]
     pub procedure_summary_contracted_count: usize,
     #[serde(default)]
@@ -1222,6 +1231,11 @@ impl NirBuildStats {
         self.mir_join_proof_count += other.mir_join_proof_count;
         self.mir_region_proof_count += other.mir_region_proof_count;
         self.mir_projection_duration_ms += other.mir_projection_duration_ms;
+        self.mir_blockgraph_admission_enabled_count += other.mir_blockgraph_admission_enabled_count;
+        self.mir_blockgraph_irreducible_budget_bypass_count +=
+            other.mir_blockgraph_irreducible_budget_bypass_count;
+        self.mir_blockgraph_extreme_budget_blocked_count +=
+            other.mir_blockgraph_extreme_budget_blocked_count;
         self.procedure_summary_contracted_count += other.procedure_summary_contracted_count;
         self.procedure_summary_tail_wrapper_count += other.procedure_summary_tail_wrapper_count;
         self.procedure_summary_import_thunk_count += other.procedure_summary_import_thunk_count;

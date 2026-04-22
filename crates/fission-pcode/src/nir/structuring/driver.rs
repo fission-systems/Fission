@@ -55,6 +55,21 @@ fn decide_structuring_admission(input: StructuringAdmissionInput) -> Structuring
     StructuringAdmissionReason::GraphCollapse
 }
 
+fn mir_blockgraph_admission_enabled() -> bool {
+    std::env::var_os("FISSION_ENABLE_MIR_BLOCKGRAPH").is_some()
+}
+
+fn apply_mir_blockgraph_admission_gate(
+    admission: StructuringAdmissionReason,
+    enabled: bool,
+) -> StructuringAdmissionReason {
+    if enabled && matches!(admission, StructuringAdmissionReason::IrreducibleBudget) {
+        StructuringAdmissionReason::GraphCollapse
+    } else {
+        admission
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     #[cfg(test)]
     fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
@@ -215,9 +230,34 @@ impl<'a> PreviewBuilder<'a> {
             .max(max_scc_component_size);
         self.structuring_irreducible_scc_count += scc_irreducible_count;
         self.structuring_irreducible_header_count += scc_irreducible_header_count;
-        let admission =
+        let original_admission =
             self.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
+        let mir_blockgraph_enabled = mir_blockgraph_admission_enabled();
+        if mir_blockgraph_enabled {
+            self.mir_blockgraph_admission_enabled_count += 1;
+            match original_admission {
+                StructuringAdmissionReason::IrreducibleBudget => {
+                    self.mir_blockgraph_irreducible_budget_bypass_count += 1;
+                }
+                StructuringAdmissionReason::ExtremeBudget => {
+                    self.mir_blockgraph_extreme_budget_blocked_count += 1;
+                }
+                StructuringAdmissionReason::GraphCollapse
+                | StructuringAdmissionReason::ExplicitForceLinear => {}
+            }
+        }
+        let admission =
+            apply_mir_blockgraph_admission_gate(original_admission, mir_blockgraph_enabled);
         let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
+        let mir_blockgraph_irreducible_trial = mir_blockgraph_enabled
+            && matches!(original_admission, StructuringAdmissionReason::IrreducibleBudget)
+            && matches!(admission, StructuringAdmissionReason::GraphCollapse);
+        let pre_trial_successors = mir_blockgraph_irreducible_trial.then(|| self.successors.clone());
+        let pre_trial_predecessors =
+            mir_blockgraph_irreducible_trial.then(|| self.predecessors.clone());
+        let pre_trial_virtual_block_map =
+            mir_blockgraph_irreducible_trial.then(|| self.virtual_block_map.clone());
+        let pre_trial_blockgraph_complete_count = self.blockgraph_region_complete_count;
 
         // Node-splitting for irreducible CFGs: when the SCC analysis shows
         // irreducible SCCs, attempt to make the CFG reducible by splitting
@@ -693,6 +733,31 @@ impl<'a> PreviewBuilder<'a> {
         let mut body = surface_structure_graph(graph);
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
+        if mir_blockgraph_irreducible_trial
+            && self.blockgraph_region_complete_count == pre_trial_blockgraph_complete_count
+        {
+            if let (Some(successors), Some(predecessors), Some(virtual_block_map)) = (
+                pre_trial_successors,
+                pre_trial_predecessors,
+                pre_trial_virtual_block_map,
+            ) {
+                self.successors = successors;
+                self.predecessors = predecessors;
+                self.virtual_block_map = virtual_block_map;
+                self.refresh_cfg_fact_cache();
+            }
+            self.forced_linear_structuring_count += 1;
+            self.structuring_force_linear_irreducible_budget_count += 1;
+            let result = self.build_proof_first_linear_multiblock_body();
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring mir-blockgraph fail-closed: elapsed={:.3}s success={} complete_delta=0",
+                    total_start.elapsed().as_secs_f64(),
+                    result.is_ok(),
+                );
+            }
+            return result;
+        }
         if diag {
             eprintln!(
                 "[DIAG] structuring done: elapsed={:.3}s stmts={}",
@@ -800,7 +865,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
 mod tests {
     use super::{
         PreviewBuilder, StructuringAdmissionInput, StructuringAdmissionReason,
-        decide_structuring_admission,
+        apply_mir_blockgraph_admission_gate, decide_structuring_admission,
     };
     use crate::PcodeFunction;
     use crate::nir::types::{
@@ -967,5 +1032,39 @@ mod tests {
             explicit_force_linear: false,
         });
         assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
+    }
+
+    #[test]
+    fn mir_blockgraph_gate_allows_irreducible_budget_graph_collapse() {
+        let decision = apply_mir_blockgraph_admission_gate(
+            StructuringAdmissionReason::IrreducibleBudget,
+            true,
+        );
+        assert_eq!(decision, StructuringAdmissionReason::GraphCollapse);
+    }
+
+    #[test]
+    fn mir_blockgraph_gate_stays_fail_closed_for_extreme_budget() {
+        let decision =
+            apply_mir_blockgraph_admission_gate(StructuringAdmissionReason::ExtremeBudget, true);
+        assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
+    }
+
+    #[test]
+    fn mir_blockgraph_gate_stays_fail_closed_for_explicit_override() {
+        let decision = apply_mir_blockgraph_admission_gate(
+            StructuringAdmissionReason::ExplicitForceLinear,
+            true,
+        );
+        assert_eq!(decision, StructuringAdmissionReason::ExplicitForceLinear);
+    }
+
+    #[test]
+    fn mir_blockgraph_gate_is_noop_when_disabled() {
+        let decision = apply_mir_blockgraph_admission_gate(
+            StructuringAdmissionReason::IrreducibleBudget,
+            false,
+        );
+        assert_eq!(decision, StructuringAdmissionReason::IrreducibleBudget);
     }
 }

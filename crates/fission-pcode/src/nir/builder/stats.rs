@@ -25,6 +25,11 @@ impl<'a> PreviewBuilder<'a> {
             mir_join_proof_count: 0,
             mir_region_proof_count: 0,
             mir_projection_duration_ms: 0,
+            mir_blockgraph_admission_enabled_count: self.mir_blockgraph_admission_enabled_count,
+            mir_blockgraph_irreducible_budget_bypass_count: self
+                .mir_blockgraph_irreducible_budget_bypass_count,
+            mir_blockgraph_extreme_budget_blocked_count: self
+                .mir_blockgraph_extreme_budget_blocked_count,
             procedure_summary_contracted_count: self.procedure_summary_contracted_count,
             procedure_summary_tail_wrapper_count: self.procedure_summary_tail_wrapper_count,
             procedure_summary_import_thunk_count: self.procedure_summary_import_thunk_count,

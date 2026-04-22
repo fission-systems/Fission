@@ -60,6 +60,9 @@ SELECTED_MIR_KEYS = (
     "join_proof",
     "region_proof",
     "projection_duration_ms",
+    "blockgraph_admission_enabled",
+    "blockgraph_irreducible_budget_bypass",
+    "blockgraph_extreme_budget_blocked",
 )
 SELECTED_BLOCKGRAPH_REGION_KEYS = (
     "candidate",

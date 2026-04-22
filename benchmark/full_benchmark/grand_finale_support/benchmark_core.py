@@ -204,6 +204,15 @@ MIR_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("mir_join_proof_count", "join_proof"),
     ("mir_region_proof_count", "region_proof"),
     ("mir_projection_duration_ms", "projection_duration_ms"),
+    ("mir_blockgraph_admission_enabled_count", "blockgraph_admission_enabled"),
+    (
+        "mir_blockgraph_irreducible_budget_bypass_count",
+        "blockgraph_irreducible_budget_bypass",
+    ),
+    (
+        "mir_blockgraph_extreme_budget_blocked_count",
+        "blockgraph_extreme_budget_blocked",
+    ),
 )
 
 BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (

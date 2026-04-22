@@ -121,6 +121,9 @@ def _minimal_single_binary_summary(
                         "mir_join_proof_count": 1,
                         "mir_region_proof_count": 1,
                         "mir_projection_duration_ms": 3,
+                        "mir_blockgraph_admission_enabled_count": 1,
+                        "mir_blockgraph_irreducible_budget_bypass_count": 1,
+                        "mir_blockgraph_extreme_budget_blocked_count": 0,
                         "blockgraph_region_candidate_count": 5,
                         "blockgraph_region_complete_count": 2,
                         "blockgraph_region_rejected_missing_follow_count": 1,
@@ -192,6 +195,9 @@ def _minimal_single_binary_summary(
                     "join_proof": 1.0,
                     "region_proof": 1.0,
                     "projection_duration_ms": 3.0,
+                    "blockgraph_admission_enabled": 1.0,
+                    "blockgraph_irreducible_budget_bypass": 1.0,
+                    "blockgraph_extreme_budget_blocked": 0.0,
                 }
             },
             "blockgraph_region_metrics": {
@@ -660,6 +666,9 @@ class CorpusBenchmarkTests(unittest.TestCase):
                 "mir_join_proof_count": 2,
                 "mir_region_proof_count": 5,
                 "mir_projection_duration_ms": 7,
+                "mir_blockgraph_admission_enabled_count": 1,
+                "mir_blockgraph_irreducible_budget_bypass_count": 1,
+                "mir_blockgraph_extreme_budget_blocked_count": 0,
             }
         )
         self.assertEqual(metrics["enabled"], 1.0)
@@ -670,6 +679,9 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["join_proof"], 2.0)
         self.assertEqual(metrics["region_proof"], 5.0)
         self.assertEqual(metrics["projection_duration_ms"], 7.0)
+        self.assertEqual(metrics["blockgraph_admission_enabled"], 1.0)
+        self.assertEqual(metrics["blockgraph_irreducible_budget_bypass"], 1.0)
+        self.assertEqual(metrics["blockgraph_extreme_budget_blocked"], 0.0)
 
     def test_extract_blockgraph_region_metrics(self) -> None:
         metrics = _extract_blockgraph_region_metrics(
@@ -942,6 +954,8 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(corpus["blockgraph_region_metric_totals"]["candidate"], 5)
         self.assertEqual(corpus["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4)
         self.assertEqual(corpus["mir_metric_totals"]["value"], 9)
+        self.assertEqual(corpus["mir_metric_totals"]["blockgraph_admission_enabled"], 1)
+        self.assertEqual(corpus["mir_metric_totals"]["blockgraph_irreducible_budget_bypass"], 1)
         self.assertEqual(corpus["binaries"][0]["mir_metrics"]["memory_region"], 2)
         self.assertEqual(
             corpus["binaries"][0]["blockgraph_region_metrics"]["complete"],
@@ -1107,6 +1121,11 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
         self.assertEqual(payload["mir_metric_totals"]["value"], 9.0)
+        self.assertEqual(payload["mir_metric_totals"]["blockgraph_admission_enabled"], 1.0)
+        self.assertEqual(
+            payload["mir_metric_totals"]["blockgraph_irreducible_budget_bypass"],
+            1.0,
+        )
         self.assertEqual(payload["blockgraph_region_metric_totals"]["candidate"], 5.0)
         self.assertEqual(payload["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4.0)
         self.assertEqual(payload["cpu_metric_totals"]["process_cpu_seconds"], 0.75)

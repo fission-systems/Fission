@@ -1025,3 +1025,200 @@ The next MIR wave should not broaden structuring heuristics. It should move one 
 - `FISSION_ENABLE_MIR_MATERIALIZATION`
 - target metric: `materialization_stabilized_count`
 - acceptance: weighted similarity neutral, new failed rows `0`, and no increase in `canonical_must_emit_label_conflict_count`
+
+## 7. MIR BlockGraph Admission Gate Trial
+
+### Summary
+
+This wave added a default-off MIR BlockGraph behavior trial for the Ghidra `FlowBlock` / `BlockGraph` clean-room migration path.
+
+Fixed metadata:
+
+```text
+wave_type: env-gated behavior trial
+env_gate: FISSION_ENABLE_MIR_BLOCKGRAPH
+default_status: off
+primary_owner: MIR BlockGraph / structuring admission
+release_path_changed: no
+```
+
+Implementation:
+
+- Added MIR BlockGraph contract types:
+  - `MirBlockGraph`
+  - `MirRegionCandidate`
+  - `MirJoinOwnershipProof`
+  - `MirFollowOwnershipProof`
+- Added additive `NirBuildStats` telemetry:
+  - `mir_blockgraph_admission_enabled_count`
+  - `mir_blockgraph_irreducible_budget_bypass_count`
+  - `mir_blockgraph_extreme_budget_blocked_count`
+- Projected the new MIR admission telemetry into verbose and compact benchmark summaries.
+- Added an env-gated admission path where `IrreducibleBudget` can attempt graph-collapse under `FISSION_ENABLE_MIR_BLOCKGRAPH=1`.
+- Kept `ExplicitForceLinear` and `ExtremeBudget` fail-closed.
+- Added fail-closed fallback when the MIR BlockGraph trial produces no complete region proof.
+
+### Targeted Validation
+
+Target:
+
+- `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe`
+- `fibonacci @ 0x140001470`
+
+Env-off:
+
+```text
+wall_clock_sec: 0.041012
+forced_linear_structuring_count: 1
+structuring_force_linear_irreducible_budget_count: 1
+mir_blockgraph_admission_enabled_count: 0
+blockgraph_region_candidate_count: 0
+blockgraph_region_complete_count: 0
+rendered_code_len: 40935
+code_sha256: 3b7597bb307cb3155faba1c9d19b518558b6ce5597ec99fac53d929b0f8ab313
+```
+
+Env-on:
+
+```text
+wall_clock_sec: 0.114046
+forced_linear_structuring_count: 1
+structuring_force_linear_irreducible_budget_count: 1
+mir_blockgraph_admission_enabled_count: 1
+mir_blockgraph_irreducible_budget_bypass_count: 1
+blockgraph_region_candidate_count: 4
+blockgraph_region_complete_count: 0
+blockgraph_region_rejected_must_emit_label_count: 4
+rendered_code_len: 40843
+code_sha256: f3f0bafe536ad2a2ce90f174eed8e254b26ea11dc55783acccc2927371eea92f
+```
+
+Interpretation:
+
+- The env gate reaches the MIR BlockGraph admission path.
+- It does not yet produce a complete BlockGraph region.
+- `fibonacci` remained forced-linear after fail-closed fallback.
+- The fallback is not byte-stable yet because the graph-collapse attempt still mutates builder state before returning to linear output.
+- The target row similarity moved only `11.65 -> 11.66`, so this is not a meaningful quality uplift.
+
+### Windows Small C 2-Way Benchmark
+
+Benchmark:
+
+```text
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+trial: benchmark/artifacts/full_benchmark/windows-small-c-mir-blockgraph-latest
+artifact: benchmark/artifacts/full_benchmark/windows-small-c-mir-blockgraph-latest/benchmark_compact_summary.json
+```
+
+Corpus result:
+
+```text
+weighted_avg_normalized_similarity: 37.604285714285716
+x64 weighted_avg_normalized_similarity: 37.604285714285716
+new failed rows: none
+row gates: 6 / 6 passed
+release_promotion_allowed: false
+```
+
+Promotion blockers:
+
+```text
+advisory_gate_mode
+failure_family_distribution canonical_must_emit_label_conflict_count: 1092 -> 1100
+failure_family_distribution canonical_alias_interleave_conflict_count: 50 -> 64
+failure_family_distribution canonical_emit_ready_failed_count: 1022 -> 1028
+```
+
+MIR totals:
+
+```text
+enabled: 294
+function: 294
+block: 294
+value: 9010
+join_proof: 658
+region_proof: 407
+blockgraph_admission_enabled: 208
+blockgraph_irreducible_budget_bypass: 1
+blockgraph_extreme_budget_blocked: 0
+```
+
+BlockGraph totals:
+
+```text
+candidate: 422
+complete: 0
+rejected_must_emit_label: 422
+rejected_join_owner_conflict: 232
+rejected_middle_ref: 24
+```
+
+### Reading of the Result
+
+What improved:
+
+- MIR now has explicit BlockGraph join/follow ownership contract types.
+- The benchmark can distinguish MIR BlockGraph admission from ordinary shadow MIR projection.
+- The trial proves the next blocker is still not admission itself, but completion of join/follow ownership proof.
+
+What regressed or stayed blocked:
+
+- `blockgraph_region_complete_count` stayed `0`.
+- `canonical_must_emit_label_conflict_count`, `canonical_alias_interleave_conflict_count`, and `canonical_emit_ready_failed_count` increased under env-on trial.
+- `fibonacci` still has no meaningful readability uplift.
+- The env-on `fibonacci` output changed despite fail-closed fallback, so future work must snapshot or isolate MIR BlockGraph trial state before admission can be trusted.
+
+Promotion status:
+
+```text
+status: blocked
+reason: env-gated trial did not produce complete BlockGraph regions and increased failure-family blockers
+default action: keep FISSION_ENABLE_MIR_BLOCKGRAPH off
+```
+
+### Validation
+
+Passed:
+
+```text
+cargo test -p fission-pcode mir_ -- --test-threads=1
+cargo test -p fission-pcode blockgraph_region -- --test-threads=1
+cargo test -p fission-pcode structuring_admission -- --test-threads=1
+cargo test -p fission-pcode suffix_window -- --test-threads=1
+cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+cargo check -p fission-pcode
+cargo check -p fission-automation
+cargo build -p fission-cli --release
+```
+
+Incomplete:
+
+```text
+cargo test -p fission-pcode -- --test-threads=1
+```
+
+Reason:
+
+- A background cargo/rust-analyzer workspace check repeatedly held the build directory lock.
+- Retried after killing stale cargo list/check processes, but the debug rustc process stalled at 0% CPU.
+- Targeted tests and release build completed successfully.
+
+### Duplicate Logic Audit
+
+- Builder still only produces CFG/control evidence and telemetry.
+- MIR now owns the added BlockGraph proof vocabulary.
+- Structuring consumes the env-gated admission decision.
+- Printer remains render-only.
+- Benchmark changes are telemetry projection only.
+
+### Next Owner
+
+Do not broaden `FISSION_ENABLE_MIR_BLOCKGRAPH` admission further. The next wave should implement actual MIR join/follow proof completion:
+
+1. convert `MustEmitLabelConflict` into typed MIR join-owner subproofs,
+2. prove smallest-complete-owner follow selection,
+3. isolate/snapshot builder state for failed MIR BlockGraph trials,
+4. only then allow graph-collapse output to survive fail-closed fallback.
