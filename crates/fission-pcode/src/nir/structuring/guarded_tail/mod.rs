@@ -26,6 +26,53 @@ pub(super) enum GuardedTailCanonicalizationFailure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NestedBeforeOwnershipClass {
+    GuardFamilyInternalizable,
+    PairedBoundaryInternalizable,
+    NestedBeforeExternalOwner,
+    NestedBeforeCrossesTerminalJoin,
+    NestedBeforeNonlocalPayload,
+    NestedBeforeUnknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AliasOwnershipLegalityReason {
+    Complete,
+    ExternalOwner,
+    CrossesTerminalJoin,
+    NonlocalPayload,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct NestedBeforeAliasWitness {
+    pub(super) stmt_idx: usize,
+    pub(super) cond: Option<HirExpr>,
+    pub(super) class: NestedBeforeOwnershipClass,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AliasOwnershipProof {
+    pub(super) label: String,
+    pub(super) raw_nested_before: usize,
+    pub(super) internalized_nested_before: usize,
+    pub(super) class: NestedBeforeOwnershipClass,
+    pub(super) legality_reason: AliasOwnershipLegalityReason,
+    pub(super) witnesses: Vec<NestedBeforeAliasWitness>,
+}
+
+impl AliasOwnershipProof {
+    pub(super) fn effective_nested_before(&self) -> usize {
+        self.raw_nested_before
+            .saturating_sub(self.internalized_nested_before)
+    }
+
+    pub(super) fn is_complete(&self) -> bool {
+        matches!(self.legality_reason, AliasOwnershipLegalityReason::Complete)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GuardedTailWitnessRejection {
     MissingTerminalJoin,
     SideEntryConflict,

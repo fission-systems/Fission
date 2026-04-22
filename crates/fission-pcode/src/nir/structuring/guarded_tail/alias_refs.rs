@@ -242,6 +242,208 @@ impl<'a> PreviewBuilder<'a> {
         (top_level_before, nested_before, refs_after)
     }
 
+    fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &HirStmt, label: &str) -> bool {
+        let HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = stmt
+        else {
+            return false;
+        };
+
+        let then_target = single_goto_target(then_body);
+        let else_target = single_goto_target(else_body);
+        matches!(then_target, Some(target) if target == label) && else_body.is_empty()
+            || matches!(else_target, Some(target) if target == label) && then_body.is_empty()
+    }
+
+    fn classify_nested_before_nonlocal_payload(stmt: &HirStmt, label: &str) -> bool {
+        let HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = stmt
+        else {
+            return false;
+        };
+
+        let then_target = single_goto_target(then_body);
+        let else_target = single_goto_target(else_body);
+        if matches!(then_target, Some(target) if target == label) && else_body.is_empty() {
+            return false;
+        }
+        if matches!(else_target, Some(target) if target == label) && then_body.is_empty() {
+            return false;
+        }
+        Self::stmt_contains_goto_label(stmt, label) > 0
+    }
+
+    fn classify_nested_before_alias_witnesses(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        label: &str,
+    ) -> Vec<NestedBeforeAliasWitness> {
+        let mut witnesses = Vec::new();
+        for (stmt_idx, stmt) in full_body.iter().enumerate() {
+            if stmt_idx >= segment_start {
+                break;
+            }
+            if Self::stmt_contains_goto_label(stmt, label) == 0 {
+                continue;
+            }
+            if matches!(stmt, HirStmt::Goto(target) if target == label) {
+                continue;
+            }
+
+            let class = if Self::classify_nested_before_nonlocal_payload(stmt, label) {
+                NestedBeforeOwnershipClass::NestedBeforeNonlocalPayload
+            } else if Self::stmt_is_single_branch_if_to_label(stmt, label).is_some() {
+                NestedBeforeOwnershipClass::NestedBeforeExternalOwner
+            } else {
+                NestedBeforeOwnershipClass::NestedBeforeUnknown
+            };
+            witnesses.push(NestedBeforeAliasWitness {
+                stmt_idx,
+                cond: Self::stmt_is_single_branch_if_to_label(stmt, label).cloned(),
+                class,
+            });
+        }
+        witnesses
+    }
+
+    pub(super) fn build_nested_before_alias_ownership_proof(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        segment_end: usize,
+        label: &str,
+        raw_nested_before: usize,
+    ) -> AliasOwnershipProof {
+        let witnesses =
+            Self::classify_nested_before_alias_witnesses(full_body, segment_start, label);
+        if raw_nested_before == 0 {
+            return AliasOwnershipProof {
+                label: label.to_string(),
+                raw_nested_before,
+                internalized_nested_before: 0,
+                class: NestedBeforeOwnershipClass::NestedBeforeUnknown,
+                legality_reason: AliasOwnershipLegalityReason::Unknown,
+                witnesses,
+            };
+        }
+
+        let anchor_idx = segment_start.saturating_sub(1);
+        let current_label_idx = full_body.iter().enumerate().find_map(|(idx, stmt)| {
+            (idx >= segment_start
+                && idx < segment_end
+                && matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+            .then_some(idx)
+        });
+        let Some(current_label_idx) = current_label_idx else {
+            return AliasOwnershipProof {
+                label: label.to_string(),
+                raw_nested_before,
+                internalized_nested_before: 0,
+                class: NestedBeforeOwnershipClass::NestedBeforeUnknown,
+                legality_reason: AliasOwnershipLegalityReason::Unknown,
+                witnesses,
+            };
+        };
+        let terminal_label_idx = (current_label_idx + 1..full_body.len())
+            .find(|idx| matches!(full_body[*idx], HirStmt::Label(_)));
+        let Some(terminal_label_idx) = terminal_label_idx else {
+            return AliasOwnershipProof {
+                label: label.to_string(),
+                raw_nested_before,
+                internalized_nested_before: 0,
+                class: NestedBeforeOwnershipClass::NestedBeforeUnknown,
+                legality_reason: AliasOwnershipLegalityReason::Unknown,
+                witnesses,
+            };
+        };
+
+        let raw_refs = collect_referenced_label_counts(full_body)
+            .get(label)
+            .copied()
+            .unwrap_or(0);
+        let guard_family_internalized =
+            Self::count_internalized_guard_family_nested_conditional_entries(
+                full_body,
+                label,
+                anchor_idx,
+                current_label_idx,
+                terminal_label_idx,
+            );
+        if guard_family_internalized >= raw_nested_before {
+            return AliasOwnershipProof {
+                label: label.to_string(),
+                raw_nested_before,
+                internalized_nested_before: raw_nested_before,
+                class: NestedBeforeOwnershipClass::GuardFamilyInternalizable,
+                legality_reason: AliasOwnershipLegalityReason::Complete,
+                witnesses,
+            };
+        }
+
+        let paired_boundary_internalized = Self::count_internalized_paired_nested_boundary_refs(
+            full_body,
+            label,
+            anchor_idx,
+            current_label_idx,
+            terminal_label_idx,
+            raw_refs,
+        );
+        if paired_boundary_internalized >= raw_nested_before {
+            return AliasOwnershipProof {
+                label: label.to_string(),
+                raw_nested_before,
+                internalized_nested_before: raw_nested_before,
+                class: NestedBeforeOwnershipClass::PairedBoundaryInternalizable,
+                legality_reason: AliasOwnershipLegalityReason::Complete,
+                witnesses,
+            };
+        }
+
+        let class = if witnesses.iter().any(|w| {
+            matches!(
+                w.class,
+                NestedBeforeOwnershipClass::NestedBeforeNonlocalPayload
+            )
+        }) {
+            NestedBeforeOwnershipClass::NestedBeforeNonlocalPayload
+        } else if witnesses.iter().all(|w| {
+            matches!(
+                w.class,
+                NestedBeforeOwnershipClass::NestedBeforeExternalOwner
+            )
+        }) {
+            NestedBeforeOwnershipClass::NestedBeforeExternalOwner
+        } else {
+            NestedBeforeOwnershipClass::NestedBeforeUnknown
+        };
+        let legality_reason = match class {
+            NestedBeforeOwnershipClass::NestedBeforeNonlocalPayload => {
+                AliasOwnershipLegalityReason::NonlocalPayload
+            }
+            NestedBeforeOwnershipClass::NestedBeforeCrossesTerminalJoin => {
+                AliasOwnershipLegalityReason::CrossesTerminalJoin
+            }
+            NestedBeforeOwnershipClass::NestedBeforeExternalOwner => {
+                AliasOwnershipLegalityReason::ExternalOwner
+            }
+            _ => AliasOwnershipLegalityReason::Unknown,
+        };
+
+        AliasOwnershipProof {
+            label: label.to_string(),
+            raw_nested_before,
+            internalized_nested_before: 0,
+            class,
+            legality_reason,
+            witnesses,
+        }
+    }
+
     pub(super) fn local_goto_positions_by_label(body: &[HirStmt]) -> HashMap<String, Vec<usize>> {
         let mut refs = HashMap::new();
         for (idx, stmt) in body.iter().enumerate() {
@@ -685,5 +887,91 @@ impl<'a> PreviewBuilder<'a> {
                 other => out.push(other.clone()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_before_alias_ownership_internalizes_same_guard_family_ref() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("reg".to_string()),
+                then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("middle".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("block_mid".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("block_mid".to_string()),
+            HirStmt::Label("block_mid".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("cond".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Goto("block_tail".to_string()),
+            HirStmt::Label("block_tail".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let proof =
+            PreviewBuilder::build_nested_before_alias_ownership_proof(&body, 1, 8, "block_mid", 1);
+
+        assert_eq!(
+            proof.class,
+            NestedBeforeOwnershipClass::GuardFamilyInternalizable
+        );
+        assert_eq!(
+            proof.legality_reason,
+            AliasOwnershipLegalityReason::Complete
+        );
+        assert_eq!(proof.internalized_nested_before, 1);
+        assert!(proof.is_complete());
+    }
+
+    #[test]
+    fn nested_before_alias_ownership_internalizes_paired_boundary_refs() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("join0".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("join0".to_string()),
+            HirStmt::Expr(HirExpr::Var("body".to_string())),
+            HirStmt::Goto("terminal".to_string()),
+            HirStmt::Label("terminal".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let proof =
+            PreviewBuilder::build_nested_before_alias_ownership_proof(&body, 1, 6, "join0", 2);
+
+        assert_eq!(
+            proof.class,
+            NestedBeforeOwnershipClass::PairedBoundaryInternalizable
+        );
+        assert_eq!(
+            proof.legality_reason,
+            AliasOwnershipLegalityReason::Complete
+        );
+        assert_eq!(proof.internalized_nested_before, 2);
+        assert!(proof.is_complete());
     }
 }

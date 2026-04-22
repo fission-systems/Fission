@@ -1,8 +1,8 @@
 use crate::nir::types::{
-    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, HirExpr,
-    HirFunction, HirLValue, HirStmt, ProcedureCallShape, ProcedureControlEffect,
-    ProcedureMemoryEffect, ProcedureReturnShape, ProcedureStackEffect, ProcedureSummary,
-    SummarySoundness, WrapperClass, WrapperContractionProof, parse_call_target_address,
+    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, HirExpr, HirFunction,
+    HirLValue, HirStmt, ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect,
+    ProcedureReturnShape, ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
+    WrapperContractionProof, parse_call_target_address,
 };
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode};
 
@@ -35,7 +35,12 @@ pub(crate) fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<Proce
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            (summary_seed(target), WrapperClass::TailForwarder, forwarded, 96)
+            (
+                summary_seed(target),
+                WrapperClass::TailForwarder,
+                forwarded,
+                96,
+            )
         }
         [
             HirStmt::Assign {
@@ -51,7 +56,12 @@ pub(crate) fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<Proce
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            (summary_seed(target), WrapperClass::PureAdapter, forwarded, 88)
+            (
+                summary_seed(target),
+                WrapperClass::PureAdapter,
+                forwarded,
+                88,
+            )
         }
         _ => return None,
     };
@@ -249,7 +259,10 @@ mod tests {
         let summary = summarize_wrapper_hir_function(&func).expect("summary");
         assert_eq!(summary.call_shape, ProcedureCallShape::SingleTailWrapper);
         assert_eq!(
-            summary.wrapper_contraction.as_ref().map(|proof| proof.wrapper_class),
+            summary
+                .wrapper_contraction
+                .as_ref()
+                .map(|proof| proof.wrapper_class),
             Some(WrapperClass::TailForwarder)
         );
         assert_eq!(summary.arg_forwarding.forwarded_param_indices, vec![0]);
@@ -287,7 +300,10 @@ mod tests {
         .expect("summary");
         assert_eq!(summary.control_effect, ProcedureControlEffect::TailJumps);
         assert_eq!(
-            summary.wrapper_contraction.as_ref().map(|proof| proof.wrapper_class),
+            summary
+                .wrapper_contraction
+                .as_ref()
+                .map(|proof| proof.wrapper_class),
             Some(WrapperClass::TailForwarder)
         );
         assert_eq!(
@@ -346,7 +362,10 @@ mod tests {
         .expect("summary");
         assert_eq!(summary.control_effect, ProcedureControlEffect::TailJumps);
         assert_eq!(
-            summary.wrapper_contraction.as_ref().map(|proof| proof.wrapper_class),
+            summary
+                .wrapper_contraction
+                .as_ref()
+                .map(|proof| proof.wrapper_class),
             Some(WrapperClass::TailForwarder)
         );
     }

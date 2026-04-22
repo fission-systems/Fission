@@ -11,9 +11,7 @@ mod recovery;
 mod types;
 pub(crate) mod wave_stats;
 
-pub use types::{
-    summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
-};
+pub use types::{summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode};
 
 #[allow(dead_code)]
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {

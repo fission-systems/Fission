@@ -1,11 +1,11 @@
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, WrapperClass, Varnode,
+    NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, Varnode, WrapperClass,
     render_contracted_wrapper_summary, summarize_direct_tail_wrapper_from_ops,
 };
-use std::time::Instant;
 use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
 use fission_static::analysis::decomp::facts::FactStore;
+use std::time::Instant;
 
 pub mod adapters;
 pub mod engine;
@@ -283,7 +283,11 @@ fn probe_wrapper_contraction(
                 .map(|func| func.name.clone())
                 .unwrap_or_else(|| format!("sub_{target:x}"))
         },
-        |target| binary.function_at(target).is_some_and(|func| func.is_import),
+        |target| {
+            binary
+                .function_at(target)
+                .is_some_and(|func| func.is_import)
+        },
     ) else {
         return Ok(None);
     };
@@ -429,14 +433,9 @@ pub fn decompile_with_rust_sleigh(
         .max(1)
         .min(config.instruction_budget_cap.max(1));
 
-    if let Some(summary_result) = probe_wrapper_contraction(
-        binary,
-        entry_address,
-        name,
-        function_size,
-        config,
-        start,
-    )? {
+    if let Some(summary_result) =
+        probe_wrapper_contraction(binary, entry_address, name, function_size, config, start)?
+    {
         return Ok(summary_result);
     }
 

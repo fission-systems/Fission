@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use fission_analysis::analysis::cfg::CfgAnalysis;
 use fission_analysis::analysis::optimizer::OptimizerConfig;
 use fission_analysis::analysis::optimizer::integration::optimize_c_code;
@@ -56,15 +56,13 @@ fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
                 },
                 address: addr,
                 output: None,
-                inputs: vec![
-                    Varnode {
-                        space_id: 0,
-                        offset: addr + 0x10,
-                        size: 8,
-                        is_constant: false,
-                        constant_val: 0,
-                    },
-                ],
+                inputs: vec![Varnode {
+                    space_id: 0,
+                    offset: addr + 0x10,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                }],
                 asm_mnemonic: None,
             }];
             blocks.push(PcodeBasicBlock {
@@ -81,7 +79,7 @@ fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
 
 fn cfg_analysis_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("cfg_analysis");
-    
+
     // Benchmark different CFG sizes
     for size in [16, 64, 256].iter() {
         let func = build_diamond_cfg(*size);
@@ -110,7 +108,7 @@ fn cfg_analysis_benchmark(c: &mut Criterion) {
 
 fn optimizer_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("optimizer");
-    
+
     let simple_code = r#"
     int x = a ^ 0;
     int y = b + 0;
@@ -120,7 +118,7 @@ fn optimizer_benchmark(c: &mut Criterion) {
     }
     return result;
 "#;
-    
+
     let complex_code = r#"
     int sum = 0;
     for (int i = 0; i < 1000; i++) {
@@ -155,7 +153,7 @@ fn optimizer_benchmark(c: &mut Criterion) {
 fn binary_load_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("binary_loading");
     group.sample_size(50); // Reduce sample size for I/O-heavy benchmark
-    
+
     // Construct path to benchmark binary directory
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let binary_dir = Path::new(manifest_dir)
@@ -163,24 +161,27 @@ fn binary_load_benchmark(c: &mut Criterion) {
         .and_then(|p| p.parent())
         .map(|p| p.join("benchmark/binary/x86-64/window"))
         .expect("Failed to construct binary directory path");
-    
+
     // Benchmark different binary sizes
     let sizes = vec!["small", "medium", "large"];
-    
+
     for size in sizes {
         let size_dir = binary_dir.join(size);
-        
+
         if size_dir.exists() {
             if let Ok(entries) = fs::read_dir(&size_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() && (path.extension().map_or(false, |ext| {
-                        ext == "exe" || ext == "dll" || ext == "sys"
-                    })) {
-                        let binary_name = path.file_name()
+                    if path.is_file()
+                        && (path
+                            .extension()
+                            .map_or(false, |ext| ext == "exe" || ext == "dll" || ext == "sys"))
+                    {
+                        let binary_name = path
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("unknown");
-                        
+
                         if let Ok(bytes) = fs::read(&path) {
                             let benchmark_id = format!("{}_{}", size, binary_name);
                             group.bench_with_input(
@@ -203,20 +204,23 @@ fn binary_load_benchmark(c: &mut Criterion) {
             }
         }
     }
-    
+
     // Also benchmark commercial binaries if available
     let commercial_dir = binary_dir.join("commercial_binary");
     if commercial_dir.exists() {
         if let Ok(entries) = fs::read_dir(&commercial_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() && (path.extension().map_or(false, |ext| {
-                    ext == "exe" || ext == "dll" || ext == "sys"
-                })) {
-                    let binary_name = path.file_name()
+                if path.is_file()
+                    && (path
+                        .extension()
+                        .map_or(false, |ext| ext == "exe" || ext == "dll" || ext == "sys"))
+                {
+                    let binary_name = path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
-                    
+
                     if let Ok(bytes) = fs::read(&path) {
                         let benchmark_id = format!("commercial_{}", binary_name);
                         group.bench_with_input(

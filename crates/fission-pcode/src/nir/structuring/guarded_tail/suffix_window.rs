@@ -1219,7 +1219,7 @@ impl<'a> PreviewBuilder<'a> {
         matches!(single_goto_target(then_body), Some(target) if target == label).then_some(cond)
     }
 
-    fn stmt_is_single_branch_if_to_label<'b>(
+    pub(super) fn stmt_is_single_branch_if_to_label<'b>(
         stmt: &'b HirStmt,
         label: &str,
     ) -> Option<&'b HirExpr> {
@@ -1583,7 +1583,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn count_internalized_paired_nested_boundary_refs(
+    pub(super) fn count_internalized_paired_nested_boundary_refs(
         body: &[HirStmt],
         label: &str,
         anchor_idx: usize,
@@ -1635,7 +1635,7 @@ impl<'a> PreviewBuilder<'a> {
         2
     }
 
-    fn count_internalized_guard_family_nested_conditional_entries(
+    pub(super) fn count_internalized_guard_family_nested_conditional_entries(
         body: &[HirStmt],
         label: &str,
         anchor_idx: usize,

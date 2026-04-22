@@ -1936,6 +1936,49 @@ fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
 }
 
 #[test]
+fn structuring_candidate_discovery_internalizes_same_guard_family_nested_before_alias_ref() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::If {
+            cond: HirExpr::Var("cond".to_string()),
+            then_body: vec![HirStmt::Goto("block_mid".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::If {
+            cond: HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("cond".to_string())),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Goto("block_tail".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_count, 0,
+        "{stats:#?}"
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count, 0,
+        "{stats:#?}"
+    );
+    assert!(stats.promotion_candidate_count >= 1, "{stats:#?}");
+}
+
+#[test]
 fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection_after_alignment() {
     let mut body = vec![
         HirStmt::If {

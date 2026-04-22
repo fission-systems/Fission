@@ -430,12 +430,18 @@ impl<'a> PreviewBuilder<'a> {
 
             // Priority 2: Try immediate next-label redirect (only if forward-chain didn't apply)
             let immediate_next_redirect = if forward_chain_redirect.is_none() {
-                if let Some(next_label_idx) = next_label_idx
-                    && let HirStmt::Label(next_label) = &body[next_label_idx]
-                    && (Self::is_local_alias_forward_segment(segment, next_label)
-                        || allow_top_level_after_label_redirect)
-                {
-                    Some(next_label.clone())
+                if let Some(next_label_idx) = next_label_idx {
+                    if let HirStmt::Label(next_label) = &body[next_label_idx] {
+                        if Self::is_local_alias_forward_segment(segment, next_label)
+                            || allow_top_level_after_label_redirect
+                        {
+                            Some(next_label.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -469,6 +475,23 @@ impl<'a> PreviewBuilder<'a> {
                         segment_end,
                         label,
                     );
+                    let nested_before_proof = if external_nested_before > 0 {
+                        Some(Self::build_nested_before_alias_ownership_proof(
+                            full_body,
+                            segment_start,
+                            segment_end,
+                            label,
+                            external_nested_before,
+                        ))
+                    } else {
+                        None
+                    };
+                    let effective_nested_before = nested_before_proof
+                        .as_ref()
+                        .map(|proof| proof.effective_nested_before())
+                        .unwrap_or(external_nested_before);
+                    let internalized_nested_before =
+                        external_nested_before.saturating_sub(effective_nested_before);
                     let external_refs_after = external_top_level_after + external_nested_after;
                     if external_nested_after > 0 {
                         self.mark_alias_nonlocal_from_external_sites(
@@ -478,7 +501,25 @@ impl<'a> PreviewBuilder<'a> {
                         );
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
-                    if external_nested_before > 0 {
+                    if self.guarded_tail_trace_enabled_for_current_fn() {
+                        if let Some(proof) = nested_before_proof.as_ref() {
+                            eprintln!(
+                                "[GT-TRACE] candidate={} alias_ownership label={} raw_nested_before={} internalized_nested_before={} class={:?} legality={:?} witnesses={:?}",
+                                segment_start.saturating_sub(1),
+                                proof.label,
+                                proof.raw_nested_before,
+                                proof.internalized_nested_before,
+                                proof.class,
+                                proof.legality_reason,
+                                proof
+                                    .witnesses
+                                    .iter()
+                                    .map(|w| (w.stmt_idx, &w.class, &w.cond))
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                    }
+                    if effective_nested_before > 0 {
                         self.mark_alias_nonlocal_from_external_sites(
                             external_top_level_before,
                             external_nested_before,
@@ -486,7 +527,11 @@ impl<'a> PreviewBuilder<'a> {
                         );
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
-                    if external_top_level_before + external_top_level_after != external_ref_count {
+                    let effective_external_ref_count =
+                        external_ref_count.saturating_sub(internalized_nested_before);
+                    if external_top_level_before + external_top_level_after
+                        != effective_external_ref_count
+                    {
                         self.mark_alias_nonlocal_external_before();
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
@@ -673,10 +718,38 @@ impl<'a> PreviewBuilder<'a> {
                                 segment_start + flattened.len(),
                                 label,
                             );
+                            let nested_before_proof = if external_nested_before > 0 {
+                                Some(Self::build_nested_before_alias_ownership_proof(
+                                    full_body,
+                                    segment_start,
+                                    segment_start + flattened.len(),
+                                    label,
+                                    external_nested_before,
+                                ))
+                            } else {
+                                None
+                            };
+                            let effective_nested_before = nested_before_proof
+                                .as_ref()
+                                .map(|proof| proof.effective_nested_before())
+                                .unwrap_or(external_nested_before);
                             let external_refs_after =
                                 external_top_level_after + external_nested_after;
                             let only_top_level_external_refs =
-                                external_nested_before == 0 && external_nested_after == 0;
+                                effective_nested_before == 0 && external_nested_after == 0;
+                            if self.guarded_tail_trace_enabled_for_current_fn() {
+                                if let Some(proof) = nested_before_proof.as_ref() {
+                                    eprintln!(
+                                        "[GT-TRACE] candidate={} terminalizable_alias label={} raw_nested_before={} internalized_nested_before={} class={:?} legality={:?}",
+                                        segment_start.saturating_sub(1),
+                                        proof.label,
+                                        proof.raw_nested_before,
+                                        proof.internalized_nested_before,
+                                        proof.class,
+                                        proof.legality_reason,
+                                    );
+                                }
+                            }
                             if !only_top_level_external_refs || terminalizable_target.is_none() {
                                 self.mark_alias_nonlocal_from_external_sites(
                                     external_top_level_before,
