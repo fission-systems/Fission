@@ -1,0 +1,9 @@
+{
+  "arch": "Atmel",
+  "entry_spec": "avr8xmega.slaspec",
+  "entry_id": "avr8xmega",
+  "include_manifest": [
+    "avr8xmega.slaspec@0",
+    "avr8.sinc@1"
+  ]
+}

@@ -3,7 +3,7 @@ use fission_pcode::{
     NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, Varnode, WrapperClass,
     render_contracted_wrapper_summary, summarize_direct_tail_wrapper_from_ops,
 };
-use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
+use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
 
@@ -150,13 +150,13 @@ pub(crate) fn decode_rust_sleigh_pcode(
     let language = sleigh_language_for_arch_spec(&binary.arch_spec)
         .ok_or_else(|| format!("rust_sleigh: unsupported arch_spec '{}'", binary.arch_spec))?;
 
-    let lifter =
-        SleighLifter::new_for_language(language).map_err(|e| format!("rust_sleigh: {e:#}"))?;
+    let lifter = RuntimeSleighFrontend::new_for_language(language)
+        .map_err(|e| format!("rust_sleigh: {e:#}"))?;
 
     let lift_contract = if continue_past_indirect_branch {
-        LiftDecodeContract::decomp_function(instruction_limit)
+        DecodeContract::decomp_function(instruction_limit)
     } else {
-        LiftDecodeContract::strict_function(instruction_limit)
+        DecodeContract::strict_function(instruction_limit)
     };
     let result =
         lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);
@@ -265,7 +265,7 @@ fn probe_wrapper_contraction(
         Some(language) => language,
         None => return Ok(None),
     };
-    let lifter = match SleighLifter::new_for_language(language) {
+    let lifter = match RuntimeSleighFrontend::new_for_language(language) {
         Ok(lifter) => lifter,
         Err(_) => return Ok(None),
     };

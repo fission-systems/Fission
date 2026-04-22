@@ -1,0 +1,9 @@
+{
+  "arch": "68000",
+  "entry_spec": "coldfire.slaspec",
+  "entry_id": "coldfire",
+  "include_manifest": [
+    "coldfire.slaspec@0",
+    "68000.sinc@1"
+  ]
+}

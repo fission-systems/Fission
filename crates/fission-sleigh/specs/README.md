@@ -3,20 +3,22 @@
 This directory is the canonical home for SLEIGH language specs used by `fission-sleigh`.
 
 - Primary path: `crates/fission-sleigh/specs/languages/`
-- Source of truth: `vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors/*/data/languages/`
-- Import policy: mirror Ghidra language directories directly into the matching
-  architecture subdirectory here; do not treat `vendor/rsleigh/slaspec` as the
+- Source of truth: `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
+- Import policy: mirror each Ghidra `Processor/data/languages` directory into the same
+  Processor-named subdirectory here; do not treat `vendor/rsleigh/slaspec` as the
   canonical import source.
-- Architecture layout:
-  - `crates/fission-sleigh/specs/languages/aarch64/`
-  - `crates/fission-sleigh/specs/languages/arm32/`
-  - `crates/fission-sleigh/specs/languages/mips/`
-  - `crates/fission-sleigh/specs/languages/powerpc/`
-  - `crates/fission-sleigh/specs/languages/riscv/`
-  - `crates/fission-sleigh/specs/languages/x86/`
-- Language lookup is recursive under `specs/languages/`, so callers still resolve by language
-  name rather than hardcoding a subdirectory.
-- Initial contents were migrated from a legacy external language-spec tree.
+- Processor layout now mirrors Ghidra 1:1.
+  - Example: `crates/fission-sleigh/specs/languages/AARCH64/`
+  - Example: `crates/fission-sleigh/specs/languages/ARM/`
+  - Example: `crates/fission-sleigh/specs/languages/PowerPC/`
+  - Example: `crates/fission-sleigh/specs/languages/x86/`
+- Current mirror coverage:
+  - `38` processors
+  - `146` `.slaspec` variants
+- Canonical checked-in manifest:
+  - `crates/fission-sleigh/specs/ghidra_language_manifest.json`
+- Language lookup remains recursive under `specs/languages/`, so callers resolve by entry
+  stem, derived language id, or compatibility alias instead of hardcoding a directory.
 
 Migration note:
 - This is a compatibility-first migration step.
@@ -24,6 +26,10 @@ Migration note:
 - This directory is now the single maintained source for local SLEIGH specs.
 
 Compiler-only front-end note:
-- The first clean-room compiler wave targets `crates/fission-sleigh/specs/languages/x86/x86-64.slaspec`.
-- Deterministic generated output is checked in under `crates/fission-sleigh/generated/x86/`.
-- Generated artifacts are compiler products only; they are not yet the canonical runtime decoder path.
+- The clean-room compiler wave now targets every checked-in `.slaspec` variant under `crates/fission-sleigh/specs/languages/<Processor>/`.
+- Deterministic generated output is checked in under `crates/fission-sleigh/generated/<Processor>/<entry-spec-stem>/`.
+- The all-variant manifest is `crates/fission-sleigh/generated/compiler_manifest.json`.
+- Regenerate the compiler-only artifacts with:
+  - `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+- Generated artifacts are compiler products consumed by the new runtime registry.
+- Runtime p-code template execution is still incomplete; unsupported variants must fail closed rather than falling back to a hand-lifter.

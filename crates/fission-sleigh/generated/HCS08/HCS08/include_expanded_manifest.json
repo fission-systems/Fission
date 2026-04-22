@@ -1,0 +1,9 @@
+{
+  "arch": "HCS08",
+  "entry_spec": "HCS08.slaspec",
+  "entry_id": "HCS08",
+  "include_manifest": [
+    "HCS08.slaspec@0",
+    "HCS_HC.sinc@1"
+  ]
+}

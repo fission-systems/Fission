@@ -1,0 +1,158 @@
+# semantic action inventory
+arch: PIC
+entry_spec: pic12c5xx.slaspec
+entry_id: pic12c5xx
+
+- ADDWF [none] pic12_instructions.sinc:196
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=165028fe88291035 op_count=0
+- ADDWF [branch] pic12_instructions.sinc:209
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=49a5d8399418f7eb op_count=0
+- ANDLW [none] pic12_instructions.sinc:223
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=975a6db124aaaefe op_count=0
+- ANDWF [none] pic12_instructions.sinc:230
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a116b86d3ef98946 op_count=0
+- BCF [none] pic12_instructions.sinc:241
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=901fd71e17df0e50 op_count=0
+- BCF [none] pic12_instructions.sinc:249
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=186405ccd92e2ed6 op_count=0
+- BCF [none] pic12_instructions.sinc:257
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af716acbd49d0418 op_count=0
+- BCF [none] pic12_instructions.sinc:265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=05976125b2d69d8b op_count=0
+- BCF [none] pic12_instructions.sinc:273
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=506c6a308337c1f2 op_count=0
+- BCF [none] pic12_instructions.sinc:281
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fa8a944025d523d op_count=0
+- BSF [none] pic12_instructions.sinc:289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a62bc8c54da0b059 op_count=0
+- BSF [none] pic12_instructions.sinc:297
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6544c3db79a2007c op_count=0
+- BSF [none] pic12_instructions.sinc:305
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf807be632b7149a op_count=0
+- BSF [none] pic12_instructions.sinc:313
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68d2639d5eea5fb7 op_count=0
+- BSF [none] pic12_instructions.sinc:321
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0517cc6b17fc079d op_count=0
+- BSF [none] pic12_instructions.sinc:329
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=38ad0453cf25fa00 op_count=0
+- BTFSC [conditional_branch] pic12_instructions.sinc:337
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ca79ce93b8edfea8 op_count=0
+- BTFSC [conditional_branch] pic12_instructions.sinc:346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cab4e485a2531a7d op_count=0
+- BTFSC [conditional_branch] pic12_instructions.sinc:352
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5e18d3bb8a0aa94d op_count=0
+- BTFSC [conditional_branch] pic12_instructions.sinc:358
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e173de3c1dbf0a08 op_count=0
+- BTFSS [conditional_branch] pic12_instructions.sinc:364
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=11c425947367c1cc op_count=0
+- BTFSS [conditional_branch] pic12_instructions.sinc:373
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=08935bf75cd102c1 op_count=0
+- BTFSS [conditional_branch] pic12_instructions.sinc:379
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=abf9a5b384701431 op_count=0
+- BTFSS [conditional_branch] pic12_instructions.sinc:385
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eccf657fdf954cac op_count=0
+- CALL [call] pic12_instructions.sinc:391
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=81b64562083c8afe op_count=0
+- CLRF [none] pic12_instructions.sinc:399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d39292ba34ed0419 op_count=0
+- CLRW [none] pic12_instructions.sinc:407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b2f6661e165e90c op_count=0
+- CLRWDT [none] pic12_instructions.sinc:414
+  semantic_ops: clearWatchDogTimer
+  semantic_template: status=unsupported_template action_hash=ef2e9af66cee2012 op_count=1
+- COMF [none] pic12_instructions.sinc:420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2653946d3e8f698b op_count=0
+- DECF [none] pic12_instructions.sinc:431
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4515d051761f6bfd op_count=0
+- DECFSZ [conditional_branch] pic12_instructions.sinc:442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a10891674d0779f4 op_count=0
+- GOTO [branch] pic12_instructions.sinc:453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd29b7fabd793c8d op_count=0
+- INCF [none] pic12_instructions.sinc:460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ba6d2526e69c6c63 op_count=0
+- INCFSZ [conditional_branch] pic12_instructions.sinc:471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed1b6d2a3e0b3f92 op_count=0
+- IORLW [none] pic12_instructions.sinc:482
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53b5f8435cfdccd0 op_count=0
+- IORWF [none] pic12_instructions.sinc:489
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6cb50d4498fb4988 op_count=0
+- MOVLW [none] pic12_instructions.sinc:500
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=397ffcf5f7a0a651 op_count=0
+- MOVF [none] pic12_instructions.sinc:506
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=61b043f4219cadb9 op_count=0
+- MOVWF [none] pic12_instructions.sinc:517
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3875002c3587d840 op_count=0
+- MOVWF [branch] pic12_instructions.sinc:524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13423f1d9858ee70 op_count=0
+- NOP [none] pic12_instructions.sinc:532
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- OPTION [none] pic12_instructions.sinc:536
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b922611d1985ed13 op_count=0
+- RETLW [return] pic12_instructions.sinc:541
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ee9766eb773bfe6 op_count=0
+- RLF [none] pic12_instructions.sinc:550
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1da1846ace3c4ce4 op_count=0
+- RRF [none] pic12_instructions.sinc:564
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f593fce682ea96d7 op_count=0
+- SLEEP [none] pic12_instructions.sinc:578
+  semantic_ops: sleep
+  semantic_template: status=unsupported_template action_hash=dbb5554b40a07650 op_count=1
+- SUBWF [none] pic12_instructions.sinc:584
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=598a0cac28da81ee op_count=0
+- SWAPF [none] pic12_instructions.sinc:597
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=105a174cc0f8c6e6 op_count=0
+- XORLW [none] pic12_instructions.sinc:607
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e739f0b13b4c5030 op_count=0
+- XORWF [none] pic12_instructions.sinc:614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd76f1e16c07862e op_count=0
+- TRIS [none] pic12c5xx.slaspec:24
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6a49ac50a69abce op_count=0

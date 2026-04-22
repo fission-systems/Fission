@@ -1391,3 +1391,604 @@ The next migration wave should implement x86-64 compiled front-end execution in 
 3. control-flow class parity
 4. pcode opcode / varnode-shape parity buckets
 5. only then consider execution-path swap behind an env gate
+
+## Sleigh All-Variant Generic Compiler Consumer Expansion
+
+### Summary
+
+Expanded the `fission-sleigh` clean-room compiler-only front-end from the x86-64 first consumer to every checked-in `.slaspec` entry variant using one generic compiler API.
+
+This remains a compiler-only wave:
+
+- no runtime decoder replacement
+- no CLI behavior change
+- no decompiler benchmark output change expected
+- no dependency on `vendor/rsleigh`
+
+### Public/internal contract
+
+New canonical compiler API surface:
+
+- `discover_entry_specs_for_arch(arch)`
+- `discover_all_entry_specs()`
+- `compile_frontend_for_entry_spec(entry_spec)`
+- `compile_frontends_for_arch(arch)`
+- `write_generated_artifacts_for_entry_spec(entry_spec, output_root)`
+- `write_all_generated_artifacts(output_root)`
+
+Compatibility retained:
+
+- `compile_x86_64_frontend()` remains a wrapper over the generic entry-spec compiler.
+
+### Generated artifact layout
+
+Generated outputs moved to variant-safe paths:
+
+```text
+crates/fission-sleigh/generated/<arch>/<entry-spec-stem>/
+```
+
+Each variant emits the same five compiler-only artifacts:
+
+- `include_expanded_manifest.json`
+- `parsed_inventory.json`
+- `normalized_pattern_graph.json`
+- `semantic_action_ir.txt`
+- `generated_frontend.rs`
+
+The all-variant manifest is now checked in at:
+
+```text
+crates/fission-sleigh/generated/compiler_manifest.json
+```
+
+Observed manifest result:
+
+```text
+variant_count: 48
+compile_status ok: 48
+
+aarch64: 3
+arm32: 16
+mips: 6
+powerpc: 18
+riscv: 3
+x86: 2
+```
+
+### Parser / preprocessor fixes required for all variants
+
+The generic compiler needed broader SLEIGH front-end coverage beyond the x86-64 subset:
+
+- `@if` / `@elif` support added.
+- Boolean preprocessor expressions now support `defined(NAME)`, `==`, `!=`, `&&`, `||`, and parentheses.
+- Comment stripping now respects `"#"` inside strings.
+- Braced block collection now ignores braces in comments.
+- Constructor parsing now accepts no-brace `unimpl` constructors.
+
+These are language-level SLEIGH parser/compiler improvements, not architecture-specific compilers.
+
+### Validation
+
+Passed:
+
+```text
+cargo run -p fission-sleigh --example generate_sleigh_frontends
+```
+
+Observed result:
+
+```text
+48 variants -> /Users/sjkim1127/Fission/crates/fission-sleigh/generated
+```
+
+Additional validation commands passed for this wave:
+
+```text
+cargo test -p fission-sleigh
+cargo check -p fission-sleigh
+cargo check -p fission-cli
+```
+
+Observed test result:
+
+```text
+fission-sleigh: 314 passed / 0 failed
+generated tree checksum stable across repeated generation
+```
+
+### What improved
+
+- `fission-sleigh` now has one generic compiler-only consumer for all checked-in architecture variants.
+- The previous x86-only generated artifact layout no longer risks collisions across variants.
+- The compiler manifest makes unsupported/failing future variants visible instead of silently skipping them.
+- Runtime hand-lifters remain untouched, so this is a safe compiler-spine expansion.
+
+### What did not change
+
+- No runtime p-code execution uses generated tables yet.
+- No decompiler quality metric is expected to move in this wave.
+- `x86` and `AArch64` hand-lifter execution paths remain canonical for runtime behavior.
+
+### Duplicate-logic audit
+
+- The compiler is generic across architectures; no arch-specific compiler implementation was added.
+- x86-64 compatibility APIs only delegate to the generic entry-spec API.
+- Generated artifacts are compiler products only and do not duplicate runtime semantic ownership.
+
+### Next owner
+
+The next migration wave should stay x86-64-first for runtime execution:
+
+1. compile-table constructor lookup
+2. decode-length parity against current hand-lifter
+3. control-flow class parity
+4. p-code opcode and varnode-shape parity
+5. env-gated execution-path trial only after parity buckets are stable
+
+## SLEIGH Runtime Hard-Delete Replacement Wave
+
+### Summary
+
+This wave intentionally removed the old architecture-specific hand-lifter path and
+started the new generated/compiler runtime owner.
+
+Fixed rollout decision:
+
+```text
+migration_mode: hard_delete
+registry_scope: all_skeleton
+canonical_runtime_owner: crates/fission-sleigh/src/runtime/
+old_lifter_path: removed
+rsleigh_dependency: none
+```
+
+### What changed
+
+- Removed `crates/fission-sleigh/src/lifter/` and all x86/AArch64 hand-lifter backend modules.
+- Added `RuntimeSleighFrontend`, `CompiledRuntimeRegistry`, `DecodeContract`, `DecodeStopReason`, and typed runtime errors under `fission_sleigh::runtime`.
+- Updated downstream consumers to import `fission_sleigh::runtime::*` instead of `fission_sleigh::lifter::*`.
+- Registered all 48 checked-in `.slaspec` variants through the generated/spec discovery path.
+- Marked `x86-64` as `ExecutableCandidate`; all other variants are `RegisteredCompileOnly`.
+- Extended generated constructor artifacts with runtime-facing metadata:
+  - `pattern_signature`
+  - `semantic_template_status`
+  - `semantic_action_hash`
+  - `semantic_op_count`
+
+### Runtime status
+
+The new runtime is deliberately fail-closed.
+
+- `x86-64` is registered as the first executable candidate, but compiled pattern/action execution is not implemented yet.
+- Non-x86-64 variants return `UnsupportedGeneratedSemantic`.
+- x86-64 decode/lift currently returns `UnsupportedPcodeTemplate` rather than emitting fake p-code.
+
+This means Rust-SLEIGH decompilation can be degraded until the next runtime execution wave. That is an intentional consequence of hard-deleting the old hand-lifter instead of keeping a fallback shim.
+
+### Validation
+
+Passed:
+
+```text
+cargo check -p fission-sleigh
+cargo run -p fission-sleigh --example generate_sleigh_frontends
+cargo test -p fission-sleigh runtime_
+cargo test -p fission-sleigh
+```
+
+Observed:
+
+```text
+runtime_ targeted tests: 2 passed / 0 failed
+fission-sleigh full tests: 25 passed / 0 failed
+generated variants: 48
+```
+
+Additional validation after downstream/runtime wiring:
+
+```text
+cargo check -p fission-cli
+cargo check -p fission-decompiler-core
+cargo build -p fission-cli --release
+cargo check -p fission-automation
+CLI info/list smoke on test_functions.exe
+CLI decomp smoke on test_functions.exe:fibonacci
+```
+
+Observed CLI smoke:
+
+```text
+info: passed
+list --json: passed
+decomp --addr 0x140001470 --json: fail-closed fallback
+error bucket: UnsupportedPcodeTemplate
+```
+
+### Benchmark readout
+
+Ran limited Windows small C corpus benchmark to make the hard-delete impact explicit:
+
+```text
+runner: benchmark/full_benchmark/full_decomp_benchmark.py
+manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-runtime-hard-delete-latest
+limit: 5
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+```
+
+Observed result:
+
+```text
+weighted_avg_normalized_similarity: 37.604% -> 0.000%
+release_promotion_allowed: false
+x64 failed binaries: 6/6
+direct_success: 0/5 for each sampled binary
+cpu process seconds: 0.032143
+effective parallelism: 4.078
+```
+
+Promotion blockers:
+
+```text
+weighted_avg_normalized_similarity regression
+row_fidelity_gate failed for all six Windows small C sample binaries
+direct_success changed for at least one binary
+arch_summary.x64 weighted similarity regression
+```
+
+This is an expected negative benchmark result for a hard-delete wave where the replacement runtime is registered but not executable yet.
+
+### Duplicate-logic audit
+
+- Old x86/AArch64 hand-lifter semantic code was removed instead of duplicated under the generated runtime path.
+- CFG block reconstruction moved to the runtime owner and remains shared by downstream tests.
+- Compiler/codegen remains architecture-generic; no per-architecture compiler was added.
+
+### Next owner
+
+The next wave must implement executable compiled-table runtime for x86-64:
+
+1. pattern/token table matching
+2. operand binding extraction
+3. semantic template lowering into `fission_pcode::PcodeOp`
+4. differential report against preserved baseline instruction samples
+5. Windows small C decomp smoke recovery
+
+## SLEIGH x86-64 Runtime Execution Seed
+
+```text
+wave_type: runtime_recovery
+runtime_owner: crates/fission-sleigh/src/runtime/
+primary_arch: x86-64
+old_lifter_path: still removed
+rsleigh_dependency: none
+external_rust_decode_dependency: iced-x86
+promotion_status: not_ready
+```
+
+### What changed
+
+- Added an x86-64 executable runtime seed under `crates/fission-sleigh/src/runtime/x86_64.rs`.
+- Kept `RuntimeSleighFrontend` / `CompiledRuntimeRegistry` as the canonical runtime owner after the hand-lifter deletion.
+- Added decode-only `iced-x86` usage for instruction decoding while keeping p-code emission owned by Fission runtime code.
+- Implemented fail-closed typed p-code emission for the initial x86-64 subset:
+  - `ret`
+  - direct/indirect `call` and `jmp`
+  - conditional branches
+  - `mov`, `lea`
+  - `push`, `pop`, `leave`
+  - integer arithmetic/logical ops
+  - `cmp`, `test`
+  - `movzx`, `movsx`, `movsxd`
+  - `setcc`
+  - accumulator sign/zero extension family
+- Fixed generated artifact JSON escaping for constructor/source strings containing control characters.
+- Regenerated all checked-in SLEIGH compiler artifacts.
+
+This is not full compiled-table SLEIGH execution yet. It restores x86-64 runtime execution after the hard-delete wave and establishes the runtime lowering owner. Unsupported generated semantics still return typed errors instead of fake p-code.
+
+### Validation
+
+Passed:
+
+```text
+cargo test -p fission-sleigh runtime_
+cargo test -p fission-sleigh
+cargo check -p fission-sleigh
+cargo check -p fission-cli
+cargo check -p fission-decompiler-core
+cargo check -p fission-automation
+cargo build -p fission-cli --release
+cargo fmt -p fission-sleigh --check
+git diff --check
+```
+
+Observed:
+
+```text
+runtime_ targeted tests: 5 passed / 0 failed
+fission-sleigh full tests: 28 passed / 0 failed
+generated artifact JSON parse: passed
+generated artifact determinism: passed
+```
+
+CLI smoke:
+
+```text
+target/release/fission_cli info benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001000 --json
+target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json
+```
+
+Observed:
+
+```text
+info: passed
+decomp 0x140001000: exit 0, engine_used=rust_sleigh, fell_back=false
+decomp 0x140001470: exit 0, engine_used=rust_sleigh, fell_back=false
+```
+
+### Benchmark readout
+
+Ran limited Windows small C recovery benchmark:
+
+```text
+runner: benchmark/full_benchmark/full_decomp_benchmark.py
+manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-runtime-hard-delete-latest
+output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-x86-runtime-latest
+limit: 5
+timeout: 120
+```
+
+Observed compact summary:
+
+```text
+weighted_avg_normalized_similarity: 0.000% -> 44.470%
+x64 weighted_avg_normalized_similarity: 44.470%
+x64 failed binaries: none
+direct_success: 5/5 on each sampled binary
+release_promotion_allowed: false
+process_cpu_seconds: 0.058375
+process_cpu_user_sec: 0.032552
+process_cpu_system_sec: 0.025823
+process_cpu_utilization_pct: 372.401
+effective_parallelism: 3.724
+func_per_cpu_second: 516.550167
+```
+
+Promotion blockers:
+
+```text
+advisory_gate_mode
+per-binary row_fidelity_gate failed for all six Windows small C sample binaries
+direct_success changed for at least one binary
+owner_metric_totals materialization_stabilized: 0.000 -> 198.000
+```
+
+Interpretation:
+
+- The hard-delete regression was partially recovered: x86-64 sample decompilation now executes again instead of returning `UnsupportedPcodeTemplate` everywhere.
+- This is not a quality promotion result. Row-fidelity still fails and output quality remains below the pre-hard-delete hand-lifter baseline.
+- The benchmark improvement is measured against the intentional hard-delete fail-closed baseline, not against the older hand-lifter path.
+
+### Duplicate-logic audit
+
+- No old hand-lifter compatibility shim was reintroduced.
+- x86-64 p-code lowering now lives in the new runtime owner, not in CLI/static/printer layers.
+- The current runtime seed still duplicates semantic intent that should ultimately come from generated SLEIGH semantic templates. That is accepted only as an executable bridge; the next owner remains compiled-table semantic template lowering.
+
+### Next owner
+
+The next runtime wave must replace the x86-64 bridge with real generated-table execution:
+
+1. generated pattern matcher over compiled constructor tables
+2. operand binding extraction from pattern matches
+3. semantic template lowering into `fission_pcode::PcodeOp`
+4. differential parity harness against preserved x86-64 p-code samples
+5. full Windows small C benchmark without `--limit`
+
+## SLEIGH x86-64 Compiled-Table Execution Migration
+
+```text
+wave_type: runtime_migration
+runtime_owner: crates/fission-sleigh/src/runtime/
+primary_arch: x86-64
+canonical_reference: vendor/ghidra/ghidra-Ghidra_12.0.4_build
+cutover_gate: FISSION_ENABLE_GENERATED_X86_64_RUNTIME
+iced_x86_status: temporary bridge_oracle only
+promotion_status: not_ready
+```
+
+### What changed
+
+This wave moves the x86-64 runtime one owner closer to the Ghidra `SleighLanguage -> DecisionNode -> ConstructState/ParserWalker -> PcodeEmit` spine without deleting the bridge yet.
+
+Compiler-side executable IR was promoted from inventory-only metadata to runtime-consumable state:
+
+- added `CompiledExecutableConstructor`
+- added `CompiledDecisionTree`
+- added `CompiledOpcodeMatcher`
+- added `CompiledOperandSpec`
+- added `CompiledSemanticKind`
+- added additive manifest fields:
+  - `runtime_ready`
+  - `decision_node_count`
+  - `constructor_template_count`
+  - `unsupported_template_count`
+
+Current x86-64 compile step now produces a typed executable subset rather than just reporting constructor inventory:
+
+- exact-byte and row/page matcher buckets
+- operand binding specs for:
+  - `ModRmRm`
+  - `ModRmReg`
+  - `OpcodeReg`
+  - `Immediate`
+  - `Relative`
+  - `FixedRegister`
+- typed semantic families for the current executable subset:
+  - `ret`
+  - `call`
+  - `jmp`
+  - `jcc`
+  - `mov`
+  - `lea`
+  - `push`
+  - `pop`
+  - `leave`
+  - arithmetic/logical core
+  - `cmp`
+  - `test`
+  - `movzx` / `movsx` / `movsxd`
+  - `setcc`
+  - `cbw` / `cwde` / `cdqe`
+
+Runtime-side owner changes:
+
+- added env-gated generated runtime entrypoint under:
+  - `crates/fission-sleigh/src/runtime/generated_x86_64.rs`
+- `RuntimeSleighFrontend` now precompiles the executable candidate frontend in-memory
+- `decode_and_lift_with_len()` now selects:
+  - gate off: existing `iced-x86` bridge path
+  - gate on: generated compiled-table matcher/binder/emitter path
+- downstream public runtime API remains unchanged
+
+Differential harness was upgraded from front-end smoke to runtime parity classification:
+
+- `decision_tree_no_match`
+- `constructor_selection_mismatch`
+- `operand_binding_mismatch`
+- `semantic_template_unsupported`
+- `pcode_opcode_mismatch`
+- `varnode_shape_mismatch`
+- `branch_target_mismatch`
+- `temporary_space_mismatch`
+
+Generated artifacts remain deterministic and repo-tracked. This wave keeps the generated files as debug/diff/readout outputs while runtime consumes the in-memory compiled IR as the canonical owner.
+
+### Validation
+
+Passed:
+
+```text
+cargo check -p fission-sleigh
+cargo check -p fission-cli
+cargo build -p fission-cli --release
+cargo test -p fission-sleigh -- --test-threads=1
+cargo test -p fission-sleigh generated_runtime_decodes_ret -- --nocapture
+cargo test -p fission-sleigh runtime::generated_x86_64::tests::generated_runtime_decodes_mov_imm64 -- --nocapture
+cargo test -p fission-sleigh generated_runtime_decodes_jcc_rel8 -- --nocapture
+cargo test -p fission-sleigh equivalence_report_runs_for_unit_seeds -- --nocapture
+```
+
+Observed:
+
+```text
+fission-sleigh full tests: 31 passed / 0 failed
+generated runtime seed tests: passed
+equivalence runtime report test: passed
+generated artifact determinism: passed
+```
+
+Determinism check:
+
+```text
+before=4187a135bd6dd985b5bec98bb48dd1e72ea8667a
+after=4187a135bd6dd985b5bec98bb48dd1e72ea8667a
+deterministic=1
+```
+
+CLI smoke with generated runtime enabled:
+
+```text
+FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1 \
+target/release/fission_cli decomp \
+  benchmark/binary/x86-64/window/small/binary/c/test_functions.exe \
+  --addr 0x140001470 --json
+```
+
+Observed:
+
+```text
+exit=0
+engine_used=rust_sleigh
+row.name=fibonacci
+row.address=0x140001470
+preview_build_stats present
+```
+
+### Limited benchmark readout
+
+Ran a limited Windows small C corpus benchmark against the previous bridge baseline:
+
+```text
+runner: benchmark/full_benchmark/full_decomp_benchmark.py
+manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+baseline: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-x86-runtime-latest
+output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-compiled-runtime-latest
+limit: 5
+timeout: 120
+env: FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1
+```
+
+Observed:
+
+```text
+weighted_avg_normalized_similarity: 44.470% -> 35.990%
+delta: -8.480pp
+promotion_status: failed
+per-binary row_fidelity_gate: failed on all 6 sample binaries
+crash rows: none observed in the limited corpus run
+```
+
+Representative degraded rows from compact summary:
+
+```text
+array-operations: WinMainCRTStartup @ 0x1400013e0
+- previous_normalized_similarity: 60.26
+- current_normalized_similarity: 38.22
+- delta: -22.04
+
+bitops-control-flow: WinMainCRTStartup @ 0x1400013e0
+- previous_normalized_similarity: 60.26
+- current_normalized_similarity: 38.22
+- delta: -22.04
+```
+
+Interpretation:
+
+- the generated compiled-table path is now executable and crash-free on the limited x64 sample corpus
+- this is not yet parity-ready
+- the current executable subset is selecting/emitting enough p-code to decompile, but not enough to preserve prior x86 bridge fidelity
+- therefore `iced-x86` deletion remains blocked
+
+### Duplicate-logic audit
+
+- Compiler executable IR remains architecture-generic; no per-architecture compiler was introduced.
+- The generated runtime path reuses the canonical `RuntimeSleighFrontend` owner instead of adding a CLI/static fallback shim.
+- A temporary duplication still exists between:
+  - bridge-side handwritten x86 semantic lowering
+  - generated runtime typed semantic emitter
+
+This duplication is intentionally temporary and only acceptable while differential parity is still open. It is the next structural debt to remove once compiled semantic template lowering is complete.
+
+### Final status
+
+```text
+result: negative_but_useful
+hard_delete_gate: still closed
+iced_x86_removal: blocked
+next_owner: compiled semantic template lowering and constructor-selection parity
+```
+
+### Next owner
+
+The next executable runtime wave must focus on parity, not broader instruction coverage:
+
+1. tighten constructor selection against `decision_tree_no_match` and selection drift
+2. close operand binding mismatches on startup/runtime-heavy rows first
+3. replace handwritten generated-runtime semantic families with compiled semantic template lowering
+4. rerun limited corpus until bridge-baseline similarity is non-worse
+5. only then open the `iced-x86` deletion gate

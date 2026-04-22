@@ -1,0 +1,13 @@
+{
+  "arch": "Xtensa",
+  "entry_spec": "xtensa_be.slaspec",
+  "entry_id": "xtensa_be",
+  "include_manifest": [
+    "xtensa_be.slaspec@0",
+    "xtensaArch.sinc@1",
+    "xtensaMain.sinc@1",
+    "xtensaInstructions.sinc@1",
+    "cust.sinc@1",
+    "flix.sinc@1"
+  ]
+}

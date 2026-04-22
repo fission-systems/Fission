@@ -1,0 +1,10 @@
+{
+  "arch": "Sparc",
+  "entry_spec": "SparcV9_64.slaspec",
+  "entry_id": "SparcV9_64",
+  "include_manifest": [
+    "SparcV9_64.slaspec@0",
+    "SparcV9.sinc@1",
+    "SparcVIS.sinc@2"
+  ]
+}

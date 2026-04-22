@@ -1,0 +1,8 @@
+{
+  "arch": "JVM",
+  "entry_spec": "JVM.slaspec",
+  "entry_id": "JVM",
+  "include_manifest": [
+    "JVM.slaspec@0"
+  ]
+}

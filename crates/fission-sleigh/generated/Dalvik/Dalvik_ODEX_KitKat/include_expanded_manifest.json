@@ -1,0 +1,14 @@
+{
+  "arch": "Dalvik",
+  "entry_spec": "Dalvik_ODEX_KitKat.slaspec",
+  "entry_id": "Dalvik_ODEX_KitKat",
+  "include_manifest": [
+    "Dalvik_ODEX_KitKat.slaspec@0",
+    "Dalvik_Base.sinc@1",
+    "Dalvik_OpCode_3E_43_unused.sinc@1",
+    "Dalvik_OpCode_73_unused.sinc@1",
+    "Dalvik_OpCode_79_unused.sinc@1",
+    "Dalvik_OpCode_7A_unused.sinc@1",
+    "Dalvik_OpCode_FF_unused.sinc@1"
+  ]
+}

@@ -1,0 +1,1194 @@
+# semantic action inventory
+arch: Xtensa
+entry_spec: xtensa_le.slaspec
+entry_id: xtensa_le
+
+- ^instruction [conditional_branch] xtensaMain.sinc:284
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=107eff3b7be4608e op_count=0
+- ^instruction [none] xtensaMain.sinc:290
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
+- ^instruction [none] xtensaMain.sinc:295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
+- abs [conditional_branch] xtensa_le.slaspec:6
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4ab964c3160a7a51 op_count=0
+  with_stack: with : phase=1
+- abs.s [none] xtensa_le.slaspec:12
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=950b12e0f35b0b91 op_count=0
+  with_stack: with : phase=1
+- add [none] xtensa_le.slaspec:15
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5747d98384a48af0 op_count=0
+  with_stack: with : phase=1
+- add.n [none] xtensa_le.slaspec:18
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=589352b8ec6cfe6f op_count=0
+  with_stack: with : phase=1
+- add.s [none] xtensa_le.slaspec:21
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c96b7befe7e2e07 op_count=0
+  with_stack: with : phase=1
+- addi [none] xtensa_le.slaspec:24
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e8de6e33b1bddf55 op_count=0
+  with_stack: with : phase=1
+- addi.n [none] xtensa_le.slaspec:27
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6539a92732cebe0 op_count=0
+  with_stack: with : phase=1
+- addmi [none] xtensa_le.slaspec:30
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c252e869c991b83f op_count=0
+  with_stack: with : phase=1
+- addx2 [none] xtensa_le.slaspec:33
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=22c6ae57a22cd894 op_count=0
+  with_stack: with : phase=1
+- addx4 [none] xtensa_le.slaspec:36
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=284776da8133fecf op_count=0
+  with_stack: with : phase=1
+- addx8 [none] xtensa_le.slaspec:39
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32ca14737f4fd8ce op_count=0
+  with_stack: with : phase=1
+- all4 [none] xtensa_le.slaspec:42
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a00108cf2e664e30 op_count=0
+  with_stack: with : phase=1
+- all8 [none] xtensa_le.slaspec:48
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72d3f7ae3533d55c op_count=0
+  with_stack: with : phase=1
+- and [none] xtensa_le.slaspec:58
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bbc6409a8afc10df op_count=0
+  with_stack: with : phase=1
+- andb [none] xtensa_le.slaspec:61
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a80ba5390dd0f71c op_count=0
+  with_stack: with : phase=1
+- andbc [none] xtensa_le.slaspec:64
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b78740c2576b67ff op_count=0
+  with_stack: with : phase=1
+- any4 [none] xtensa_le.slaspec:67
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eae01ad7ed7dfe70 op_count=0
+  with_stack: with : phase=1
+- any8 [none] xtensa_le.slaspec:73
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=10cd6701e887cfcc op_count=0
+  with_stack: with : phase=1
+- ball [conditional_branch] xtensa_le.slaspec:83
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=61049df71bbfc89d op_count=0
+  with_stack: with : phase=1
+- bany [conditional_branch] xtensa_le.slaspec:87
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d83190516c30f775 op_count=0
+  with_stack: with : phase=1
+- bbc [conditional_branch] xtensa_le.slaspec:94
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b8306e683628b2bf op_count=0
+  with_stack: with : phase=1
+- bbci [conditional_branch] xtensa_le.slaspec:101
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f6de48077e377519 op_count=0
+  with_stack: with : phase=1
+- bbs [conditional_branch] xtensa_le.slaspec:108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb4d0b5b4caf9706 op_count=0
+  with_stack: with : phase=1
+- bbsi [conditional_branch] xtensa_le.slaspec:115
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd2f8fd64c3a5b35 op_count=0
+  with_stack: with : phase=1
+- beq [conditional_branch] xtensa_le.slaspec:122
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0db2704d7726558c op_count=0
+  with_stack: with : phase=1
+- beqi [conditional_branch] xtensa_le.slaspec:126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d6f53a31fc068ed9 op_count=0
+  with_stack: with : phase=1
+- beqz [conditional_branch] xtensa_le.slaspec:130
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b3de26cd37a60c2 op_count=0
+  with_stack: with : phase=1
+- beqz.n [conditional_branch] xtensa_le.slaspec:134
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=603a4688fe60dc89 op_count=0
+  with_stack: with : phase=1
+- bf [conditional_branch] xtensa_le.slaspec:138
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91f52cb1d369bcbf op_count=0
+  with_stack: with : phase=1
+- bge [conditional_branch] xtensa_le.slaspec:142
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=99426eb3d17f71d2 op_count=0
+  with_stack: with : phase=1
+- bgei [conditional_branch] xtensa_le.slaspec:146
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6fd621e3bebae60f op_count=0
+  with_stack: with : phase=1
+- bgeu [conditional_branch] xtensa_le.slaspec:150
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b36ef209e60d88d1 op_count=0
+  with_stack: with : phase=1
+- bgeui [conditional_branch] xtensa_le.slaspec:154
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27ee8825f6682607 op_count=0
+  with_stack: with : phase=1
+- bgez [conditional_branch] xtensa_le.slaspec:158
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a167638f2834b0ec op_count=0
+  with_stack: with : phase=1
+- blt [conditional_branch] xtensa_le.slaspec:162
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33bb30f82d8554f3 op_count=0
+  with_stack: with : phase=1
+- blti [conditional_branch] xtensa_le.slaspec:166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=544794a1bdbeb7d4 op_count=0
+  with_stack: with : phase=1
+- bltu [conditional_branch] xtensa_le.slaspec:170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6883cb5763171c6e op_count=0
+  with_stack: with : phase=1
+- bltui [conditional_branch] xtensa_le.slaspec:174
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4642a83956b0834 op_count=0
+  with_stack: with : phase=1
+- bltz [conditional_branch] xtensa_le.slaspec:178
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b78a1d0132e8d1b op_count=0
+  with_stack: with : phase=1
+- bnall [conditional_branch] xtensa_le.slaspec:182
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2058deb68fc0e271 op_count=0
+  with_stack: with : phase=1
+- bne [conditional_branch] xtensa_le.slaspec:186
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2af8dd9abf20138 op_count=0
+  with_stack: with : phase=1
+- bnei [conditional_branch] xtensa_le.slaspec:190
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ff7a42a492dc05bd op_count=0
+  with_stack: with : phase=1
+- bnez [conditional_branch] xtensa_le.slaspec:194
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=647cb1a9f81bc03e op_count=0
+  with_stack: with : phase=1
+- bnez.n [conditional_branch] xtensa_le.slaspec:198
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6cbd527f17ed7aa5 op_count=0
+  with_stack: with : phase=1
+- bnone [conditional_branch] xtensa_le.slaspec:202
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3947ac711f30134b op_count=0
+  with_stack: with : phase=1
+- break [none] xtensa_le.slaspec:206
+  semantic_ops: breakpoint
+  semantic_template: status=unsupported_template action_hash=28256c1f8fc09c18 op_count=1
+  with_stack: with : phase=1
+- break.n [none] xtensa_le.slaspec:210
+  semantic_ops: breakpoint
+  semantic_template: status=unsupported_template action_hash=36ca37f5790cdcce op_count=1
+  with_stack: with : phase=1
+- bt [conditional_branch] xtensa_le.slaspec:214
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=64b39d11ac7f0698 op_count=0
+  with_stack: with : phase=1
+- call0 [call] xtensa_le.slaspec:218
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5eb0b9c2d63f8a7b op_count=0
+  with_stack: with : phase=1
+- call4 [call] xtensa_le.slaspec:223
+  semantic_ops: restore4, swap4
+  semantic_template: status=unsupported_template action_hash=7e4a51601d921df2 op_count=2
+  with_stack: with : phase=1
+- call8 [call] xtensa_le.slaspec:230
+  semantic_ops: restore8, swap8
+  semantic_template: status=unsupported_template action_hash=df61ba509373394d op_count=2
+  with_stack: with : phase=1
+- call12 [call] xtensa_le.slaspec:237
+  semantic_ops: restore12, swap12
+  semantic_template: status=unsupported_template action_hash=038d3f1de7493d06 op_count=2
+  with_stack: with : phase=1
+- callx0 [call] xtensa_le.slaspec:244
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6b981feb7d4ff4ac op_count=0
+  with_stack: with : phase=1
+- callx4 [call] xtensa_le.slaspec:250
+  semantic_ops: restore4, swap4
+  semantic_template: status=unsupported_template action_hash=ee342ffe17532bfe op_count=2
+  with_stack: with : phase=1
+- callx8 [call] xtensa_le.slaspec:258
+  semantic_ops: restore8, swap8
+  semantic_template: status=unsupported_template action_hash=6d7e3a27a97dadd7 op_count=2
+  with_stack: with : phase=1
+- callx12 [call] xtensa_le.slaspec:266
+  semantic_ops: restore12, swap12
+  semantic_template: status=unsupported_template action_hash=3c786576b0f0a35a op_count=2
+  with_stack: with : phase=1
+- ceil.s [none] xtensa_le.slaspec:274
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9d92e8fe7d15136 op_count=0
+  with_stack: with : phase=1
+- clamps [none] xtensa_le.slaspec:278
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d251966999ad6431 op_count=0
+  with_stack: with : phase=1
+- dhi [none] xtensa_le.slaspec:286
+  semantic_ops: dhi
+  semantic_template: status=unsupported_template action_hash=238937654c4b71a2 op_count=1
+  with_stack: with : phase=1
+- dhu [none] xtensa_le.slaspec:289
+  semantic_ops: dhu
+  semantic_template: status=unsupported_template action_hash=63d240519c67a149 op_count=1
+  with_stack: with : phase=1
+- dhwb [none] xtensa_le.slaspec:292
+  semantic_ops: dhwb
+  semantic_template: status=unsupported_template action_hash=0b7be34c7bb4609a op_count=1
+  with_stack: with : phase=1
+- dhwbi [none] xtensa_le.slaspec:295
+  semantic_ops: dhwbi
+  semantic_template: status=unsupported_template action_hash=569594b934872089 op_count=1
+  with_stack: with : phase=1
+- dii [none] xtensa_le.slaspec:298
+  semantic_ops: dii
+  semantic_template: status=unsupported_template action_hash=2cc7fd342d000ff3 op_count=1
+  with_stack: with : phase=1
+- diu [none] xtensa_le.slaspec:301
+  semantic_ops: diu
+  semantic_template: status=unsupported_template action_hash=2d120c95907990b4 op_count=1
+  with_stack: with : phase=1
+- diwb [none] xtensa_le.slaspec:304
+  semantic_ops: diwb
+  semantic_template: status=unsupported_template action_hash=77635afab5ed1622 op_count=1
+  with_stack: with : phase=1
+- diwbi [none] xtensa_le.slaspec:307
+  semantic_ops: diwbi
+  semantic_template: status=unsupported_template action_hash=fa3b128da8c0e41f op_count=1
+  with_stack: with : phase=1
+- dpfl [none] xtensa_le.slaspec:310
+  semantic_ops: dpfl
+  semantic_template: status=unsupported_template action_hash=a550584394351efa op_count=1
+  with_stack: with : phase=1
+- dpfr [none] xtensa_le.slaspec:313
+  semantic_ops: dpfr
+  semantic_template: status=unsupported_template action_hash=7143c1b098f0900b op_count=1
+  with_stack: with : phase=1
+- dpfro [none] xtensa_le.slaspec:316
+  semantic_ops: dpfro
+  semantic_template: status=unsupported_template action_hash=49c4ecca31395ce8 op_count=1
+  with_stack: with : phase=1
+- dpfw [none] xtensa_le.slaspec:319
+  semantic_ops: dpfw
+  semantic_template: status=unsupported_template action_hash=a7c2e827d37796c0 op_count=1
+  with_stack: with : phase=1
+- dpfwo [none] xtensa_le.slaspec:322
+  semantic_ops: dpfwo
+  semantic_template: status=unsupported_template action_hash=c9f7858252a7a0e1 op_count=1
+  with_stack: with : phase=1
+- dsync [none] xtensa_le.slaspec:325
+  semantic_ops: dsync
+  semantic_template: status=unsupported_template action_hash=9c7a54ec18add024 op_count=1
+  with_stack: with : phase=1
+- entry [none] xtensa_le.slaspec:328
+  semantic_ops: rotateRegWindow
+  semantic_template: status=unsupported_template action_hash=b8bdd24f53f0427d op_count=1
+  with_stack: with : phase=1
+- esync [none] xtensa_le.slaspec:334
+  semantic_ops: esync
+  semantic_template: status=unsupported_template action_hash=7ac6ee1cd5a097a1 op_count=1
+  with_stack: with : phase=1
+- excw [none] xtensa_le.slaspec:337
+  semantic_ops: excw
+  semantic_template: status=unsupported_template action_hash=70460e668b85a9ba op_count=1
+  with_stack: with : phase=1
+- extui [none] xtensa_le.slaspec:340
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=422c5b30adf6712f op_count=0
+  with_stack: with : phase=1
+- extw [none] xtensa_le.slaspec:345
+  semantic_ops: extw
+  semantic_template: status=unsupported_template action_hash=fc45d01c17a09fbf op_count=1
+  with_stack: with : phase=1
+- float.s [none] xtensa_le.slaspec:348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3d08fb15f964b2f7 op_count=0
+  with_stack: with : phase=1
+- floor.s [none] xtensa_le.slaspec:352
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ecd4bc64a2266a2b op_count=0
+  with_stack: with : phase=1
+- idtlb [none] xtensa_le.slaspec:356
+  semantic_ops: idtlb
+  semantic_template: status=unsupported_template action_hash=de7402339f1ffaf6 op_count=1
+  with_stack: with : phase=1
+- ihi [none] xtensa_le.slaspec:359
+  semantic_ops: ihi
+  semantic_template: status=unsupported_template action_hash=bb2266e3561c2ff5 op_count=1
+  with_stack: with : phase=1
+- ihu [none] xtensa_le.slaspec:362
+  semantic_ops: ihu
+  semantic_template: status=unsupported_template action_hash=59d5d3c13fe525ea op_count=1
+  with_stack: with : phase=1
+- iii [none] xtensa_le.slaspec:365
+  semantic_ops: iii
+  semantic_template: status=unsupported_template action_hash=a52b51987e50dc2c op_count=1
+  with_stack: with : phase=1
+- iitlb [none] xtensa_le.slaspec:368
+  semantic_ops: iitlb
+  semantic_template: status=unsupported_template action_hash=2c8d00fbd964c11d op_count=1
+  with_stack: with : phase=1
+- iiu [none] xtensa_le.slaspec:371
+  semantic_ops: iiu
+  semantic_template: status=unsupported_template action_hash=3cb40877501a89ef op_count=1
+  with_stack: with : phase=1
+- ill [branch] xtensa_le.slaspec:374
+  semantic_ops: ill
+  semantic_template: status=unsupported_template action_hash=c025acb32631421e op_count=1
+  with_stack: with : phase=1
+- ill.n [branch] xtensa_le.slaspec:378
+  semantic_ops: ill
+  semantic_template: status=unsupported_template action_hash=c025acb32631421e op_count=1
+  with_stack: with : phase=1
+- ipf [none] xtensa_le.slaspec:382
+  semantic_ops: ipf
+  semantic_template: status=unsupported_template action_hash=3297bae9db136620 op_count=1
+  with_stack: with : phase=1
+- ipfl [none] xtensa_le.slaspec:385
+  semantic_ops: ipfl
+  semantic_template: status=unsupported_template action_hash=ecac0f7fb8d5a24f op_count=1
+  with_stack: with : phase=1
+- isync [none] xtensa_le.slaspec:388
+  semantic_ops: isync
+  semantic_template: status=unsupported_template action_hash=a2d28894b6d40ee5 op_count=1
+  with_stack: with : phase=1
+- j [branch] xtensa_le.slaspec:391
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc2b42822744be54 op_count=0
+  with_stack: with : phase=1
+- ret [return] xtensa_le.slaspec:394
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c6116b515d9db5b op_count=0
+  with_stack: with : phase=1
+- ret [return] xtensa_le.slaspec:397
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c6116b515d9db5b op_count=0
+  with_stack: with : phase=1
+- jx [branch] xtensa_le.slaspec:400
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed0041067c73be9f op_count=0
+  with_stack: with : phase=1
+- l8ui [none] xtensa_le.slaspec:403
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8f5a5e991e3a6249 op_count=0
+  with_stack: with : phase=1
+- l16si [none] xtensa_le.slaspec:407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dadd59686488098e op_count=0
+  with_stack: with : phase=1
+- l16ui [none] xtensa_le.slaspec:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f0c57494d9ff8c6d op_count=0
+  with_stack: with : phase=1
+- l32ai [none] xtensa_le.slaspec:415
+  semantic_ops: acquire
+  semantic_template: status=unsupported_template action_hash=3a7056943d34e3cc op_count=1
+  with_stack: with : phase=1
+- l32e [none] xtensa_le.slaspec:420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cff4636998c3b907 op_count=0
+  with_stack: with : phase=1
+- l32i [none] xtensa_le.slaspec:424
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a1c28d225503f93 op_count=0
+  with_stack: with : phase=1
+- l32i.n [none] xtensa_le.slaspec:428
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f30fdb820be16433 op_count=0
+  with_stack: with : phase=1
+- l32r [none] xtensa_le.slaspec:432
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=848ffb64152ff963 op_count=0
+  with_stack: with : phase=1
+- ldct [none] xtensa_le.slaspec:435
+  semantic_ops: ldct
+  semantic_template: status=unsupported_template action_hash=616feef19c0961f6 op_count=1
+  with_stack: with : phase=1
+- lict [none] xtensa_le.slaspec:438
+  semantic_ops: lict
+  semantic_template: status=unsupported_template action_hash=9366943747f3686b op_count=1
+  with_stack: with : phase=1
+- licw [none] xtensa_le.slaspec:441
+  semantic_ops: licw
+  semantic_template: status=unsupported_template action_hash=b901c43f91478ca8 op_count=1
+  with_stack: with : phase=1
+- lsi [none] xtensa_le.slaspec:444
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f67832beaa341e1 op_count=0
+  with_stack: with : phase=1
+- lsiu [none] xtensa_le.slaspec:448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f39faebf29d365f3 op_count=0
+  with_stack: with : phase=1
+- lsx [none] xtensa_le.slaspec:453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0676e2ffdd7d57ed op_count=0
+  with_stack: with : phase=1
+- lsxu [none] xtensa_le.slaspec:457
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1274dd93be0d6b37 op_count=0
+  with_stack: with : phase=1
+- madd.s [none] xtensa_le.slaspec:462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=57fb2d2825947a1c op_count=0
+  with_stack: with : phase=1
+- max [none] xtensa_le.slaspec:465
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd3ed45b65dad323 op_count=0
+  with_stack: with : phase=1
+- maxu [none] xtensa_le.slaspec:469
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d955bf225fa09c72 op_count=0
+  with_stack: with : phase=1
+- memw [none] xtensa_le.slaspec:473
+  semantic_ops: memw
+  semantic_template: status=unsupported_template action_hash=98fbecca19713bf1 op_count=1
+  with_stack: with : phase=1
+- min [none] xtensa_le.slaspec:476
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af4cd8f48109339d op_count=0
+  with_stack: with : phase=1
+- minu [none] xtensa_le.slaspec:480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0090d3db13bff2e4 op_count=0
+  with_stack: with : phase=1
+- mov.n [none] xtensa_le.slaspec:484
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df1910245eb406b0 op_count=0
+  with_stack: with : phase=1
+- mov.s [none] xtensa_le.slaspec:487
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f9f239bdc19063e op_count=0
+  with_stack: with : phase=1
+- moveqz [conditional_branch] xtensa_le.slaspec:490
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af8a8acb45646b89 op_count=0
+  with_stack: with : phase=1
+- moveqz.s [conditional_branch] xtensa_le.slaspec:495
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a275b1c28555e9b op_count=0
+  with_stack: with : phase=1
+- movf [conditional_branch] xtensa_le.slaspec:500
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59616bb8644041da op_count=0
+  with_stack: with : phase=1
+- movf.s [conditional_branch] xtensa_le.slaspec:505
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7073f02a3ab0915a op_count=0
+  with_stack: with : phase=1
+- movgez [conditional_branch] xtensa_le.slaspec:510
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=114992c92efb77ec op_count=0
+  with_stack: with : phase=1
+- movgez.s [conditional_branch] xtensa_le.slaspec:515
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c20ed14629d8ace6 op_count=0
+  with_stack: with : phase=1
+- movi [none] xtensa_le.slaspec:520
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=313454c19019b3df op_count=0
+  with_stack: with : phase=1
+- movi.n [none] xtensa_le.slaspec:524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6a451a2fe2320fa op_count=0
+  with_stack: with : phase=1
+- movltz [conditional_branch] xtensa_le.slaspec:528
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4334e0449c5f2261 op_count=0
+  with_stack: with : phase=1
+- movltz.s [conditional_branch] xtensa_le.slaspec:533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=924c4fa11de8a8b3 op_count=0
+  with_stack: with : phase=1
+- movnez [conditional_branch] xtensa_le.slaspec:538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88ab09808990dee5 op_count=0
+  with_stack: with : phase=1
+- movnez.s [conditional_branch] xtensa_le.slaspec:543
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b1c4d9e07102fd17 op_count=0
+  with_stack: with : phase=1
+- movsp [none] xtensa_le.slaspec:548
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e2ccc9cdf63f3be op_count=0
+  with_stack: with : phase=1
+- movt [conditional_branch] xtensa_le.slaspec:551
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ac80b722652ae5d op_count=0
+  with_stack: with : phase=1
+- movt.s [conditional_branch] xtensa_le.slaspec:556
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28b4dbdec8ff5b4f op_count=0
+  with_stack: with : phase=1
+- msub.s [none] xtensa_le.slaspec:561
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72db0e62df1364ca op_count=0
+  with_stack: with : phase=1
+- mul.s [none] xtensa_le.slaspec:564
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f6eb8e842414d7c op_count=0
+  with_stack: with : phase=1
+- mul16s [none] xtensa_le.slaspec:567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7d684035a44834b3 op_count=0
+  with_stack: with : phase=1
+- mul16u [none] xtensa_le.slaspec:570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c1785c120480dafd op_count=0
+  with_stack: with : phase=1
+- mull [none] xtensa_le.slaspec:573
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27f388acbddf1ffb op_count=0
+  with_stack: with : phase=1
+- mulsh [none] xtensa_le.slaspec:576
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4fe84d435c8b144d op_count=0
+  with_stack: with : phase=1
+- muluh [none] xtensa_le.slaspec:582
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b35e966f36b2d153 op_count=0
+  with_stack: with : phase=1
+- neg [none] xtensa_le.slaspec:588
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=555c2ecd768b38f4 op_count=0
+  with_stack: with : phase=1
+- neg.s [none] xtensa_le.slaspec:591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f88ec3da300c437 op_count=0
+  with_stack: with : phase=1
+- nop [none] xtensa_le.slaspec:594
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- nop.n [none] xtensa_le.slaspec:595
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- nsa [none] xtensa_le.slaspec:596
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a26b2796e6306468 op_count=0
+  with_stack: with : phase=1
+- nsau [none] xtensa_le.slaspec:599
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4ef6ac73175053ee op_count=0
+  with_stack: with : phase=1
+- oeq.s [none] xtensa_le.slaspec:602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eb81a11557c6dd15 op_count=0
+  with_stack: with : phase=1
+- ole.s [none] xtensa_le.slaspec:605
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6de9b398fa861dc op_count=0
+  with_stack: with : phase=1
+- olt.s [none] xtensa_le.slaspec:608
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e0c9a4dbc24cc83 op_count=0
+  with_stack: with : phase=1
+- mov [none] xtensa_le.slaspec:611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=921f64595cee16a4 op_count=0
+  with_stack: with : phase=1
+- or [none] xtensa_le.slaspec:614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e468aa5115f49d35 op_count=0
+  with_stack: with : phase=1
+- orb [none] xtensa_le.slaspec:617
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4742a5a7c4f73eb4 op_count=0
+  with_stack: with : phase=1
+- orbc [none] xtensa_le.slaspec:620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=118964e87547d947 op_count=0
+  with_stack: with : phase=1
+- pdtlb [none] xtensa_le.slaspec:623
+  semantic_ops: pdtlb
+  semantic_template: status=unsupported_template action_hash=2b8a6e2c205ad0eb op_count=1
+  with_stack: with : phase=1
+- pitlb [none] xtensa_le.slaspec:626
+  semantic_ops: pitlb
+  semantic_template: status=unsupported_template action_hash=31ae294a28a27ac8 op_count=1
+  with_stack: with : phase=1
+- quos [none] xtensa_le.slaspec:629
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33b1c195391e7849 op_count=0
+  with_stack: with : phase=1
+- quou [none] xtensa_le.slaspec:632
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a4b19cd5e0c5f9cc op_count=0
+  with_stack: with : phase=1
+- rdtlb0 [none] xtensa_le.slaspec:635
+  semantic_ops: rdtlb0
+  semantic_template: status=unsupported_template action_hash=5e3c47690666a4fb op_count=1
+  with_stack: with : phase=1
+- rdtlb1 [none] xtensa_le.slaspec:638
+  semantic_ops: rdtlb1
+  semantic_template: status=unsupported_template action_hash=dda7a1f07ada5ca2 op_count=1
+  with_stack: with : phase=1
+- rems [none] xtensa_le.slaspec:641
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e7b3ba96495942d3 op_count=0
+  with_stack: with : phase=1
+- remu [none] xtensa_le.slaspec:644
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4fced12e354f398a op_count=0
+  with_stack: with : phase=1
+- rer [none] xtensa_le.slaspec:647
+  semantic_ops: rer
+  semantic_template: status=unsupported_template action_hash=fd0b549a91ea4d58 op_count=1
+  with_stack: with : phase=1
+- ret.n [return] xtensa_le.slaspec:650
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c6116b515d9db5b op_count=0
+  with_stack: with : phase=1
+- retw [return] xtensa_le.slaspec:653
+  semantic_ops: restoreRegWindow
+  semantic_template: status=unsupported_template action_hash=dd07e632f394b813 op_count=1
+  with_stack: with : phase=1
+- retw.n [return] xtensa_le.slaspec:658
+  semantic_ops: restoreRegWindow
+  semantic_template: status=unsupported_template action_hash=dd07e632f394b813 op_count=1
+  with_stack: with : phase=1
+- rfdd [return] xtensa_le.slaspec:663
+  semantic_ops: rfdd
+  semantic_template: status=unsupported_template action_hash=9059b7022d3dbaba op_count=1
+  with_stack: with : phase=1
+- rfde [return] xtensa_le.slaspec:667
+  semantic_ops: rfde
+  semantic_template: status=unsupported_template action_hash=5dc84eff498cbf1b op_count=1
+  with_stack: with : phase=1
+- rfdo [return] xtensa_le.slaspec:671
+  semantic_ops: rfdo
+  semantic_template: status=unsupported_template action_hash=2a3e789c245b7559 op_count=1
+  with_stack: with : phase=1
+- rfe [return] xtensa_le.slaspec:675
+  semantic_ops: rfe
+  semantic_template: status=unsupported_template action_hash=c496e1d077bdaf8f op_count=1
+  with_stack: with : phase=1
+- rfi [return] xtensa_le.slaspec:681
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b384e7c63a9be61e op_count=0
+  with_stack: with : phase=1
+- rfme [return] xtensa_le.slaspec:685
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ad14b5a5aed5645 op_count=0
+  with_stack: with : phase=1
+- rfr [none] xtensa_le.slaspec:690
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ab3bdf596ae81435 op_count=0
+  with_stack: with : phase=1
+- rfue [return] xtensa_le.slaspec:693
+  semantic_ops: rfue
+  semantic_template: status=unsupported_template action_hash=bddba76c69778680 op_count=1
+  with_stack: with : phase=1
+- rfwo [return] xtensa_le.slaspec:697
+  semantic_ops: rfwo
+  semantic_template: status=unsupported_template action_hash=91b824ff7fefd2e9 op_count=1
+  with_stack: with : phase=1
+- rfwu [return] xtensa_le.slaspec:702
+  semantic_ops: rfwu
+  semantic_template: status=unsupported_template action_hash=78b89a1320577367 op_count=1
+  with_stack: with : phase=1
+- ritlb0 [none] xtensa_le.slaspec:707
+  semantic_ops: ritlb0
+  semantic_template: status=unsupported_template action_hash=c87ca84afd0809fa op_count=1
+  with_stack: with : phase=1
+- ritlb1 [none] xtensa_le.slaspec:710
+  semantic_ops: ritlb1
+  semantic_template: status=unsupported_template action_hash=093db529fb059d13 op_count=1
+  with_stack: with : phase=1
+- rotw [none] xtensa_le.slaspec:713
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7d70df73617b37d op_count=0
+  with_stack: with : phase=1
+- round.s [conditional_branch] xtensa_le.slaspec:716
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2ba741ca8a91d94 op_count=0
+  with_stack: with : phase=1
+- rsil [none] xtensa_le.slaspec:729
+  semantic_ops: rsil
+  semantic_template: status=unsupported_template action_hash=855acb8212f30269 op_count=1
+  with_stack: with : phase=1
+- rsr [none] xtensa_le.slaspec:732
+  semantic_ops: rsr
+  semantic_template: status=unsupported_template action_hash=cc44e765e03bb750 op_count=1
+  with_stack: with : phase=1
+- rsync [none] xtensa_le.slaspec:735
+  semantic_ops: rsync
+  semantic_template: status=unsupported_template action_hash=8acc9c7114454ef2 op_count=1
+  with_stack: with : phase=1
+- rur [none] xtensa_le.slaspec:738
+  semantic_ops: rur
+  semantic_template: status=unsupported_template action_hash=66f67f184f9a3106 op_count=1
+  with_stack: with : phase=1
+- s8i [none] xtensa_le.slaspec:741
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5e1005e3afb3355 op_count=0
+  with_stack: with : phase=1
+- s16i [none] xtensa_le.slaspec:745
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b23d3f32e32663d4 op_count=0
+  with_stack: with : phase=1
+- s32c1i [conditional_branch] xtensa_le.slaspec:749
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6d726b18cf02b62 op_count=0
+  with_stack: with : phase=1
+- s32e [none] xtensa_le.slaspec:757
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=18fd1ec5f6cef5e9 op_count=0
+  with_stack: with : phase=1
+- s32i [none] xtensa_le.slaspec:761
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2ac3b391d40f3b0e op_count=0
+  with_stack: with : phase=1
+- s32i.n [none] xtensa_le.slaspec:765
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8fecf07604aaa5a op_count=0
+  with_stack: with : phase=1
+- s32ri [none] xtensa_le.slaspec:769
+  semantic_ops: release
+  semantic_template: status=unsupported_template action_hash=ace45b8d81fbc8fb op_count=1
+  with_stack: with : phase=1
+- sdct [none] xtensa_le.slaspec:774
+  semantic_ops: sdct
+  semantic_template: status=unsupported_template action_hash=e956b0fe9ece645e op_count=1
+  with_stack: with : phase=1
+- ^"sext" [none] xtensa_le.slaspec:777
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7a119aadfccd5c7 op_count=0
+  with_stack: with : phase=1
+- ^"sext" [none] xtensa_le.slaspec:782
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=060a15a14498c340 op_count=0
+  with_stack: with : phase=1
+- ^"sext" [none] xtensa_le.slaspec:785
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20a310a153d5ec61 op_count=0
+  with_stack: with : phase=1
+- sict [none] xtensa_le.slaspec:788
+  semantic_ops: sict
+  semantic_template: status=unsupported_template action_hash=5ecf28823de8404b op_count=1
+  with_stack: with : phase=1
+- sicw [none] xtensa_le.slaspec:791
+  semantic_ops: sicw
+  semantic_template: status=unsupported_template action_hash=b6968b007e05e7a0 op_count=1
+  with_stack: with : phase=1
+- simcall [none] xtensa_le.slaspec:794
+  semantic_ops: simcall
+  semantic_template: status=unsupported_template action_hash=52e467b3286d0374 op_count=1
+  with_stack: with : phase=1
+- sll [none] xtensa_le.slaspec:797
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b5df054113acbb4 op_count=0
+  with_stack: with : phase=1
+- slli [none] xtensa_le.slaspec:801
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0ad0bcd37f5356dc op_count=0
+  with_stack: with : phase=1
+- sra [none] xtensa_le.slaspec:804
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a4ac22e8e1db06e2 op_count=0
+  with_stack: with : phase=1
+- srai [none] xtensa_le.slaspec:807
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6a617486b3301d7 op_count=0
+  with_stack: with : phase=1
+- src [none] xtensa_le.slaspec:810
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=068604fec4c28e27 op_count=0
+  with_stack: with : phase=1
+- srl [none] xtensa_le.slaspec:817
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=195725fac399a9a5 op_count=0
+  with_stack: with : phase=1
+- srli [none] xtensa_le.slaspec:820
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ebaa1b38631eb1d4 op_count=0
+  with_stack: with : phase=1
+- ssa8b [none] xtensa_le.slaspec:823
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e3cf6cc4716a5e0 op_count=0
+  with_stack: with : phase=1
+- ssa8l [none] xtensa_le.slaspec:827
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0850e4597ae4eab op_count=0
+  with_stack: with : phase=1
+- ssai [none] xtensa_le.slaspec:831
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cd70b9be84766dfe op_count=0
+  with_stack: with : phase=1
+- ssi [none] xtensa_le.slaspec:834
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0dcdc091c2d00b07 op_count=0
+  with_stack: with : phase=1
+- ssiu [none] xtensa_le.slaspec:838
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6175192f1fccc9b1 op_count=0
+  with_stack: with : phase=1
+- ssl [none] xtensa_le.slaspec:843
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=da1d72408fc226a1 op_count=0
+  with_stack: with : phase=1
+- ssr [none] xtensa_le.slaspec:846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ff08021dca634067 op_count=0
+  with_stack: with : phase=1
+- ssx [none] xtensa_le.slaspec:849
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=485f6ecb49bef35b op_count=0
+  with_stack: with : phase=1
+- ssxu [none] xtensa_le.slaspec:853
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c368ad49920c148d op_count=0
+  with_stack: with : phase=1
+- sub [none] xtensa_le.slaspec:858
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b62e586c91ff54d2 op_count=0
+  with_stack: with : phase=1
+- sub.s [none] xtensa_le.slaspec:861
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=56a9d37fa6bcca29 op_count=0
+  with_stack: with : phase=1
+- subx2 [none] xtensa_le.slaspec:864
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb16eac5d938251e op_count=0
+  with_stack: with : phase=1
+- subx4 [none] xtensa_le.slaspec:867
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=160eaf18b23924b1 op_count=0
+  with_stack: with : phase=1
+- subx8 [none] xtensa_le.slaspec:870
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=189f1c3412936984 op_count=0
+  with_stack: with : phase=1
+- syscall [none] xtensa_le.slaspec:873
+  semantic_ops: syscall
+  semantic_template: status=unsupported_template action_hash=7f1dd1f04c7391c2 op_count=1
+  with_stack: with : phase=1
+- trunc.s [conditional_branch] xtensa_le.slaspec:876
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6f53d41678e460e op_count=0
+  with_stack: with : phase=1
+- ueq.s [none] xtensa_le.slaspec:889
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=559229571f714f67 op_count=0
+  with_stack: with : phase=1
+- ufloat.s [none] xtensa_le.slaspec:892
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8380ecc3f0b8d815 op_count=0
+  with_stack: with : phase=1
+- ule.s [none] xtensa_le.slaspec:897
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b0abcd7ebbbd6b9e op_count=0
+  with_stack: with : phase=1
+- ult.s [none] xtensa_le.slaspec:900
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=45e6cbced58ab5e9 op_count=0
+  with_stack: with : phase=1
+- un.s [none] xtensa_le.slaspec:903
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df0c9505d5a2cb40 op_count=0
+  with_stack: with : phase=1
+- utrunc.s [none] xtensa_le.slaspec:906
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6acf3c6e27f43b32 op_count=0
+  with_stack: with : phase=1
+- waiti [none] xtensa_le.slaspec:914
+  semantic_ops: waiti
+  semantic_template: status=unsupported_template action_hash=b445159bd4df1dd2 op_count=1
+  with_stack: with : phase=1
+- wdtlb [none] xtensa_le.slaspec:917
+  semantic_ops: wdtlb
+  semantic_template: status=unsupported_template action_hash=48b1e0690be88345 op_count=1
+  with_stack: with : phase=1
+- wer [none] xtensa_le.slaspec:920
+  semantic_ops: wer
+  semantic_template: status=unsupported_template action_hash=ea427082f0be9b92 op_count=1
+  with_stack: with : phase=1
+- wfr [none] xtensa_le.slaspec:923
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d14429bff2418a3 op_count=0
+  with_stack: with : phase=1
+- witlb [none] xtensa_le.slaspec:926
+  semantic_ops: witlb
+  semantic_template: status=unsupported_template action_hash=245b639a24a5581e op_count=1
+  with_stack: with : phase=1
+- wsr [none] xtensa_le.slaspec:929
+  semantic_ops: wsr
+  semantic_template: status=unsupported_template action_hash=c4d8ca9381ad799c op_count=1
+  with_stack: with : phase=1
+- wur [none] xtensa_le.slaspec:932
+  semantic_ops: wur
+  semantic_template: status=unsupported_template action_hash=1d9519eaf920e962 op_count=1
+  with_stack: with : phase=1
+- xor [none] xtensa_le.slaspec:935
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=137e0753f2ebf9f7 op_count=0
+  with_stack: with : phase=1
+- xorb [none] xtensa_le.slaspec:938
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2988346cedc393c op_count=0
+  with_stack: with : phase=1
+- xsr [none] xtensa_le.slaspec:941
+  semantic_ops: xsr
+  semantic_template: status=unsupported_template action_hash=bff51049869e661f op_count=1
+  with_stack: with : phase=1
+- lddec [none] xtensa_le.slaspec:944
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0528c6fa585ce61 op_count=0
+  with_stack: with : phase=1
+- ldinc [none] xtensa_le.slaspec:949
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=877e0642a5892e6f op_count=0
+  with_stack: with : phase=1
+- mul.aa.ll [none] xtensa_le.slaspec:954
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9f007b6239b24327 op_count=0
+  with_stack: with : phase=1
+- mul.aa.hl [none] xtensa_le.slaspec:961
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd93b2da307f256e op_count=0
+  with_stack: with : phase=1
+- mul.aa.lh [none] xtensa_le.slaspec:968
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3268b69d82730d26 op_count=0
+  with_stack: with : phase=1
+- mul.aa.hh [none] xtensa_le.slaspec:975
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66351947324ffcad op_count=0
+  with_stack: with : phase=1
+- mul.ad.ll [none] xtensa_le.slaspec:982
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4a96993261c8ca6a op_count=0
+  with_stack: with : phase=1
+- mul.ad.hl [none] xtensa_le.slaspec:989
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=76f04218e165929b op_count=0
+  with_stack: with : phase=1
+- mul.ad.lh [none] xtensa_le.slaspec:996
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73ee1ca8ef2daa91 op_count=0
+  with_stack: with : phase=1
+- mul.ad.hh [none] xtensa_le.slaspec:1003
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b34d200f64199a42 op_count=0
+  with_stack: with : phase=1
+- mul.da.ll [none] xtensa_le.slaspec:1010
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=705b37805a4b6ce2 op_count=0
+  with_stack: with : phase=1
+- mul.da.hl [none] xtensa_le.slaspec:1017
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e31bb8190317ffa9 op_count=0
+  with_stack: with : phase=1
+- mul.da.lh [none] xtensa_le.slaspec:1024
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bcf706d84edc16d9 op_count=0
+  with_stack: with : phase=1
+- mul.da.hh [none] xtensa_le.slaspec:1031
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30a9d8f83376ce90 op_count=0
+  with_stack: with : phase=1
+- mul.dd.ll [none] xtensa_le.slaspec:1038
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a08ff266462198ff op_count=0
+  with_stack: with : phase=1
+- mul.dd.hl [none] xtensa_le.slaspec:1045
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=767273f512f75b2c op_count=0
+  with_stack: with : phase=1
+- mul.dd.lh [none] xtensa_le.slaspec:1052
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd561ecf8fc5d85e op_count=0
+  with_stack: with : phase=1
+- mul.dd.hh [none] xtensa_le.slaspec:1059
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a1cc769743105503 op_count=0
+  with_stack: with : phase=1
+- mula.aa.ll [none] xtensa_le.slaspec:1066
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=70929c1a78f02ea4 op_count=0
+  with_stack: with : phase=1
+- mula.aa.hl [none] xtensa_le.slaspec:1073
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eb9f887eb37799a1 op_count=0
+  with_stack: with : phase=1
+- mula.aa.lh [none] xtensa_le.slaspec:1080
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88c66b23a9742e49 op_count=0
+  with_stack: with : phase=1
+- mula.aa.hh [none] xtensa_le.slaspec:1087
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1a2c9a75e408d556 op_count=0
+  with_stack: with : phase=1
+- mula.ad.ll [none] xtensa_le.slaspec:1094
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=761c6acfb9a9ed3d op_count=0
+  with_stack: with : phase=1
+- mula.ad.hl [none] xtensa_le.slaspec:1101
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a7545af9e6746ce8 op_count=0
+  with_stack: with : phase=1
+- mula.ad.lh [none] xtensa_le.slaspec:1108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=22b63bbe66c30c9a op_count=0
+  with_stack: with : phase=1
+- mula.ad.hh [none] xtensa_le.slaspec:1115
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f86aa7df8e99185 op_count=0
+  with_stack: with : phase=1
+- mula.da.ll [none] xtensa_le.slaspec:1122
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a98d605bf1027d65 op_count=0
+  with_stack: with : phase=1
+- mula.da.hl [none] xtensa_le.slaspec:1129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d5b6494551b31442 op_count=0
+  with_stack: with : phase=1
+- mula.da.lh [none] xtensa_le.slaspec:1136
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b22203359bf1c7f2 op_count=0
+  with_stack: with : phase=1
+- mula.da.hh [none] xtensa_le.slaspec:1143
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7883f6742f793227 op_count=0
+  with_stack: with : phase=1
+- mula.dd.ll [none] xtensa_le.slaspec:1150
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=21c26bcd5ee88b2c op_count=0
+  with_stack: with : phase=1
+- mula.dd.hl [none] xtensa_le.slaspec:1157
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0d99e61a26174d3 op_count=0
+  with_stack: with : phase=1
+- mula.dd.lh [none] xtensa_le.slaspec:1164
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63840b8449884751 op_count=0
+  with_stack: with : phase=1
+- mula.dd.hh [none] xtensa_le.slaspec:1171
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=213aa5e2da7d1820 op_count=0
+  with_stack: with : phase=1
+- mula.da.ll.lddec [none] xtensa_le.slaspec:1178
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b7f617af8439b85 op_count=0
+  with_stack: with : phase=1
+- mula.da.hl.lddec [none] xtensa_le.slaspec:1188
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3dafbeada76843ca op_count=0
+  with_stack: with : phase=1
+- mula.da.lh.lddec [none] xtensa_le.slaspec:1198
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b336f9c9f7074efa op_count=0
+  with_stack: with : phase=1
+- mula.da.hh.lddec [none] xtensa_le.slaspec:1208
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a44a1ffd4111fd9f op_count=0
+  with_stack: with : phase=1
+- mula.da.ll.ldinc [none] xtensa_le.slaspec:1218
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3c50407460505f77 op_count=0
+  with_stack: with : phase=1
+- mula.da.hl.ldinc [none] xtensa_le.slaspec:1228
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b038fcc7e88d9764 op_count=0
+  with_stack: with : phase=1
+- mula.da.lh.ldinc [none] xtensa_le.slaspec:1238
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd1383ae7c2177b4 op_count=0
+  with_stack: with : phase=1
+- mula.da.hh.ldinc [none] xtensa_le.slaspec:1248
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cad8381cfdf3e531 op_count=0
+  with_stack: with : phase=1
+- mula.dd.ll.lddec [none] xtensa_le.slaspec:1258
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c729272b9f9441c op_count=0
+  with_stack: with : phase=1
+- mula.dd.hl.lddec [none] xtensa_le.slaspec:1268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bccdb3aad8d6e9d9 op_count=0
+  with_stack: with : phase=1
+- mula.dd.lh.lddec [none] xtensa_le.slaspec:1278
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=52d58c2baf0f03d3 op_count=0
+  with_stack: with : phase=1
+- mula.dd.hh.lddec [none] xtensa_le.slaspec:1288
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=49fa50860bf1c6c8 op_count=0
+  with_stack: with : phase=1
+- mula.da.ll.ldinc [none] xtensa_le.slaspec:1298
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0a53c5e5813bf5c6 op_count=0
+  with_stack: with : phase=1
+- mula.da.hl.ldinc [none] xtensa_le.slaspec:1308
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c69d4fccf2599423 op_count=0
+  with_stack: with : phase=1
+- mula.da.lh.ldinc [none] xtensa_le.slaspec:1318
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=35a5c1d22438859d op_count=0
+  with_stack: with : phase=1
+- mula.da.hh.ldinc [none] xtensa_le.slaspec:1328
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c21155fdbf453482 op_count=0
+  with_stack: with : phase=1
+- umul.aa.ll [none] xtensa_le.slaspec:1338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3190d5f6195b8b5d op_count=0
+  with_stack: with : phase=1
+- umul.aa.hl [none] xtensa_le.slaspec:1345
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5794c1d3d17acea8 op_count=0
+  with_stack: with : phase=1
+- umul.aa.lh [none] xtensa_le.slaspec:1352
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd9bf352ab6bb500 op_count=0
+  with_stack: with : phase=1
+- umul.aa.hh [none] xtensa_le.slaspec:1359
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7cd2da7b55f6c5cb op_count=0
+  with_stack: with : phase=1
+- loop [none] xtensa_le.slaspec:1367
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68994a0230a05788 op_count=0
+  with_stack: with : phase=1
+- loopgtz [conditional_branch] xtensa_le.slaspec:1373
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=508ef83ab09417b6 op_count=0
+  with_stack: with : phase=1
+- loopnez [conditional_branch] xtensa_le.slaspec:1380
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ff5a66651d2444e op_count=0
+  with_stack: with : phase=1
+- cust0 [none] xtensa_le.slaspec:1388
+  semantic_ops: cust0
+  semantic_template: status=unsupported_template action_hash=b272f7b31d65ef16 op_count=1
+  with_stack: with : phase=1
+- cust1 [none] xtensa_le.slaspec:1392
+  semantic_ops: cust1
+  semantic_template: status=unsupported_template action_hash=c805c5bb2544968f op_count=1
+  with_stack: with : phase=1
+- FLIX [none] xtensa_le.slaspec:1396
+  semantic_ops: flix
+  semantic_template: status=unsupported_template action_hash=b2c2c6446b285d5e op_count=1
+  with_stack: with : phase=1

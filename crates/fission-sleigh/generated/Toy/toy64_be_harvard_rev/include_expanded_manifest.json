@@ -1,0 +1,10 @@
+{
+  "arch": "Toy",
+  "entry_spec": "toy64_be_harvard_rev.slaspec",
+  "entry_id": "toy64_be_harvard_rev",
+  "include_manifest": [
+    "toy64_be_harvard_rev.slaspec@0",
+    "toy.sinc@1",
+    "toyInstructions.sinc@1"
+  ]
+}

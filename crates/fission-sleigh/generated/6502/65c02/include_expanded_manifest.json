@@ -1,0 +1,9 @@
+{
+  "arch": "6502",
+  "entry_spec": "65c02.slaspec",
+  "entry_id": "65c02",
+  "include_manifest": [
+    "65c02.slaspec@0",
+    "6502.slaspec@1"
+  ]
+}

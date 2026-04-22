@@ -1,0 +1,9 @@
+{
+  "arch": "Z80",
+  "entry_spec": "z180.slaspec",
+  "entry_id": "z180",
+  "include_manifest": [
+    "z180.slaspec@0",
+    "z80.slaspec@1"
+  ]
+}

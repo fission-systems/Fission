@@ -1,0 +1,25 @@
+{
+  "arch": "Dalvik",
+  "entry_spec": "Dalvik_DEX_Oreo.slaspec",
+  "entry_id": "Dalvik_DEX_Oreo",
+  "include_manifest": [
+    "Dalvik_DEX_Oreo.slaspec@0",
+    "Dalvik_Base.sinc@1",
+    "Dalvik_OpCode_3E_43_unused.sinc@1",
+    "Dalvik_OpCode_73_return_void_no_barrier.sinc@1",
+    "Dalvik_OpCode_79_unused.sinc@1",
+    "Dalvik_OpCode_7A_unused.sinc@1",
+    "Dalvik_OpCode_E3_EA_dex.sinc@1",
+    "Dalvik_OpCode_EB_F2_iput_iget.sinc@1",
+    "Dalvik_OpCode_F3_unused.sinc@1",
+    "Dalvik_OpCode_F4_unused.sinc@1",
+    "Dalvik_OpCode_F5_unused.sinc@1",
+    "Dalvik_OpCode_F6_unused.sinc@1",
+    "Dalvik_OpCode_F7_unused.sinc@1",
+    "Dalvik_OpCode_F8_unused.sinc@1",
+    "Dalvik_OpCode_F9_unused.sinc@1",
+    "Dalvik_OpCode_FA_FD_dex.sinc@1",
+    "Dalvik_OpCode_FE_unused.sinc@1",
+    "Dalvik_OpCode_FF_unused.sinc@1"
+  ]
+}

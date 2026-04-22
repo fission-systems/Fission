@@ -1,0 +1,566 @@
+# semantic action inventory
+arch: 8051
+entry_spec: mx51.slaspec
+entry_id: mx51
+
+- ACALL [call] 8051_main.sinc:652
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6dfd4af09a2cd84e op_count=0
+- ADD [none] 8051_main.sinc:655
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f704d7bbdf66ea28 op_count=0
+- ADD [none] 8051_main.sinc:656
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7c974f40d2f08936 op_count=0
+- ADD [none] 8051_main.sinc:657
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6b2e3d64049e8d32 op_count=0
+- ADD [none] 8051_main.sinc:658
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=10d6f21d06802b30 op_count=0
+- ADDC [none] 8051_main.sinc:660
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd134beca6b3cf0e op_count=0
+- ADDC [none] 8051_main.sinc:661
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c1c70e54b0a31205 op_count=0
+- ADDC [none] 8051_main.sinc:662
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7bc0ac9291ae55b1 op_count=0
+- ADDC [none] 8051_main.sinc:663
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=780a678298af8656 op_count=0
+- AJMP [branch] 8051_main.sinc:669
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41476d48eaa5da38 op_count=0
+- ANL [none] 8051_main.sinc:672
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cde27502de5d6922 op_count=0
+- ANL [none] 8051_main.sinc:673
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=52e2df7b71731581 op_count=0
+- ANL [none] 8051_main.sinc:674
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42cd8f59026be049 op_count=0
+- ANL [none] 8051_main.sinc:675
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be59992afe63f8aa op_count=0
+- ANL [none] 8051_main.sinc:676
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73527220cfa5bad2 op_count=0
+- ANL [none] 8051_main.sinc:677
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa9270de9ac7cccf op_count=0
+- ANL [none] 8051_main.sinc:679
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f081c894ffd08ea8 op_count=0
+- ANL [none] 8051_main.sinc:680
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=785170e072c26682 op_count=0
+- ANL [none] 8051_main.sinc:682
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c030634bad332e9 op_count=0
+- ANL [none] 8051_main.sinc:683
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ec58eea4e2e1de75 op_count=0
+- CJNE [conditional_branch] 8051_main.sinc:692
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=60c3c7a9f3060ea2 op_count=0
+- CJNE [conditional_branch] 8051_main.sinc:693
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eebaecd275daf356 op_count=0
+- CJNE [conditional_branch] 8051_main.sinc:694
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=efacd97e6e2f2a36 op_count=0
+- CJNE [conditional_branch] 8051_main.sinc:695
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9609c30e12b89c46 op_count=0
+- CLR [none] 8051_main.sinc:697
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9a8149bda63dd8ee op_count=0
+- CLR [none] 8051_main.sinc:698
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=451d0dd2d5e23910 op_count=0
+- CLR [none] 8051_main.sinc:700
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac4a72d7eda4fcb4 op_count=0
+- CLR [none] 8051_main.sinc:702
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=809193133df23935 op_count=0
+- CPL [none] 8051_main.sinc:710
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1a3e9b8fef754ad9 op_count=0
+- CPL [none] 8051_main.sinc:711
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4e28c4f080997e44 op_count=0
+- CPL [none] 8051_main.sinc:713
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=44d70c0787f5d3c4 op_count=0
+- CPL [none] 8051_main.sinc:715
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=160c4fa8403f56ca op_count=0
+- DA [none] 8051_main.sinc:722
+  semantic_ops: decimal_adjust
+  semantic_template: status=unsupported_template action_hash=f861bc23e8c33ba1 op_count=1
+- DEC [none] 8051_main.sinc:724
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5b90dd9a5c1fc601 op_count=0
+- DEC [none] 8051_main.sinc:725
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33c88ad3293a3113 op_count=0
+- DEC [none] 8051_main.sinc:726
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df9998f28eab4ff5 op_count=0
+- DEC [none] 8051_main.sinc:727
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b99c62d899539ebd op_count=0
+- DIV [conditional_branch] 8051_main.sinc:729
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fa5a3955fcefa18 op_count=0
+- DJNZ [conditional_branch] 8051_main.sinc:732
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82f45246fc2436e8 op_count=0
+- DJNZ [conditional_branch] 8051_main.sinc:733
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a246dca4cab5841 op_count=0
+- INC [none] 8051_main.sinc:735
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=463c21cd9bbdcdbb op_count=0
+- INC [none] 8051_main.sinc:736
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=491cc69fe99b4fd9 op_count=0
+- INC [none] 8051_main.sinc:737
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=75b22ce0a89c6f37 op_count=0
+- INC [none] 8051_main.sinc:739
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c5f8a67456e3d7a op_count=0
+- INC [none] 8051_main.sinc:746
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4e01f6c6b1d3297f op_count=0
+- INC [none] 8051_main.sinc:747
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc4955e9dd5ae9b1 op_count=0
+- JB [conditional_branch] 8051_main.sinc:749
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bdd856d449e09d87 op_count=0
+- JBC [conditional_branch] 8051_main.sinc:750
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6586be13152637d6 op_count=0
+- JB [conditional_branch] 8051_main.sinc:752
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a3b0b85e1cad2a9e op_count=0
+- JBC [conditional_branch] 8051_main.sinc:753
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=782b71383e390a65 op_count=0
+- JC [conditional_branch] 8051_main.sinc:761
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=088504b8503f5cbd op_count=0
+- JMP [branch] 8051_main.sinc:762
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eecdd9ae9f343d9c op_count=0
+- JNB [conditional_branch] 8051_main.sinc:764
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df65dbc59520d4f4 op_count=0
+- JNB [conditional_branch] 8051_main.sinc:766
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a92228d171291dd op_count=0
+- JNC [conditional_branch] 8051_main.sinc:773
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd817d6f76c0a0b1 op_count=0
+- JNZ [conditional_branch] 8051_main.sinc:774
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46ad2e34556fb573 op_count=0
+- JZ [conditional_branch] 8051_main.sinc:775
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8d43fe716a62897 op_count=0
+- LCALL [call] 8051_main.sinc:781
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e0052f09a2f1bbd op_count=0
+- LJMP [branch] 8051_main.sinc:782
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41586d48eab44d6b op_count=0
+- MOV [none] 8051_main.sinc:788
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1051042aba6643c op_count=0
+- MOV [none] 8051_main.sinc:789
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=135e96f4f07e6083 op_count=0
+- MOV [none] 8051_main.sinc:790
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f703b04349564297 op_count=0
+- MOV [none] 8051_main.sinc:791
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a7645415914ca6f8 op_count=0
+- MOV [none] 8051_main.sinc:792
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5fb43d0c65656f50 op_count=0
+- MOV [none] 8051_main.sinc:793
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0ff11632f0cb6a54 op_count=0
+- MOV [none] 8051_main.sinc:794
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3524bf46df3cddff op_count=0
+- MOV [none] 8051_main.sinc:795
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=16ff10c1315e2e1f op_count=0
+- MOV [none] 8051_main.sinc:796
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7bab681f673e46aa op_count=0
+- MOV [none] 8051_main.sinc:797
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=23816beb5f5f23b3 op_count=0
+- MOV [none] 8051_main.sinc:798
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68f0c01ecc549d51 op_count=0
+- MOV [none] 8051_main.sinc:799
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4174ebf2a5423d0e op_count=0
+- MOV [none] 8051_main.sinc:800
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=094c5c3b73747a47 op_count=0
+- MOV [none] 8051_main.sinc:801
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f8eab15c3dc8a689 op_count=0
+- MOV [none] 8051_main.sinc:802
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9158c4ad429bbb86 op_count=0
+- MOV [none] 8051_main.sinc:806
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7884030eba0bc654 op_count=0
+- MOV [none] 8051_main.sinc:809
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=408a3d737bd63a0c op_count=0
+- MOV [none] 8051_main.sinc:810
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42b3593fe2eca1d8 op_count=0
+- MOV [none] 8051_main.sinc:812
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46df9c2dd3242124 op_count=0
+- MOV [none] 8051_main.sinc:813
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd761fb27c53e008 op_count=0
+- MOVC [none] 8051_main.sinc:822
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e2ab413bbdef770 op_count=0
+- MOVC [none] 8051_main.sinc:823
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=de750520282dc911 op_count=0
+- MOVX [none] 8051_main.sinc:825
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=12d0a6559eab0ea3 op_count=0
+- MOVX [none] 8051_main.sinc:826
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9a9eb97375430b09 op_count=0
+- MOVX [none] 8051_main.sinc:827
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29d71510a102b337 op_count=0
+- MOVX [none] 8051_main.sinc:828
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c09bff121b264c69 op_count=0
+- MUL [none] 8051_main.sinc:830
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5751d26b994485f0 op_count=0
+- NOP [none] 8051_main.sinc:833
+  semantic_ops: nop
+  semantic_template: status=unsupported_template action_hash=210f691c5ebc6a7e op_count=1
+- ORL [none] 8051_main.sinc:835
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b87d492b10c3fed1 op_count=0
+- ORL [none] 8051_main.sinc:836
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41143cd1c13a1616 op_count=0
+- ORL [none] 8051_main.sinc:837
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a28c312a731f91ea op_count=0
+- ORL [none] 8051_main.sinc:838
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b9eeb34c1e62ece1 op_count=0
+- ORL [none] 8051_main.sinc:839
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=52aff71f8bdb2fb2 op_count=0
+- ORL [none] 8051_main.sinc:840
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c67ee7ef95d481ad op_count=0
+- ORL [none] 8051_main.sinc:842
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e8356b5f455dbbae op_count=0
+- ORL [none] 8051_main.sinc:843
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=93a9632c17a85a98 op_count=0
+- ORL [none] 8051_main.sinc:845
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28404b795e360237 op_count=0
+- ORL [none] 8051_main.sinc:846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b0020f44a7f34e1 op_count=0
+- POP [none] 8051_main.sinc:855
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28aa23b072d808a9 op_count=0
+- PUSH [none] 8051_main.sinc:857
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e211e9e9bd85e1cc op_count=0
+- RET [return] 8051_main.sinc:859
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=734cb63705c09bfa op_count=0
+- RETI [return] 8051_main.sinc:869
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=734cb63705c09bfa op_count=0
+- RL [none] 8051_main.sinc:879
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=50410e9521220b26 op_count=0
+- RLC [none] 8051_main.sinc:880
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c22f30508a0ea93 op_count=0
+- RR [none] 8051_main.sinc:881
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e73626c6e67cc7a op_count=0
+- RRC [none] 8051_main.sinc:882
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1ef2d30308e9036 op_count=0
+- SETB [none] 8051_main.sinc:884
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3819ec9e347315d7 op_count=0
+- SETB [none] 8051_main.sinc:886
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c4f69f9bb062c2f op_count=0
+- SETB [none] 8051_main.sinc:888
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=809493133df46f0c op_count=0
+- SJMP [branch] 8051_main.sinc:895
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b8d143e7c1e9ecc8 op_count=0
+- SUBB [none] 8051_main.sinc:897
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8167ce82860b029c op_count=0
+- SUBB [none] 8051_main.sinc:898
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e3bed8108b14d77 op_count=0
+- SUBB [none] 8051_main.sinc:899
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c69a4677e4a71a71 op_count=0
+- SUBB [none] 8051_main.sinc:900
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=55f97c18e307f810 op_count=0
+- SWAP [none] 8051_main.sinc:902
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa1fc86397b687ce op_count=0
+- XCH [none] 8051_main.sinc:904
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=62efb9a89d9ab1b2 op_count=0
+- XCH [none] 8051_main.sinc:905
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=05480d0e282a053e op_count=0
+- XCH [none] 8051_main.sinc:906
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=729bd5b8f7006592 op_count=0
+- XCHD [none] 8051_main.sinc:909
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e88acfe6bcb37e95 op_count=0
+- XRL [none] 8051_main.sinc:911
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d919a22e763f748b op_count=0
+- XRL [none] 8051_main.sinc:912
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=411cf20e85191040 op_count=0
+- XRL [none] 8051_main.sinc:913
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c300022dd878ce78 op_count=0
+- XRL [none] 8051_main.sinc:914
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72ef27d76a1b3a13 op_count=0
+- XRL [none] 8051_main.sinc:915
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c14195e3398bea80 op_count=0
+- XRL [none] 8051_main.sinc:916
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b5c96238bdd5b2af op_count=0
+- inc [none] mx51.sinc:84
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0aa811aad66beda7 op_count=0
+- dec [none] mx51.sinc:87
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1fd17dba487a9f65 op_count=0
+- add [none] mx51.sinc:90
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f1749d1533c5628 op_count=0
+- addc [none] mx51.sinc:93
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9e75421982d1085c op_count=0
+- orl [none] mx51.sinc:96
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=886d578e9e243faf op_count=0
+- anl [none] mx51.sinc:99
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9721957b6ed8e33c op_count=0
+- xrl [none] mx51.sinc:102
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a91896c3ba5a134d op_count=0
+- subb [none] mx51.sinc:105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f746fb518e92d91a op_count=0
+- xch [none] mx51.sinc:108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f3f414542da921b0 op_count=0
+- mov [none] mx51.sinc:111
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=543d4334f6f2b1a0 op_count=0
+- mov [none] mx51.sinc:114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e15956f10b992b0 op_count=0
+- mov [none] mx51.sinc:117
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88ef7d828f6b941f op_count=0
+- mov [none] mx51.sinc:120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f671af0ea7fe08f1 op_count=0
+- mov [none] mx51.sinc:123
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c0c9cc005582ee59 op_count=0
+- mov [none] mx51.sinc:126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=06184cdbad3781df op_count=0
+- mov [none] mx51.sinc:129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72f0dd81f1bbb5c4 op_count=0
+- mov [none] mx51.sinc:132
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b1ceb7fe8b0882b2 op_count=0
+- orl [none] mx51.sinc:135
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=562bcbb666492ea2 op_count=0
+- anl [none] mx51.sinc:138
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1aef0974d714dd2 op_count=0
+- xrl [none] mx51.sinc:141
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a01b59937b387e30 op_count=0
+- xrl [none] mx51.sinc:144
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a4d016bca2e1ac5f op_count=0
+- anl [none] mx51.sinc:147
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c57ddc2a3abeb67 op_count=0
+- orl [none] mx51.sinc:150
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=605e923107f0e09d op_count=0
+- push [none] mx51.sinc:153
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5d95e12f8c17bb09 op_count=0
+- pop [none] mx51.sinc:156
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=83fdf391206c9672 op_count=0
+- cjne [conditional_branch] mx51.sinc:159
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bf62ee6de6c5aaa op_count=0
+- djnz [conditional_branch] mx51.sinc:162
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7b4b4fc32b2a96b0 op_count=0
+- ejmp [branch] mx51.sinc:169
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a173f27b31567f72 op_count=0
+- ecall [call] mx51.sinc:172
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2209fefe4aae98ee op_count=0
+- mov [none] mx51.sinc:175
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86e94336a4a08e2b op_count=0
+- eret [return] mx51.sinc:178
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f6de1e19cf774b7 op_count=0
+- jmp [branch] mx51.sinc:181
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=21704b6c7fc79c85 op_count=0
+- movx [none] mx51.sinc:187
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=241da7253f9406fe op_count=0
+- movx [none] mx51.sinc:190
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b767da07d20ef6f6 op_count=0
+- movc [none] mx51.sinc:193
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df31657e66adcd57 op_count=0
+- inc [none] mx51.sinc:196
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f78b29e659160b53 op_count=0
+- emov [none] mx51.sinc:201
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=448b2d78660d9bae op_count=0
+- emov [none] mx51.sinc:205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df3e500e29c02ac8 op_count=0
+- add [none] mx51.sinc:209
+  semantic_ops: endian_swap
+  semantic_template: status=unsupported_template action_hash=ec93aa1e779e07b5 op_count=1
+- anl [none] mx51.sinc:221
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6c6655d973b3b5b op_count=0
+- anl [none] mx51.sinc:222
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4da223d53b0b0aa3 op_count=0
+- anl [none] mx51.sinc:224
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5aa3c46caec98152 op_count=0
+- anl [none] mx51.sinc:225
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df11f2f15d67f314 op_count=0
+- clr [none] mx51.sinc:234
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c71ccefa163a0526 op_count=0
+- clr [none] mx51.sinc:236
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2953459696e230f0 op_count=0
+- cpl [none] mx51.sinc:244
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f40242b5ed3960a4 op_count=0
+- cpl [none] mx51.sinc:246
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d0bad6a51fa00ea op_count=0
+- jb [conditional_branch] mx51.sinc:253
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc423be5a9f79098 op_count=0
+- jbc [conditional_branch] mx51.sinc:254
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25724a48fff81a1d op_count=0
+- jb [conditional_branch] mx51.sinc:256
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7e7a24da0f6cf69 op_count=0
+- jbc [conditional_branch] mx51.sinc:257
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=40936b618fbd8247 op_count=0
+- jnb [conditional_branch] mx51.sinc:266
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6b3a04376f48775b op_count=0
+- jnb [conditional_branch] mx51.sinc:268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=417425ad2847b9aa op_count=0
+- mov [none] mx51.sinc:275
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a9504ba81ecf3597 op_count=0
+- mov [none] mx51.sinc:276
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=39bd45d7c2f25964 op_count=0
+- mov [none] mx51.sinc:278
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a9ff939e3d4ce1b9 op_count=0
+- mov [none] mx51.sinc:279
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7c5a25770f9ef451 op_count=0
+- orl [none] mx51.sinc:288
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0a5dd4753ff1e385 op_count=0
+- orl [none] mx51.sinc:289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ab0ac06fb9161081 op_count=0
+- orl [none] mx51.sinc:291
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2c3fb7221e7ad7c op_count=0
+- orl [none] mx51.sinc:292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e2ed1126cc4e47fe op_count=0
+- setb [none] mx51.sinc:301
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b803c551b7530c4f op_count=0
+- setb [none] mx51.sinc:303
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=294fc59696df2199 op_count=0

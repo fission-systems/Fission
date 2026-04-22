@@ -41,7 +41,7 @@ use fission_pcode::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
 };
 #[cfg(not(feature = "native_decomp"))]
-use fission_sleigh::lifter::{LiftDecodeContract, SleighLifter};
+use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 
 #[cfg(feature = "native_decomp")]
 fn prepare_inventory_decompiler(
@@ -506,12 +506,12 @@ fn decode_rust_sleigh_pcode(
     let language = sleigh_language_for_arch_spec(&binary.arch_spec)
         .ok_or_else(|| format!("rust_sleigh: unsupported arch_spec '{}'", binary.arch_spec))?;
 
-    let lifter =
-        SleighLifter::new_for_language(language).map_err(|e| format!("rust_sleigh: {e:#}"))?;
+    let lifter = RuntimeSleighFrontend::new_for_language(language)
+        .map_err(|e| format!("rust_sleigh: {e:#}"))?;
     let lift_contract = if continue_past_indirect_branch {
-        LiftDecodeContract::decomp_function(instruction_limit)
+        DecodeContract::decomp_function(instruction_limit)
     } else {
-        LiftDecodeContract::strict_function(instruction_limit)
+        DecodeContract::strict_function(instruction_limit)
     };
     let result =
         lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);

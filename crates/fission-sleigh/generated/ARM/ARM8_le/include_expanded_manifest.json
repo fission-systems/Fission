@@ -1,0 +1,13 @@
+{
+  "arch": "ARM",
+  "entry_spec": "ARM8_le.slaspec",
+  "entry_id": "ARM8_le",
+  "include_manifest": [
+    "ARM8_le.slaspec@0",
+    "ARM.sinc@1",
+    "ARMinstructions.sinc@2",
+    "ARMneon.sinc@3",
+    "ARMv8.sinc@3",
+    "ARMTHUMBinstructions.sinc@2"
+  ]
+}

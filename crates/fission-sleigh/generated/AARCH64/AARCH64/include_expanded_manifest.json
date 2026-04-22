@@ -1,0 +1,14 @@
+{
+  "arch": "AARCH64",
+  "entry_spec": "AARCH64.slaspec",
+  "entry_id": "AARCH64",
+  "include_manifest": [
+    "AARCH64.slaspec@0",
+    "AARCH64instructions.sinc@1",
+    "AARCH64_base_PACoptions.sinc@2",
+    "AARCH64base.sinc@2",
+    "AARCH64neon.sinc@2",
+    "AARCH64ldst.sinc@2",
+    "AARCH64sve.sinc@2"
+  ]
+}

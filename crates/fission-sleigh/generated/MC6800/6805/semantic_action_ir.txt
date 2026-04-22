@@ -1,0 +1,263 @@
+# semantic action inventory
+arch: MC6800
+entry_spec: 6805.slaspec
+entry_id: 6805
+
+- ADC [none] 6805.slaspec:56
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=650bfb6b3ced2a75 op_count=0
+- ADD [none] 6805.slaspec:75
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a52f734f5ef4ac4 op_count=0
+- AND [none] 6805.slaspec:91
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f13167058d9c0fc op_count=0
+- ASLA [none] 6805.slaspec:98
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8dbb46b06ed76bd7 op_count=0
+- ASLX [none] 6805.slaspec:105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32b40e7d9afaad88 op_count=0
+- ASL [none] 6805.slaspec:112
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=523d0bf7968c8000 op_count=0
+- ASRA [none] 6805.slaspec:121
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5f00d2931e54f34 op_count=0
+- ASRX [none] 6805.slaspec:128
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3922575dba0835f7 op_count=0
+- ASR [none] 6805.slaspec:135
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b93b9b2bf95cbfb3 op_count=0
+- BCC [conditional_branch] 6805.slaspec:145
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89bd6228d6d0607f op_count=0
+- BCLR [none] 6805.slaspec:150
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7d2da5c80738dcd7 op_count=0
+- BCS [conditional_branch] 6805.slaspec:154
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c696cdd91859aaf op_count=0
+- BEQ [conditional_branch] 6805.slaspec:158
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cedd525e33553ffe op_count=0
+- BHCC [conditional_branch] 6805.slaspec:162
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82bad8f316c858b6 op_count=0
+- BHCS [conditional_branch] 6805.slaspec:166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e2e277f6ce121d74 op_count=0
+- BHI [conditional_branch] 6805.slaspec:170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d209b926bdebadcf op_count=0
+- BIH [conditional_branch] 6805.slaspec:178
+  semantic_ops: readIRQ
+  semantic_template: status=unsupported_template action_hash=04451b6ce76ada69 op_count=1
+- BIL [conditional_branch] 6805.slaspec:183
+  semantic_ops: readIRQ
+  semantic_template: status=unsupported_template action_hash=7f16bb4c3c97a8cd op_count=1
+- BIT [none] 6805.slaspec:188
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ffb7a972e27322b op_count=0
+- BLS [conditional_branch] 6805.slaspec:196
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d56e4eddfa53363f op_count=0
+- BMC [conditional_branch] 6805.slaspec:202
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86d5020066dca301 op_count=0
+- BMI [conditional_branch] 6805.slaspec:206
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c2b68692132482a op_count=0
+- BMS [conditional_branch] 6805.slaspec:210
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e2103e03daed4485 op_count=0
+- BNE [conditional_branch] 6805.slaspec:214
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f43ff78e676947a4 op_count=0
+- BPL [conditional_branch] 6805.slaspec:218
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c71e226d0ea19fd8 op_count=0
+- BRA [branch] 6805.slaspec:222
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df669cd4f508f356 op_count=0
+- BRN [none] 6805.slaspec:227
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- BRCLR [conditional_branch] 6805.slaspec:231
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c4d8b6abb9d91e9f op_count=0
+- BRSET [conditional_branch] 6805.slaspec:238
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=369a852726382deb op_count=0
+- BSET [none] 6805.slaspec:245
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3667e173d87d2109 op_count=0
+- BSR [call] 6805.slaspec:250
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5642af24454adad1 op_count=0
+- CLC [none] 6805.slaspec:258
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7b7056d125b9a376 op_count=0
+- CLI [none] 6805.slaspec:263
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a70dec881d1c0370 op_count=0
+- CLRA [none] 6805.slaspec:267
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfa188e2570deb6d op_count=0
+- CLRX [none] 6805.slaspec:273
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4093b3807b0c1b14 op_count=0
+- CLR [none] 6805.slaspec:279
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=129b7d53490c8bce op_count=0
+- CMP [none] 6805.slaspec:285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b30b59fb79562834 op_count=0
+- COMA [none] 6805.slaspec:294
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ba2da9029ee48995 op_count=0
+- COMX [none] 6805.slaspec:301
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=49116622ec53725d op_count=0
+- COM [none] 6805.slaspec:308
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6a3deae57f8d2287 op_count=0
+- CPX [none] 6805.slaspec:316
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c86728db901fca42 op_count=0
+- DECA [none] 6805.slaspec:324
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=903802cdd9cd44aa op_count=0
+- DECX [none] 6805.slaspec:330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ff41e890472c1584 op_count=0
+- DEC [none] 6805.slaspec:336
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ca7da424779d33e2 op_count=0
+- EOR [none] 6805.slaspec:343
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d78fe15340359022 op_count=0
+- INCA [none] 6805.slaspec:350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c5aeeebcfc7b420 op_count=0
+- INCX [none] 6805.slaspec:356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a55a9cd1422c3882 op_count=0
+- INC [none] 6805.slaspec:362
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=58d9604396067964 op_count=0
+- JMP [branch] 6805.slaspec:369
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3eaaa6d0627570ae op_count=0
+- JMP [branch] 6805.slaspec:374
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=58a6712d2977983f op_count=0
+- JSR [call] 6805.slaspec:380
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d9626aa188eafda4 op_count=0
+- JSR [call] 6805.slaspec:386
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67d33bdff75669c5 op_count=0
+- LDA [none] 6805.slaspec:393
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c7c738db88f10c5 op_count=0
+- LDX [none] 6805.slaspec:400
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c30bb6d8fb88c5ce op_count=0
+- LSRA [none] 6805.slaspec:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e363269da5ce8c8e op_count=0
+- LSRX [none] 6805.slaspec:418
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a14bebf4ec6d0afe op_count=0
+- LSR [none] 6805.slaspec:425
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e541c3706b9b10f op_count=0
+- MUL [none] 6805.slaspec:435
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=44037879092ed0ca op_count=0
+- NEGA [none] 6805.slaspec:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13ba13d759da611c op_count=0
+- NEGX [none] 6805.slaspec:452
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6a9b55f45c136605 op_count=0
+- NEG [none] 6805.slaspec:459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a3bc053c05626a23 op_count=0
+- NOP [none] 6805.slaspec:468
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ORA [none] 6805.slaspec:472
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c84059e381b8292 op_count=0
+- ROLA [none] 6805.slaspec:479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2b00b4ec3a61223 op_count=0
+- ROLX [none] 6805.slaspec:488
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3aa102ddab50351a op_count=0
+- ROL [none] 6805.slaspec:497
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fc7da31975ac677a op_count=0
+- RORA [none] 6805.slaspec:508
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a772865ddd50092f op_count=0
+- RORX [none] 6805.slaspec:517
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=214521819c2e823a op_count=0
+- ROR [none] 6805.slaspec:526
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=01b5613f4eb92b3a op_count=0
+- RSP [none] 6805.slaspec:538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67547778cf706d5c op_count=0
+- RTI [return] 6805.slaspec:543
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5a162089919ad4f0 op_count=0
+- RTS [return] 6805.slaspec:565
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1e5dea41d42ef304 op_count=0
+- SBC [none] 6805.slaspec:574
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9173075d7fc3ecf6 op_count=0
+- SEC [none] 6805.slaspec:584
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7b6cded125b6a1b7 op_count=0
+- SEI [none] 6805.slaspec:589
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a70a6c881d18f419 op_count=0
+- STA [none] 6805.slaspec:594
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7a44ef85fc24bc85 op_count=0
+- STOP [none] 6805.slaspec:601
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a70dec881d1c0370 op_count=0
+- STX [none] 6805.slaspec:606
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7223b828c562ea26 op_count=0
+- SUB [none] 6805.slaspec:613
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a799efdddca28f72 op_count=0
+- SWI [call] 6805.slaspec:623
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=219a240a62ed030f op_count=0
+- TAX [none] 6805.slaspec:638
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0c0c97c087cd4060 op_count=0
+- TSTA [none] 6805.slaspec:643
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dac669c48df77283 op_count=0
+- TSTX [none] 6805.slaspec:648
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=038bc0e5da052281 op_count=0
+- TST [none] 6805.slaspec:653
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f95c0f3df1230bd op_count=0
+- TXA [none] 6805.slaspec:660
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=974190d6bddf1be0 op_count=0
+- WAIT [none] 6805.slaspec:665
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a70dec881d1c0370 op_count=0

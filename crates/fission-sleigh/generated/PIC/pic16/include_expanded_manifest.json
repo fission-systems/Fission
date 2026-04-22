@@ -1,0 +1,10 @@
+{
+  "arch": "PIC",
+  "entry_spec": "pic16.slaspec",
+  "entry_id": "pic16",
+  "include_manifest": [
+    "pic16.slaspec@0",
+    "pic16.sinc@1",
+    "pic16_instructions.sinc@1"
+  ]
+}

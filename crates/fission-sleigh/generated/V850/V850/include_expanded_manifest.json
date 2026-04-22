@@ -1,0 +1,19 @@
+{
+  "arch": "V850",
+  "entry_spec": "V850.slaspec",
+  "entry_id": "V850",
+  "include_manifest": [
+    "V850.slaspec@0",
+    "Helpers/Register.sinc@1",
+    "Helpers/Tokens.sinc@1",
+    "Helpers/Variables.sinc@1",
+    "Helpers/Conditions.sinc@1",
+    "Helpers/Macros.sinc@1",
+    "Helpers/Extras.sinc@1",
+    "Instructions/Arithmetic.sinc@1",
+    "Instructions/Float.sinc@1",
+    "Instructions/Load_Store.sinc@1",
+    "Instructions/Logic.sinc@1",
+    "Instructions/Special.sinc@1"
+  ]
+}

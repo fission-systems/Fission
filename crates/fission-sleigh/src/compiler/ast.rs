@@ -127,7 +127,9 @@ impl<'a> ParseCursor<'a> {
     }
 
     fn collect_define(&mut self) -> Result<AstDefine> {
-        let start = self.current().ok_or_else(|| anyhow!("missing define start"))?;
+        let start = self
+            .current()
+            .ok_or_else(|| anyhow!("missing define start"))?;
         let statement = self.collect_until_semicolon();
         Ok(AstDefine {
             file: start.file.clone(),
@@ -141,8 +143,12 @@ impl<'a> ParseCursor<'a> {
             .current()
             .ok_or_else(|| anyhow!("missing constructor start"))?
             .clone();
-        let block = self.collect_braced_block()?;
-        let (signature, body) = split_signature_and_body(&block)?;
+        let block = self.collect_constructor_block()?;
+        let (signature, body) = if block.contains('{') {
+            split_signature_and_body(&block)?
+        } else {
+            (block.trim().to_string(), String::new())
+        };
         Ok(AstConstructor {
             file: start.file,
             line_number: start.line_number,
@@ -209,18 +215,57 @@ impl<'a> ParseCursor<'a> {
         collected.join("\n")
     }
 
+    fn collect_constructor_block(&mut self) -> Result<String> {
+        let mut collected = Vec::new();
+        let mut brace_depth = 0i64;
+        let mut seen_open = false;
+        let start = self.current().cloned();
+
+        while let Some(line) = self.current() {
+            let text = line.text.clone();
+            let structural_text = strip_comments(&text).trim();
+            brace_depth += count_structural_char(structural_text, '{') as i64;
+            if count_structural_char(structural_text, '{') > 0 {
+                seen_open = true;
+            }
+            brace_depth -= count_structural_char(structural_text, '}') as i64;
+            let unbraced_terminal = is_unbraced_constructor_terminal(structural_text);
+            collected.push(text);
+            self.index += 1;
+
+            if seen_open && brace_depth == 0 {
+                return Ok(collected.join("\n"));
+            }
+
+            if !seen_open && unbraced_terminal {
+                return Ok(collected.join("\n"));
+            }
+        }
+
+        bail!(
+            "unterminated constructor starting at {}:{}",
+            start
+                .as_ref()
+                .map(|l| l.file.display().to_string())
+                .unwrap_or_default(),
+            start.as_ref().map(|l| l.line_number).unwrap_or_default()
+        )
+    }
+
     fn collect_braced_block(&mut self) -> Result<String> {
         let mut collected = Vec::new();
         let mut brace_depth = 0i64;
         let mut seen_open = false;
+        let start = self.current().cloned();
 
         while let Some(line) = self.current() {
             let text = line.text.clone();
-            brace_depth += count_char(&text, '{') as i64;
-            if text.contains('{') {
+            let structural_text = strip_comments(&text);
+            brace_depth += count_structural_char(structural_text, '{') as i64;
+            if count_structural_char(structural_text, '{') > 0 {
                 seen_open = true;
             }
-            brace_depth -= count_char(&text, '}') as i64;
+            brace_depth -= count_structural_char(structural_text, '}') as i64;
             collected.push(text);
             self.index += 1;
 
@@ -229,7 +274,14 @@ impl<'a> ParseCursor<'a> {
             }
         }
 
-        bail!("unterminated braced block near {}", self.lines.last().map(|l| l.file.display().to_string()).unwrap_or_default())
+        bail!(
+            "unterminated braced block starting at {}:{}",
+            start
+                .as_ref()
+                .map(|l| l.file.display().to_string())
+                .unwrap_or_default(),
+            start.as_ref().map(|l| l.line_number).unwrap_or_default()
+        )
     }
 
     fn current(&self) -> Option<&'a PreprocessedLine> {
@@ -238,19 +290,69 @@ impl<'a> ParseCursor<'a> {
 }
 
 fn strip_comments(raw: &str) -> &str {
-    raw.split('#').next().unwrap_or(raw)
+    let mut in_string = false;
+    for (idx, ch) in raw.char_indices() {
+        if ch == '"' {
+            in_string = !in_string;
+        } else if ch == '#' && !in_string {
+            return &raw[..idx];
+        }
+    }
+    raw
 }
 
-fn count_char(text: &str, needle: char) -> usize {
-    text.chars().filter(|ch| *ch == needle).count()
+fn count_structural_char(text: &str, needle: char) -> usize {
+    let mut in_string = false;
+    let mut count = 0usize;
+    for ch in text.chars() {
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string && ch == needle {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn first_structural_char(text: &str, needle: char) -> Option<usize> {
+    let mut in_string = false;
+    for (idx, ch) in text.char_indices() {
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string && ch == needle {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn last_structural_char(text: &str, needle: char) -> Option<usize> {
+    let mut in_string = false;
+    let mut last = None;
+    for (idx, ch) in text.char_indices() {
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string && ch == needle {
+            last = Some(idx);
+        }
+    }
+    last
+}
+
+fn is_unbraced_constructor_terminal(trimmed: &str) -> bool {
+    trimmed == "unimpl" || trimmed.ends_with(" unimpl")
 }
 
 fn split_signature_and_body(block: &str) -> Result<(String, String)> {
-    let open = block
-        .find('{')
+    let open = first_structural_char(block, '{')
         .ok_or_else(|| anyhow!("missing opening brace in block"))?;
-    let close = block
-        .rfind('}')
+    let close = last_structural_char(block, '}')
         .ok_or_else(|| anyhow!("missing closing brace in block"))?;
     if close <= open {
         bail!("invalid block ordering");
@@ -263,15 +365,20 @@ fn split_signature_and_body(block: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::expand_entry_spec;
+    use crate::compiler::{expand_entry_spec, x86_64_entry_spec_path};
 
     #[test]
     fn parse_expanded_spec_finds_with_blocks_and_constructors() {
-        let expanded =
-            expand_entry_spec(&crate::compiler::x86_64_entry_spec_path()).expect("expand spec");
+        let expanded = expand_entry_spec(&x86_64_entry_spec_path()).expect("expand spec");
         let ast = parse_expanded_spec(&expanded).expect("parse ast");
-        assert!(ast.items.iter().any(|item| matches!(item, AstItem::WithBlock(_))));
-        assert!(ast.items.iter().any(|item| matches!(item, AstItem::Constructor(_))));
+        assert!(ast
+            .items
+            .iter()
+            .any(|item| matches!(item, AstItem::WithBlock(_))));
+        assert!(ast
+            .items
+            .iter()
+            .any(|item| matches!(item, AstItem::Constructor(_))));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+{
+  "arch": "MC6800",
+  "entry_spec": "6805.slaspec",
+  "entry_id": "6805",
+  "include_manifest": [
+    "6805.slaspec@0"
+  ]
+}

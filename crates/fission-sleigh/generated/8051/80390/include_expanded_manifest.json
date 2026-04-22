@@ -1,0 +1,9 @@
+{
+  "arch": "8051",
+  "entry_spec": "80390.slaspec",
+  "entry_id": "80390",
+  "include_manifest": [
+    "80390.slaspec@0",
+    "8051_main.sinc@1"
+  ]
+}

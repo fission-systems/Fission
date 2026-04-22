@@ -1,0 +1,9 @@
+{
+  "arch": "eBPF",
+  "entry_spec": "eBPF_le.slaspec",
+  "entry_id": "eBPF_le",
+  "include_manifest": [
+    "eBPF_le.slaspec@0",
+    "eBPF.sinc@1"
+  ]
+}

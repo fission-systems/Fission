@@ -1,0 +1,9 @@
+{
+  "arch": "SuperH",
+  "entry_spec": "sh-2a.slaspec",
+  "entry_id": "sh-2a",
+  "include_manifest": [
+    "sh-2a.slaspec@0",
+    "superh.sinc@1"
+  ]
+}

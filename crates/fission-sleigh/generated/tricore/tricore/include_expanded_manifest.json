@@ -1,0 +1,10 @@
+{
+  "arch": "tricore",
+  "entry_spec": "tricore.slaspec",
+  "entry_id": "tricore",
+  "include_manifest": [
+    "tricore.slaspec@0",
+    "tricore.sinc@1",
+    "tricore.pcp.sinc@2"
+  ]
+}

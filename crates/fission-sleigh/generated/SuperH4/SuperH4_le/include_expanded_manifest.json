@@ -1,0 +1,9 @@
+{
+  "arch": "SuperH4",
+  "entry_spec": "SuperH4_le.slaspec",
+  "entry_id": "SuperH4_le",
+  "include_manifest": [
+    "SuperH4_le.slaspec@0",
+    "SuperH4.sinc@1"
+  ]
+}

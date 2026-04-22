@@ -1,0 +1,650 @@
+# semantic action inventory
+arch: SuperH4
+entry_spec: SuperH4_be.slaspec
+entry_id: SuperH4_be
+
+- add [none] SuperH4.sinc:634
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b55eca3e7e260d8 op_count=0
+- add [none] SuperH4.sinc:644
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d7e56371a9620692 op_count=0
+- addc [none] SuperH4.sinc:654
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f06f5a903ab30fe op_count=0
+- addv [none] SuperH4.sinc:667
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b7931d6d6163f7d op_count=0
+- and [none] SuperH4.sinc:678
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=618437606ce50d47 op_count=0
+- and [none] SuperH4.sinc:687
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3546456d43c3a158 op_count=0
+- and.b [none] SuperH4.sinc:696
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bc5988697502b689 op_count=0
+- bf [conditional_branch] SuperH4.sinc:706
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a9a43592ffa71fd op_count=0
+- bf^"/s" [conditional_branch] SuperH4.sinc:716
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b4141079dfa6dd70 op_count=0
+- bra [branch] SuperH4.sinc:728
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=742601fea7a5eb43 op_count=0
+- braf [branch] SuperH4.sinc:739
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0ff18213f9d0060 op_count=0
+- bsr [mixed] SuperH4.sinc:751
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ada22f8eaa548320 op_count=0
+- bsrf [call] SuperH4.sinc:762
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=11893ddae4dc78fa op_count=0
+- bt [conditional_branch] SuperH4.sinc:775
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9cee49e6c7957490 op_count=0
+- bt^"/s" [conditional_branch] SuperH4.sinc:785
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac4a3bd3ba1e29dd op_count=0
+- clrmac [none] SuperH4.sinc:796
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0fb7970077f76744 op_count=0
+- clrs [none] SuperH4.sinc:807
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=729ad52daa328f10 op_count=0
+- clrt [none] SuperH4.sinc:817
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9e01838d6f816d3 op_count=0
+- cmp^"/eq" [none] SuperH4.sinc:827
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5ccbd9d4261b225 op_count=0
+- cmp^"/ge" [none] SuperH4.sinc:837
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19a20edb512a2135 op_count=0
+- cmp^"/gt" [none] SuperH4.sinc:846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d47311cf30572052 op_count=0
+- cmp^"/hi" [none] SuperH4.sinc:856
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88704e5b0326532f op_count=0
+- cmp^"/hs" [none] SuperH4.sinc:866
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=75531d46f10b74ca op_count=0
+- cmp^"/pl" [none] SuperH4.sinc:876
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7e9f413d162196a op_count=0
+- cmp^"/pz" [none] SuperH4.sinc:885
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3f85ed0e5f08553 op_count=0
+- cmp^"/str" [none] SuperH4.sinc:895
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3c9fcd074aa4616d op_count=0
+- cmp^"/eq" [none] SuperH4.sinc:911
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=600f909b9d35579b op_count=0
+- div0s [none] SuperH4.sinc:921
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5507ca0b82ef005 op_count=0
+- div0u [none] SuperH4.sinc:933
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=222ae32196b8ca1f op_count=0
+- div1 [conditional_branch] SuperH4.sinc:945
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03ff0106350b4da7 op_count=0
+- dmuls.l [none] SuperH4.sinc:1059
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4e25c26a8fe0fdf0 op_count=0
+- dmulu.l [none] SuperH4.sinc:1070
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1822ffb2f5c93692 op_count=0
+- dt [none] SuperH4.sinc:1080
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bbf4c9bd65ac8676 op_count=0
+- exts.b [none] SuperH4.sinc:1091
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96e0399ae9b1a7e0 op_count=0
+- exts.w [none] SuperH4.sinc:1100
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=afc6349af77d3c81 op_count=0
+- extu.b [none] SuperH4.sinc:1110
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=349ab10e68b8efab op_count=0
+- extu.w [none] SuperH4.sinc:1120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3d815a0e6dd4ea9e op_count=0
+- fabs [conditional_branch] SuperH4.sinc:1130
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f0103b396b759eee op_count=0
+- fadd [conditional_branch] SuperH4.sinc:1145
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d3eeee578cefedd op_count=0
+- fcmp^"/eq" [conditional_branch] SuperH4.sinc:1160
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3efb67748622bd85 op_count=0
+- fcmp^"/gt" [conditional_branch] SuperH4.sinc:1174
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4df19654b3c32e3a op_count=0
+- fcnvds [none] SuperH4.sinc:1192
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a0d399b174bbe3dd op_count=0
+- fcnvsd [none] SuperH4.sinc:1205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cba36ef218b41e71 op_count=0
+- fdiv [conditional_branch] SuperH4.sinc:1216
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e8afbeabe1fd9927 op_count=0
+- fipr [conditional_branch] SuperH4.sinc:1233
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b60628a7d4d844e5 op_count=0
+- fldi0 [none] SuperH4.sinc:1255
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7215e1ed09d54c97 op_count=0
+- fldi1 [none] SuperH4.sinc:1268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb0b0c56829e9184 op_count=0
+- flds [none] SuperH4.sinc:1278
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b8c34c27db743b1 op_count=0
+- float [conditional_branch] SuperH4.sinc:1287
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=445586ab36482837 op_count=0
+- fmac [conditional_branch] SuperH4.sinc:1303
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=24e14fa906a02ed0 op_count=0
+- fmov [conditional_branch] SuperH4.sinc:1318
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=065c53df95adad7b op_count=0
+- fmov.s [conditional_branch] SuperH4.sinc:1332
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af65564729e47a6e op_count=0
+- fmov.s [conditional_branch] SuperH4.sinc:1350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6d8eda01260769ce op_count=0
+- fmov.s [conditional_branch] SuperH4.sinc:1365
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3cb0185e41e0b2d6 op_count=0
+- fmov.s [conditional_branch] SuperH4.sinc:1382
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a0309b49eb1b718 op_count=0
+- fmov.s [conditional_branch] SuperH4.sinc:1399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=da584c3b8f0124cc op_count=0
+- fmov [conditional_branch] SuperH4.sinc:1414
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1e3aaf36d97389da op_count=0
+- fmul [conditional_branch] SuperH4.sinc:1429
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aad544f9d13d39ab op_count=0
+- fneg [conditional_branch] SuperH4.sinc:1444
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bacaf71604e33a02 op_count=0
+- frchg [conditional_branch] SuperH4.sinc:1459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6305b15f762ec2bf op_count=0
+- fschg [conditional_branch] SuperH4.sinc:1473
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=949d34bc5b1201a8 op_count=0
+- fpchg [none] SuperH4.sinc:1485
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ae0abf11ebe2cfab op_count=0
+- fsqrt [conditional_branch] SuperH4.sinc:1494
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4e9cc30500ab02e4 op_count=0
+- fsrra [conditional_branch] SuperH4.sinc:1509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3c33a3f5a87f5de8 op_count=0
+- fsca [mixed] SuperH4.sinc:1522
+  semantic_ops: cos, sin
+  semantic_template: status=unsupported_template action_hash=99b5502cfd7aa159 op_count=2
+- fsts [none] SuperH4.sinc:1546
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf93545ef385c425 op_count=0
+- fsub [conditional_branch] SuperH4.sinc:1555
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b59dda9f8b1bd8e5 op_count=0
+- ftrc [conditional_branch] SuperH4.sinc:1571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a7272054268e477b op_count=0
+- ftrv [conditional_branch] SuperH4.sinc:1586
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0527318dd65b598d op_count=0
+- icbi [none] SuperH4.sinc:1623
+  semantic_ops: InvalidateCacheBlock
+  semantic_template: status=unsupported_template action_hash=275e40032742437c op_count=1
+- jmp [branch] SuperH4.sinc:1632
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b122b9fd746596de op_count=0
+- jsr [call] SuperH4.sinc:1645
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66f620e942aa41b2 op_count=0
+- ldc [none] SuperH4.sinc:1659
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fc0adffdd75c013e op_count=0
+- ldc [none] SuperH4.sinc:1670
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0d313ad9be043d7f op_count=0
+- ldc [none] SuperH4.sinc:1680
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ce3840fa3abf4d1 op_count=0
+- ldc [none] SuperH4.sinc:1689
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=887e780d63af7845 op_count=0
+- ldc [none] SuperH4.sinc:1698
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a3c90f8909133f5 op_count=0
+- ldc [none] SuperH4.sinc:1707
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=220c62b88d67b271 op_count=0
+- ldc [none] SuperH4.sinc:1715
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eaa6c3b05fb30415 op_count=0
+- ldc.l [none] SuperH4.sinc:1725
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b56689289bb7141a op_count=0
+- ldc.l [none] SuperH4.sinc:1737
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25c15e302d09a7f5 op_count=0
+- ldc.l [none] SuperH4.sinc:1748
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8dbc60f68c5ad533 op_count=0
+- ldc.l [none] SuperH4.sinc:1758
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e0416e33f067b4a3 op_count=0
+- ldc.l [none] SuperH4.sinc:1768
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ee61b6cfb139c6b op_count=0
+- ldc.l [none] SuperH4.sinc:1778
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2ef1188fc4194017 op_count=0
+- ldc.l [none] SuperH4.sinc:1788
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1e1753ad1effd3a3 op_count=0
+- lds [none] SuperH4.sinc:1799
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5091d0485cd30077 op_count=0
+- lds.l [none] SuperH4.sinc:1809
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d932057c104a9a17 op_count=0
+- lds [none] SuperH4.sinc:1821
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=22af42be510c03ee op_count=0
+- lds.l [none] SuperH4.sinc:1833
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fe45016887e4525 op_count=0
+- lds [none] SuperH4.sinc:1845
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b46a399444f2613 op_count=0
+- lds [none] SuperH4.sinc:1855
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29a3bce992ccf98b op_count=0
+- lds [none] SuperH4.sinc:1865
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aa9036f1c95b86c3 op_count=0
+- lds.l [none] SuperH4.sinc:1875
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2a600826ae00173f op_count=0
+- lds.l [none] SuperH4.sinc:1886
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ef355d10be9876ff op_count=0
+- lds.l [none] SuperH4.sinc:1897
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8e495296b6582a1 op_count=0
+- ldtlb [none] SuperH4.sinc:1909
+  semantic_ops: LoadTranslationLookasideBuffer
+  semantic_template: status=unsupported_template action_hash=bceafc4b59de77a9 op_count=1
+- mac.l [conditional_branch] SuperH4.sinc:1916
+  semantic_ops: mac_lOp
+  semantic_template: status=unsupported_template action_hash=d74abc1ba91b71fa op_count=1
+- mac.w [conditional_branch] SuperH4.sinc:1938
+  semantic_ops: mac_wOp
+  semantic_template: status=unsupported_template action_hash=6529f20c353d1bd2 op_count=1
+- mov [none] SuperH4.sinc:1959
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7cd90181896a06ac op_count=0
+- mov.b [none] SuperH4.sinc:1969
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5e6c335aaccdc756 op_count=0
+- mov.w [none] SuperH4.sinc:1979
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86bcc7652bcabcae op_count=0
+- mov.l [none] SuperH4.sinc:1989
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d05e6ac25474cf8c op_count=0
+- mov.b [none] SuperH4.sinc:1999
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96633b85cb88a3c2 op_count=0
+- mov.w [none] SuperH4.sinc:2009
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1afd5d35b5e786b op_count=0
+- mov.l [none] SuperH4.sinc:2019
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ce02b8bd76cd6d8 op_count=0
+- mov.b [none] SuperH4.sinc:2029
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1494fbb56d6fc7d op_count=0
+- mov.w [none] SuperH4.sinc:2040
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=359a4a8283c7bd02 op_count=0
+- mov.l [none] SuperH4.sinc:2051
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac7b21df071d6c6a op_count=0
+- mov.b [none] SuperH4.sinc:2062
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf797008a9d79438 op_count=0
+- mov.w [none] SuperH4.sinc:2073
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53a3a26948350fd8 op_count=0
+- mov.l [none] SuperH4.sinc:2084
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c2b3246f3d7256d op_count=0
+- mov.b [none] SuperH4.sinc:2095
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4041f9b5142c110 op_count=0
+- mov.w [none] SuperH4.sinc:2105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a75f4431bc8205c0 op_count=0
+- mov.l [none] SuperH4.sinc:2115
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5cca5465b8decc96 op_count=0
+- mov.b [none] SuperH4.sinc:2125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=449e15482d629102 op_count=0
+- mov.w [none] SuperH4.sinc:2135
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d5d7170f374211f op_count=0
+- mov.l [none] SuperH4.sinc:2145
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ab979140bf9a1dc op_count=0
+- mov [none] SuperH4.sinc:2155
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=595fd32c85413264 op_count=0
+- mov.w [none] SuperH4.sinc:2165
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ff65606c8f854a76 op_count=0
+- mov.l [none] SuperH4.sinc:2175
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac5779cc1f1eef65 op_count=0
+- mov.b [none] SuperH4.sinc:2185
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=741a39373f8e1882 op_count=0
+- mov.w [none] SuperH4.sinc:2195
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ec32320cb48cf25c op_count=0
+- mov.l [none] SuperH4.sinc:2205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e082cdc2111b5077 op_count=0
+- mov.b [none] SuperH4.sinc:2215
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f48702e787ea8aaa op_count=0
+- mov.w [none] SuperH4.sinc:2225
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e7cf47ed784f9823 op_count=0
+- mov.l [none] SuperH4.sinc:2235
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=07b570204436483c op_count=0
+- mov.b [none] SuperH4.sinc:2245
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=71fad4b9012acbbb op_count=0
+- mov.w [none] SuperH4.sinc:2255
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6a9fd55e4883c68 op_count=0
+- mov.l [none] SuperH4.sinc:2265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6bec59d8fc9285b op_count=0
+- mov.b [none] SuperH4.sinc:2275
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32a35e65a6025ceb op_count=0
+- mov.w [none] SuperH4.sinc:2285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf784288f729d8a7 op_count=0
+- mov.l [none] SuperH4.sinc:2295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ba38ed272d72d51 op_count=0
+- mova [none] SuperH4.sinc:2305
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ff323fa3a0d9bf8 op_count=0
+- movca.l [none] SuperH4.sinc:2315
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=357023d5c0a76478 op_count=0
+- movt [none] SuperH4.sinc:2324
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9790cc98ef46bb60 op_count=0
+- movua.l [none] SuperH4.sinc:2333
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=659a9dd5a802217a op_count=0
+- movua.l [none] SuperH4.sinc:2341
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89d8de6a427de8a0 op_count=0
+- movua.l [none] SuperH4.sinc:2346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=659a9dd5a802217a op_count=0
+- mul.l [none] SuperH4.sinc:2354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e722feed0a3f23b9 op_count=0
+- muls.w [none] SuperH4.sinc:2364
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=895e959a8e7ac169 op_count=0
+- mulu.w [none] SuperH4.sinc:2374
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2eaad40cd7b14e53 op_count=0
+- neg [none] SuperH4.sinc:2384
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aea355a27ab5132f op_count=0
+- negc [none] SuperH4.sinc:2394
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6945d8c19695e7bd op_count=0
+- nop [none] SuperH4.sinc:2407
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- not [none] SuperH4.sinc:2414
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=244c700c36d304c0 op_count=0
+- ocbi [none] SuperH4.sinc:2425
+  semantic_ops: CacheBlockInvalidate
+  semantic_template: status=unsupported_template action_hash=1faadec6e9538691 op_count=1
+- ocbp [none] SuperH4.sinc:2433
+  semantic_ops: CacheBlockPurge
+  semantic_template: status=unsupported_template action_hash=0be193d27b92fc0f op_count=1
+- ocbwb [none] SuperH4.sinc:2442
+  semantic_ops: CacheBlockWriteBack
+  semantic_template: status=unsupported_template action_hash=5d43634b0da04626 op_count=1
+- or [none] SuperH4.sinc:2449
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19be906c2e2e1f41 op_count=0
+- or [none] SuperH4.sinc:2459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41086eee4d80d292 op_count=0
+- or.b [none] SuperH4.sinc:2469
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a2e1582af29db03 op_count=0
+- pref [none] SuperH4.sinc:2479
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rotcl [none] SuperH4.sinc:2486
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5019d48b16b780ff op_count=0
+- rotcr [none] SuperH4.sinc:2497
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e3ae642ea49203d5 op_count=0
+- rotl [none] SuperH4.sinc:2509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d9985733d4af94d3 op_count=0
+- rotr [none] SuperH4.sinc:2520
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=832a51a3524c7a11 op_count=0
+- rte [return] SuperH4.sinc:2531
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0c42dbd774cdd065 op_count=0
+- rts [return] SuperH4.sinc:2545
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=57650967533ebabc op_count=0
+- sets [none] SuperH4.sinc:2557
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7297552daa2f7fb9 op_count=0
+- sett [none] SuperH4.sinc:2567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9e3a038d6fb33c2 op_count=0
+- shad [conditional_branch] SuperH4.sinc:2575
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90bb4522baac69cd op_count=0
+- shal [none] SuperH4.sinc:2591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2903f3dc715f95f8 op_count=0
+- shar [none] SuperH4.sinc:2602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=17fa45276e941a0a op_count=0
+- shld [conditional_branch] SuperH4.sinc:2611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=006e50dbc1ad9590 op_count=0
+- shll [none] SuperH4.sinc:2628
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2903f3dc715f95f8 op_count=0
+- shll2 [none] SuperH4.sinc:2639
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=279670930b76142e op_count=0
+- shll8 [none] SuperH4.sinc:2649
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=119eb4c64a89ba98 op_count=0
+- shll16 [none] SuperH4.sinc:2658
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fe8783d18dab975 op_count=0
+- shlr [none] SuperH4.sinc:2668
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bda343911c04ac31 op_count=0
+- shlr2 [none] SuperH4.sinc:2679
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ead4dd907961c03 op_count=0
+- shlr8 [none] SuperH4.sinc:2689
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e8b55d907794335 op_count=0
+- shlr16 [none] SuperH4.sinc:2699
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cd8b56c7ded60278 op_count=0
+- sleep [none] SuperH4.sinc:2709
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- stc [none] SuperH4.sinc:2716
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1f07abd1d83be46 op_count=0
+- stc [none] SuperH4.sinc:2727
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a79a72fa029ac10b op_count=0
+- stc [none] SuperH4.sinc:2737
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9e2afc624fd0d989 op_count=0
+- stc [none] SuperH4.sinc:2746
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41767dc66fccbf05 op_count=0
+- stc [none] SuperH4.sinc:2756
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e066f639ac5b1c75 op_count=0
+- stc [none] SuperH4.sinc:2765
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b427261bb5cb66a5 op_count=0
+- stc [none] SuperH4.sinc:2774
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bbfc1992bc618e31 op_count=0
+- stc [none] SuperH4.sinc:2783
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=380006e4cd56ec85 op_count=0
+- stc.l [none] SuperH4.sinc:2793
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=06b523f8ef2a9ee0 op_count=0
+- stc.l [none] SuperH4.sinc:2805
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b688c485227ad567 op_count=0
+- stc.l [none] SuperH4.sinc:2816
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=24169f107bad039a op_count=0
+- stc.l [none] SuperH4.sinc:2826
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f8f65e66f5ca444 op_count=0
+- stc.l [none] SuperH4.sinc:2836
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6a2586e675e716c8 op_count=0
+- stc.l [none] SuperH4.sinc:2846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7edc9e6aa98c308 op_count=0
+- stc.l [none] SuperH4.sinc:2856
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c22f6e7a5896107c op_count=0
+- stc.l [none] SuperH4.sinc:2866
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d6afcbb2624ea72 op_count=0
+- sts [none] SuperH4.sinc:2877
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89798f4c6c957e97 op_count=0
+- sts [none] SuperH4.sinc:2887
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d701d0a577c080c7 op_count=0
+- sts [none] SuperH4.sinc:2897
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b80975a36f32bd43 op_count=0
+- sts.l [none] SuperH4.sinc:2907
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31bd9226a30f3d3d op_count=0
+- sts.l [none] SuperH4.sinc:2918
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31b00a26a303cbc9 op_count=0
+- sts.l [none] SuperH4.sinc:2929
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d2da4f4bde87c88 op_count=0
+- sts [none] SuperH4.sinc:2940
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c96008b6093836b op_count=0
+- sts [none] SuperH4.sinc:2950
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f96c5bbc61022b35 op_count=0
+- sts.l [none] SuperH4.sinc:2961
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1fc194d1f61de907 op_count=0
+- sts.l [none] SuperH4.sinc:2972
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a57da39b9c21a0e op_count=0
+- sub [none] SuperH4.sinc:2984
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92adb07ee3b07796 op_count=0
+- subc [none] SuperH4.sinc:2994
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1a42f155736862d op_count=0
+- subv [none] SuperH4.sinc:3007
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=751411ad8c53d5bd op_count=0
+- swap.b [none] SuperH4.sinc:3017
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b0a2dd41564dc791 op_count=0
+- swap.w [none] SuperH4.sinc:3029
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67e785d4d772cdf6 op_count=0
+- synco [none] SuperH4.sinc:3040
+  semantic_ops: SynchronizeDataOperation
+  semantic_template: status=unsupported_template action_hash=90626704eadc146e op_count=1
+- tas.b [none] SuperH4.sinc:3049
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13c659e768747778 op_count=0
+- trapa [none] SuperH4.sinc:3063
+  semantic_ops: TrapAlways
+  semantic_template: status=unsupported_template action_hash=f99dbefe65100981 op_count=1
+- tst [none] SuperH4.sinc:3070
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6be8d6f0d8d012c2 op_count=0
+- tst [none] SuperH4.sinc:3080
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=026aa0fc08552f9c op_count=0
+- tst.b [none] SuperH4.sinc:3090
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9e982793f8d6f6a1 op_count=0
+- xor [none] SuperH4.sinc:3099
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5800a1f6bd535b8f op_count=0
+- xor [none] SuperH4.sinc:3109
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7270c7607e0a66e0 op_count=0
+- xor.b [none] SuperH4.sinc:3119
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c4b21f7296b64d9 op_count=0
+- xtrct [none] SuperH4.sinc:3129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3e06e82d6c3a0125 op_count=0

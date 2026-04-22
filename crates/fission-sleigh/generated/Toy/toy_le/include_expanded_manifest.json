@@ -1,0 +1,10 @@
+{
+  "arch": "Toy",
+  "entry_spec": "toy_le.slaspec",
+  "entry_id": "toy_le",
+  "include_manifest": [
+    "toy_le.slaspec@0",
+    "toy.sinc@1",
+    "toyInstructions.sinc@1"
+  ]
+}

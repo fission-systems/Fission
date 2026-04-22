@@ -1,0 +1,9 @@
+{
+  "arch": "PIC",
+  "entry_spec": "dsPIC33C.slaspec",
+  "entry_id": "dsPIC33C",
+  "include_manifest": [
+    "dsPIC33C.slaspec@0",
+    "PIC24.sinc@1"
+  ]
+}

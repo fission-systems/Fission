@@ -1581,6 +1581,9 @@ dependencies = [
  "anyhow",
  "fission-loader",
  "fission-pcode",
+ "iced-x86",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
 ]

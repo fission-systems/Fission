@@ -178,13 +178,7 @@ mod tests {
             9,
             ":ADC^lockx m64,simm32 is $(LONGMODE_ON) & byte=0x81 {",
         );
-        assert!(line
-            .tokens
-            .iter()
-            .any(|token| token.lexeme == ":ADC^lockx"));
-        assert!(line
-            .tokens
-            .iter()
-            .any(|token| token.lexeme == "m64"));
+        assert!(line.tokens.iter().any(|token| token.lexeme == ":ADC^lockx"));
+        assert!(line.tokens.iter().any(|token| token.lexeme == "m64"));
     }
 }

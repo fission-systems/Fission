@@ -27,7 +27,7 @@ fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
-    fission_sleigh::lifter::is_terminal_control_flow(opcode)
+    fission_sleigh::runtime::is_terminal_control_flow(opcode)
 }
 
 #[cfg(test)]
@@ -35,7 +35,7 @@ fn build_cfg_blocks(
     entry_address: u64,
     ops: Vec<fission_pcode::PcodeOp>,
 ) -> Vec<fission_pcode::PcodeBasicBlock> {
-    fission_sleigh::lifter::build_cfg_blocks(entry_address, ops)
+    fission_sleigh::runtime::build_cfg_blocks(entry_address, ops)
 }
 
 fn render_with_rust_sleigh(

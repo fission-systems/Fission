@@ -1,0 +1,10 @@
+{
+  "arch": "HCS12",
+  "entry_spec": "HCS12X.slaspec",
+  "entry_id": "HCS12X",
+  "include_manifest": [
+    "HCS12X.slaspec@0",
+    "HCS_HC12.sinc@1",
+    "XGATE.sinc@1"
+  ]
+}

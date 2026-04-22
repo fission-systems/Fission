@@ -1,0 +1,4315 @@
+# semantic action inventory
+arch: RISCV
+entry_spec: andestar_v5.slaspec
+entry_id: andestar_v5
+
+- ^instruction [branch] andestar_v5.slaspec:28
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5ef638f319f30efc op_count=0
+- ^instruction [none] andestar_v5.slaspec:29
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
+- add [none] andestar_v5.slaspec:32
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c3767f00213d12d op_count=0
+  with_stack: with : phase=1
+- addi [none] andestar_v5.slaspec:36
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a269a4e0468a67e2 op_count=0
+  with_stack: with : phase=1
+- nop [none] andestar_v5.slaspec:40
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c0ac2d7dc719f55 op_count=0
+  with_stack: with : phase=1
+- mv [none] andestar_v5.slaspec:45
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ea4acb02c7943e57 op_count=0
+  with_stack: with : phase=1
+- li [none] andestar_v5.slaspec:49
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c165abe2eacf2f1 op_count=0
+  with_stack: with : phase=1
+- mv [none] andestar_v5.slaspec:53
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ea4acb02c7943e57 op_count=0
+  with_stack: with : phase=1
+- and [none] andestar_v5.slaspec:57
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e321c2b803536e8 op_count=0
+  with_stack: with : phase=1
+- andi [none] andestar_v5.slaspec:61
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b687daefec0be6f1 op_count=0
+  with_stack: with : phase=1
+- auipc [none] andestar_v5.slaspec:65
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fb6568b00cb49fe9 op_count=0
+  with_stack: with : phase=1
+- beq [conditional_branch] andestar_v5.slaspec:69
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f534db2ca232ebe8 op_count=0
+  with_stack: with : phase=1
+- bge [conditional_branch] andestar_v5.slaspec:73
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=06836c0429404b1a op_count=0
+  with_stack: with : phase=1
+- bgeu [conditional_branch] andestar_v5.slaspec:77
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9f89a9c0e0d4ac5 op_count=0
+  with_stack: with : phase=1
+- blt [conditional_branch] andestar_v5.slaspec:81
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0af2d8364ed7d7bf op_count=0
+  with_stack: with : phase=1
+- bltu [conditional_branch] andestar_v5.slaspec:85
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0cd6ec561e850b26 op_count=0
+  with_stack: with : phase=1
+- bne [conditional_branch] andestar_v5.slaspec:89
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e84304486eec084 op_count=0
+  with_stack: with : phase=1
+- ebreak [none] andestar_v5.slaspec:93
+  semantic_ops: ebreak
+  semantic_template: status=unsupported_template action_hash=53afa8b4da68be1d op_count=1
+  with_stack: with : phase=1
+- ecall [none] andestar_v5.slaspec:97
+  semantic_ops: ecall
+  semantic_template: status=unsupported_template action_hash=0edb21dcc292ef08 op_count=1
+  with_stack: with : phase=1
+- fence [none] andestar_v5.slaspec:101
+  semantic_ops: fence
+  semantic_template: status=unsupported_template action_hash=fc7ece9ec4cfc236 op_count=1
+  with_stack: with : phase=1
+- jal [call] andestar_v5.slaspec:105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25350c4d8380b2a3 op_count=0
+  with_stack: with : phase=1
+- jal [branch] andestar_v5.slaspec:110
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c302e9cdd77c16a op_count=0
+  with_stack: with : phase=1
+- j [branch] andestar_v5.slaspec:115
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02d692b04bc370f1 op_count=0
+  with_stack: with : phase=1
+- jalr [call] andestar_v5.slaspec:119
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd8a56ef1577be1e op_count=0
+  with_stack: with : phase=1
+- jalr [branch] andestar_v5.slaspec:125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc44b4f761837231 op_count=0
+  with_stack: with : phase=1
+- jr [branch] andestar_v5.slaspec:131
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f145a11921261ade op_count=0
+  with_stack: with : phase=1
+- jr [branch] andestar_v5.slaspec:136
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b9df03f6f0653756 op_count=0
+  with_stack: with : phase=1
+- ret [return] andestar_v5.slaspec:141
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2be022c4fe45aee6 op_count=0
+  with_stack: with : phase=1
+- lb [none] andestar_v5.slaspec:146
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3cc882be382b0768 op_count=0
+  with_stack: with : phase=1
+- lbu [none] andestar_v5.slaspec:151
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8585813a891d4bb1 op_count=0
+  with_stack: with : phase=1
+- lh [none] andestar_v5.slaspec:156
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b4a3cc3dad48f2d7 op_count=0
+  with_stack: with : phase=1
+- lhu [none] andestar_v5.slaspec:161
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cb3471e6b95f14ae op_count=0
+  with_stack: with : phase=1
+- lui [none] andestar_v5.slaspec:166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c08e2be2ea19cad op_count=0
+  with_stack: with : phase=1
+- lw [none] andestar_v5.slaspec:170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0144e793db93f876 op_count=0
+  with_stack: with : phase=1
+- or [none] andestar_v5.slaspec:175
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29892139efbff7ca op_count=0
+  with_stack: with : phase=1
+- ori [none] andestar_v5.slaspec:179
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68f1d38f6c80d40b op_count=0
+  with_stack: with : phase=1
+- sb [none] andestar_v5.slaspec:183
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=006e71c5c2b9650d op_count=0
+  with_stack: with : phase=1
+- sh [none] andestar_v5.slaspec:188
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f9fc4b236bba783 op_count=0
+  with_stack: with : phase=1
+- sll [none] andestar_v5.slaspec:193
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=297b97223f578324 op_count=0
+  with_stack: with : phase=1
+- slli [none] andestar_v5.slaspec:198
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6cabb50d59fedd26 op_count=0
+  with_stack: with : phase=1
+- slt [none] andestar_v5.slaspec:202
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=120e8e6141678d21 op_count=0
+  with_stack: with : phase=1
+- slti [none] andestar_v5.slaspec:206
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a471837c3b91a90a op_count=0
+  with_stack: with : phase=1
+- sltiu [none] andestar_v5.slaspec:210
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f35907d232bf469 op_count=0
+  with_stack: with : phase=1
+- sltu [none] andestar_v5.slaspec:214
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c0a2895cd49de40 op_count=0
+  with_stack: with : phase=1
+- sra [none] andestar_v5.slaspec:218
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67931ca0f02c52e5 op_count=0
+  with_stack: with : phase=1
+- srai [none] andestar_v5.slaspec:223
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ca9af938197104b op_count=0
+  with_stack: with : phase=1
+- srl [none] andestar_v5.slaspec:227
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=daeaf78925c83dbc op_count=0
+  with_stack: with : phase=1
+- srli [none] andestar_v5.slaspec:232
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=423b02e359d0a63a op_count=0
+  with_stack: with : phase=1
+- sub [none] andestar_v5.slaspec:236
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f5bb73988e0d9b0b op_count=0
+  with_stack: with : phase=1
+- neg [none] andestar_v5.slaspec:240
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c5b7dd2e638a0df op_count=0
+  with_stack: with : phase=1
+- sw [none] andestar_v5.slaspec:244
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9427182845396077 op_count=0
+  with_stack: with : phase=1
+- unimp [branch] andestar_v5.slaspec:249
+  semantic_ops: unimp
+  semantic_template: status=unsupported_template action_hash=7a1132173ac4692e op_count=1
+  with_stack: with : phase=1
+- xor [none] andestar_v5.slaspec:255
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7877321dd24e4770 op_count=0
+  with_stack: with : phase=1
+- xori [none] andestar_v5.slaspec:259
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9fae0402583eef49 op_count=0
+  with_stack: with : phase=1
+- not [none] andestar_v5.slaspec:263
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ffca902ca7f553e5 op_count=0
+  with_stack: with : phase=1
+- amoadd.w^aqrl [none] andestar_v5.slaspec:267
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f23a56525e0a3b0a op_count=0
+  with_stack: with : phase=1
+- amoand.w^aqrl [none] andestar_v5.slaspec:276
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0787eaddf15f291 op_count=0
+  with_stack: with : phase=1
+- amomax.w^aqrl [conditional_branch] andestar_v5.slaspec:285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=202fe6eba1d60959 op_count=0
+  with_stack: with : phase=1
+- amomaxu.w^aqrl [conditional_branch] andestar_v5.slaspec:294
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d55d01c1de17026 op_count=0
+  with_stack: with : phase=1
+- amomin.w^aqrl [conditional_branch] andestar_v5.slaspec:303
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2544bb7b96a27f6f op_count=0
+  with_stack: with : phase=1
+- amominu.w^aqrl [conditional_branch] andestar_v5.slaspec:312
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ebf0b821324de5e8 op_count=0
+  with_stack: with : phase=1
+- amoor.w^aqrl [none] andestar_v5.slaspec:321
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e0dc07809ce8ed17 op_count=0
+  with_stack: with : phase=1
+- amoswap.w^aqrl [none] andestar_v5.slaspec:330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f97cbb99599f10fb op_count=0
+  with_stack: with : phase=1
+- amoxor.w^aqrl [none] andestar_v5.slaspec:338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=774fa7379f267a59 op_count=0
+  with_stack: with : phase=1
+- lr.w^aqrl [none] andestar_v5.slaspec:347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aaa99d72942c23df op_count=0
+  with_stack: with : phase=1
+- sc.w^aqrl [conditional_branch] andestar_v5.slaspec:354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fffc402d51d768b0 op_count=0
+  with_stack: with : phase=1
+- div [none] andestar_v5.slaspec:366
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8af6337284a21a80 op_count=0
+  with_stack: with : phase=1
+- divu [none] andestar_v5.slaspec:370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e581f6a6c9c7c9f1 op_count=0
+  with_stack: with : phase=1
+- mul [none] andestar_v5.slaspec:374
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82c45addfc8e101c op_count=0
+  with_stack: with : phase=1
+- mulh [none] andestar_v5.slaspec:378
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f301867c196ead5b op_count=0
+  with_stack: with : phase=1
+- mulhsu [none] andestar_v5.slaspec:385
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6956c38016fe58dc op_count=0
+  with_stack: with : phase=1
+- mulhu [none] andestar_v5.slaspec:392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bcb448e5bd4f951f op_count=0
+  with_stack: with : phase=1
+- rem [none] andestar_v5.slaspec:399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=98f67111d4158a62 op_count=0
+  with_stack: with : phase=1
+- remu [none] andestar_v5.slaspec:403
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fe451ee02db52773 op_count=0
+  with_stack: with : phase=1
+- andn [none] andestar_v5.slaspec:407
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bdep [none] andestar_v5.slaspec:408
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bext [none] andestar_v5.slaspec:409
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bfp [none] andestar_v5.slaspec:410
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clmul [none] andestar_v5.slaspec:411
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clmulh [none] andestar_v5.slaspec:412
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clmulr [none] andestar_v5.slaspec:413
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clz [none] andestar_v5.slaspec:414
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- cmix [none] andestar_v5.slaspec:415
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- cmov [none] andestar_v5.slaspec:416
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32.b [none] andestar_v5.slaspec:417
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32.h [none] andestar_v5.slaspec:418
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32.w [none] andestar_v5.slaspec:419
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32c.b [none] andestar_v5.slaspec:420
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32c.h [none] andestar_v5.slaspec:421
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crc32c.w [none] andestar_v5.slaspec:422
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ctz [none] andestar_v5.slaspec:423
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fsl [none] andestar_v5.slaspec:424
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fsr [none] andestar_v5.slaspec:425
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fsri [none] andestar_v5.slaspec:426
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- gorc [none] andestar_v5.slaspec:427
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- gorci [none] andestar_v5.slaspec:428
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- grev [none] andestar_v5.slaspec:429
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- grevi [none] andestar_v5.slaspec:430
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- max [none] andestar_v5.slaspec:431
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- maxu [none] andestar_v5.slaspec:432
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- min [none] andestar_v5.slaspec:433
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- minu [none] andestar_v5.slaspec:434
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- orn [none] andestar_v5.slaspec:435
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pack [none] andestar_v5.slaspec:436
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- packh [none] andestar_v5.slaspec:437
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- packu [none] andestar_v5.slaspec:438
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pcnt [none] andestar_v5.slaspec:439
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rol [none] andestar_v5.slaspec:440
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ror [none] andestar_v5.slaspec:441
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rori [none] andestar_v5.slaspec:442
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbclr [none] andestar_v5.slaspec:443
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbclri [none] andestar_v5.slaspec:444
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbext [none] andestar_v5.slaspec:445
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbexti [none] andestar_v5.slaspec:446
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbinv [none] andestar_v5.slaspec:447
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbinvi [none] andestar_v5.slaspec:448
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbset [none] andestar_v5.slaspec:449
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sbseti [none] andestar_v5.slaspec:450
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sext.b [none] andestar_v5.slaspec:451
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sext.h [none] andestar_v5.slaspec:452
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sh1add [none] andestar_v5.slaspec:453
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sh2add [none] andestar_v5.slaspec:454
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sh3add [none] andestar_v5.slaspec:455
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- shfl [none] andestar_v5.slaspec:456
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- shfli [none] andestar_v5.slaspec:457
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- slo [none] andestar_v5.slaspec:458
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sloi [none] andestar_v5.slaspec:459
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sro [none] andestar_v5.slaspec:460
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sroi [none] andestar_v5.slaspec:461
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- unshfl [none] andestar_v5.slaspec:462
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- unshfli [none] andestar_v5.slaspec:463
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- xnor [none] andestar_v5.slaspec:464
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- add16 [none] andestar_v5.slaspec:465
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86975a5383f34de5 op_count=0
+  with_stack: with : phase=1
+- add64 [none] andestar_v5.slaspec:472
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9a8c0dca7546438 op_count=0
+  with_stack: with : phase=1
+- add8 [none] andestar_v5.slaspec:479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7435873360042d59 op_count=0
+  with_stack: with : phase=1
+- ave [none] andestar_v5.slaspec:488
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9d5b935327e0141 op_count=0
+  with_stack: with : phase=1
+- bitrev [none] andestar_v5.slaspec:493
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bitrevi [none] andestar_v5.slaspec:494
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bpick [none] andestar_v5.slaspec:495
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- bpick [none] andestar_v5.slaspec:496
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clo16 [none] andestar_v5.slaspec:497
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clo32 [none] andestar_v5.slaspec:498
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clo8 [none] andestar_v5.slaspec:499
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clrs16 [none] andestar_v5.slaspec:500
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clrs32 [none] andestar_v5.slaspec:501
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clrs8 [none] andestar_v5.slaspec:502
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clz16 [none] andestar_v5.slaspec:503
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clz32 [none] andestar_v5.slaspec:504
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- clz8 [none] andestar_v5.slaspec:505
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- cmpeq16 [none] andestar_v5.slaspec:506
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- cmpeq8 [none] andestar_v5.slaspec:507
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- cras16 [none] andestar_v5.slaspec:508
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- crsa16 [none] andestar_v5.slaspec:509
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- insb [none] andestar_v5.slaspec:510
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kabs16 [none] andestar_v5.slaspec:511
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kabs32 [none] andestar_v5.slaspec:512
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kabs8 [none] andestar_v5.slaspec:513
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kabsw [none] andestar_v5.slaspec:514
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kadd16 [none] andestar_v5.slaspec:515
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kadd64 [none] andestar_v5.slaspec:516
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kadd8 [none] andestar_v5.slaspec:517
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kaddh [none] andestar_v5.slaspec:518
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kaddw [none] andestar_v5.slaspec:519
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kcras16 [none] andestar_v5.slaspec:520
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kcrsa16 [none] andestar_v5.slaspec:521
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmabb [none] andestar_v5.slaspec:522
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmabb16 [none] andestar_v5.slaspec:523
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmabt [none] andestar_v5.slaspec:524
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmabt16 [none] andestar_v5.slaspec:525
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmatt [none] andestar_v5.slaspec:526
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmatt16 [none] andestar_v5.slaspec:527
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmbb [none] andestar_v5.slaspec:528
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmbb16 [none] andestar_v5.slaspec:529
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmbt [none] andestar_v5.slaspec:530
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmbt16 [none] andestar_v5.slaspec:531
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmtt [none] andestar_v5.slaspec:532
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kdmtt16 [none] andestar_v5.slaspec:533
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khm16 [none] andestar_v5.slaspec:534
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khm8 [none] andestar_v5.slaspec:535
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmbb [none] andestar_v5.slaspec:536
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmbb16 [none] andestar_v5.slaspec:537
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmbt [none] andestar_v5.slaspec:538
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmbt16 [none] andestar_v5.slaspec:539
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmtt [none] andestar_v5.slaspec:540
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmtt16 [none] andestar_v5.slaspec:541
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmx16 [none] andestar_v5.slaspec:542
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- khmx8 [none] andestar_v5.slaspec:543
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmabb [none] andestar_v5.slaspec:544
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmabt [none] andestar_v5.slaspec:545
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmada [none] andestar_v5.slaspec:546
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmadrs [none] andestar_v5.slaspec:547
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmads [none] andestar_v5.slaspec:548
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmar64 [none] andestar_v5.slaspec:549
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmatt [none] andestar_v5.slaspec:550
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmaxda [none] andestar_v5.slaspec:551
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmaxds [none] andestar_v5.slaspec:552
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmda [none] andestar_v5.slaspec:553
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmac [none] andestar_v5.slaspec:554
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmac.u [none] andestar_v5.slaspec:555
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawb [none] andestar_v5.slaspec:556
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawb.u [none] andestar_v5.slaspec:557
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawb2 [none] andestar_v5.slaspec:558
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawb2.u [none] andestar_v5.slaspec:559
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawt [none] andestar_v5.slaspec:560
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmawt.u [none] andestar_v5.slaspec:561
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmsb [none] andestar_v5.slaspec:562
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmsb.u [none] andestar_v5.slaspec:563
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwb2 [none] andestar_v5.slaspec:564
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwb2.u [none] andestar_v5.slaspec:565
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwt2 [none] andestar_v5.slaspec:566
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwt2 [none] andestar_v5.slaspec:567
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwt2.u [none] andestar_v5.slaspec:568
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmmwt2.u [none] andestar_v5.slaspec:569
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmsda [none] andestar_v5.slaspec:570
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmsr64 [none] andestar_v5.slaspec:571
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmsxda [none] andestar_v5.slaspec:572
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kmxda [none] andestar_v5.slaspec:573
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksll [none] andestar_v5.slaspec:574
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksll16 [none] andestar_v5.slaspec:575
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksll8 [none] andestar_v5.slaspec:576
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslli [none] andestar_v5.slaspec:577
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslra16 [none] andestar_v5.slaspec:578
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslra16.u [none] andestar_v5.slaspec:579
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslra8 [none] andestar_v5.slaspec:580
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslra8.u [none] andestar_v5.slaspec:581
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslraw [none] andestar_v5.slaspec:582
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslraw.u [none] andestar_v5.slaspec:583
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksub16 [none] andestar_v5.slaspec:584
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksub64 [none] andestar_v5.slaspec:585
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksub8 [none] andestar_v5.slaspec:586
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksubh [none] andestar_v5.slaspec:587
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ksubw [none] andestar_v5.slaspec:588
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kwmmul [none] andestar_v5.slaspec:589
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kwmmul.u [none] andestar_v5.slaspec:590
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- maddr32 [none] andestar_v5.slaspec:591
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- maxw [none] andestar_v5.slaspec:592
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- minw [none] andestar_v5.slaspec:593
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- msubr32 [none] andestar_v5.slaspec:594
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- mtlbi [none] andestar_v5.slaspec:595
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- mtlei [none] andestar_v5.slaspec:596
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- mulr64 [none] andestar_v5.slaspec:597
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- mulsr64 [none] andestar_v5.slaspec:598
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- oneop [none] andestar_v5.slaspec:599
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- oneop2 [none] andestar_v5.slaspec:600
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pbsad [none] andestar_v5.slaspec:601
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pbsada [none] andestar_v5.slaspec:602
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pkbb16 [none] andestar_v5.slaspec:603
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pkbt16 [none] andestar_v5.slaspec:604
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pktb16 [none] andestar_v5.slaspec:605
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pktt16 [none] andestar_v5.slaspec:606
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- radd16 [none] andestar_v5.slaspec:607
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- radd64 [none] andestar_v5.slaspec:608
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- radd8 [none] andestar_v5.slaspec:609
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- raddw [none] andestar_v5.slaspec:610
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rcras16 [none] andestar_v5.slaspec:611
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rcrsa16 [none] andestar_v5.slaspec:612
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rsub16 [none] andestar_v5.slaspec:613
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rsub64 [none] andestar_v5.slaspec:614
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rsub8 [none] andestar_v5.slaspec:615
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- rsubw [none] andestar_v5.slaspec:616
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sclip16 [none] andestar_v5.slaspec:617
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uclip16 [none] andestar_v5.slaspec:618
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sclip32 [none] andestar_v5.slaspec:619
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sclip8 [none] andestar_v5.slaspec:620
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uclip8 [none] andestar_v5.slaspec:621
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- scmple16 [none] andestar_v5.slaspec:622
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- scmple8 [none] andestar_v5.slaspec:623
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- scmplt16 [none] andestar_v5.slaspec:624
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- scmplt8 [none] andestar_v5.slaspec:625
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sll16 [none] andestar_v5.slaspec:626
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sll8 [none] andestar_v5.slaspec:627
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- slli16 [none] andestar_v5.slaspec:628
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslli16 [none] andestar_v5.slaspec:629
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- slli8 [none] andestar_v5.slaspec:630
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- kslli8 [none] andestar_v5.slaspec:631
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smal [none] andestar_v5.slaspec:632
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalbb [none] andestar_v5.slaspec:633
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalbt [none] andestar_v5.slaspec:634
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalda [none] andestar_v5.slaspec:635
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smaldrs [none] andestar_v5.slaspec:636
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalds [none] andestar_v5.slaspec:637
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smaltt [none] andestar_v5.slaspec:638
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalxda [none] andestar_v5.slaspec:639
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smalxds [none] andestar_v5.slaspec:640
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smaqa [none] andestar_v5.slaspec:641
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smaqa.su [none] andestar_v5.slaspec:642
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smar64 [none] andestar_v5.slaspec:643
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smax16 [none] andestar_v5.slaspec:644
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smax8 [none] andestar_v5.slaspec:645
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smbb16 [none] andestar_v5.slaspec:646
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smbt16 [none] andestar_v5.slaspec:647
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smdrs [none] andestar_v5.slaspec:648
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smds [none] andestar_v5.slaspec:649
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smin16 [none] andestar_v5.slaspec:650
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smin8 [none] andestar_v5.slaspec:651
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmul [none] andestar_v5.slaspec:652
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmul.u [none] andestar_v5.slaspec:653
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmwb [none] andestar_v5.slaspec:654
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmwb.u [none] andestar_v5.slaspec:655
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmwt [none] andestar_v5.slaspec:656
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smmwt.u [none] andestar_v5.slaspec:657
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smslda [none] andestar_v5.slaspec:658
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smslxda [none] andestar_v5.slaspec:659
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smsr64 [none] andestar_v5.slaspec:660
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smtt16 [none] andestar_v5.slaspec:661
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smul16 [none] andestar_v5.slaspec:662
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smul16h [none] andestar_v5.slaspec:663
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smul8 [none] andestar_v5.slaspec:664
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smulx16 [none] andestar_v5.slaspec:665
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smulx16h [none] andestar_v5.slaspec:666
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smulx8 [none] andestar_v5.slaspec:667
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- smxds [none] andestar_v5.slaspec:668
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sra.u [none] andestar_v5.slaspec:669
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sra16 [none] andestar_v5.slaspec:670
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sra16.u [none] andestar_v5.slaspec:671
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sra8 [none] andestar_v5.slaspec:672
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sra8.u [none] andestar_v5.slaspec:673
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srai.u [none] andestar_v5.slaspec:674
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srai16 [none] andestar_v5.slaspec:675
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srai16.u [none] andestar_v5.slaspec:676
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srai8 [none] andestar_v5.slaspec:677
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srai8.u [none] andestar_v5.slaspec:678
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sraiw.u [none] andestar_v5.slaspec:679
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srl16 [none] andestar_v5.slaspec:680
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srl16.u [none] andestar_v5.slaspec:681
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srl8 [none] andestar_v5.slaspec:682
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srl8.u [none] andestar_v5.slaspec:683
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srli16 [none] andestar_v5.slaspec:684
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srli16.u [none] andestar_v5.slaspec:685
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srli8 [none] andestar_v5.slaspec:686
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- srli8.u [none] andestar_v5.slaspec:687
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sub16 [none] andestar_v5.slaspec:688
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sub64 [none] andestar_v5.slaspec:689
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sub8 [none] andestar_v5.slaspec:690
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sunpkd810 [none] andestar_v5.slaspec:691
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sunpkd820 [none] andestar_v5.slaspec:692
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sunpkd830 [none] andestar_v5.slaspec:693
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sunpkd831 [none] andestar_v5.slaspec:694
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- sunpkd832 [none] andestar_v5.slaspec:695
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- swap16 [none] andestar_v5.slaspec:696
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- swap8 [none] andestar_v5.slaspec:697
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uclip32 [none] andestar_v5.slaspec:698
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ucmple16 [none] andestar_v5.slaspec:699
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ucmple8 [none] andestar_v5.slaspec:700
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ucmplt16 [none] andestar_v5.slaspec:701
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ucmplt8 [none] andestar_v5.slaspec:702
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukadd16 [none] andestar_v5.slaspec:703
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukadd64 [none] andestar_v5.slaspec:704
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukadd8 [none] andestar_v5.slaspec:705
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukaddh [none] andestar_v5.slaspec:706
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukaddw [none] andestar_v5.slaspec:707
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukcras16 [none] andestar_v5.slaspec:708
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukcrsa16 [none] andestar_v5.slaspec:709
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukmar64 [none] andestar_v5.slaspec:710
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ukmsr64 [none] andestar_v5.slaspec:711
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uksub16 [none] andestar_v5.slaspec:712
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uksub64 [none] andestar_v5.slaspec:713
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uksub8 [none] andestar_v5.slaspec:714
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uksubh [none] andestar_v5.slaspec:715
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uksubw [none] andestar_v5.slaspec:716
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umaqa [none] andestar_v5.slaspec:717
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umar64 [none] andestar_v5.slaspec:718
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umax16 [none] andestar_v5.slaspec:719
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umax8 [none] andestar_v5.slaspec:720
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umin16 [none] andestar_v5.slaspec:721
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umin8 [none] andestar_v5.slaspec:722
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umsr64 [none] andestar_v5.slaspec:723
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umul16 [none] andestar_v5.slaspec:724
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umul16h [none] andestar_v5.slaspec:725
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umul8 [none] andestar_v5.slaspec:726
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umulx16 [none] andestar_v5.slaspec:727
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umulx16h [none] andestar_v5.slaspec:728
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- umulx8 [none] andestar_v5.slaspec:729
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uradd16 [none] andestar_v5.slaspec:730
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uradd64 [none] andestar_v5.slaspec:731
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uradd8 [none] andestar_v5.slaspec:732
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- uraddw [none] andestar_v5.slaspec:733
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- urcras16 [none] andestar_v5.slaspec:734
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- urcrsa16 [none] andestar_v5.slaspec:735
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ursub16 [none] andestar_v5.slaspec:736
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ursub64 [none] andestar_v5.slaspec:737
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ursub8 [none] andestar_v5.slaspec:738
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ursubw [none] andestar_v5.slaspec:739
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- wext [none] andestar_v5.slaspec:740
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- wexti [none] andestar_v5.slaspec:741
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- zunpkd810 [none] andestar_v5.slaspec:742
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- zunpkd820 [none] andestar_v5.slaspec:743
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- zunpkd830 [none] andestar_v5.slaspec:744
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- zunpkd831 [none] andestar_v5.slaspec:745
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- zunpkd832 [none] andestar_v5.slaspec:746
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- saes32.encs [none] andestar_v5.slaspec:747
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- saes32.encsm [none] andestar_v5.slaspec:748
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- saes32.decs [none] andestar_v5.slaspec:749
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- saes32.decsm [none] andestar_v5.slaspec:750
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha256.sig0 [none] andestar_v5.slaspec:751
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha256.sig1 [none] andestar_v5.slaspec:752
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha256.sum0 [none] andestar_v5.slaspec:753
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha256.sum1 [none] andestar_v5.slaspec:754
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sum0r [none] andestar_v5.slaspec:755
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sum1r [none] andestar_v5.slaspec:756
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sig0l [none] andestar_v5.slaspec:757
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sig0h [none] andestar_v5.slaspec:758
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sig1l [none] andestar_v5.slaspec:759
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssha512.sig1h [none] andestar_v5.slaspec:760
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssm3.p0 [none] andestar_v5.slaspec:761
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssm3.p1 [none] andestar_v5.slaspec:762
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssm4.ed [none] andestar_v5.slaspec:763
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- ssm4.ks [none] andestar_v5.slaspec:764
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- pollentropy [none] andestar_v5.slaspec:765
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fadd.s [none] andestar_v5.slaspec:766
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ad1a93b5e7a8e07 op_count=0
+  with_stack: with : phase=1
+- fclass.s [none] andestar_v5.slaspec:771
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fcvt.s.w [none] andestar_v5.slaspec:774
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fed9d59ae2814bbe op_count=0
+  with_stack: with : phase=1
+- fcvt.s.wu [none] andestar_v5.slaspec:779
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8dd0f31d828c19b6 op_count=0
+  with_stack: with : phase=1
+- fcvt.w.s [none] andestar_v5.slaspec:785
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7c52749a30c9f4f4 op_count=0
+  with_stack: with : phase=1
+- fcvt.wu.s [none] andestar_v5.slaspec:789
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7c52749a30c9f4f4 op_count=0
+  with_stack: with : phase=1
+- fdiv.s [none] andestar_v5.slaspec:793
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ead18e4a6bc29e33 op_count=0
+  with_stack: with : phase=1
+- feq.s [none] andestar_v5.slaspec:798
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cf8c02f6f7824db6 op_count=0
+  with_stack: with : phase=1
+- fle.s [none] andestar_v5.slaspec:802
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=64f6e7b621f9f207 op_count=0
+  with_stack: with : phase=1
+- flt.s [none] andestar_v5.slaspec:806
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=75ca0e20252a5508 op_count=0
+  with_stack: with : phase=1
+- flw [none] andestar_v5.slaspec:810
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b3f059ead163f44 op_count=0
+  with_stack: with : phase=1
+- fmadd.s [none] andestar_v5.slaspec:815
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5e1dc59dc77949d op_count=0
+  with_stack: with : phase=1
+- fmax.s [conditional_branch] andestar_v5.slaspec:820
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f070ad2562c871b op_count=0
+  with_stack: with : phase=1
+- fmin.s [conditional_branch] andestar_v5.slaspec:832
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9de0532e7fe6cb9 op_count=0
+  with_stack: with : phase=1
+- fmsub.s [none] andestar_v5.slaspec:844
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0dbb6c6749b9dd87 op_count=0
+  with_stack: with : phase=1
+- fmul.s [none] andestar_v5.slaspec:849
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d979f05228e70b48 op_count=0
+  with_stack: with : phase=1
+- fmv.w.x [none] andestar_v5.slaspec:854
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b1d989e17cebd96e op_count=0
+  with_stack: with : phase=1
+- fmv.x.w [none] andestar_v5.slaspec:858
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c5a03eb611008b6 op_count=0
+  with_stack: with : phase=1
+- fnmadd.s [none] andestar_v5.slaspec:864
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=068c6e2d01588cd1 op_count=0
+  with_stack: with : phase=1
+- fnmsub.s [none] andestar_v5.slaspec:869
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a95c9858db93f33 op_count=0
+  with_stack: with : phase=1
+- fsgnj.s [none] andestar_v5.slaspec:874
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=44c19ae892396705 op_count=0
+  with_stack: with : phase=1
+- fmv.s [none] andestar_v5.slaspec:880
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=970e0bda36fdb486 op_count=0
+  with_stack: with : phase=1
+- fsgnjn.s [none] andestar_v5.slaspec:884
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=580a41e4cf1f0cce op_count=0
+  with_stack: with : phase=1
+- fneg.s [none] andestar_v5.slaspec:890
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77d1eb283a1b5a19 op_count=0
+  with_stack: with : phase=1
+- fsgnjx.s [none] andestar_v5.slaspec:895
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15d43e1fb2cba207 op_count=0
+  with_stack: with : phase=1
+- fabs.s [none] andestar_v5.slaspec:901
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4bf6166575aff8a9 op_count=0
+  with_stack: with : phase=1
+- fsqrt.s [none] andestar_v5.slaspec:906
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e03e237f5fc77b17 op_count=0
+  with_stack: with : phase=1
+- fsub.s [none] andestar_v5.slaspec:911
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a60e98ef8c1a8681 op_count=0
+  with_stack: with : phase=1
+- fsw [none] andestar_v5.slaspec:916
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dafadf029e768857 op_count=0
+  with_stack: with : phase=1
+- fadd.d [none] andestar_v5.slaspec:921
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad783898c6a8ef11 op_count=0
+  with_stack: with : phase=1
+- fclass.d [none] andestar_v5.slaspec:925
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fcvt.d.s [none] andestar_v5.slaspec:928
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc368284be601705 op_count=0
+  with_stack: with : phase=1
+- fcvt.d.w [none] andestar_v5.slaspec:933
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=282f01252252f75e op_count=0
+  with_stack: with : phase=1
+- fcvt.d.wu [none] andestar_v5.slaspec:938
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d49272d204e06b2e op_count=0
+  with_stack: with : phase=1
+- fcvt.s.d [none] andestar_v5.slaspec:944
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d26cc0d18c893cde op_count=0
+  with_stack: with : phase=1
+- fcvt.w.d [none] andestar_v5.slaspec:949
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9e3b399de1491c9 op_count=0
+  with_stack: with : phase=1
+- fcvt.wu.d [none] andestar_v5.slaspec:953
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9e3b399de1491c9 op_count=0
+  with_stack: with : phase=1
+- fdiv.d [none] andestar_v5.slaspec:957
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aba23aa4e703bc7d op_count=0
+  with_stack: with : phase=1
+- feq.d [none] andestar_v5.slaspec:961
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1132e2872f2cf706 op_count=0
+  with_stack: with : phase=1
+- fld [none] andestar_v5.slaspec:965
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc0ca3948c8c3012 op_count=0
+  with_stack: with : phase=1
+- fle.d [none] andestar_v5.slaspec:970
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5b917b8ce4813a17 op_count=0
+  with_stack: with : phase=1
+- flt.d [none] andestar_v5.slaspec:974
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6246d6e5cdb82bbe op_count=0
+  with_stack: with : phase=1
+- fmadd.d [none] andestar_v5.slaspec:978
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a47a6060740b8b04 op_count=0
+  with_stack: with : phase=1
+- fmax.d [conditional_branch] andestar_v5.slaspec:982
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=80ed287b348806d4 op_count=0
+  with_stack: with : phase=1
+- fmin.d [conditional_branch] andestar_v5.slaspec:994
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f6545dddcdfd3d9b op_count=0
+  with_stack: with : phase=1
+- fmsub.d [none] andestar_v5.slaspec:1006
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=420c91e500ec539a op_count=0
+  with_stack: with : phase=1
+- fmul.d [none] andestar_v5.slaspec:1010
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4fccda625a7d5690 op_count=0
+  with_stack: with : phase=1
+- fnmadd.d [none] andestar_v5.slaspec:1014
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46c1cdaa9477eed8 op_count=0
+  with_stack: with : phase=1
+- fnmsub.d [none] andestar_v5.slaspec:1018
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fec5c2756f69996 op_count=0
+  with_stack: with : phase=1
+- fsd [none] andestar_v5.slaspec:1022
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6435bfc16edbc173 op_count=0
+  with_stack: with : phase=1
+- fsgnj.d [none] andestar_v5.slaspec:1027
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd4571d37429a412 op_count=0
+  with_stack: with : phase=1
+- fmv.d [none] andestar_v5.slaspec:1033
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fe662f61a8582b0d op_count=0
+  with_stack: with : phase=1
+- fsgnjn.d [none] andestar_v5.slaspec:1037
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8bff0f7084364655 op_count=0
+  with_stack: with : phase=1
+- fneg.d [none] andestar_v5.slaspec:1043
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0092c1e4dce278ca op_count=0
+  with_stack: with : phase=1
+- fsgnjx.d [none] andestar_v5.slaspec:1047
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bc0f971b4eb79f03 op_count=0
+  with_stack: with : phase=1
+- fabs.d [none] andestar_v5.slaspec:1053
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1489f63a46298dc op_count=0
+  with_stack: with : phase=1
+- fsqrt.d [none] andestar_v5.slaspec:1057
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3d00309c0f83ed5a op_count=0
+  with_stack: with : phase=1
+- fsub.d [none] andestar_v5.slaspec:1061
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91e436ca48f1634b op_count=0
+  with_stack: with : phase=1
+- csrc [none] andestar_v5.slaspec:1065
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7b0d327954823af op_count=0
+  with_stack: with : phase=1
+- csrrc [none] andestar_v5.slaspec:1072
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2f7fc0d0cd91d98 op_count=0
+  with_stack: with : phase=1
+- csrci [none] andestar_v5.slaspec:1080
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1972032a1844ec0 op_count=0
+  with_stack: with : phase=1
+- csrrci [none] andestar_v5.slaspec:1086
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=24fc88143a20e241 op_count=0
+  with_stack: with : phase=1
+- csrr [none] andestar_v5.slaspec:1093
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13dc61a3413eca82 op_count=0
+  with_stack: with : phase=1
+- csrs [none] andestar_v5.slaspec:1097
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=51cdd5a62f7c8555 op_count=0
+  with_stack: with : phase=1
+- csrrs [none] andestar_v5.slaspec:1102
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7fa2443db2b791c0 op_count=0
+  with_stack: with : phase=1
+- csrsi [none] andestar_v5.slaspec:1108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ae10b0ed98d84c40 op_count=0
+  with_stack: with : phase=1
+- csrrsi [none] andestar_v5.slaspec:1114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d6e2e0cf054c2c1 op_count=0
+  with_stack: with : phase=1
+- csrw [none] andestar_v5.slaspec:1121
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9bdd84975adc5587 op_count=0
+  with_stack: with : phase=1
+- csrrw [none] andestar_v5.slaspec:1125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e3add3bca59884d op_count=0
+  with_stack: with : phase=1
+- csrwi [none] andestar_v5.slaspec:1132
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c3b40f235f69fbc8 op_count=0
+  with_stack: with : phase=1
+- csrrwi [none] andestar_v5.slaspec:1137
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68e3420fe17c9900 op_count=0
+  with_stack: with : phase=1
+- frcsr [none] andestar_v5.slaspec:1144
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=95e685d83b60de9a op_count=0
+  with_stack: with : phase=1
+- frflags [none] andestar_v5.slaspec:1148
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc246c6fdf28cc92 op_count=0
+  with_stack: with : phase=1
+- frrm [none] andestar_v5.slaspec:1152
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=01a5b70b6b0970df op_count=0
+  with_stack: with : phase=1
+- fscsr [none] andestar_v5.slaspec:1156
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=61369de1d6d66c12 op_count=0
+  with_stack: with : phase=1
+- fscsr [none] andestar_v5.slaspec:1161
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=da95f2d232d97e61 op_count=0
+  with_stack: with : phase=1
+- fsflags [none] andestar_v5.slaspec:1166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9aba403a9a1e7fb1 op_count=0
+  with_stack: with : phase=1
+- fsflags [none] andestar_v5.slaspec:1171
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e404831d368e664 op_count=0
+  with_stack: with : phase=1
+- fsflagsi [none] andestar_v5.slaspec:1176
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=089e13831906c847 op_count=0
+  with_stack: with : phase=1
+- fsflagsi [none] andestar_v5.slaspec:1182
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=428f7962d9504bcc op_count=0
+  with_stack: with : phase=1
+- fsrm [none] andestar_v5.slaspec:1188
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bceb2f386ed979b1 op_count=0
+  with_stack: with : phase=1
+- fsrm [none] andestar_v5.slaspec:1193
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b7166d04f5188360 op_count=0
+  with_stack: with : phase=1
+- fsrmi [none] andestar_v5.slaspec:1198
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3d2d226cd71c5b8b op_count=0
+  with_stack: with : phase=1
+- fsrmi [none] andestar_v5.slaspec:1204
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cb8726131571e5b8 op_count=0
+  with_stack: with : phase=1
+- dret [return] andestar_v5.slaspec:1213
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ab7cb532c104d3a7 op_count=0
+  with_stack: with : phase=1
+- mret [return] andestar_v5.slaspec:1217
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fe6c7d153e24bb4d op_count=0
+  with_stack: with : phase=1
+- sret [return] andestar_v5.slaspec:1221
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fb215fd9b8c77427 op_count=0
+  with_stack: with : phase=1
+- uret [return] andestar_v5.slaspec:1225
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13b38d7d6fcf1675 op_count=0
+  with_stack: with : phase=1
+- wfi [none] andestar_v5.slaspec:1229
+  semantic_ops: wfi
+  semantic_template: status=unsupported_template action_hash=2987de0b34a7b8c1 op_count=1
+  with_stack: with : phase=1
+- sfence.vm [none] andestar_v5.slaspec:1233
+  semantic_ops: sfence.vm
+  semantic_template: status=unsupported_template action_hash=87c8b068e23b6042 op_count=1
+  with_stack: with : phase=1
+- sfence.vm [none] andestar_v5.slaspec:1237
+  semantic_ops: sfence.vm
+  semantic_template: status=unsupported_template action_hash=4c1a56e6f77ca314 op_count=1
+  with_stack: with : phase=1
+- sfence.vma [none] andestar_v5.slaspec:1241
+  semantic_ops: sfence.vma
+  semantic_template: status=unsupported_template action_hash=02539100b75207d6 op_count=1
+  with_stack: with : phase=1
+- hlv.b [none] andestar_v5.slaspec:1245
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7bac6c566a16c6f op_count=0
+  with_stack: with : phase=1
+- hlv.bu [none] andestar_v5.slaspec:1249
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=144abd46b0efdc04 op_count=0
+  with_stack: with : phase=1
+- hlv.h [none] andestar_v5.slaspec:1253
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=17b7585fb579db9e op_count=0
+  with_stack: with : phase=1
+- hlv.hu [none] andestar_v5.slaspec:1257
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8cdf79e1cef76d9 op_count=0
+  with_stack: with : phase=1
+- hlvx.hu [none] andestar_v5.slaspec:1261
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8cdf79e1cef76d9 op_count=0
+  with_stack: with : phase=1
+- hlv.w [none] andestar_v5.slaspec:1265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72a7e9eca5118241 op_count=0
+  with_stack: with : phase=1
+- hlvx.wu [none] andestar_v5.slaspec:1269
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e9f7d60ff08d719 op_count=0
+  with_stack: with : phase=1
+- hsv.b [none] andestar_v5.slaspec:1273
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=40dcd0249e6864c8 op_count=0
+  with_stack: with : phase=1
+- hsv.h [none] andestar_v5.slaspec:1277
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=62b98127a4c255ec op_count=0
+  with_stack: with : phase=1
+- hsv.w [none] andestar_v5.slaspec:1281
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e494ca92faa3984 op_count=0
+  with_stack: with : phase=1
+- c.add [none] andestar_v5.slaspec:1285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c3637f7714f834c op_count=0
+  with_stack: with : phase=1
+- c.addi [none] andestar_v5.slaspec:1289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=55de6889ea37f88d op_count=0
+  with_stack: with : phase=1
+- c.nop [none] andestar_v5.slaspec:1293
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c0ac2d7dc719f55 op_count=0
+  with_stack: with : phase=1
+- c.addi16sp [none] andestar_v5.slaspec:1298
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=784a51ac4cd0e04c op_count=0
+  with_stack: with : phase=1
+- c.addi4spn [none] andestar_v5.slaspec:1302
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=00c17d760beb91dc op_count=0
+  with_stack: with : phase=1
+- c.and [none] andestar_v5.slaspec:1306
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=837f3127aace6357 op_count=0
+  with_stack: with : phase=1
+- c.andi [none] andestar_v5.slaspec:1310
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc88d7878b43ee70 op_count=0
+  with_stack: with : phase=1
+- c.beqz [conditional_branch] andestar_v5.slaspec:1314
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4afe45afdefc661 op_count=0
+  with_stack: with : phase=1
+- c.bnez [conditional_branch] andestar_v5.slaspec:1318
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9f91e655c241fb85 op_count=0
+  with_stack: with : phase=1
+- c.ebreak [none] andestar_v5.slaspec:1322
+  semantic_ops: ebreak
+  semantic_template: status=unsupported_template action_hash=53afa8b4da68be1d op_count=1
+  with_stack: with : phase=1
+- c.fld [none] andestar_v5.slaspec:1326
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31bb96db869a6f2e op_count=0
+  with_stack: with : phase=1
+- c.fldsp [none] andestar_v5.slaspec:1331
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=51e03f763d5a759d op_count=0
+  with_stack: with : phase=1
+- c.flw [none] andestar_v5.slaspec:1336
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3e14c3a722c9d580 op_count=0
+  with_stack: with : phase=1
+- c.flwsp [none] andestar_v5.slaspec:1341
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=83838866d2347259 op_count=0
+  with_stack: with : phase=1
+- c.fsd [none] andestar_v5.slaspec:1346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=559a969a17cd3972 op_count=0
+  with_stack: with : phase=1
+- c.fsdsp [none] andestar_v5.slaspec:1351
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1335adfc72522fb6 op_count=0
+  with_stack: with : phase=1
+- c.fsw [none] andestar_v5.slaspec:1356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b28e241a4ab99fc9 op_count=0
+  with_stack: with : phase=1
+- c.fswsp [none] andestar_v5.slaspec:1361
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d73246ffd7c627f3 op_count=0
+  with_stack: with : phase=1
+- c.j [branch] andestar_v5.slaspec:1366
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d435967e8102c5dd op_count=0
+  with_stack: with : phase=1
+- c.jal [call] andestar_v5.slaspec:1370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee147230525c165c op_count=0
+  with_stack: with : phase=1
+- c.jalr [call] andestar_v5.slaspec:1375
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e7e63dd86af24df op_count=0
+  with_stack: with : phase=1
+- c.jr [branch] andestar_v5.slaspec:1380
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2cace8b3831b2056 op_count=0
+  with_stack: with : phase=1
+- ret [return] andestar_v5.slaspec:1384
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f932e21ca2a3913 op_count=0
+  with_stack: with : phase=1
+- c.li [none] andestar_v5.slaspec:1388
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=faf9e4019e041483 op_count=0
+  with_stack: with : phase=1
+- c.lui [none] andestar_v5.slaspec:1392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=43c86475cd19ff81 op_count=0
+  with_stack: with : phase=1
+- c.lw [none] andestar_v5.slaspec:1396
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d8d1c41b7fa34a7f op_count=0
+  with_stack: with : phase=1
+- c.lwsp [none] andestar_v5.slaspec:1401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=193f5049a8ec45b4 op_count=0
+  with_stack: with : phase=1
+- c.mv [none] andestar_v5.slaspec:1406
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c549245f3e3fa0f2 op_count=0
+  with_stack: with : phase=1
+- c.or [none] andestar_v5.slaspec:1410
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1888dcf1cf9bb639 op_count=0
+  with_stack: with : phase=1
+- c.slli [none] andestar_v5.slaspec:1414
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2615d888c1188213 op_count=0
+  with_stack: with : phase=1
+- c.slli64 [none] andestar_v5.slaspec:1418
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=08a3e3842f1d7321 op_count=0
+  with_stack: with : phase=1
+- c.srai [none] andestar_v5.slaspec:1422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0223c414c9b40f00 op_count=0
+  with_stack: with : phase=1
+- c.srai64 [none] andestar_v5.slaspec:1426
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=22ddb4c4a00548f6 op_count=0
+  with_stack: with : phase=1
+- c.srli [none] andestar_v5.slaspec:1430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=05bc64a668f6402f op_count=0
+  with_stack: with : phase=1
+- c.srli64 [none] andestar_v5.slaspec:1434
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=612d3c5cb1a28685 op_count=0
+  with_stack: with : phase=1
+- c.sub [none] andestar_v5.slaspec:1438
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bdd3e335ad9e1d58 op_count=0
+  with_stack: with : phase=1
+- c.sw [none] andestar_v5.slaspec:1442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c718c4f07a0ca2b op_count=0
+  with_stack: with : phase=1
+- c.swsp [none] andestar_v5.slaspec:1447
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d6b1ce0b8189cbe op_count=0
+  with_stack: with : phase=1
+- c.xor [none] andestar_v5.slaspec:1452
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f76e34b1ad4b47f op_count=0
+  with_stack: with : phase=1
+- vaadd.vv [none] andestar_v5.slaspec:1456
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vaadd.vx [none] andestar_v5.slaspec:1457
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vaaddu.vv [none] andestar_v5.slaspec:1458
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vaaddu.vx [none] andestar_v5.slaspec:1459
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadc.vim [none] andestar_v5.slaspec:1460
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadc.vvm [none] andestar_v5.slaspec:1461
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadc.vxm [none] andestar_v5.slaspec:1462
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadd.vi [none] andestar_v5.slaspec:1463
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadd.vv [none] andestar_v5.slaspec:1464
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vadd.vx [none] andestar_v5.slaspec:1465
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei16.v [none] andestar_v5.slaspec:1466
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei16.v [none] andestar_v5.slaspec:1467
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei32.v [none] andestar_v5.slaspec:1468
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei32.v [none] andestar_v5.slaspec:1469
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei64.v [none] andestar_v5.slaspec:1470
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei64.v [none] andestar_v5.slaspec:1471
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei8.v [none] andestar_v5.slaspec:1472
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoaddei8.v [none] andestar_v5.slaspec:1473
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei16.v [none] andestar_v5.slaspec:1474
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei16.v [none] andestar_v5.slaspec:1475
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei32.v [none] andestar_v5.slaspec:1476
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei32.v [none] andestar_v5.slaspec:1477
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei64.v [none] andestar_v5.slaspec:1478
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei64.v [none] andestar_v5.slaspec:1479
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei8.v [none] andestar_v5.slaspec:1480
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoandei8.v [none] andestar_v5.slaspec:1481
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei16.v [none] andestar_v5.slaspec:1482
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei16.v [none] andestar_v5.slaspec:1483
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei32.v [none] andestar_v5.slaspec:1484
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei32.v [none] andestar_v5.slaspec:1485
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei64.v [none] andestar_v5.slaspec:1486
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei64.v [none] andestar_v5.slaspec:1487
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei8.v [none] andestar_v5.slaspec:1488
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxei8.v [none] andestar_v5.slaspec:1489
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei16.v [none] andestar_v5.slaspec:1490
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei16.v [none] andestar_v5.slaspec:1491
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei32.v [none] andestar_v5.slaspec:1492
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei32.v [none] andestar_v5.slaspec:1493
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei64.v [none] andestar_v5.slaspec:1494
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei64.v [none] andestar_v5.slaspec:1495
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei8.v [none] andestar_v5.slaspec:1496
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamomaxuei8.v [none] andestar_v5.slaspec:1497
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei16.v [none] andestar_v5.slaspec:1498
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei16.v [none] andestar_v5.slaspec:1499
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei32.v [none] andestar_v5.slaspec:1500
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei32.v [none] andestar_v5.slaspec:1501
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei64.v [none] andestar_v5.slaspec:1502
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei64.v [none] andestar_v5.slaspec:1503
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei8.v [none] andestar_v5.slaspec:1504
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominei8.v [none] andestar_v5.slaspec:1505
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei16.v [none] andestar_v5.slaspec:1506
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei16.v [none] andestar_v5.slaspec:1507
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei32.v [none] andestar_v5.slaspec:1508
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei32.v [none] andestar_v5.slaspec:1509
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei64.v [none] andestar_v5.slaspec:1510
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei64.v [none] andestar_v5.slaspec:1511
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei8.v [none] andestar_v5.slaspec:1512
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamominuei8.v [none] andestar_v5.slaspec:1513
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei16.v [none] andestar_v5.slaspec:1514
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei16.v [none] andestar_v5.slaspec:1515
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei32.v [none] andestar_v5.slaspec:1516
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei32.v [none] andestar_v5.slaspec:1517
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei64.v [none] andestar_v5.slaspec:1518
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei64.v [none] andestar_v5.slaspec:1519
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei8.v [none] andestar_v5.slaspec:1520
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoorei8.v [none] andestar_v5.slaspec:1521
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei16.v [none] andestar_v5.slaspec:1522
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei16.v [none] andestar_v5.slaspec:1523
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei32.v [none] andestar_v5.slaspec:1524
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei32.v [none] andestar_v5.slaspec:1525
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei64.v [none] andestar_v5.slaspec:1526
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei64.v [none] andestar_v5.slaspec:1527
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei8.v [none] andestar_v5.slaspec:1528
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoswapei8.v [none] andestar_v5.slaspec:1529
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei16.v [none] andestar_v5.slaspec:1530
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei16.v [none] andestar_v5.slaspec:1531
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei32.v [none] andestar_v5.slaspec:1532
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei32.v [none] andestar_v5.slaspec:1533
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei64.v [none] andestar_v5.slaspec:1534
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei64.v [none] andestar_v5.slaspec:1535
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei8.v [none] andestar_v5.slaspec:1536
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vamoxorei8.v [none] andestar_v5.slaspec:1537
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vand.vi [none] andestar_v5.slaspec:1538
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vand.vv [none] andestar_v5.slaspec:1539
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vand.vx [none] andestar_v5.slaspec:1540
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vasub.vv [none] andestar_v5.slaspec:1541
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vasub.vx [none] andestar_v5.slaspec:1542
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vasubu.vv [none] andestar_v5.slaspec:1543
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vasubu.vx [none] andestar_v5.slaspec:1544
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vcompress.vm [none] andestar_v5.slaspec:1545
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdiv.vv [none] andestar_v5.slaspec:1546
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdiv.vx [none] andestar_v5.slaspec:1547
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdivu.vv [none] andestar_v5.slaspec:1548
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdivu.vx [none] andestar_v5.slaspec:1549
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdot.vv [none] andestar_v5.slaspec:1550
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vdotu.vv [none] andestar_v5.slaspec:1551
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfadd.vf [none] andestar_v5.slaspec:1552
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfadd.vv [none] andestar_v5.slaspec:1553
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfclass.v [none] andestar_v5.slaspec:1554
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.f.x.v [none] andestar_v5.slaspec:1555
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.f.xu.v [none] andestar_v5.slaspec:1556
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.rtz.x.f.v [none] andestar_v5.slaspec:1557
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.rtz.xu.f.v [none] andestar_v5.slaspec:1558
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.x.f.v [none] andestar_v5.slaspec:1559
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfcvt.xu.f.v [none] andestar_v5.slaspec:1560
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfdiv.vf [none] andestar_v5.slaspec:1561
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfdiv.vv [none] andestar_v5.slaspec:1562
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfdot.vv [none] andestar_v5.slaspec:1563
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfirst.m [none] andestar_v5.slaspec:1564
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmacc.vf [none] andestar_v5.slaspec:1565
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmacc.vv [none] andestar_v5.slaspec:1566
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmadd.vf [none] andestar_v5.slaspec:1567
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmadd.vv [none] andestar_v5.slaspec:1568
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmax.vf [none] andestar_v5.slaspec:1569
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmax.vv [none] andestar_v5.slaspec:1570
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmerge.vfm [none] andestar_v5.slaspec:1571
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmin.vf [none] andestar_v5.slaspec:1572
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmin.vv [none] andestar_v5.slaspec:1573
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmsac.vf [none] andestar_v5.slaspec:1574
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmsac.vv [none] andestar_v5.slaspec:1575
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmsub.vf [none] andestar_v5.slaspec:1576
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmsub.vv [none] andestar_v5.slaspec:1577
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmul.vf [none] andestar_v5.slaspec:1578
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmul.vv [none] andestar_v5.slaspec:1579
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmv.f.s [none] andestar_v5.slaspec:1580
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmv.s.f [none] andestar_v5.slaspec:1581
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfmv.v.f [none] andestar_v5.slaspec:1582
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.f.f.w [none] andestar_v5.slaspec:1583
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.f.x.w [none] andestar_v5.slaspec:1584
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.f.xu.w [none] andestar_v5.slaspec:1585
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.rod.f.f.w [none] andestar_v5.slaspec:1586
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.rtz.x.f.w [none] andestar_v5.slaspec:1587
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.rtz.xu.f.w [none] andestar_v5.slaspec:1588
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.x.f.w [none] andestar_v5.slaspec:1589
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfncvt.xu.f.w [none] andestar_v5.slaspec:1590
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmacc.vf [none] andestar_v5.slaspec:1591
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmacc.vv [none] andestar_v5.slaspec:1592
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmadd.vf [none] andestar_v5.slaspec:1593
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmadd.vv [none] andestar_v5.slaspec:1594
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmsac.vf [none] andestar_v5.slaspec:1595
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmsac.vv [none] andestar_v5.slaspec:1596
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmsub.vf [none] andestar_v5.slaspec:1597
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfnmsub.vv [none] andestar_v5.slaspec:1598
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfrdiv.vf [none] andestar_v5.slaspec:1599
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfredmax.vs [none] andestar_v5.slaspec:1600
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfredmin.vs [none] andestar_v5.slaspec:1601
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfredosum.vs [none] andestar_v5.slaspec:1602
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfredsum.vs [none] andestar_v5.slaspec:1603
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfrsub.vf [none] andestar_v5.slaspec:1604
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnj.vf [none] andestar_v5.slaspec:1605
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnj.vv [none] andestar_v5.slaspec:1606
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnjn.vf [none] andestar_v5.slaspec:1607
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnjn.vv [none] andestar_v5.slaspec:1608
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnjx.vf [none] andestar_v5.slaspec:1609
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsgnjx.vv [none] andestar_v5.slaspec:1610
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfslide1down.vf [none] andestar_v5.slaspec:1611
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfslide1up.vf [none] andestar_v5.slaspec:1612
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsqrt.v [none] andestar_v5.slaspec:1613
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsub.vf [none] andestar_v5.slaspec:1614
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfsub.vv [none] andestar_v5.slaspec:1615
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwadd.vf [none] andestar_v5.slaspec:1616
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwadd.vv [none] andestar_v5.slaspec:1617
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwadd.wf [none] andestar_v5.slaspec:1618
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwadd.wv [none] andestar_v5.slaspec:1619
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.f.f.v [none] andestar_v5.slaspec:1620
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.f.x.v [none] andestar_v5.slaspec:1621
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.f.xu.v [none] andestar_v5.slaspec:1622
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.rtz.x.f.v [none] andestar_v5.slaspec:1623
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.rtz.xu.f.v [none] andestar_v5.slaspec:1624
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.x.f.v [none] andestar_v5.slaspec:1625
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwcvt.xu.f.v [none] andestar_v5.slaspec:1626
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmacc.vf [none] andestar_v5.slaspec:1627
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmacc.vv [none] andestar_v5.slaspec:1628
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmsac.vf [none] andestar_v5.slaspec:1629
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmsac.vv [none] andestar_v5.slaspec:1630
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmul.vf [none] andestar_v5.slaspec:1631
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwmul.vv [none] andestar_v5.slaspec:1632
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwnmacc.vf [none] andestar_v5.slaspec:1633
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwnmacc.vv [none] andestar_v5.slaspec:1634
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwnmsac.vf [none] andestar_v5.slaspec:1635
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwnmsac.vv [none] andestar_v5.slaspec:1636
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwredosum.vs [none] andestar_v5.slaspec:1637
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwredsum.vs [none] andestar_v5.slaspec:1638
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwsub.vf [none] andestar_v5.slaspec:1639
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwsub.vv [none] andestar_v5.slaspec:1640
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwsub.wf [none] andestar_v5.slaspec:1641
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vfwsub.wv [none] andestar_v5.slaspec:1642
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vid.v [none] andestar_v5.slaspec:1643
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- viota.m [none] andestar_v5.slaspec:1644
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl1re16.v [none] andestar_v5.slaspec:1645
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl1re32.v [none] andestar_v5.slaspec:1646
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl1re64.v [none] andestar_v5.slaspec:1647
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl1re8.v [none] andestar_v5.slaspec:1648
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl2re16.v [none] andestar_v5.slaspec:1649
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl2re32.v [none] andestar_v5.slaspec:1650
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl2re64.v [none] andestar_v5.slaspec:1651
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl2re8.v [none] andestar_v5.slaspec:1652
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl4re16.v [none] andestar_v5.slaspec:1653
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl4re32.v [none] andestar_v5.slaspec:1654
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl4re64.v [none] andestar_v5.slaspec:1655
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl4re8.v [none] andestar_v5.slaspec:1656
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl8re16.v [none] andestar_v5.slaspec:1657
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl8re32.v [none] andestar_v5.slaspec:1658
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl8re64.v [none] andestar_v5.slaspec:1659
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vl8re8.v [none] andestar_v5.slaspec:1660
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle1024.v [none] andestar_v5.slaspec:1661
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle1024ff.v [none] andestar_v5.slaspec:1662
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle128.v [none] andestar_v5.slaspec:1663
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle128ff.v [none] andestar_v5.slaspec:1664
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle16.v [none] andestar_v5.slaspec:1665
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle16ff.v [none] andestar_v5.slaspec:1666
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle256.v [none] andestar_v5.slaspec:1667
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle256ff.v [none] andestar_v5.slaspec:1668
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle32.v [none] andestar_v5.slaspec:1669
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle32ff.v [none] andestar_v5.slaspec:1670
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle512.v [none] andestar_v5.slaspec:1671
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle512ff.v [none] andestar_v5.slaspec:1672
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle64.v [none] andestar_v5.slaspec:1673
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle64ff.v [none] andestar_v5.slaspec:1674
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle8.v [none] andestar_v5.slaspec:1675
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vle8ff.v [none] andestar_v5.slaspec:1676
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse1024.v [none] andestar_v5.slaspec:1677
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse128.v [none] andestar_v5.slaspec:1678
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse16.v [none] andestar_v5.slaspec:1679
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse256.v [none] andestar_v5.slaspec:1680
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse32.v [none] andestar_v5.slaspec:1681
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse512.v [none] andestar_v5.slaspec:1682
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse64.v [none] andestar_v5.slaspec:1683
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlse8.v [none] andestar_v5.slaspec:1684
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei1024.v [none] andestar_v5.slaspec:1685
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei128.v [none] andestar_v5.slaspec:1686
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei16.v [none] andestar_v5.slaspec:1687
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei256.v [none] andestar_v5.slaspec:1688
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei32.v [none] andestar_v5.slaspec:1689
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei512.v [none] andestar_v5.slaspec:1690
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei64.v [none] andestar_v5.slaspec:1691
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vlxei8.v [none] andestar_v5.slaspec:1692
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmacc.vv [none] andestar_v5.slaspec:1693
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmacc.vx [none] andestar_v5.slaspec:1694
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmadc.vim [none] andestar_v5.slaspec:1695
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmadc.vvm [none] andestar_v5.slaspec:1696
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmadc.vxm [none] andestar_v5.slaspec:1697
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmadd.vv [none] andestar_v5.slaspec:1698
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmadd.vx [none] andestar_v5.slaspec:1699
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmand.mm [none] andestar_v5.slaspec:1700
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmandnot.mm [none] andestar_v5.slaspec:1701
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmax.vv [none] andestar_v5.slaspec:1702
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmax.vx [none] andestar_v5.slaspec:1703
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmaxu.vv [none] andestar_v5.slaspec:1704
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmaxu.vx [none] andestar_v5.slaspec:1705
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmerge.vim [none] andestar_v5.slaspec:1706
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmerge.vvm [none] andestar_v5.slaspec:1707
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmerge.vxm [none] andestar_v5.slaspec:1708
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfeq.vf [none] andestar_v5.slaspec:1709
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfeq.vv [none] andestar_v5.slaspec:1710
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfge.vf [none] andestar_v5.slaspec:1711
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfgt.vf [none] andestar_v5.slaspec:1712
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfle.vf [none] andestar_v5.slaspec:1713
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfle.vv [none] andestar_v5.slaspec:1714
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmflt.vf [none] andestar_v5.slaspec:1715
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmflt.vv [none] andestar_v5.slaspec:1716
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfne.vf [none] andestar_v5.slaspec:1717
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmfne.vv [none] andestar_v5.slaspec:1718
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmin.vv [none] andestar_v5.slaspec:1719
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmin.vx [none] andestar_v5.slaspec:1720
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vminu.vv [none] andestar_v5.slaspec:1721
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vminu.vx [none] andestar_v5.slaspec:1722
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmnand.mm [none] andestar_v5.slaspec:1723
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmnor.mm [none] andestar_v5.slaspec:1724
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmor.mm [none] andestar_v5.slaspec:1725
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmornot.mm [none] andestar_v5.slaspec:1726
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsbc.vvm [none] andestar_v5.slaspec:1727
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsbc.vxm [none] andestar_v5.slaspec:1728
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsbf.m [none] andestar_v5.slaspec:1729
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmseq.vi [none] andestar_v5.slaspec:1730
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmseq.vv [none] andestar_v5.slaspec:1731
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmseq.vx [none] andestar_v5.slaspec:1732
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsgt.vi [none] andestar_v5.slaspec:1733
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsgt.vx [none] andestar_v5.slaspec:1734
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsgtu.vi [none] andestar_v5.slaspec:1735
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsgtu.vx [none] andestar_v5.slaspec:1736
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsif.m [none] andestar_v5.slaspec:1737
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsle.vi [none] andestar_v5.slaspec:1738
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsle.vv [none] andestar_v5.slaspec:1739
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsle.vx [none] andestar_v5.slaspec:1740
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsleu.vi [none] andestar_v5.slaspec:1741
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsleu.vv [none] andestar_v5.slaspec:1742
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsleu.vx [none] andestar_v5.slaspec:1743
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmslt.vv [none] andestar_v5.slaspec:1744
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmslt.vx [none] andestar_v5.slaspec:1745
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsltu.vv [none] andestar_v5.slaspec:1746
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsltu.vx [none] andestar_v5.slaspec:1747
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsne.vi [none] andestar_v5.slaspec:1748
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsne.vv [none] andestar_v5.slaspec:1749
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsne.vx [none] andestar_v5.slaspec:1750
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmsof.m [none] andestar_v5.slaspec:1751
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmul.vv [none] andestar_v5.slaspec:1752
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmul.vx [none] andestar_v5.slaspec:1753
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulh.vv [none] andestar_v5.slaspec:1754
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulh.vx [none] andestar_v5.slaspec:1755
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulhsu.vv [none] andestar_v5.slaspec:1756
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulhsu.vx [none] andestar_v5.slaspec:1757
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulhu.vv [none] andestar_v5.slaspec:1758
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmulhu.vx [none] andestar_v5.slaspec:1759
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv.s.x [none] andestar_v5.slaspec:1760
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv.v.i [none] andestar_v5.slaspec:1761
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv.v.v [none] andestar_v5.slaspec:1762
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv.v.x [none] andestar_v5.slaspec:1763
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv.x.s [none] andestar_v5.slaspec:1764
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv1r.v [none] andestar_v5.slaspec:1765
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv2r.v [none] andestar_v5.slaspec:1766
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv4r.v [none] andestar_v5.slaspec:1767
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmv8r.v [none] andestar_v5.slaspec:1768
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmxnor.mm [none] andestar_v5.slaspec:1769
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vmxor.mm [none] andestar_v5.slaspec:1770
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclip.wi [none] andestar_v5.slaspec:1771
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclip.wv [none] andestar_v5.slaspec:1772
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclip.wx [none] andestar_v5.slaspec:1773
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclipu.wi [none] andestar_v5.slaspec:1774
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclipu.wv [none] andestar_v5.slaspec:1775
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnclipu.wx [none] andestar_v5.slaspec:1776
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnmsac.vv [none] andestar_v5.slaspec:1777
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnmsac.vx [none] andestar_v5.slaspec:1778
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnmsub.vv [none] andestar_v5.slaspec:1779
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnmsub.vx [none] andestar_v5.slaspec:1780
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsra.wi [none] andestar_v5.slaspec:1781
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsra.wv [none] andestar_v5.slaspec:1782
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsra.wx [none] andestar_v5.slaspec:1783
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsrl.wi [none] andestar_v5.slaspec:1784
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsrl.wv [none] andestar_v5.slaspec:1785
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vnsrl.wx [none] andestar_v5.slaspec:1786
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vor.vi [none] andestar_v5.slaspec:1787
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vor.vv [none] andestar_v5.slaspec:1788
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vor.vx [none] andestar_v5.slaspec:1789
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vpopc.m [none] andestar_v5.slaspec:1790
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmacc.vv [none] andestar_v5.slaspec:1791
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmacc.vx [none] andestar_v5.slaspec:1792
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmaccsu.vv [none] andestar_v5.slaspec:1793
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmaccsu.vx [none] andestar_v5.slaspec:1794
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmaccu.vv [none] andestar_v5.slaspec:1795
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmaccu.vx [none] andestar_v5.slaspec:1796
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vqmaccus.vx [none] andestar_v5.slaspec:1797
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredand.vs [none] andestar_v5.slaspec:1798
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredmax.vs [none] andestar_v5.slaspec:1799
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredmaxu.vs [none] andestar_v5.slaspec:1800
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredmin.vs [none] andestar_v5.slaspec:1801
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredminu.vs [none] andestar_v5.slaspec:1802
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredor.vs [none] andestar_v5.slaspec:1803
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredsum.vs [none] andestar_v5.slaspec:1804
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vredxor.vs [none] andestar_v5.slaspec:1805
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrem.vv [none] andestar_v5.slaspec:1806
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrem.vx [none] andestar_v5.slaspec:1807
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vremu.vv [none] andestar_v5.slaspec:1808
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vremu.vx [none] andestar_v5.slaspec:1809
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrgather.vi [none] andestar_v5.slaspec:1810
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrgather.vv [none] andestar_v5.slaspec:1811
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrgather.vx [none] andestar_v5.slaspec:1812
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrgatherei16.vv [none] andestar_v5.slaspec:1813
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrsub.vi [none] andestar_v5.slaspec:1814
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vrsub.vx [none] andestar_v5.slaspec:1815
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vs1r.v [none] andestar_v5.slaspec:1816
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vs2r.v [none] andestar_v5.slaspec:1817
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vs4r.v [none] andestar_v5.slaspec:1818
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vs8r.v [none] andestar_v5.slaspec:1819
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsadd.vi [none] andestar_v5.slaspec:1820
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsadd.vv [none] andestar_v5.slaspec:1821
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsadd.vx [none] andestar_v5.slaspec:1822
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsaddu.vi [none] andestar_v5.slaspec:1823
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsaddu.vv [none] andestar_v5.slaspec:1824
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsaddu.vx [none] andestar_v5.slaspec:1825
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsbc.vvm [none] andestar_v5.slaspec:1826
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsbc.vxm [none] andestar_v5.slaspec:1827
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse1024.v [none] andestar_v5.slaspec:1828
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse128.v [none] andestar_v5.slaspec:1829
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse16.v [none] andestar_v5.slaspec:1830
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse256.v [none] andestar_v5.slaspec:1831
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse32.v [none] andestar_v5.slaspec:1832
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse512.v [none] andestar_v5.slaspec:1833
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse64.v [none] andestar_v5.slaspec:1834
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vse8.v [none] andestar_v5.slaspec:1835
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsetvl [none] andestar_v5.slaspec:1836
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsetvli [none] andestar_v5.slaspec:1837
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsext.vf2 [none] andestar_v5.slaspec:1838
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsext.vf4 [none] andestar_v5.slaspec:1839
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsext.vf8 [none] andestar_v5.slaspec:1840
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslide1down.vx [none] andestar_v5.slaspec:1841
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslide1up.vx [none] andestar_v5.slaspec:1842
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslidedown.vi [none] andestar_v5.slaspec:1843
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslidedown.vx [none] andestar_v5.slaspec:1844
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslideup.vi [none] andestar_v5.slaspec:1845
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vslideup.vx [none] andestar_v5.slaspec:1846
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsll.vi [none] andestar_v5.slaspec:1847
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsll.vv [none] andestar_v5.slaspec:1848
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsll.vx [none] andestar_v5.slaspec:1849
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsmul.vv [none] andestar_v5.slaspec:1850
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsmul.vx [none] andestar_v5.slaspec:1851
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsra.vi [none] andestar_v5.slaspec:1852
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsra.vv [none] andestar_v5.slaspec:1853
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsra.vx [none] andestar_v5.slaspec:1854
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsrl.vi [none] andestar_v5.slaspec:1855
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsrl.vv [none] andestar_v5.slaspec:1856
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsrl.vx [none] andestar_v5.slaspec:1857
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse1024.v [none] andestar_v5.slaspec:1858
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse128.v [none] andestar_v5.slaspec:1859
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse16.v [none] andestar_v5.slaspec:1860
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse256.v [none] andestar_v5.slaspec:1861
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse32.v [none] andestar_v5.slaspec:1862
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse512.v [none] andestar_v5.slaspec:1863
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse64.v [none] andestar_v5.slaspec:1864
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsse8.v [none] andestar_v5.slaspec:1865
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssra.vi [none] andestar_v5.slaspec:1866
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssra.vv [none] andestar_v5.slaspec:1867
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssra.vx [none] andestar_v5.slaspec:1868
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssrl.vi [none] andestar_v5.slaspec:1869
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssrl.vv [none] andestar_v5.slaspec:1870
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssrl.vx [none] andestar_v5.slaspec:1871
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssub.vv [none] andestar_v5.slaspec:1872
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssub.vx [none] andestar_v5.slaspec:1873
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssubu.vv [none] andestar_v5.slaspec:1874
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vssubu.vx [none] andestar_v5.slaspec:1875
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsub.vv [none] andestar_v5.slaspec:1876
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsub.vx [none] andestar_v5.slaspec:1877
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei1024.v [none] andestar_v5.slaspec:1878
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei128.v [none] andestar_v5.slaspec:1879
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei16.v [none] andestar_v5.slaspec:1880
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei256.v [none] andestar_v5.slaspec:1881
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei32.v [none] andestar_v5.slaspec:1882
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei512.v [none] andestar_v5.slaspec:1883
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei64.v [none] andestar_v5.slaspec:1884
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsuxei8.v [none] andestar_v5.slaspec:1885
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei1024.v [none] andestar_v5.slaspec:1886
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei128.v [none] andestar_v5.slaspec:1887
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei16.v [none] andestar_v5.slaspec:1888
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei256.v [none] andestar_v5.slaspec:1889
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei32.v [none] andestar_v5.slaspec:1890
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei512.v [none] andestar_v5.slaspec:1891
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei64.v [none] andestar_v5.slaspec:1892
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vsxei8.v [none] andestar_v5.slaspec:1893
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwadd.vv [none] andestar_v5.slaspec:1894
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwadd.vx [none] andestar_v5.slaspec:1895
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwadd.wv [none] andestar_v5.slaspec:1896
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwadd.wx [none] andestar_v5.slaspec:1897
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwaddu.vv [none] andestar_v5.slaspec:1898
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwaddu.vx [none] andestar_v5.slaspec:1899
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwaddu.wv [none] andestar_v5.slaspec:1900
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwaddu.wx [none] andestar_v5.slaspec:1901
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmacc.vv [none] andestar_v5.slaspec:1902
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmacc.vx [none] andestar_v5.slaspec:1903
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmaccsu.vv [none] andestar_v5.slaspec:1904
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmaccsu.vx [none] andestar_v5.slaspec:1905
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmaccu.vv [none] andestar_v5.slaspec:1906
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmaccu.vx [none] andestar_v5.slaspec:1907
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmaccus.vx [none] andestar_v5.slaspec:1908
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmul.vv [none] andestar_v5.slaspec:1909
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmul.vx [none] andestar_v5.slaspec:1910
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmulsu.vv [none] andestar_v5.slaspec:1911
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmulsu.vx [none] andestar_v5.slaspec:1912
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmulu.vv [none] andestar_v5.slaspec:1913
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwmulu.vx [none] andestar_v5.slaspec:1914
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwredsum.vs [none] andestar_v5.slaspec:1915
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwredsumu.vs [none] andestar_v5.slaspec:1916
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsub.vv [none] andestar_v5.slaspec:1917
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsub.vx [none] andestar_v5.slaspec:1918
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsub.wv [none] andestar_v5.slaspec:1919
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsub.wx [none] andestar_v5.slaspec:1920
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsubu.vv [none] andestar_v5.slaspec:1921
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsubu.vx [none] andestar_v5.slaspec:1922
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsubu.wv [none] andestar_v5.slaspec:1923
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vwsubu.wx [none] andestar_v5.slaspec:1924
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vxor.vi [none] andestar_v5.slaspec:1925
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vxor.vv [none] andestar_v5.slaspec:1926
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vxor.vx [none] andestar_v5.slaspec:1927
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vzext.vf2 [none] andestar_v5.slaspec:1928
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vzext.vf4 [none] andestar_v5.slaspec:1929
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- vzext.vf8 [none] andestar_v5.slaspec:1930
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : phase=1
+- fence.i [none] andestar_v5.slaspec:1931
+  semantic_ops: fence.i
+  semantic_template: status=unsupported_template action_hash=35de78bd69720959 op_count=1
+  with_stack: with : phase=1
+- addigp [none] andestar_v5.slaspec:1969
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f96dc09304b66dd op_count=0
+  with_stack: with : phase=1
+- bbc [conditional_branch] andestar_v5.slaspec:1973
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce99154d4647970a op_count=0
+  with_stack: with : phase=1
+- bbs [conditional_branch] andestar_v5.slaspec:1978
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d83d57ada819e6bd op_count=0
+  with_stack: with : phase=1
+- beqc [conditional_branch] andestar_v5.slaspec:1983
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ffc8f9fa53910afa op_count=0
+  with_stack: with : phase=1
+- bnec [conditional_branch] andestar_v5.slaspec:1988
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4595fa8f73e2bd26 op_count=0
+  with_stack: with : phase=1
+- bfos [none] andestar_v5.slaspec:1995
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=48f8295a42d831f0 op_count=0
+  with_stack: with : phase=1
+- bfos [none] andestar_v5.slaspec:2002
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=470378eaba3f8c81 op_count=0
+  with_stack: with : phase=1
+- bfos [none] andestar_v5.slaspec:2010
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d30ad9358a7b8daa op_count=0
+  with_stack: with : phase=1
+- bfoz [none] andestar_v5.slaspec:2017
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=83c11fb09ddb649f op_count=0
+  with_stack: with : phase=1
+- bfoz [none] andestar_v5.slaspec:2023
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=93a2ba1bbfedd06f op_count=0
+  with_stack: with : phase=1
+- bfoz [none] andestar_v5.slaspec:2031
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1be061d99e541037 op_count=0
+  with_stack: with : phase=1
+- lea.h [none] andestar_v5.slaspec:2039
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f150af4deb58a34d op_count=0
+  with_stack: with : phase=1
+- lea.w [none] andestar_v5.slaspec:2044
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c32e4130acd0542f op_count=0
+  with_stack: with : phase=1
+- lea.d [none] andestar_v5.slaspec:2049
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=61d1b0adb4db0863 op_count=0
+  with_stack: with : phase=1
+- lea.b.ze [none] andestar_v5.slaspec:2054
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a1dd220e23bd24d op_count=0
+  with_stack: with : phase=1
+- lea.h.ze [none] andestar_v5.slaspec:2059
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=edc807f24c5b6fc5 op_count=0
+  with_stack: with : phase=1
+- lea.w.ze [none] andestar_v5.slaspec:2064
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd631bf1f7f9e927 op_count=0
+  with_stack: with : phase=1
+- lea.d.ze [none] andestar_v5.slaspec:2069
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f171e18e23cc5cb op_count=0
+  with_stack: with : phase=1
+- lbgp [none] andestar_v5.slaspec:2074
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad0d032aae6c8bbd op_count=0
+  with_stack: with : phase=1
+- lbugp [none] andestar_v5.slaspec:2079
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f6c294c814bef2a4 op_count=0
+  with_stack: with : phase=1
+- lhgp [none] andestar_v5.slaspec:2084
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f24cb22d43ac7ee0 op_count=0
+  with_stack: with : phase=1
+- lhugp [none] andestar_v5.slaspec:2089
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a5c232a0a6148701 op_count=0
+  with_stack: with : phase=1
+- lwgp [none] andestar_v5.slaspec:2094
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=219b9be1198a2d43 op_count=0
+  with_stack: with : phase=1
+- lwugp [none] andestar_v5.slaspec:2099
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc94622c14601d32 op_count=0
+  with_stack: with : phase=1
+- ldgp [none] andestar_v5.slaspec:2104
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=99a85553fc231cfb op_count=0
+  with_stack: with : phase=1
+- sbgp [none] andestar_v5.slaspec:2109
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0625529d2323b56a op_count=0
+  with_stack: with : phase=1
+- shgp [none] andestar_v5.slaspec:2114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a30718c0f6989e2a op_count=0
+  with_stack: with : phase=1
+- swgp [none] andestar_v5.slaspec:2119
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5d47c47f09c5163d op_count=0
+  with_stack: with : phase=1
+- sdgp [none] andestar_v5.slaspec:2124
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ca4de8040a2f80e3 op_count=0
+  with_stack: with : phase=1
+- ffb [conditional_branch] andestar_v5.slaspec:2129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=354229b849a8b3ba op_count=0
+  with_stack: with : phase=1
+- ffzmism [conditional_branch] andestar_v5.slaspec:2144
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be8609149d06f5d4 op_count=0
+  with_stack: with : phase=1
+- ffmism [conditional_branch] andestar_v5.slaspec:2159
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=831e300832e1bf29 op_count=0
+  with_stack: with : phase=1
+- flmism [conditional_branch] andestar_v5.slaspec:2174
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1142f9573afdb8f9 op_count=0
+  with_stack: with : phase=1
+- exec.it [branch] andestar_v5.slaspec:2193
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b527b4bf4b30c368 op_count=0
+  with_stack: with : phase=1
+- ex9.it [branch] andestar_v5.slaspec:2197
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b527b4bf4b30c368 op_count=0
+  with_stack: with : phase=1
+- nexec.it [branch] andestar_v5.slaspec:2205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5603af1bd6cd171e op_count=0
+  with_stack: with : phase=1
+- vln8.v [none] andestar_v5.slaspec:2210
+  semantic_ops: vln8
+  semantic_template: status=unsupported_template action_hash=59a6995f5eb07598 op_count=1
+  with_stack: with : phase=1
+- vlnu8.v [none] andestar_v5.slaspec:2215
+  semantic_ops: vln8
+  semantic_template: status=unsupported_template action_hash=59a6995f5eb07598 op_count=1
+  with_stack: with : phase=1
+- fcvt.s.bf16 [none] andestar_v5.slaspec:2221
+  semantic_ops: fcvt.s.bf16
+  semantic_template: status=unsupported_template action_hash=3379becafd7d6cb8 op_count=1
+  with_stack: with : phase=1
+- fcvt.bf16.s [none] andestar_v5.slaspec:2225
+  semantic_ops: fcvt.bf16.s
+  semantic_template: status=unsupported_template action_hash=16da18dd879af9e2 op_count=1
+  with_stack: with : phase=1
+- vfwcvt.s.bf16 [none] andestar_v5.slaspec:2229
+  semantic_ops: vfwcvt.s.bf16
+  semantic_template: status=unsupported_template action_hash=113403205bbefb0b op_count=1
+  with_stack: with : phase=1
+- vfncvt.bf16.s [none] andestar_v5.slaspec:2233
+  semantic_ops: vfncvt.bf16.s
+  semantic_template: status=unsupported_template action_hash=cde980b7f76b72a6 op_count=1
+  with_stack: with : phase=1
+- vfpmadt.vf [none] andestar_v5.slaspec:2237
+  semantic_ops: vfpmadt.vf
+  semantic_template: status=unsupported_template action_hash=9b0f30d06f4a872a op_count=1
+  with_stack: with : phase=1
+- vfpmadb.vf [none] andestar_v5.slaspec:2242
+  semantic_ops: vfpmadb.vf
+  semantic_template: status=unsupported_template action_hash=b48ad5334199174c op_count=1
+  with_stack: with : phase=1
+- vd4dots.vv [none] andestar_v5.slaspec:2247
+  semantic_ops: vd4dots.vv
+  semantic_template: status=unsupported_template action_hash=adfe40716d24f83e op_count=1
+  with_stack: with : phase=1
+- vd4dotu.vv [none] andestar_v5.slaspec:2252
+  semantic_ops: vd4dotu.vv
+  semantic_template: status=unsupported_template action_hash=31ff2b0d3f4e12f0 op_count=1
+  with_stack: with : phase=1
+- vd4dotsu.vv [none] andestar_v5.slaspec:2257
+  semantic_ops: vd4dotsu.vv
+  semantic_template: status=unsupported_template action_hash=15569fbe18ab4b15 op_count=1
+  with_stack: with : phase=1
+- vle4.v [none] andestar_v5.slaspec:2262
+  semantic_ops: vle4.v
+  semantic_template: status=unsupported_template action_hash=6f90fd82a5a461cc op_count=1
+  with_stack: with : phase=1
+- vfwcvt.f.n.v [none] andestar_v5.slaspec:2267
+  semantic_ops: vfwcvt.f.n.v
+  semantic_template: status=unsupported_template action_hash=eb793b9657188f0b op_count=1
+  with_stack: with : phase=1
+- vfwcvt.f.nu.v [none] andestar_v5.slaspec:2272
+  semantic_ops: vfwcvt.f.nu.v
+  semantic_template: status=unsupported_template action_hash=c6454739a9ac49f1 op_count=1
+  with_stack: with : phase=1
+- vfwcvt.f.b.v [none] andestar_v5.slaspec:2277
+  semantic_ops: vfwcvt.f.b.v
+  semantic_template: status=unsupported_template action_hash=7b5fc31dc7d73e70 op_count=1
+  with_stack: with : phase=1
+- vfwcvt.f.bu.v [none] andestar_v5.slaspec:2282
+  semantic_ops: vfwcvt.f.bu.v
+  semantic_template: status=unsupported_template action_hash=665625aa64fbec15 op_count=1
+  with_stack: with : phase=1

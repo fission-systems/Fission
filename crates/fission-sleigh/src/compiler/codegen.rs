@@ -49,8 +49,9 @@ pub fn write_generated_artifacts(root: &Path, artifacts: &GeneratedArtifactSet) 
     for artifact in &artifacts.artifacts {
         let path = root.join(&artifact.relative_path);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create generated artifact parent {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("create generated artifact parent {}", parent.display())
+            })?;
         }
         fs::write(&path, &artifact.contents)
             .with_context(|| format!("write generated artifact {}", path.display()))?;
@@ -66,9 +67,10 @@ fn render_include_manifest(compiled: &CompiledFrontend) -> String {
         .collect::<Vec<_>>()
         .join(",\n");
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"include_manifest\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"include_manifest\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
+        json_string(&compiled.entry_id),
         entries
     )
 }
@@ -79,12 +81,64 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         .iter()
         .map(|ctor| {
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"control_flow\": {}, \"with_depth\": {}, \"signature_hash\": \"{:016x}\"}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"control_flow\": {}, \"with_depth\": {}, \"signature_hash\": \"{:016x}\", \"pattern_signature\": {}, \"semantic_template_status\": {}, \"semantic_action_hash\": \"{:016x}\", \"semantic_op_count\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(ctor.control_flow.as_str()),
                 ctor.with_stack.len(),
-                ctor.signature_hash
+                ctor.signature_hash,
+                json_string(&ctor.pattern_signature),
+                json_string(&ctor.semantic_template.status),
+                ctor.semantic_template.action_hash,
+                ctor.semantic_template.op_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let executable_lines = compiled
+        .executable_constructors
+        .iter()
+        .map(|ctor| {
+            format!(
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"reg_opcode_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"semantic_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                json_string(&ctor.mnemonic),
+                json_string(&ctor.source),
+                json_string(&ctor.display),
+                ctor.signature_hash,
+                render_matcher(&ctor.matcher),
+                render_optional_u8(ctor.mod_constraint),
+                render_u8_array(&ctor.reg_opcode_values),
+                render_u8_array(&ctor.opsize_variants),
+                render_operand_specs(&ctor.operand_specs),
+                json_string(ctor.semantic_kind.as_str()),
+                render_constructor_template(&ctor.constructor_template),
+                ctor.runtime_ready,
+                render_optional_string(ctor.unsupported_template_kind.as_deref())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let decision_node_lines = compiled
+        .decision_tree
+        .nodes
+        .iter()
+        .map(|node| {
+            let branches = node
+                .branches
+                .iter()
+                .map(|edge| {
+                    format!(
+                        "{{\"value\": {}, \"next_node_index\": {}}}",
+                        edge.value, edge.next_node_index
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "    {{\"probe\": {}, \"branches\": [{}], \"leaf_constructor_indexes\": {}}}",
+                render_decision_probe(node.probe),
+                branches,
+                render_usize_array(&node.leaf_constructor_indexes)
             )
         })
         .collect::<Vec<_>>()
@@ -102,15 +156,21 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         .collect::<Vec<_>>()
         .join(",\n");
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"pcodeop_count\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [\n{}\n  ],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
+        json_string(&compiled.entry_id),
         compiled.definitions.len(),
         compiled.macros.len(),
         compiled.constructors.len(),
+        compiled.executable_constructors.len(),
+        compiled.decision_tree.decision_node_count,
+        compiled.decision_tree.root_node_index,
         compiled.pcode_ops.len(),
         definition_lines,
-        constructor_lines
+        constructor_lines,
+        decision_node_lines,
+        executable_lines
     )
 }
 
@@ -131,9 +191,10 @@ fn render_pattern_graph(compiled: &CompiledFrontend) -> String {
         .collect::<Vec<_>>()
         .join(",\n");
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"pattern_nodes\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"pattern_nodes\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
+        json_string(&compiled.entry_id),
         lines
     )
 }
@@ -142,7 +203,8 @@ fn render_semantic_ir(compiled: &CompiledFrontend) -> String {
     let mut output = String::new();
     output.push_str("# semantic action inventory\n");
     output.push_str(&format!("arch: {}\n", compiled.arch));
-    output.push_str(&format!("entry_spec: {}\n\n", compiled.entry_spec));
+    output.push_str(&format!("entry_spec: {}\n", compiled.entry_spec));
+    output.push_str(&format!("entry_id: {}\n\n", compiled.entry_id));
     for constructor in &compiled.constructors {
         output.push_str(&format!(
             "- {} [{}] {}\n",
@@ -158,6 +220,12 @@ fn render_semantic_ir(compiled: &CompiledFrontend) -> String {
                 constructor.semantic_ops.join(", ")
             ));
         }
+        output.push_str(&format!(
+            "  semantic_template: status={} action_hash={:016x} op_count={}\n",
+            constructor.semantic_template.status,
+            constructor.semantic_template.action_hash,
+            constructor.semantic_template.op_count
+        ));
         if !constructor.with_stack.is_empty() {
             output.push_str(&format!(
                 "  with_stack: {}\n",
@@ -175,10 +243,12 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
         .take(256)
         .map(|ctor| {
             format!(
-                "    GeneratedConstructor {{ mnemonic: {}, source: {}, control_flow: {} }},",
+                "    GeneratedConstructor {{ mnemonic: {}, source: {}, control_flow: {}, signature_hash: 0x{:016x}, semantic_template_status: {} }},",
                 rust_string(&ctor.mnemonic),
                 rust_string(&ctor.source),
-                rust_string(ctor.control_flow.as_str())
+                rust_string(ctor.control_flow.as_str()),
+                ctor.signature_hash,
+                rust_string(&ctor.semantic_template.status)
             )
         })
         .collect::<Vec<_>>()
@@ -191,9 +261,14 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
              pub mnemonic: &'static str,\n\
              pub source: &'static str,\n\
              pub control_flow: &'static str,\n\
+             pub signature_hash: u64,\n\
+             pub semantic_template_status: &'static str,\n\
          }}\n\n\
          pub const GENERATED_ARCH: &str = {};\n\
          pub const GENERATED_ENTRY_SPEC: &str = {};\n\
+         pub const GENERATED_ENTRY_ID: &str = {};\n\
+         pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};\n\
+         pub const GENERATED_DECISION_NODE_COUNT: usize = {};\n\
          pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[\n\
 {}\n\
          ];\n",
@@ -201,16 +276,193 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
         compiled.entry_spec,
         rust_string(&compiled.arch),
         rust_string(&compiled.entry_spec),
+        rust_string(&compiled.entry_id),
+        compiled.executable_constructors.len(),
+        compiled.decision_tree.decision_node_count,
         constructor_rows
     )
 }
 
+fn render_matcher(matcher: &crate::compiler::CompiledOpcodeMatcher) -> String {
+    match matcher {
+        crate::compiler::CompiledOpcodeMatcher::ExactBytes(bytes) => format!(
+            "{{\"kind\": \"exact_bytes\", \"bytes\": {}}}",
+            render_u8_array(bytes)
+        ),
+        crate::compiler::CompiledOpcodeMatcher::RowCc { prefix, row } => format!(
+            "{{\"kind\": \"row_cc\", \"prefix\": {}, \"row\": {}}}",
+            render_u8_array(prefix),
+            row
+        ),
+        crate::compiler::CompiledOpcodeMatcher::RowPage { row, page } => format!(
+            "{{\"kind\": \"row_page\", \"row\": {}, \"page\": {}}}",
+            row, page
+        ),
+    }
+}
+
+fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> String {
+    match probe {
+        crate::compiler::CompiledDecisionProbe::Terminal => json_string("terminal"),
+        crate::compiler::CompiledDecisionProbe::InstructionByte { offset, mask, shift } => format!(
+            "{{\"kind\": \"instruction_byte\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
+        ),
+        crate::compiler::CompiledDecisionProbe::OperandSizeCode => {
+            json_string("operand_size_code")
+        }
+        crate::compiler::CompiledDecisionProbe::ModBits => json_string("mod_bits"),
+        crate::compiler::CompiledDecisionProbe::RegOpcode => json_string("reg_opcode"),
+    }
+}
+
+fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> String {
+    let rows = specs
+        .iter()
+        .map(|spec| match spec {
+            crate::compiler::CompiledOperandSpec::ModRmRm { size, memory_only } => {
+                format!(
+                    "{{\"kind\": \"modrm_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
+                )
+            }
+            crate::compiler::CompiledOperandSpec::ModRmReg { size } => {
+                format!("{{\"kind\": \"modrm_reg\", \"size\": {size}}}")
+            }
+            crate::compiler::CompiledOperandSpec::OpcodeReg { size } => {
+                format!("{{\"kind\": \"opcode_reg\", \"size\": {size}}}")
+            }
+            crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
+                format!("{{\"kind\": \"immediate\", \"size\": {size}, \"signed\": {signed}}}")
+            }
+            crate::compiler::CompiledOperandSpec::Relative { size } => {
+                format!("{{\"kind\": \"relative\", \"size\": {size}}}")
+            }
+            crate::compiler::CompiledOperandSpec::FixedRegister { reg, size } => format!(
+                "{{\"kind\": \"fixed_register\", \"reg\": {}, \"size\": {size}}}",
+                json_string(match reg {
+                    crate::compiler::CompiledFixedRegister::Accumulator => "accumulator",
+                })
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{rows}]")
+}
+
+fn render_constructor_template(
+    template: &crate::compiler::CompiledConstructorTemplate,
+) -> String {
+    let handles = template
+        .handles
+        .iter()
+        .map(|handle| {
+            format!(
+                "{{\"operand_index\": {}, \"spec\": {}}}",
+                handle.operand_index,
+                render_operand_specs(std::slice::from_ref(&handle.spec))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let decode_steps = template
+        .decode_steps
+        .iter()
+        .map(|step| match step {
+            crate::compiler::CompiledOperandDecodeStep::ConsumeModRm => {
+                "{\"kind\": \"consume_modrm\"}".to_string()
+            }
+            crate::compiler::CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
+                format!("{{\"kind\": \"decode_operand\", \"operand_index\": {operand_index}}}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let semantic_ops = template
+        .semantic_ops
+        .iter()
+        .map(|op| match op {
+            crate::compiler::CompiledSemanticOp::Binary { opcode } => format!(
+                "{{\"kind\": {}, \"opcode\": {}}}",
+                json_string(op.as_str()),
+                json_string(opcode.as_str())
+            ),
+            crate::compiler::CompiledSemanticOp::Compare { bitwise } => format!(
+                "{{\"kind\": {}, \"bitwise\": {bitwise}}}",
+                json_string(op.as_str())
+            ),
+            crate::compiler::CompiledSemanticOp::Extend { signed } => format!(
+                "{{\"kind\": {}, \"signed\": {signed}}}",
+                json_string(op.as_str())
+            ),
+            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => format!(
+                "{{\"kind\": {}, \"src_size\": {src_size}, \"dst_size\": {dst_size}}}",
+                json_string(op.as_str())
+            ),
+            _ => format!("{{\"kind\": {}}}", json_string(op.as_str())),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{{\"handles\": [{}], \"decode_steps\": [{}], \"semantic_ops\": [{}]}}",
+        handles, decode_steps, semantic_ops
+    )
+}
+
+fn render_u8_array(values: &[u8]) -> String {
+    let joined = values
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{joined}]")
+}
+
+fn render_optional_u8(value: Option<u8>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "null".to_string(),
+    }
+}
+
+fn render_optional_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => json_string(value),
+        None => "null".to_string(),
+    }
+}
+
+fn render_usize_array(values: &[usize]) -> String {
+    let joined = values
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{joined}]")
+}
+
 fn json_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            ch if ch.is_control() => {
+                escaped.push_str(&format!("\\u{:04x}", ch as u32));
+            }
+            ch => escaped.push(ch),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 fn rust_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("{:?}", value)
 }
 
 #[cfg(test)]
@@ -220,11 +472,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::compiler::{compile_x86_64_frontend, generated_root_for_arch};
+    use crate::compiler::{
+        compile_frontend_for_entry_spec, generated_root_for_entry_spec, x86_64_entry_spec_path,
+    };
 
     #[test]
     fn generated_output_is_deterministic() {
-        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let compiled =
+            compile_frontend_for_entry_spec(&x86_64_entry_spec_path()).expect("compile frontend");
         let lhs = render_generated_artifacts(&compiled).expect("render lhs");
         let rhs = render_generated_artifacts(&compiled).expect("render rhs");
         assert_eq!(lhs, rhs);
@@ -232,7 +487,8 @@ mod tests {
 
     #[test]
     fn writes_artifacts_to_directory() {
-        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let compiled =
+            compile_frontend_for_entry_spec(&x86_64_entry_spec_path()).expect("compile frontend");
         let artifacts = render_generated_artifacts(&compiled).expect("render artifacts");
         let dir = tempdir().expect("tempdir");
         write_generated_artifacts(dir.path(), &artifacts).expect("write artifacts");
@@ -242,14 +498,21 @@ mod tests {
 
     #[test]
     fn checked_in_generated_artifacts_match_renderer_output() {
-        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let compiled =
+            compile_frontend_for_entry_spec(&x86_64_entry_spec_path()).expect("compile frontend");
         let artifacts = render_generated_artifacts(&compiled).expect("render artifacts");
-        let root = generated_root_for_arch("x86");
+        let root =
+            generated_root_for_entry_spec(&x86_64_entry_spec_path()).expect("generated root");
         for artifact in artifacts.artifacts {
             let path = root.join(&artifact.relative_path);
             let checked_in = fs::read_to_string(&path)
                 .unwrap_or_else(|_| panic!("missing checked-in artifact {}", path.display()));
-            assert_eq!(checked_in, artifact.contents, "artifact mismatch at {}", path.display());
+            assert_eq!(
+                checked_in,
+                artifact.contents,
+                "artifact mismatch at {}",
+                path.display()
+            );
         }
     }
 }

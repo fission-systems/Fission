@@ -9,11 +9,14 @@ use super::preprocessor::ExpandedSpec;
 pub struct CompiledFrontend {
     pub arch: String,
     pub entry_spec: String,
+    pub entry_id: String,
     pub include_manifest: Vec<String>,
     pub defines: Vec<(String, String)>,
     pub definitions: Vec<CompiledSpecDefinition>,
     pub macros: Vec<CompiledMacro>,
     pub constructors: Vec<CompiledConstructor>,
+    pub executable_constructors: Vec<CompiledExecutableConstructor>,
+    pub decision_tree: CompiledDecisionTree,
     pub pcode_ops: Vec<CompiledPcodeOp>,
     pub pattern_nodes: Vec<CompiledPatternNode>,
 }
@@ -38,9 +41,301 @@ pub struct CompiledConstructor {
     pub display: String,
     pub source: String,
     pub control_flow: ControlFlowClass,
+    pub pattern_signature: String,
+    pub semantic_template: CompiledSemanticTemplate,
     pub with_stack: Vec<String>,
     pub semantic_ops: Vec<String>,
     pub signature_hash: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledExecutableConstructor {
+    pub mnemonic: String,
+    pub source: String,
+    pub display: String,
+    pub signature_hash: u64,
+    pub matcher: CompiledOpcodeMatcher,
+    pub mod_constraint: Option<u8>,
+    pub reg_opcode_values: Vec<u8>,
+    pub opsize_variants: Vec<u8>,
+    pub operand_specs: Vec<CompiledOperandSpec>,
+    pub semantic_kind: CompiledSemanticKind,
+    pub constructor_template: CompiledConstructorTemplate,
+    pub runtime_ready: bool,
+    pub unsupported_template_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDecisionTree {
+    pub root_node_index: usize,
+    pub root_buckets: Vec<CompiledDecisionBucket>,
+    pub nodes: Vec<CompiledDecisionNode>,
+    pub decision_node_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDecisionBucket {
+    pub key: String,
+    pub node_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDecisionNode {
+    pub probe: CompiledDecisionProbe,
+    pub branches: Vec<CompiledDecisionEdge>,
+    pub leaf_constructor_indexes: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDecisionEdge {
+    pub value: u8,
+    pub next_node_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledDecisionProbe {
+    Terminal,
+    InstructionByte { offset: u8, mask: u8, shift: u8 },
+    OperandSizeCode,
+    ModBits,
+    RegOpcode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledOpcodeMatcher {
+    ExactBytes(Vec<u8>),
+    RowCc {
+        prefix: Vec<u8>,
+        row: u8,
+    },
+    RowPage {
+        row: u8,
+        page: u8,
+    },
+}
+
+impl CompiledOpcodeMatcher {
+    pub fn key(&self) -> String {
+        match self {
+            Self::ExactBytes(bytes) => bytes
+                .first()
+                .map(|byte| format!("byte_{byte:02x}"))
+                .unwrap_or_else(|| "empty".to_string()),
+            Self::RowCc { prefix, row } => {
+                if prefix.is_empty() {
+                    format!("row_{row}")
+                } else {
+                    format!("row_{row}_after_{:02x}", prefix[prefix.len() - 1])
+                }
+            }
+            Self::RowPage { row, page } => format!("row_{row}_page_{page}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledOperandSpec {
+    ModRmRm {
+        size: u32,
+        memory_only: bool,
+    },
+    ModRmReg { size: u32 },
+    OpcodeReg { size: u32 },
+    Immediate { size: u32, signed: bool },
+    Relative { size: u32 },
+    FixedRegister { reg: CompiledFixedRegister, size: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledConstructorTemplate {
+    pub handles: Vec<CompiledHandleTemplate>,
+    pub decode_steps: Vec<CompiledOperandDecodeStep>,
+    pub semantic_ops: Vec<CompiledSemanticOp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledHandleTemplate {
+    pub operand_index: usize,
+    pub spec: CompiledOperandSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledOperandDecodeStep {
+    ConsumeModRm,
+    DecodeOperand { operand_index: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledSemanticOp {
+    Nop,
+    Return,
+    Call,
+    Jump,
+    ConditionalJump,
+    Move,
+    Lea,
+    Push,
+    Pop,
+    Leave,
+    Binary { opcode: CompiledArithmeticOpcode },
+    Compare { bitwise: bool },
+    Extend { signed: bool },
+    SetCc,
+    AccumulatorExtend { src_size: u32, dst_size: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledArithmeticOpcode {
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Mul,
+    Shl,
+    Shr,
+    Sar,
+    Inc,
+    Dec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledFixedRegister {
+    Accumulator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledSemanticKind {
+    Nop,
+    Ret,
+    Call,
+    Jmp,
+    Jcc,
+    Mov,
+    Lea,
+    Push,
+    Pop,
+    Leave,
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Imul,
+    Mul,
+    Shl,
+    Shr,
+    Sar,
+    Inc,
+    Dec,
+    Cmp,
+    Test,
+    Movzx,
+    Movsx,
+    Movsxd,
+    Setcc,
+    Cbw,
+    Cwde,
+    Cdqe,
+}
+
+impl CompiledSemanticKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Nop => "nop",
+            Self::Ret => "ret",
+            Self::Call => "call",
+            Self::Jmp => "jmp",
+            Self::Jcc => "jcc",
+            Self::Mov => "mov",
+            Self::Lea => "lea",
+            Self::Push => "push",
+            Self::Pop => "pop",
+            Self::Leave => "leave",
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::And => "and",
+            Self::Or => "or",
+            Self::Xor => "xor",
+            Self::Imul => "imul",
+            Self::Mul => "mul",
+            Self::Shl => "shl",
+            Self::Shr => "shr",
+            Self::Sar => "sar",
+            Self::Inc => "inc",
+            Self::Dec => "dec",
+            Self::Cmp => "cmp",
+            Self::Test => "test",
+            Self::Movzx => "movzx",
+            Self::Movsx => "movsx",
+            Self::Movsxd => "movsxd",
+            Self::Setcc => "setcc",
+            Self::Cbw => "cbw",
+            Self::Cwde => "cwde",
+            Self::Cdqe => "cdqe",
+        }
+    }
+}
+
+impl CompiledDecisionProbe {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::InstructionByte { .. } => "instruction_byte",
+            Self::OperandSizeCode => "operand_size_code",
+            Self::ModBits => "mod_bits",
+            Self::RegOpcode => "reg_opcode",
+        }
+    }
+}
+
+impl CompiledSemanticOp {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Nop => "nop",
+            Self::Return => "return",
+            Self::Call => "call",
+            Self::Jump => "jump",
+            Self::ConditionalJump => "conditional_jump",
+            Self::Move => "move",
+            Self::Lea => "lea",
+            Self::Push => "push",
+            Self::Pop => "pop",
+            Self::Leave => "leave",
+            Self::Binary { .. } => "binary",
+            Self::Compare { bitwise: false } => "compare",
+            Self::Compare { bitwise: true } => "test",
+            Self::Extend { signed: false } => "zext",
+            Self::Extend { signed: true } => "sext",
+            Self::SetCc => "setcc",
+            Self::AccumulatorExtend { .. } => "accumulator_extend",
+        }
+    }
+}
+
+impl CompiledArithmeticOpcode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::And => "and",
+            Self::Or => "or",
+            Self::Xor => "xor",
+            Self::Mul => "mul",
+            Self::Shl => "shl",
+            Self::Shr => "shr",
+            Self::Sar => "sar",
+            Self::Inc => "inc",
+            Self::Dec => "dec",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledSemanticTemplate {
+    pub status: String,
+    pub action_hash: u64,
+    pub op_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,11 +376,16 @@ impl ControlFlowClass {
     }
 }
 
-pub fn compile_frontend(expanded: &ExpandedSpec, ast: &SpecAst) -> Result<CompiledFrontend> {
+pub fn compile_frontend(
+    arch: &str,
+    expanded: &ExpandedSpec,
+    ast: &SpecAst,
+) -> Result<CompiledFrontend> {
     let mut collector = Collector {
         definitions: Vec::new(),
         macros: Vec::new(),
         constructors: Vec::new(),
+        executable_constructors: Vec::new(),
         pcode_ops: BTreeSet::new(),
         pcode_op_sources: BTreeMap::new(),
         pattern_nodes: Vec::new(),
@@ -106,13 +406,20 @@ pub fn compile_frontend(expanded: &ExpandedSpec, ast: &SpecAst) -> Result<Compil
         .collect::<Vec<_>>();
     pcode_ops.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
+    let decision_tree = build_decision_tree(&collector.executable_constructors);
     Ok(CompiledFrontend {
-        arch: "x86".to_string(),
+        arch: arch.to_string(),
         entry_spec: expanded
             .entry_spec
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or("x86-64.slaspec")
+            .unwrap_or("unknown.slaspec")
+            .to_string(),
+        entry_id: expanded
+            .entry_spec
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
             .to_string(),
         include_manifest: expanded
             .include_manifest
@@ -127,6 +434,8 @@ pub fn compile_frontend(expanded: &ExpandedSpec, ast: &SpecAst) -> Result<Compil
         definitions: collector.definitions,
         macros: collector.macros,
         constructors: collector.constructors,
+        executable_constructors: collector.executable_constructors,
+        decision_tree,
         pcode_ops,
         pattern_nodes: collector.pattern_nodes,
     })
@@ -136,6 +445,7 @@ struct Collector {
     definitions: Vec<CompiledSpecDefinition>,
     macros: Vec<CompiledMacro>,
     constructors: Vec<CompiledConstructor>,
+    executable_constructors: Vec<CompiledExecutableConstructor>,
     pcode_ops: BTreeSet<String>,
     pcode_op_sources: BTreeMap<String, String>,
     pattern_nodes: Vec<CompiledPatternNode>,
@@ -184,7 +494,10 @@ impl Collector {
                         name: macro_name(&m.signature),
                         source: format!(
                             "{}:{}",
-                            m.file.file_name().and_then(|name| name.to_str()).unwrap_or("<unknown>"),
+                            m.file
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("<unknown>"),
                             m.line_number
                         ),
                         body_line_count: m.body.lines().count(),
@@ -223,6 +536,15 @@ impl Collector {
         let control_flow = classify_control_flow(&constructor.body);
         let semantic_ops = constructor_semantic_ops(&constructor.body, &self.pcode_ops);
         let signature_hash = stable_hash(&constructor.signature);
+        let semantic_template = CompiledSemanticTemplate {
+            status: if constructor.body.trim().is_empty() {
+                "empty".to_string()
+            } else {
+                "unsupported_template".to_string()
+            },
+            action_hash: stable_hash(&constructor.body),
+            op_count: semantic_ops.len(),
+        };
         self.pattern_nodes.push(CompiledPatternNode {
             node_id: format!("{source}#{:016x}", signature_hash),
             source: source.clone(),
@@ -231,14 +553,27 @@ impl Collector {
             control_flow,
         });
         self.constructors.push(CompiledConstructor {
-            mnemonic,
+            mnemonic: mnemonic.clone(),
             display: constructor.signature.clone(),
-            source,
+            source: source.clone(),
             control_flow,
-            with_stack: with_stack.iter().map(|frame| frame.header.clone()).collect(),
+            pattern_signature: constructor.signature.clone(),
+            semantic_template,
+            with_stack: with_stack
+                .iter()
+                .map(|frame| frame.header.clone())
+                .collect(),
             semantic_ops,
             signature_hash,
         });
+        if let Some(executable) = compile_executable_constructor(
+            &constructor.signature,
+            &mnemonic,
+            &source,
+            signature_hash,
+        ) {
+            self.executable_constructors.push(executable);
+        }
     }
 }
 
@@ -303,28 +638,747 @@ fn stable_hash(text: &str) -> u64 {
     hash
 }
 
+fn build_decision_tree(
+    constructors: &[CompiledExecutableConstructor],
+) -> CompiledDecisionTree {
+    let constructor_indexes = (0..constructors.len()).collect::<Vec<_>>();
+    let root_probes = decision_probes_for_constructors(constructors);
+    let mut nodes = Vec::new();
+    let root_node_index = build_bucket_node(
+        constructors,
+        &constructor_indexes,
+        &root_probes,
+        &mut nodes,
+    );
+    let mut buckets = BTreeMap::<String, Vec<usize>>::new();
+    for (index, constructor) in constructors.iter().enumerate() {
+        buckets
+            .entry(constructor.matcher.key())
+            .or_default()
+            .push(index);
+    }
+    let root_buckets = buckets
+        .into_iter()
+        .map(|(key, constructor_indexes)| {
+            let node_index = build_bucket_node(
+                constructors,
+                &constructor_indexes,
+                &root_probes,
+                &mut nodes,
+            );
+            CompiledDecisionBucket { key, node_index }
+        })
+        .collect::<Vec<_>>();
+    CompiledDecisionTree {
+        root_node_index,
+        decision_node_count: nodes.len(),
+        nodes,
+        root_buckets,
+    }
+}
+
+fn decision_probes_for_constructors(
+    constructors: &[CompiledExecutableConstructor],
+) -> Vec<CompiledDecisionProbe> {
+    let max_opcode_len = constructors
+        .iter()
+        .map(|ctor| opcode_matcher_probe_len(&ctor.matcher))
+        .max()
+        .unwrap_or(1)
+        .min(4);
+
+    let mut probes = (0..max_opcode_len)
+        .map(|offset| CompiledDecisionProbe::InstructionByte {
+            offset: offset as u8,
+            mask: 0xff,
+            shift: 0,
+        })
+        .collect::<Vec<_>>();
+    probes.extend([
+        CompiledDecisionProbe::OperandSizeCode,
+        CompiledDecisionProbe::ModBits,
+        CompiledDecisionProbe::RegOpcode,
+    ]);
+    probes
+}
+
+fn opcode_matcher_probe_len(matcher: &CompiledOpcodeMatcher) -> usize {
+    match matcher {
+        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.len(),
+        CompiledOpcodeMatcher::RowCc { prefix, .. } => prefix.len() + 1,
+        CompiledOpcodeMatcher::RowPage { .. } => 1,
+    }
+}
+
+fn build_bucket_node(
+    constructors: &[CompiledExecutableConstructor],
+    constructor_indexes: &[usize],
+    probes: &[CompiledDecisionProbe],
+    nodes: &mut Vec<CompiledDecisionNode>,
+) -> usize {
+    if constructor_indexes.len() <= 1 || probes.is_empty() {
+        return push_leaf_node(constructors, constructor_indexes, nodes);
+    }
+
+    for (probe_pos, probe) in probes.iter().enumerate() {
+        let mut wildcard = Vec::new();
+        let mut groups = BTreeMap::<u8, Vec<usize>>::new();
+        for index in constructor_indexes.iter().copied() {
+            let ctor = &constructors[index];
+            let values = decision_feature_values(ctor, *probe);
+            if values.is_empty() {
+                wildcard.push(index);
+            } else {
+                for value in values {
+                    groups.entry(value).or_default().push(index);
+                }
+            }
+        }
+        if groups.len() <= 1 {
+            continue;
+        }
+
+        let remaining = probes[probe_pos + 1..].to_vec();
+        let node_index = nodes.len();
+        nodes.push(CompiledDecisionNode {
+            probe: *probe,
+            branches: Vec::new(),
+            leaf_constructor_indexes: Vec::new(),
+        });
+        let mut branches = Vec::new();
+        for (value, mut specific) in groups {
+            let mut branch_indexes = wildcard.clone();
+            branch_indexes.append(&mut specific);
+            branch_indexes.sort_unstable();
+            branch_indexes.dedup();
+            let child_index =
+                build_bucket_node(constructors, &branch_indexes, &remaining, nodes);
+            branches.push(CompiledDecisionEdge {
+                value,
+                next_node_index: child_index,
+            });
+        }
+        branches.sort_by_key(|branch| branch.value);
+        nodes[node_index].branches = branches;
+        return node_index;
+    }
+
+    push_leaf_node(constructors, constructor_indexes, nodes)
+}
+
+fn push_leaf_node(
+    constructors: &[CompiledExecutableConstructor],
+    constructor_indexes: &[usize],
+    nodes: &mut Vec<CompiledDecisionNode>,
+) -> usize {
+    let mut indexes = constructor_indexes.to_vec();
+    indexes.sort_by(|lhs, rhs| {
+        decision_specificity(&constructors[*rhs])
+            .cmp(&decision_specificity(&constructors[*lhs]))
+            .then_with(|| lhs.cmp(rhs))
+    });
+    indexes.dedup();
+    let node_index = nodes.len();
+    nodes.push(CompiledDecisionNode {
+        probe: CompiledDecisionProbe::Terminal,
+        branches: Vec::new(),
+        leaf_constructor_indexes: indexes,
+    });
+    node_index
+}
+
+fn decision_feature_values(
+    constructor: &CompiledExecutableConstructor,
+    probe: CompiledDecisionProbe,
+) -> Vec<u8> {
+    match probe {
+        CompiledDecisionProbe::Terminal => Vec::new(),
+        CompiledDecisionProbe::InstructionByte {
+            offset,
+            mask,
+            shift,
+        } => instruction_probe_values(&constructor.matcher, offset as usize)
+            .into_iter()
+            .map(|value| (value & mask) >> shift)
+            .collect(),
+        CompiledDecisionProbe::OperandSizeCode => constructor.opsize_variants.clone(),
+        CompiledDecisionProbe::ModBits => {
+            if let Some(value) = constructor.mod_constraint {
+                return vec![value];
+            }
+            let has_modrm = constructor.operand_specs.iter().any(|spec| {
+                matches!(
+                    spec,
+                    CompiledOperandSpec::ModRmRm { .. } | CompiledOperandSpec::ModRmReg { .. }
+                )
+            });
+            let memory_only = constructor.operand_specs.iter().any(|spec| {
+                matches!(
+                    spec,
+                    CompiledOperandSpec::ModRmRm {
+                        memory_only: true,
+                        ..
+                    }
+                )
+            });
+            if memory_only {
+                vec![0, 1, 2]
+            } else if has_modrm {
+                vec![0, 1, 2, 3]
+            } else {
+                Vec::new()
+            }
+        }
+        CompiledDecisionProbe::RegOpcode => constructor.reg_opcode_values.clone(),
+    }
+}
+
+fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> Vec<u8> {
+    match matcher {
+        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.get(offset).copied().into_iter().collect(),
+        CompiledOpcodeMatcher::RowCc { prefix, row } => {
+            if let Some(byte) = prefix.get(offset) {
+                return vec![*byte];
+            }
+            if offset == prefix.len() {
+                return (0u8..=15).map(|cc| (row << 4) | cc).collect();
+            }
+            Vec::new()
+        }
+        CompiledOpcodeMatcher::RowPage { row, page } => {
+            if offset == 0 {
+                return (0u8..=7).map(|low| (row << 4) | (page << 3) | low).collect();
+            }
+            Vec::new()
+        }
+    }
+}
+
+fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
+    let mut score = 0usize;
+    score += constructor.opsize_variants.len().min(1) * 2;
+    score += constructor.reg_opcode_values.len().min(1) * 3;
+    score += usize::from(constructor.mod_constraint.is_some()) * 2;
+    score += constructor
+        .operand_specs
+        .iter()
+        .filter(|spec| {
+            matches!(
+                spec,
+                CompiledOperandSpec::ModRmRm {
+                    memory_only: true,
+                    ..
+                }
+            )
+        })
+        .count()
+        * 2;
+    score += match &constructor.matcher {
+        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.len(),
+        CompiledOpcodeMatcher::RowCc { prefix, .. } => prefix.len() + 1,
+        CompiledOpcodeMatcher::RowPage { .. } => 1,
+    };
+    score
+}
+
+fn compile_executable_constructor(
+    signature: &str,
+    mnemonic: &str,
+    source: &str,
+    signature_hash: u64,
+) -> Option<CompiledExecutableConstructor> {
+    if !is_x86_64_candidate(signature) {
+        return None;
+    }
+    let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
+    let semantic_kind = classify_semantic_kind(&normalized_mnemonic)?;
+    let matcher = parse_opcode_matcher(signature)?;
+    let operand_specs = parse_operand_specs(signature, &matcher, semantic_kind).ok()?;
+    let mod_constraint = parse_single_value(signature, "mod=");
+    let reg_opcode_values = parse_value_list(signature, "reg_opcode=");
+    let opsize_variants = parse_opsize_variants(signature);
+    let unsupported_template_kind = unsupported_template_reason(signature, semantic_kind, &operand_specs);
+    let runtime_ready = unsupported_template_kind.is_none();
+    let constructor_template = build_constructor_template(&operand_specs, semantic_kind);
+
+    Some(CompiledExecutableConstructor {
+        mnemonic: normalized_mnemonic,
+        source: source.to_string(),
+        display: signature.to_string(),
+        signature_hash,
+        matcher,
+        mod_constraint,
+        reg_opcode_values,
+        opsize_variants,
+        operand_specs,
+        semantic_kind,
+        constructor_template,
+        runtime_ready,
+        unsupported_template_kind,
+    })
+}
+
+fn normalize_executable_mnemonic(mnemonic: &str) -> String {
+    let trimmed = mnemonic.trim();
+    if trimmed.eq_ignore_ascii_case("J^cc") {
+        return "J^CC".to_string();
+    }
+    if trimmed.eq_ignore_ascii_case("SET^cc") {
+        return "SET^CC".to_string();
+    }
+    trimmed
+        .split('^')
+        .next()
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string()
+}
+
+fn is_x86_64_candidate(signature: &str) -> bool {
+    if signature.contains("$(LONGMODE_OFF)") {
+        return false;
+    }
+    if signature.contains("$(VEX_") || signature.contains("$(EVEX_") || signature.contains("$(PRE_")
+    {
+        return false;
+    }
+    if !signature.contains("vexMode=0") && signature.contains("vexMode=") {
+        return false;
+    }
+    true
+}
+
+fn classify_semantic_kind(mnemonic: &str) -> Option<CompiledSemanticKind> {
+    Some(match mnemonic.to_ascii_uppercase().as_str() {
+        "NOP" | "PAUSE" => CompiledSemanticKind::Nop,
+        "RET" => CompiledSemanticKind::Ret,
+        "CALL" => CompiledSemanticKind::Call,
+        "JMP" => CompiledSemanticKind::Jmp,
+        "J^CC" => CompiledSemanticKind::Jcc,
+        "MOV" => CompiledSemanticKind::Mov,
+        "LEA" => CompiledSemanticKind::Lea,
+        "PUSH" => CompiledSemanticKind::Push,
+        "POP" => CompiledSemanticKind::Pop,
+        "LEAVE" => CompiledSemanticKind::Leave,
+        "ADD" => CompiledSemanticKind::Add,
+        "SUB" => CompiledSemanticKind::Sub,
+        "AND" => CompiledSemanticKind::And,
+        "OR" => CompiledSemanticKind::Or,
+        "XOR" => CompiledSemanticKind::Xor,
+        "IMUL" => CompiledSemanticKind::Imul,
+        "MUL" => CompiledSemanticKind::Mul,
+        "SHL" | "SAL" => CompiledSemanticKind::Shl,
+        "SHR" => CompiledSemanticKind::Shr,
+        "SAR" => CompiledSemanticKind::Sar,
+        "INC" => CompiledSemanticKind::Inc,
+        "DEC" => CompiledSemanticKind::Dec,
+        "CMP" => CompiledSemanticKind::Cmp,
+        "TEST" => CompiledSemanticKind::Test,
+        "MOVZX" => CompiledSemanticKind::Movzx,
+        "MOVSX" => CompiledSemanticKind::Movsx,
+        "MOVSXD" => CompiledSemanticKind::Movsxd,
+        "SET^CC" => CompiledSemanticKind::Setcc,
+        "CBW" => CompiledSemanticKind::Cbw,
+        "CWDE" => CompiledSemanticKind::Cwde,
+        "CDQE" => CompiledSemanticKind::Cdqe,
+        _ => return None,
+    })
+}
+
+fn parse_opcode_matcher(signature: &str) -> Option<CompiledOpcodeMatcher> {
+    let bytes = parse_byte_sequence(signature);
+    if let Some(row) = parse_single_value(signature, "row=") {
+        if signature.contains("& cc") {
+            return Some(CompiledOpcodeMatcher::RowCc {
+                prefix: bytes,
+                row,
+            });
+        }
+        if let Some(page) = parse_single_value(signature, "page=") {
+            return Some(CompiledOpcodeMatcher::RowPage { row, page });
+        }
+    }
+    if bytes.is_empty() {
+        None
+    } else {
+        Some(CompiledOpcodeMatcher::ExactBytes(bytes))
+    }
+}
+
+fn parse_operand_specs(
+    signature: &str,
+    matcher: &CompiledOpcodeMatcher,
+    semantic_kind: CompiledSemanticKind,
+) -> Result<Vec<CompiledOperandSpec>> {
+    let head = signature
+        .trim_start_matches(':')
+        .split(" is ")
+        .next()
+        .unwrap_or(signature);
+    let operand_part = head
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if operand_part.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut specs = Vec::new();
+    for raw_token in operand_part.split(',') {
+        let token = raw_token.trim().trim_matches(|ch| ch == '(' || ch == ')');
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(size) = relative_size(token) {
+            specs.push(CompiledOperandSpec::Relative { size });
+            continue;
+        }
+        if let Some((size, signed)) = immediate_size(token) {
+            specs.push(CompiledOperandSpec::Immediate { size, signed });
+            continue;
+        }
+        if token.eq_ignore_ascii_case("FS")
+            || token.eq_ignore_ascii_case("GS")
+            || token.eq_ignore_ascii_case("CS")
+            || token.eq_ignore_ascii_case("SS")
+            || token.eq_ignore_ascii_case("DS")
+            || token.eq_ignore_ascii_case("ES")
+        {
+            return Err(anyhow::anyhow!("segment operand is not executable in first runtime wave"));
+        }
+        if let Some(size) = fixed_accumulator_size(token) {
+            specs.push(CompiledOperandSpec::FixedRegister {
+                reg: CompiledFixedRegister::Accumulator,
+                size,
+            });
+            continue;
+        }
+        if let Some(size) = register_size_token(token) {
+            let spec = match matcher {
+                CompiledOpcodeMatcher::RowPage { .. }
+                    if token.starts_with("Rmr") || token.starts_with("CRmr") =>
+                {
+                    CompiledOperandSpec::OpcodeReg { size }
+                }
+                _ if token.starts_with("Reg")
+                    || token == "Sreg"
+                    || token == "creg"
+                    || token == "creg_x"
+                    || token == "debugreg"
+                    || token == "debugreg_x" =>
+                {
+                    CompiledOperandSpec::ModRmReg { size }
+                }
+                _ => CompiledOperandSpec::ModRmRm {
+                    size,
+                    memory_only: token.starts_with('m'),
+                },
+            };
+            specs.push(spec);
+            continue;
+        }
+    }
+
+    if specs.is_empty() {
+        return Err(anyhow::anyhow!(
+            "no executable operand specs parsed for {signature}"
+        ));
+    }
+
+    if matches!(semantic_kind, CompiledSemanticKind::Setcc) && specs.len() != 1 {
+        return Err(anyhow::anyhow!("setcc expects one operand"));
+    }
+    Ok(specs)
+}
+
+fn parse_byte_sequence(signature: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut start = 0usize;
+    while let Some(pos) = signature[start..].find("byte=0x") {
+        let begin = start + pos + "byte=0x".len();
+        let hex = signature[begin..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_hexdigit())
+            .collect::<String>();
+        if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+            bytes.push(byte);
+        }
+        start = begin + hex.len();
+    }
+    bytes
+}
+
+fn parse_single_value(signature: &str, key: &str) -> Option<u8> {
+    let start = signature.find(key)? + key.len();
+    let digits = signature[start..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    digits.parse().ok()
+}
+
+fn parse_value_list(signature: &str, key: &str) -> Vec<u8> {
+    if let Some(single) = parse_single_value(signature, key) {
+        return vec![single];
+    }
+    let Some(start) = signature.find(key) else {
+        return Vec::new();
+    };
+    let rest = &signature[start + key.len()..];
+    if !rest.starts_with('(') {
+        return Vec::new();
+    }
+    let Some(end) = rest.find(')') else {
+        return Vec::new();
+    };
+    rest[1..end]
+        .split('|')
+        .filter_map(|value| value.trim().parse().ok())
+        .collect()
+}
+
+fn parse_opsize_variants(signature: &str) -> Vec<u8> {
+    if signature.contains("(opsize=1 | opsize=2)") {
+        return vec![1, 2];
+    }
+    if let Some(opsize) = parse_single_value(signature, "opsize=") {
+        return vec![opsize];
+    }
+    Vec::new()
+}
+
+fn unsupported_template_reason(
+    signature: &str,
+    semantic_kind: CompiledSemanticKind,
+    operand_specs: &[CompiledOperandSpec],
+) -> Option<String> {
+    if signature.contains("currentCS")
+        || signature.contains("check_")
+        || signature.contains("bit64=")
+        || signature.contains("rexRprefix=")
+        || signature.contains("creg")
+        || signature.contains("debugreg")
+        || signature.contains("xmmmod=")
+        || signature.contains("ymmmod=")
+        || signature.contains("zmm")
+        || signature.contains("bnd")
+        || signature.contains("moffs")
+    {
+        return Some("unsupported_runtime_constraint".to_string());
+    }
+
+    match semantic_kind {
+        CompiledSemanticKind::Nop
+        | CompiledSemanticKind::Ret
+        | CompiledSemanticKind::Call
+        | CompiledSemanticKind::Jmp
+        | CompiledSemanticKind::Jcc
+        | CompiledSemanticKind::Mov
+        | CompiledSemanticKind::Lea
+        | CompiledSemanticKind::Push
+        | CompiledSemanticKind::Pop
+        | CompiledSemanticKind::Leave
+        | CompiledSemanticKind::Add
+        | CompiledSemanticKind::Sub
+        | CompiledSemanticKind::And
+        | CompiledSemanticKind::Or
+        | CompiledSemanticKind::Xor
+        | CompiledSemanticKind::Imul
+        | CompiledSemanticKind::Mul
+        | CompiledSemanticKind::Shl
+        | CompiledSemanticKind::Shr
+        | CompiledSemanticKind::Sar
+        | CompiledSemanticKind::Inc
+        | CompiledSemanticKind::Dec
+        | CompiledSemanticKind::Cmp
+        | CompiledSemanticKind::Test
+        | CompiledSemanticKind::Movzx
+        | CompiledSemanticKind::Movsx
+        | CompiledSemanticKind::Movsxd
+        | CompiledSemanticKind::Setcc
+        | CompiledSemanticKind::Cbw
+        | CompiledSemanticKind::Cwde
+        | CompiledSemanticKind::Cdqe => {}
+    }
+
+    if operand_specs.len() > 2 && !matches!(semantic_kind, CompiledSemanticKind::Push | CompiledSemanticKind::Pop) {
+        return Some("unsupported_operand_arity".to_string());
+    }
+    None
+}
+
+fn build_constructor_template(
+    operand_specs: &[CompiledOperandSpec],
+    semantic_kind: CompiledSemanticKind,
+) -> CompiledConstructorTemplate {
+    let handles = operand_specs
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(operand_index, spec)| CompiledHandleTemplate { operand_index, spec })
+        .collect::<Vec<_>>();
+    let mut decode_steps = Vec::new();
+    if operand_specs.iter().any(|spec| {
+        matches!(
+            spec,
+            CompiledOperandSpec::ModRmRm { .. } | CompiledOperandSpec::ModRmReg { .. }
+        )
+    }) {
+        decode_steps.push(CompiledOperandDecodeStep::ConsumeModRm);
+    }
+    decode_steps.extend((0..operand_specs.len()).map(|operand_index| {
+        CompiledOperandDecodeStep::DecodeOperand { operand_index }
+    }));
+    let semantic_ops = semantic_ops_for_kind(semantic_kind);
+    CompiledConstructorTemplate {
+        handles,
+        decode_steps,
+        semantic_ops,
+    }
+}
+
+fn semantic_ops_for_kind(semantic_kind: CompiledSemanticKind) -> Vec<CompiledSemanticOp> {
+    use CompiledArithmeticOpcode as Arith;
+    use CompiledSemanticKind as Kind;
+    use CompiledSemanticOp as Op;
+
+    vec![match semantic_kind {
+        Kind::Nop => Op::Nop,
+        Kind::Ret => Op::Return,
+        Kind::Call => Op::Call,
+        Kind::Jmp => Op::Jump,
+        Kind::Jcc => Op::ConditionalJump,
+        Kind::Mov => Op::Move,
+        Kind::Lea => Op::Lea,
+        Kind::Push => Op::Push,
+        Kind::Pop => Op::Pop,
+        Kind::Leave => Op::Leave,
+        Kind::Add => Op::Binary { opcode: Arith::Add },
+        Kind::Sub => Op::Binary { opcode: Arith::Sub },
+        Kind::And => Op::Binary { opcode: Arith::And },
+        Kind::Or => Op::Binary { opcode: Arith::Or },
+        Kind::Xor => Op::Binary { opcode: Arith::Xor },
+        Kind::Imul | Kind::Mul => Op::Binary { opcode: Arith::Mul },
+        Kind::Shl => Op::Binary { opcode: Arith::Shl },
+        Kind::Shr => Op::Binary { opcode: Arith::Shr },
+        Kind::Sar => Op::Binary { opcode: Arith::Sar },
+        Kind::Inc => Op::Binary { opcode: Arith::Inc },
+        Kind::Dec => Op::Binary { opcode: Arith::Dec },
+        Kind::Cmp => Op::Compare { bitwise: false },
+        Kind::Test => Op::Compare { bitwise: true },
+        Kind::Movzx => Op::Extend { signed: false },
+        Kind::Movsx | Kind::Movsxd => Op::Extend { signed: true },
+        Kind::Setcc => Op::SetCc,
+        Kind::Cbw => Op::AccumulatorExtend {
+            src_size: 1,
+            dst_size: 2,
+        },
+        Kind::Cwde => Op::AccumulatorExtend {
+            src_size: 2,
+            dst_size: 4,
+        },
+        Kind::Cdqe => Op::AccumulatorExtend {
+            src_size: 4,
+            dst_size: 8,
+        },
+    }]
+}
+
+fn register_size_token(token: &str) -> Option<u32> {
+    let digits = token
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    if digits.is_empty() {
+        return match token {
+            "AL" => Some(1),
+            "AX" => Some(2),
+            "EAX" => Some(4),
+            "RAX" => Some(8),
+            "FS" | "GS" | "CS" | "SS" | "DS" | "ES" => Some(2),
+            _ => None,
+        };
+    }
+    digits.parse::<u32>().ok().map(|bits| (bits / 8).max(1))
+}
+
+fn relative_size(token: &str) -> Option<u32> {
+    if !token.starts_with("rel") {
+        return None;
+    }
+    register_size_token(token)
+}
+
+fn immediate_size(token: &str) -> Option<(u32, bool)> {
+    if !(token.starts_with("imm") || token.starts_with("simm")) {
+        return None;
+    }
+    let signed = token.starts_with("simm");
+    let digits = token
+        .chars()
+        .skip_while(|ch| !ch.is_ascii_digit())
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    let bits = digits.parse::<u32>().ok()?;
+    Some(((bits / 8).max(1), signed))
+}
+
+fn fixed_accumulator_size(token: &str) -> Option<u32> {
+    match token {
+        "AL" => Some(1),
+        "AX" => Some(2),
+        "EAX" => Some(4),
+        "RAX" => Some(8),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::{expand_entry_spec, parse_expanded_spec, x86_64_entry_spec_path};
+    use crate::compiler::{
+        compile_frontend_for_entry_spec, expand_entry_spec, infer_arch_from_entry_spec,
+        parse_expanded_spec, x86_64_entry_spec_path,
+    };
 
     #[test]
     fn compile_frontend_collects_pcode_ops_and_patterns() {
-        let expanded = expand_entry_spec(&x86_64_entry_spec_path()).expect("expand spec");
+        let entry_spec = x86_64_entry_spec_path();
+        let expanded = expand_entry_spec(&entry_spec).expect("expand spec");
         let ast = parse_expanded_spec(&expanded).expect("parse spec");
-        let compiled = compile_frontend(&expanded, &ast).expect("compile frontend");
+        let arch = infer_arch_from_entry_spec(&entry_spec).expect("infer arch");
+        let compiled = compile_frontend(&arch, &expanded, &ast).expect("compile frontend");
         assert!(!compiled.pcode_ops.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
         assert!(compiled
             .constructors
             .iter()
-            .any(|item| item.mnemonic.eq_ignore_ascii_case("RET") || item.control_flow != ControlFlowClass::None));
+            .any(|item| item.mnemonic.eq_ignore_ascii_case("RET")
+                || item.control_flow != ControlFlowClass::None));
+    }
+
+    #[test]
+    fn compile_frontend_for_entry_spec_sets_arch_from_path() {
+        let compiled = compile_frontend_for_entry_spec(&x86_64_entry_spec_path())
+            .expect("compile generic entry spec");
+        assert_eq!(compiled.arch, "x86");
     }
 
     #[test]
     fn control_flow_classifier_separates_branch_from_none() {
-        assert_eq!(classify_control_flow("tmp = x + y;"), ControlFlowClass::None);
-        assert_eq!(classify_control_flow("goto inst_next;"), ControlFlowClass::Branch);
+        assert_eq!(
+            classify_control_flow("tmp = x + y;"),
+            ControlFlowClass::None
+        );
+        assert_eq!(
+            classify_control_flow("goto inst_next;"),
+            ControlFlowClass::Branch
+        );
         assert_eq!(
             classify_control_flow("if cond goto inst_next;"),
             ControlFlowClass::ConditionalBranch

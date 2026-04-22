@@ -1,0 +1,1463 @@
+# semantic action inventory
+arch: ARM
+entry_spec: ARM4t_be.slaspec
+entry_id: ARM4t_be
+
+- ^instruction [none] ARMinstructions.sinc:1533
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ^instruction [none] ARMinstructions.sinc:1534
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- adc^COND^SBIT_CZNO [none] ARMinstructions.sinc:1549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=85f4784b5d7ab80f op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^COND^SBIT_CZNO [none] ARMinstructions.sinc:1559
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=806f21530587e392 op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^COND^SBIT_CZNO [none] ARMinstructions.sinc:1569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28f92d00623e20d5 op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1579
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=56912d7a51df11be op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c4fee6f0eaa2a411 op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aa51352be76e6c38 op_count=0
+  with_stack: with : ARMcondCk=1
+- adr^COND [none] ARMinstructions.sinc:1625
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ba0b97769413c49d op_count=0
+  with_stack: with : ARMcondCk=1
+- adr^COND [branch] ARMinstructions.sinc:1630
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1519dcdbf6815cc2 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [none] ARMinstructions.sinc:1637
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f238f91d494d3f0 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [none] ARMinstructions.sinc:1647
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fc121dba98afc4f op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [none] ARMinstructions.sinc:1657
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7810c4b7e572b4ae op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1667
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54c8306bdb660c23 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1679
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f9eec28912b9a8e op_count=0
+  with_stack: with : ARMcondCk=1
+- add^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1691
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=333dd91769a66891 op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [none] ARMinstructions.sinc:1703
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a0a7a501c54f5c7f op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [none] ARMinstructions.sinc:1713
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bbe315e75750effb op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [none] ARMinstructions.sinc:1723
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32a61ddfcf1efac3 op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1733
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=56479e78da129386 op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1745
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=410e9f58cac32f9e op_count=0
+  with_stack: with : ARMcondCk=1
+- and^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1757
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=204f433213e60356 op_count=0
+  with_stack: with : ARMcondCk=1
+- b [branch] ARMinstructions.sinc:1769
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5ae17048f90a50f4 op_count=0
+  with_stack: with : ARMcondCk=1
+- b^cc [conditional_branch] ARMinstructions.sinc:1773
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=930b0abfdd574adc op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [none] ARMinstructions.sinc:1777
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77a36e28c2a607aa op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [none] ARMinstructions.sinc:1787
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c39ef981163577f2 op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [none] ARMinstructions.sinc:1797
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=14f81fc120700b6e op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1807
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df7806099b4de94d op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1819
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fdd405d3e81e0ee1 op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1831
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e7cae268aa141a6d op_count=0
+  with_stack: with : ARMcondCk=1
+- bl [branch] ARMinstructions.sinc:1843
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e24fae3cdda390c op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^COND [branch] ARMinstructions.sinc:1848
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86cb11697bd807b1 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl [call] ARMinstructions.sinc:1855
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82d89c52722b49b3 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^COND [call] ARMinstructions.sinc:1860
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25b8003b065046d2 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^COND [branch] ARMinstructions.sinc:1867
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86cb11697bd807b1 op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^COND [return] ARMinstructions.sinc:1874
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5365ce960129a87 op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^COND [branch] ARMinstructions.sinc:1881
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d36ad170a09f05e op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^COND [call] ARMinstructions.sinc:1888
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=feb712f6471467e5 op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^COND [branch] ARMinstructions.sinc:1895
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d36ad170a09f05e op_count=0
+  with_stack: with : ARMcondCk=1
+- cdp^COND [none] ARMinstructions.sinc:1902
+  semantic_ops: coprocessor_function
+  semantic_template: status=unsupported_template action_hash=3df14c998b1aaecb op_count=1
+  with_stack: with : ARMcondCk=1
+- cmn^COND [none] ARMinstructions.sinc:1910
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2fa04b8e577ec81 op_count=0
+  with_stack: with : ARMcondCk=1
+- cmn^COND [none] ARMinstructions.sinc:1920
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89632dbdf6ff5030 op_count=0
+  with_stack: with : ARMcondCk=1
+- cmn^COND [none] ARMinstructions.sinc:1930
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=894fdc0e351d7247 op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^COND [none] ARMinstructions.sinc:1940
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c0e2f070668d85c op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^COND [none] ARMinstructions.sinc:1950
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9bb71d8cc56fe7d op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^COND [none] ARMinstructions.sinc:1960
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4012478154531106 op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [none] ARMinstructions.sinc:1970
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c7f69e348051533 op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [none] ARMinstructions.sinc:1980
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5fe22fe953e8055b op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [none] ARMinstructions.sinc:1990
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7b53bb1337bb0d17 op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2000
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42753d0a5a047d9a op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2012
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ff1e52bd1e454cbe op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2024
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5b5c7e030de03aaa op_count=0
+  with_stack: with : ARMcondCk=1
+- ldc^COND [none] ARMinstructions.sinc:2036
+  semantic_ops: coprocessor_load
+  semantic_template: status=unsupported_template action_hash=d43997a6762e165e op_count=1
+  with_stack: with : ARMcondCk=1
+- ldcl^COND [none] ARMinstructions.sinc:2043
+  semantic_ops: coprocessor_loadlong
+  semantic_template: status=unsupported_template action_hash=c100661186167540 op_count=1
+  with_stack: with : ARMcondCk=1
+- ldm^mdir^COND [none] ARMinstructions.sinc:2050
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=97b7214b6690ab33 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldm^mdir^COND [return] ARMinstructions.sinc:2055
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f426fd31db9483c op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [none] ARMinstructions.sinc:2062
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82f53565fab7c56f op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [call] ARMinstructions.sinc:2068
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c275778ded358f4d op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [call] ARMinstructions.sinc:2079
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c275778ded358f4d op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [branch] ARMinstructions.sinc:2090
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5d36f62f0ac3aea op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [branch] ARMinstructions.sinc:2098
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5d36f62f0ac3aea op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrb^COND [none] ARMinstructions.sinc:2106
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e802b4b5a8951ec0 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrbt^COND [none] ARMinstructions.sinc:2112
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e802b4b5a8951ec0 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrh^COND [none] ARMinstructions.sinc:2118
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=38fabd80f78a01ed op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrsb^COND [none] ARMinstructions.sinc:2124
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee9b6551b435cc6b op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrsh^COND [none] ARMinstructions.sinc:2130
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3900eb5928c81b4e op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrt^COND [none] ARMinstructions.sinc:2136
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82f53565fab7c56f op_count=0
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2142
+  semantic_ops: coproc_moveto_Main_ID
+  semantic_template: status=unsupported_template action_hash=47e6e595cf949f67 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2149
+  semantic_ops: coproc_moveto_Cache_Type
+  semantic_template: status=unsupported_template action_hash=538192ef5701868b op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2156
+  semantic_ops: coproc_moveto_TCM_Status
+  semantic_template: status=unsupported_template action_hash=987c14c0cdc73dab op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2163
+  semantic_ops: coproc_moveto_TLB_Type
+  semantic_template: status=unsupported_template action_hash=5a830023736a94ef op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2170
+  semantic_ops: coproc_moveto_Control
+  semantic_template: status=unsupported_template action_hash=71cc58f917e2ac8d op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2177
+  semantic_ops: coproc_moveto_Auxiliary_Control
+  semantic_template: status=unsupported_template action_hash=1923ace85c7a9f04 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2184
+  semantic_ops: coproc_moveto_Coprocessor_Access_Control
+  semantic_template: status=unsupported_template action_hash=0ac00457d07790c3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2191
+  semantic_ops: coproc_moveto_Secure_Configuration
+  semantic_template: status=unsupported_template action_hash=7acd2ff6c30c997e op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2198
+  semantic_ops: coproc_moveto_Secure_Debug_Enable
+  semantic_template: status=unsupported_template action_hash=6f5050a294131365 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2205
+  semantic_ops: coproc_moveto_NonSecure_Access_Control
+  semantic_template: status=unsupported_template action_hash=cadf7cca9f92cc37 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2212
+  semantic_ops: coproc_moveto_Translation_table_base_0
+  semantic_template: status=unsupported_template action_hash=4a2dd865b106560b op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2219
+  semantic_ops: coproc_moveto_Translation_table_base_1
+  semantic_template: status=unsupported_template action_hash=51173e5ef19fa5d2 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2226
+  semantic_ops: coproc_moveto_Translation_table_control
+  semantic_template: status=unsupported_template action_hash=943104510f429068 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2233
+  semantic_ops: coproc_moveto_Domain_Access_Control
+  semantic_template: status=unsupported_template action_hash=b6b5c8c2d723ae1d op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2240
+  semantic_ops: coproc_moveto_Data_Fault_Status
+  semantic_template: status=unsupported_template action_hash=ec5e8522570c5b14 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2247
+  semantic_ops: coproc_moveto_Instruction_Fault
+  semantic_template: status=unsupported_template action_hash=b033c439e1470bab op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2254
+  semantic_ops: coproc_moveto_Fault_Address
+  semantic_template: status=unsupported_template action_hash=5b8a90b9f4972b6b op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2261
+  semantic_ops: coproc_moveto_Instruction_Fault
+  semantic_template: status=unsupported_template action_hash=b033c439e1470bab op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2268
+  semantic_ops: coproc_moveto_Wait_for_interrupt
+  semantic_template: status=unsupported_template action_hash=68adaa1c6e63e7c5 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2275
+  semantic_ops: coproc_moveto_Invalidate_Entire_Instruction
+  semantic_template: status=unsupported_template action_hash=4c1ac0cd4972b06e op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2282
+  semantic_ops: coproc_moveto_Invalidate_Instruction_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=dae6981941c4327a op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2289
+  semantic_ops: coproc_moveto_Flush_Prefetch_Buffer
+  semantic_template: status=unsupported_template action_hash=6bebfe7de11273a3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2296
+  semantic_ops: coproc_moveto_Invalidate_Entire_Data_cache
+  semantic_template: status=unsupported_template action_hash=583c3d916866e6d5 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2303
+  semantic_ops: coproc_moveto_Invalidate_Entire_Data_by_MVA
+  semantic_template: status=unsupported_template action_hash=740d04d2d2abdbfd op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2310
+  semantic_ops: coproc_moveto_Invalidate_Entire_Data_by_Index
+  semantic_template: status=unsupported_template action_hash=ba9881aef5142083 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2317
+  semantic_ops: coproc_moveto_Clean_Entire_Data_Cache
+  semantic_template: status=unsupported_template action_hash=26f46509cb3226ad op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2324
+  semantic_ops: coproc_moveto_Clean_Data_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=48034217617f91a6 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2331
+  semantic_ops: coproc_moveto_Clean_Data_Cache_by_Index
+  semantic_template: status=unsupported_template action_hash=3b6ba2c9aa14ca28 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2338
+  semantic_ops: coproc_moveto_Data_Synchronization
+  semantic_template: status=unsupported_template action_hash=863615048a009217 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2345
+  semantic_ops: coproc_moveto_Data_Memory_Barrier
+  semantic_template: status=unsupported_template action_hash=0e61e1df40d82ac4 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2352
+  semantic_ops: coproc_moveto_Invalidate_Entire_Data_Cache
+  semantic_template: status=unsupported_template action_hash=f16a22efa7f21fb5 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2359
+  semantic_ops: coproc_moveto_Invalidate_Data_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=09bb68dd663e7cfe op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2366
+  semantic_ops: coproc_moveto_Invalidate_unified_TLB_unlocked
+  semantic_template: status=unsupported_template action_hash=a4df383cf380c30f op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2373
+  semantic_ops: coproc_moveto_Invalidate_unified_TLB_by_MVA
+  semantic_template: status=unsupported_template action_hash=8bfc4bb6f5db91b8 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2380
+  semantic_ops: coproc_moveto_Invalidate_unified_TLB_by_ASID_match
+  semantic_template: status=unsupported_template action_hash=1edcdb2e51f9a27b op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2387
+  semantic_ops: coproc_moveto_FCSE_PID
+  semantic_template: status=unsupported_template action_hash=10d0d7ec7d206985 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2394
+  semantic_ops: coproc_moveto_Context_ID
+  semantic_template: status=unsupported_template action_hash=c57277b378bc33c9 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2401
+  semantic_ops: coproc_moveto_User_RW_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=68bec03e62d6a7b6 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2408
+  semantic_ops: coproc_moveto_User_R_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=5d85592b566a0f35 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2415
+  semantic_ops: coproc_moveto_Privileged_only_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=3c8a34cca79c1a33 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2422
+  semantic_ops: coproc_moveto_Peripherial_Port_Memory_Remap
+  semantic_template: status=unsupported_template action_hash=483e54386ae095d3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2429
+  semantic_ops: coproc_moveto_Feature_Identification
+  semantic_template: status=unsupported_template action_hash=7175305bae406495 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2437
+  semantic_ops: coproc_moveto_ISA_Feature_Identification
+  semantic_template: status=unsupported_template action_hash=74e8bd1f0916bb51 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2445
+  semantic_ops: coproc_moveto_Peripheral_Port_Memory_Remap
+  semantic_template: status=unsupported_template action_hash=a8b799f6075ee042 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2453
+  semantic_ops: coproc_moveto_Control_registers
+  semantic_template: status=unsupported_template action_hash=9cefd7276deb5428 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2461
+  semantic_ops: coproc_moveto_Security_world_control
+  semantic_template: status=unsupported_template action_hash=702a9ff65b16a67b op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2469
+  semantic_ops: coproc_moveto_Translation_table
+  semantic_template: status=unsupported_template action_hash=0bed730edcf99a7e op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2477
+  semantic_ops: coproc_moveto_Instruction_cache
+  semantic_template: status=unsupported_template action_hash=58c4dfb0a9bbf72f op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2485
+  semantic_ops: coproc_moveto_Data_cache_operations
+  semantic_template: status=unsupported_template action_hash=b54af453e5794ac6 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2493
+  semantic_ops: coproc_moveto_Identification_registers
+  semantic_template: status=unsupported_template action_hash=b36ed38641532af3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2501
+  semantic_ops: coproc_moveto_Peripheral_System
+  semantic_template: status=unsupported_template action_hash=0c96c2eaf1979d15 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr^COND [none] ARMinstructions.sinc:2509
+  semantic_ops: coprocessor_moveto
+  semantic_template: status=unsupported_template action_hash=5467a48585ac88f2 op_count=1
+  with_stack: with : ARMcondCk=1
+- mla^COND^SBIT_ZN [none] ARMinstructions.sinc:2517
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cb606ac3f9a9cb5 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [none] ARMinstructions.sinc:2524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=81002c697d3c27de op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [none] ARMinstructions.sinc:2533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03687ad13f48a138 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov [none] ARMinstructions.sinc:2542
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6719bdee4aec58f3 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [none] ARMinstructions.sinc:2549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=547e269abd46c39a op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2558
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=58032bd2a3e27faa op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e8329e94c78c389d op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [call] ARMinstructions.sinc:2582
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c1c785eb64d780a6 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^COND^SBIT_CZNO [branch] ARMinstructions.sinc:2594
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b671a229c9ea3fac op_count=0
+  with_stack: with : ARMcondCk=1
+- mov [none] ARMinstructions.sinc:2606
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=93f8d802977fdf1a op_count=0
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2611
+  semantic_ops: coproc_movefrom_Main_ID
+  semantic_template: status=unsupported_template action_hash=de9212093a31bf95 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2618
+  semantic_ops: coproc_movefrom_Cache_Type
+  semantic_template: status=unsupported_template action_hash=5df71eaa86b55191 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2625
+  semantic_ops: coproc_movefrom_TCM_Status
+  semantic_template: status=unsupported_template action_hash=1b987f066a5c70f1 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2632
+  semantic_ops: coproc_movefrom_TLB_Type
+  semantic_template: status=unsupported_template action_hash=ac3f7b0c2589417d op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2639
+  semantic_ops: coproc_movefrom_Control
+  semantic_template: status=unsupported_template action_hash=2d5979c74d67d63f op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2646
+  semantic_ops: coproc_movefrom_Auxiliary_Control
+  semantic_template: status=unsupported_template action_hash=33b689f1ee651186 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2653
+  semantic_ops: coproc_movefrom_Coprocessor_Access_Control
+  semantic_template: status=unsupported_template action_hash=e75fafee66a157c9 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2660
+  semantic_ops: coproc_movefrom_Secure_Configuration
+  semantic_template: status=unsupported_template action_hash=e0afa848b95a1b94 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2667
+  semantic_ops: coproc_movefrom_Secure_Debug_Enable
+  semantic_template: status=unsupported_template action_hash=610a357980339037 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2674
+  semantic_ops: coproc_movefrom_NonSecure_Access_Control
+  semantic_template: status=unsupported_template action_hash=08c765e331498f85 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2681
+  semantic_ops: coproc_movefrom_Translation_table_base_0
+  semantic_template: status=unsupported_template action_hash=e72f67b579d74291 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2688
+  semantic_ops: coproc_movefrom_Translation_table_base_1
+  semantic_template: status=unsupported_template action_hash=469811ad231c2280 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2695
+  semantic_ops: coproc_movefrom_Translation_table_control
+  semantic_template: status=unsupported_template action_hash=c4f9cb6b3f8cdda2 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2702
+  semantic_ops: coproc_movefrom_Domain_Access_Control
+  semantic_template: status=unsupported_template action_hash=4741669f5174afef op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2709
+  semantic_ops: coproc_movefrom_Instruction_Fault_Status
+  semantic_template: status=unsupported_template action_hash=39c2c9c356d6e866 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2716
+  semantic_ops: coproc_movefrom_Data_Fault_Status
+  semantic_template: status=unsupported_template action_hash=5f644ebb5ca69e36 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2723
+  semantic_ops: coproc_movefrom_Fault_Address
+  semantic_template: status=unsupported_template action_hash=7722e93b6108b7b1 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2730
+  semantic_ops: coproc_movefrom_Instruction_Fault_Address
+  semantic_template: status=unsupported_template action_hash=39674024871d3c2c op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2737
+  semantic_ops: coproc_movefrom_Wait_for_interrupt
+  semantic_template: status=unsupported_template action_hash=9ebed614cf5492d7 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2744
+  semantic_ops: coproc_movefrom_Invalidate_Entire_Instruction
+  semantic_template: status=unsupported_template action_hash=067e0185dbdbdba4 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2751
+  semantic_ops: coproc_movefrom_Invalidate_Instruction_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=3b41ab3e59d56528 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2758
+  semantic_ops: coproc_movefrom_Flush_Prefetch_Buffer
+  semantic_template: status=unsupported_template action_hash=49b462b1fcee33e9 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2765
+  semantic_ops: coproc_movefrom_Invalidate_Entire_Data_cache
+  semantic_template: status=unsupported_template action_hash=b4069059b213ecc7 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2772
+  semantic_ops: coproc_movefrom_Invalidate_Entire_Data_by_MVA
+  semantic_template: status=unsupported_template action_hash=c3d5f5864ba2300f op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2779
+  semantic_ops: coproc_movefrom_Invalidate_Entire_Data_by_Index
+  semantic_template: status=unsupported_template action_hash=3654554ae174f689 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2786
+  semantic_ops: coproc_movefrom_Clean_Entire_Data_Cache
+  semantic_template: status=unsupported_template action_hash=faac379f6c595e1f op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2793
+  semantic_ops: coproc_movefrom_Clean_Data_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=3f3397348eabe7fc op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2800
+  semantic_ops: coproc_movefrom_Clean_Data_Cache_by_Index
+  semantic_template: status=unsupported_template action_hash=10cfdb6423edaf62 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2807
+  semantic_ops: coproc_movefrom_Data_Synchronization
+  semantic_template: status=unsupported_template action_hash=c732108ad607c825 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2814
+  semantic_ops: coproc_movefrom_Data_Memory_Barrier
+  semantic_template: status=unsupported_template action_hash=f695adf623f77646 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2821
+  semantic_ops: coproc_movefrom_Invalidate_Entire_Data_Cache
+  semantic_template: status=unsupported_template action_hash=068cf332483432e7 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2828
+  semantic_ops: coproc_movefrom_Invalidate_Data_Cache_by_MVA
+  semantic_template: status=unsupported_template action_hash=d1fda3dc70c7f214 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2835
+  semantic_ops: coproc_movefrom_Invalidate_unified_TLB_unlocked
+  semantic_template: status=unsupported_template action_hash=e14ca0626a35985d op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2842
+  semantic_ops: coproc_movefrom_Invalidate_unified_TLB_by_MVA
+  semantic_template: status=unsupported_template action_hash=939161d8068f2dd2 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2849
+  semantic_ops: coproc_movefrom_Invalidate_unified_TLB_by_ASID_match
+  semantic_template: status=unsupported_template action_hash=424b9f87d4db5ca1 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2856
+  semantic_ops: coproc_movefrom_FCSE_PID
+  semantic_template: status=unsupported_template action_hash=54dcead5fd7c4397 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2863
+  semantic_ops: coproc_movefrom_Context_ID
+  semantic_template: status=unsupported_template action_hash=b99e0cc63d7178c3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2870
+  semantic_ops: coproc_movefrom_User_RW_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=293dc1cf08644eac op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2877
+  semantic_ops: coproc_movefrom_User_R_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=fde938cde68eeb67 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2884
+  semantic_ops: coproc_movefrom_Privileged_only_Thread_and_Process_ID
+  semantic_template: status=unsupported_template action_hash=90039ba36d99f2d9 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2891
+  semantic_ops: coproc_movefrom_Peripherial_Port_Memory_Remap
+  semantic_template: status=unsupported_template action_hash=0210162707e63039 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2898
+  semantic_ops: coproc_movefrom_Feature_Identification
+  semantic_template: status=unsupported_template action_hash=d58041af1c111f6d op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2906
+  semantic_ops: coproc_movefrom_ISA_Feature_Identification
+  semantic_template: status=unsupported_template action_hash=91c7d5a8e7613195 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2914
+  semantic_ops: coproc_movefrom_Peripheral_Port_Memory_Remap
+  semantic_template: status=unsupported_template action_hash=629cdbd96f138d30 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2922
+  semantic_ops: coproc_movefrom_Control_registers
+  semantic_template: status=unsupported_template action_hash=aff3c7bee35bab70 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2930
+  semantic_ops: coproc_movefrom_Security_world_control
+  semantic_template: status=unsupported_template action_hash=d06c07020ea492db op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2938
+  semantic_ops: coproc_movefrom_Translation_table
+  semantic_template: status=unsupported_template action_hash=5bc618c83aa0d8bc op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2946
+  semantic_ops: coproc_movefrom_Instruction_cache
+  semantic_template: status=unsupported_template action_hash=e819d8b8bccfe0b3 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2954
+  semantic_ops: coproc_movefrom_Data_cache_operations
+  semantic_template: status=unsupported_template action_hash=40f1dcc12bd37eb4 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2962
+  semantic_ops: coproc_movefrom_Identification_registers
+  semantic_template: status=unsupported_template action_hash=c4c5fcdcad0fca93 op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2970
+  semantic_ops: coproc_movefrom_Peripheral_System
+  semantic_template: status=unsupported_template action_hash=ca2e9bd7e3285e1f op_count=1
+  with_stack: with : ARMcondCk=1
+- mrc^COND [none] ARMinstructions.sinc:2978
+  semantic_ops: coprocessor_movefromRt
+  semantic_template: status=unsupported_template action_hash=26f47c25720ded0e op_count=1
+  with_stack: with : ARMcondCk=1
+- mrs^COND [none] ARMinstructions.sinc:2986
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2098c71ca2c6d903 op_count=0
+  with_stack: with : ARMcondCk=1
+- mrs^COND [none] ARMinstructions.sinc:2991
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1e8f2ff76dc736e op_count=0
+  with_stack: with : ARMcondCk=1
+- msr^COND [none] ARMinstructions.sinc:2996
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b330ff90f9516cc op_count=0
+  with_stack: with : ARMcondCk=1
+- msr^COND [none] ARMinstructions.sinc:3003
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32fd166d3f387d11 op_count=0
+  with_stack: with : ARMcondCk=1
+- msr^COND [none] ARMinstructions.sinc:3015
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7538025d14f8f3c op_count=0
+  with_stack: with : ARMcondCk=1
+- msr^COND [none] ARMinstructions.sinc:3022
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1a947c5e0b1b220 op_count=0
+  with_stack: with : ARMcondCk=1
+- mul^COND^SBIT_ZN [none] ARMinstructions.sinc:3028
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=781163469771054a op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_CZNO [none] ARMinstructions.sinc:3037
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=56e3b77981c41f2c op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_CZNO [none] ARMinstructions.sinc:3046
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a778da59f497ec38 op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_CZNO [none] ARMinstructions.sinc:3055
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=79d6ca22020f2ebc op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_ZN [branch] ARMinstructions.sinc:3064
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d6d4bd5eb49aa46 op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_ZN [branch] ARMinstructions.sinc:3074
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88c08d11d2aba226 op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^COND^SBIT_ZN [branch] ARMinstructions.sinc:3084
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2acecfdfbb1f2496 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [none] ARMinstructions.sinc:3094
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0a56fa428ed30d19 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [none] ARMinstructions.sinc:3104
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8498e2969a101a1 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [none] ARMinstructions.sinc:3114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a0d6077ab6ac6e9d op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3124
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8af1f6caf347d00 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3136
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=71c120bd792f4784 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3148
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f33c42be9180b10 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [none] ARMinstructions.sinc:3160
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6bb23c1c348d421f op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [none] ARMinstructions.sinc:3170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=518696b29aa57360 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [none] ARMinstructions.sinc:3180
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=faaa74d330d39ad5 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3190
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=107a62fb0b501eae op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3202
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=64ca00e339b8efff op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3214
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3c53f00695f6f04 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [none] ARMinstructions.sinc:3226
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=184de650fbdd1a7c op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [none] ARMinstructions.sinc:3236
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0d5fe63ed5e031eb op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [none] ARMinstructions.sinc:3246
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=64230aeec933d946 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3256
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9a9b3c9eb9fa7ce2 op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8368de6c45d7640d op_count=0
+  with_stack: with : ARMcondCk=1
+- rsc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3280
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6f6a1bf7343099e op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [none] ARMinstructions.sinc:3292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa4a77913504a0d0 op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [none] ARMinstructions.sinc:3302
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e2375a15324e023f op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [none] ARMinstructions.sinc:3312
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=878a8580053f7fd2 op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [branch] ARMinstructions.sinc:3322
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=589be50efba12938 op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [branch] ARMinstructions.sinc:3334
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6b4a9238ed43811 op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^SBIT_CZNO^COND [branch] ARMinstructions.sinc:3346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b9defcc70df9356a op_count=0
+  with_stack: with : ARMcondCk=1
+- smlal^COND^SBIT_ZN [none] ARMinstructions.sinc:3358
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1dfa26a40e0e44de op_count=0
+  with_stack: with : ARMcondCk=1
+- smull^COND^SBIT_ZN [none] ARMinstructions.sinc:3370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b7fb804c91de063a op_count=0
+  with_stack: with : ARMcondCk=1
+- stc^COND [none] ARMinstructions.sinc:3381
+  semantic_ops: coprocessor_store
+  semantic_template: status=unsupported_template action_hash=1bceb4449c606f97 op_count=1
+  with_stack: with : ARMcondCk=1
+- stcl^COND [none] ARMinstructions.sinc:3388
+  semantic_ops: coprocessor_storelong
+  semantic_template: status=unsupported_template action_hash=1454c961d1b57ec1 op_count=1
+  with_stack: with : ARMcondCk=1
+- stm^mdir^COND [none] ARMinstructions.sinc:3395
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=97b7214b6690ab33 op_count=0
+  with_stack: with : ARMcondCk=1
+- str^COND [none] ARMinstructions.sinc:3400
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c007a4836620383b op_count=0
+  with_stack: with : ARMcondCk=1
+- strb^COND [none] ARMinstructions.sinc:3406
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0605ae11358cd0f9 op_count=0
+  with_stack: with : ARMcondCk=1
+- strbt^COND [none] ARMinstructions.sinc:3413
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0605ae11358cd0f9 op_count=0
+  with_stack: with : ARMcondCk=1
+- strh^COND [none] ARMinstructions.sinc:3420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59ebc419fd6cb8c2 op_count=0
+  with_stack: with : ARMcondCk=1
+- strt^COND [none] ARMinstructions.sinc:3427
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c007a4836620383b op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [none] ARMinstructions.sinc:3433
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddac8beaaaa6067b op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [none] ARMinstructions.sinc:3443
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7feefa71b6d9a4ac op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [none] ARMinstructions.sinc:3453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c049fa1cbbabed3d op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3463
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=78768a0afd42393c op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [return] ARMinstructions.sinc:3477
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ffa80bccad510d59 op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3490
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25d5475ce79d4bd1 op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^COND^SBIT_CZNO [branch] ARMinstructions.sinc:3504
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e7eff21b7374d8ea op_count=0
+  with_stack: with : ARMcondCk=1
+- swi^COND [none] ARMinstructions.sinc:3518
+  semantic_ops: software_interrupt
+  semantic_template: status=unsupported_template action_hash=ddb77b9bfb6bcf7b op_count=1
+  with_stack: with : ARMcondCk=1
+- swp^COND [none] ARMinstructions.sinc:3524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c80a3e98ac55e6c1 op_count=0
+  with_stack: with : ARMcondCk=1
+- swpb^COND [none] ARMinstructions.sinc:3531
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6b58d8c68940eaf op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND [none] ARMinstructions.sinc:3539
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86498a2fe4bba50a op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND [none] ARMinstructions.sinc:3549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9e77cec0f61c2ec op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND [none] ARMinstructions.sinc:3559
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=612f26eeaa0231ca op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND^"p" [none] ARMinstructions.sinc:3569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86498a2fe4bba50a op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND^"p" [none] ARMinstructions.sinc:3579
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e9e77cec0f61c2ec op_count=0
+  with_stack: with : ARMcondCk=1
+- teq^COND^"p" [none] ARMinstructions.sinc:3589
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=612f26eeaa0231ca op_count=0
+  with_stack: with : ARMcondCk=1
+- tst^COND [none] ARMinstructions.sinc:3599
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5758961f2dcc956 op_count=0
+  with_stack: with : ARMcondCk=1
+- tst^COND [none] ARMinstructions.sinc:3609
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd34667856c8993c op_count=0
+  with_stack: with : ARMcondCk=1
+- tst^COND [none] ARMinstructions.sinc:3619
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b5e71d1b1cdd436 op_count=0
+  with_stack: with : ARMcondCk=1
+- umlal^COND^SBIT_ZN [none] ARMinstructions.sinc:3629
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b29e5a52d65b6743 op_count=0
+  with_stack: with : ARMcondCk=1
+- umull^COND^SBIT_ZN [none] ARMinstructions.sinc:3643
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e101a54e4d2c58c9 op_count=0
+  with_stack: with : ARMcondCk=1
+- adc^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1067
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=16db367f3d6be1f5 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1075
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6bb0eb4583ce950c op_count=0
+  with_stack: with : ARMcondCk=1
+- add^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1083
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ca8d38b38d96c206 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1091
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19f37fe80b7e34a8 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^ItCond [none] ARMTHUMBinstructions.sinc:1099
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5017e3cbdf4e933 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^ItCond [branch] ARMTHUMBinstructions.sinc:1104
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=963e814cfb932892 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^ItCond [none] ARMTHUMBinstructions.sinc:1111
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=51f577402673ff32 op_count=0
+  with_stack: with : ARMcondCk=1
+- add^ItCond [none] ARMTHUMBinstructions.sinc:1116
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=40ba16a02fa9f0fe op_count=0
+  with_stack: with : ARMcondCk=1
+- adr^ItCond [none] ARMTHUMBinstructions.sinc:1121
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=894b941296f83618 op_count=0
+  with_stack: with : ARMcondCk=1
+- and^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cda1c2e7b2f6d77f op_count=0
+  with_stack: with : ARMcondCk=1
+- asr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1137
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=962f13628d99b1cb op_count=0
+  with_stack: with : ARMcondCk=1
+- asr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1145
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c84e7cf9405b3a1c op_count=0
+  with_stack: with : ARMcondCk=1
+- asr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1153
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c9ed58ca201db32a op_count=0
+  with_stack: with : ARMcondCk=1
+- b^thcc [conditional_branch] ARMTHUMBinstructions.sinc:1162
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77425b2bdd0cbeb4 op_count=0
+  with_stack: with : ARMcondCk=1
+- b^ItCond [branch] ARMTHUMBinstructions.sinc:1166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41476d48eaa5da38 op_count=0
+  with_stack: with : ARMcondCk=1
+- bic^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cedb63b50ac3f1b6 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^ItCond [call] ARMTHUMBinstructions.sinc:1177
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=085827503c9157e2 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^ItCond [none] ARMTHUMBinstructions.sinc:1184
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c16285285cd5a344 op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^ItCond [call] ARMTHUMBinstructions.sinc:1189
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fb47ae1402aefb7a op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^ItCond [call] ARMTHUMBinstructions.sinc:1197
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42795fbb62f74bc8 op_count=0
+  with_stack: with : ARMcondCk=1
+- blx^ItCond [call] ARMTHUMBinstructions.sinc:1205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fdf158fc56840770 op_count=0
+  with_stack: with : ARMcondCk=1
+- blx^ItCond [call] ARMTHUMBinstructions.sinc:1213
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=837ac08af97619aa op_count=0
+  with_stack: with : ARMcondCk=1
+- bl^ItCond [branch] ARMTHUMBinstructions.sinc:1221
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=71ae484b4c3e8ec9 op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^bxns^ItCond [return] ARMTHUMBinstructions.sinc:1230
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=904b9d4e6e9f1680 op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^bxns^ItCond [branch] ARMTHUMBinstructions.sinc:1236
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6864c850e8dbfc4d op_count=0
+  with_stack: with : ARMcondCk=1
+- bx^bxns^ItCond [call] ARMTHUMBinstructions.sinc:1242
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=591bfc98f7ec2976 op_count=0
+  with_stack: with : ARMcondCk=1
+- cbnz^ItCond [conditional_branch] ARMTHUMBinstructions.sinc:1248
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=36d1c571accaeb52 op_count=0
+  with_stack: with : ARMcondCk=1
+- cbz^ItCond [conditional_branch] ARMTHUMBinstructions.sinc:1254
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ecd9f3899c1b3be op_count=0
+  with_stack: with : ARMcondCk=1
+- cmn^ItCond [none] ARMTHUMBinstructions.sinc:1260
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c3b76a2b48ada88a op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^ItCond [none] ARMTHUMBinstructions.sinc:1268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54b943b32fcecde3 op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^ItCond [none] ARMTHUMBinstructions.sinc:1276
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aed2d0d30e1bed0b op_count=0
+  with_stack: with : ARMcondCk=1
+- cmp^ItCond [none] ARMTHUMBinstructions.sinc:1284
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddeec490684ef6c5 op_count=0
+  with_stack: with : ARMcondCk=1
+- eor^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d053b6c1c15b1b7 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldmia^ItCond [none] ARMTHUMBinstructions.sinc:1299
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=302cd0f5ac2c4e33 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^ItCond [none] ARMTHUMBinstructions.sinc:1306
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63e9bc6f7261e436 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^ItCond [none] ARMTHUMBinstructions.sinc:1312
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee1a47ec3f89e1f2 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^ItCond [none] ARMTHUMBinstructions.sinc:1318
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=24c8346e3a7a7f6d op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^ItCond [none] ARMTHUMBinstructions.sinc:1324
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2277f6779dd0ea4f op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrb^ItCond [none] ARMTHUMBinstructions.sinc:1330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0117aa767351255f op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrb^ItCond [none] ARMTHUMBinstructions.sinc:1336
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=623eb66c5313efbf op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrh^ItCond [none] ARMTHUMBinstructions.sinc:1342
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0c58a6124e3bb324 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrh^ItCond [none] ARMTHUMBinstructions.sinc:1348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2faffba68837b88 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrsb^ItCond [none] ARMTHUMBinstructions.sinc:1354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dff9cbd7a6477de2 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldrsh^ItCond [none] ARMTHUMBinstructions.sinc:1360
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86e5052efbadb1d5 op_count=0
+  with_stack: with : ARMcondCk=1
+- lsl^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1371
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=390515a68053d268 op_count=0
+  with_stack: with : ARMcondCk=1
+- lsl^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1379
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c23ac5a274fcb8fa op_count=0
+  with_stack: with : ARMcondCk=1
+- lsr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=49e6e28440e83d1f op_count=0
+  with_stack: with : ARMcondCk=1
+- lsr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1400
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d8bffbdcf963c8a5 op_count=0
+  with_stack: with : ARMcondCk=1
+- lsr^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1409
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=61590ca8815d1c43 op_count=0
+  with_stack: with : ARMcondCk=1
+- mcr^ItCond [none] ARMTHUMBinstructions.sinc:1418
+  semantic_ops: coprocessor_moveto
+  semantic_template: status=unsupported_template action_hash=6c30cb83d29b03f6 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcr2^ItCond [none] ARMTHUMBinstructions.sinc:1426
+  semantic_ops: coprocessor_moveto
+  semantic_template: status=unsupported_template action_hash=6c30cb83d29b03f6 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcrr^ItCond [none] ARMTHUMBinstructions.sinc:1434
+  semantic_ops: coprocessor_moveto2
+  semantic_template: status=unsupported_template action_hash=cce3bd781c294d00 op_count=1
+  with_stack: with : ARMcondCk=1
+- mcrr^ItCond [none] ARMTHUMBinstructions.sinc:1441
+  semantic_ops: coprocessor_moveto2
+  semantic_template: status=unsupported_template action_hash=cce3bd781c294d00 op_count=1
+  with_stack: with : ARMcondCk=1
+- mov^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f856c47a5800ba8c op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1455
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c57d14e2d316968e op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^ItCond [none] ARMTHUMBinstructions.sinc:1462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fde0e4627806e488 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^ItCond [branch] ARMTHUMBinstructions.sinc:1467
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad1b95ba7f68155 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^ItCond [mixed] ARMTHUMBinstructions.sinc:1474
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1b6a002eae78158 op_count=0
+  with_stack: with : ARMcondCk=1
+- mov^ItCond [none] ARMTHUMBinstructions.sinc:1481
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fde0e4627806e488 op_count=0
+  with_stack: with : ARMcondCk=1
+- mul^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1486
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67bf19cf84a70f11 op_count=0
+  with_stack: with : ARMcondCk=1
+- mvn^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1493
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=837bab9343703a2b op_count=0
+  with_stack: with : ARMcondCk=1
+- nop^ItCond [none] ARMTHUMBinstructions.sinc:1500
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- nop^ItCond^".w" [none] ARMTHUMBinstructions.sinc:1503
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- nop [none] ARMTHUMBinstructions.sinc:1506
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- orr^CheckInIT_ZN^ItCond [none] ARMTHUMBinstructions.sinc:1509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e86029edde6793f5 op_count=0
+  with_stack: with : ARMcondCk=1
+- pop^ItCond [none] ARMTHUMBinstructions.sinc:1516
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc176995bd89345d op_count=0
+  with_stack: with : ARMcondCk=1
+- pop^ItCond [return] ARMTHUMBinstructions.sinc:1523
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=527015507bbef2ad op_count=0
+  with_stack: with : ARMcondCk=1
+- pop^ItCond [none] ARMTHUMBinstructions.sinc:1532
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=18845279720f89af op_count=0
+  with_stack: with : ARMcondCk=1
+- pop^ItCond [return] ARMTHUMBinstructions.sinc:1539
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67118f5213124f6a op_count=0
+  with_stack: with : ARMcondCk=1
+- push^ItCond [none] ARMTHUMBinstructions.sinc:1548
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=959de2dab8e6e414 op_count=0
+  with_stack: with : ARMcondCk=1
+- push^ItCond [none] ARMTHUMBinstructions.sinc:1555
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2992dd45529cf8be op_count=0
+  with_stack: with : ARMcondCk=1
+- push^ItCond [none] ARMTHUMBinstructions.sinc:1562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=99d5fb5dd554009c op_count=0
+  with_stack: with : ARMcondCk=1
+- rsb^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aeb0dd0cb7eb4d49 op_count=0
+  with_stack: with : ARMcondCk=1
+- ror^CheckInIT_CZN^ItCond [none] ARMTHUMBinstructions.sinc:1581
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8bac05852fccf922 op_count=0
+  with_stack: with : ARMcondCk=1
+- sbc^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9becd53e19c7ab61 op_count=0
+  with_stack: with : ARMcondCk=1
+- smla^thXBIT^thYBIT^ItCond [none] ARMTHUMBinstructions.sinc:1603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=289ae4c905607119 op_count=0
+  with_stack: with : ARMcondCk=1
+- smlad^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03406b3e65a5df46 op_count=0
+  with_stack: with : ARMcondCk=1
+- smlald^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1626
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=23745362e784f887 op_count=0
+  with_stack: with : ARMcondCk=1
+- smlal^ItCond [none] ARMTHUMBinstructions.sinc:1640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5876c1c97f7f938f op_count=0
+  with_stack: with : ARMcondCk=1
+- smlal^thXBIT^thYBIT^ItCond [none] ARMTHUMBinstructions.sinc:1648
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=05ccf3cf88ba929f op_count=0
+  with_stack: with : ARMcondCk=1
+- smlaw^thYBIT^ItCond [none] ARMTHUMBinstructions.sinc:1657
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77bdfe648ba0005f op_count=0
+  with_stack: with : ARMcondCk=1
+- smlsd^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1666
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac679ca4cd89af19 op_count=0
+  with_stack: with : ARMcondCk=1
+- smlsld^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1678
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cb43edcd853bd6f3 op_count=0
+  with_stack: with : ARMcondCk=1
+- smmla^ItCond [none] ARMTHUMBinstructions.sinc:1692
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c54f02385617292e op_count=0
+  with_stack: with : ARMcondCk=1
+- smmlar^ItCond [none] ARMTHUMBinstructions.sinc:1700
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d53f83327b4a85f op_count=0
+  with_stack: with : ARMcondCk=1
+- smmls^ItCond [none] ARMTHUMBinstructions.sinc:1708
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96be36481b9a871e op_count=0
+  with_stack: with : ARMcondCk=1
+- smmlsr^ItCond [none] ARMTHUMBinstructions.sinc:1715
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3330ce4b0117ec44 op_count=0
+  with_stack: with : ARMcondCk=1
+- smmul^ItCond [none] ARMTHUMBinstructions.sinc:1723
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b408d0140c89fe65 op_count=0
+  with_stack: with : ARMcondCk=1
+- smmulr^ItCond [none] ARMTHUMBinstructions.sinc:1729
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46ba47d42c9f8125 op_count=0
+  with_stack: with : ARMcondCk=1
+- smuad^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1736
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=21c39f1a600d3c04 op_count=0
+  with_stack: with : ARMcondCk=1
+- smulbb^ItCond [none] ARMTHUMBinstructions.sinc:1747
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c53d201505647ab op_count=0
+  with_stack: with : ARMcondCk=1
+- smulbt^ItCond [none] ARMTHUMBinstructions.sinc:1756
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3180d20659eff856 op_count=0
+  with_stack: with : ARMcondCk=1
+- smultb^ItCond [none] ARMTHUMBinstructions.sinc:1765
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30e1c023c3dd0844 op_count=0
+  with_stack: with : ARMcondCk=1
+- smultt^ItCond [none] ARMTHUMBinstructions.sinc:1774
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=78f3e17fadee7f8f op_count=0
+  with_stack: with : ARMcondCk=1
+- smull^ItCond [none] ARMTHUMBinstructions.sinc:1783
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94d812aa8b13d879 op_count=0
+  with_stack: with : ARMcondCk=1
+- smusd^thdXbot^ItCond [none] ARMTHUMBinstructions.sinc:1790
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0da8694214810bd op_count=0
+  with_stack: with : ARMcondCk=1
+- smulw^thYBIT^ItCond [none] ARMTHUMBinstructions.sinc:1801
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03f0b2c6971b7f9b op_count=0
+  with_stack: with : ARMcondCk=1
+- srsdb^ItCond [none] ARMTHUMBinstructions.sinc:1807
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddec6a33855f54cb op_count=0
+  with_stack: with : ARMcondCk=1
+- srsdb^ItCond [none] ARMTHUMBinstructions.sinc:1816
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0cf2280395e2bc3e op_count=0
+  with_stack: with : ARMcondCk=1
+- srsib^ItCond [none] ARMTHUMBinstructions.sinc:1824
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aad237d611eaaba7 op_count=0
+  with_stack: with : ARMcondCk=1
+- srsia^ItCond [none] ARMTHUMBinstructions.sinc:1833
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e8d9c7091adfc54a op_count=0
+  with_stack: with : ARMcondCk=1
+- stmia^ItCond [none] ARMTHUMBinstructions.sinc:1841
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=465b9f7a8aa63db2 op_count=0
+  with_stack: with : ARMcondCk=1
+- str^ItCond [none] ARMTHUMBinstructions.sinc:1848
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0db05a089fd82ffb op_count=0
+  with_stack: with : ARMcondCk=1
+- str^ItCond [none] ARMTHUMBinstructions.sinc:1853
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e4ee7e3b6a0d19c op_count=0
+  with_stack: with : ARMcondCk=1
+- str^ItCond [none] ARMTHUMBinstructions.sinc:1858
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=93043d7abfc21292 op_count=0
+  with_stack: with : ARMcondCk=1
+- strb^ItCond [none] ARMTHUMBinstructions.sinc:1863
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c15cc529067e55e6 op_count=0
+  with_stack: with : ARMcondCk=1
+- strb^ItCond [none] ARMTHUMBinstructions.sinc:1869
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53c5a1e5a80810ba op_count=0
+  with_stack: with : ARMcondCk=1
+- strh^ItCond [none] ARMTHUMBinstructions.sinc:1875
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c91381e45f70a5be op_count=0
+  with_stack: with : ARMcondCk=1
+- strh^ItCond [none] ARMTHUMBinstructions.sinc:1881
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d18788fd4f15ff33 op_count=0
+  with_stack: with : ARMcondCk=1
+- strt^ItCond^".w" [none] ARMTHUMBinstructions.sinc:1887
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fb0dac274cce8db op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1893
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03706e46dfdf5b3d op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1901
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7ab0bab08e57c77 op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^CheckInIT_CZNO^ItCond [none] ARMTHUMBinstructions.sinc:1909
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1566304dd47bd9d op_count=0
+  with_stack: with : ARMcondCk=1
+- sub^ItCond [none] ARMTHUMBinstructions.sinc:1917
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b392fd1fa7eaf92 op_count=0
+  with_stack: with : ARMcondCk=1
+- svc^ItCond [none] ARMTHUMBinstructions.sinc:1922
+  semantic_ops: software_interrupt
+  semantic_template: status=unsupported_template action_hash=a76b02f27e12d224 op_count=1
+  with_stack: with : ARMcondCk=1
+- tst^ItCond [none] ARMTHUMBinstructions.sinc:1928
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0190b27d2ab2111c op_count=0
+  with_stack: with : ARMcondCk=1

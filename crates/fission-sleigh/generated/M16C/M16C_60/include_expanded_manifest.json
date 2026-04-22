@@ -1,0 +1,8 @@
+{
+  "arch": "M16C",
+  "entry_spec": "M16C_60.slaspec",
+  "entry_id": "M16C_60",
+  "include_manifest": [
+    "M16C_60.slaspec@0"
+  ]
+}

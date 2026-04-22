@@ -1,0 +1,19 @@
+{
+  "arch": "PowerPC",
+  "entry_spec": "ppc_32_quicciii_le.slaspec",
+  "entry_id": "ppc_32_quicciii_le",
+  "include_manifest": [
+    "ppc_32_quicciii_le.slaspec@0",
+    "ppc_common.sinc@1",
+    "ppc_instructions.sinc@2",
+    "lmwInstructions.sinc@3",
+    "lswInstructions.sinc@3",
+    "mulhwInstructions.sinc@3",
+    "stmwInstructions.sinc@3",
+    "stswiInstructions.sinc@3",
+    "ppc_embedded.sinc@2",
+    "quicciii.sinc@1",
+    "evx.sinc@1",
+    "Scalar_SPFP.sinc@2"
+  ]
+}

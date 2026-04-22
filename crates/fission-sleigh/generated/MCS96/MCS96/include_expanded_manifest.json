@@ -1,0 +1,9 @@
+{
+  "arch": "MCS96",
+  "entry_spec": "MCS96.slaspec",
+  "entry_id": "MCS96",
+  "include_manifest": [
+    "MCS96.slaspec@0",
+    "MCS96.sinc@1"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "arch": "Loongarch",
+  "entry_spec": "loongarch32_f64.slaspec",
+  "entry_id": "loongarch32_f64",
+  "include_manifest": [
+    "loongarch32_f64.slaspec@0",
+    "loongarch_main.sinc@1",
+    "loongarch32_instructions.sinc@1",
+    "loongarch_float.sinc@1",
+    "loongarch_double.sinc@1"
+  ]
+}

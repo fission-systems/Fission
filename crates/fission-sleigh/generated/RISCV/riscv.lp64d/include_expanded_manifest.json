@@ -1,0 +1,33 @@
+{
+  "arch": "RISCV",
+  "entry_spec": "riscv.lp64d.slaspec",
+  "entry_id": "riscv.lp64d",
+  "include_manifest": [
+    "riscv.lp64d.slaspec@0",
+    "riscv.reg.sinc@1",
+    "riscv.table.sinc@1",
+    "riscv.instr.sinc@1",
+    "riscv.rv32i.sinc@2",
+    "riscv.rv32a.sinc@2",
+    "riscv.rv32m.sinc@2",
+    "riscv.rv32b.sinc@2",
+    "riscv.rv32p.sinc@2",
+    "riscv.rv32k.sinc@2",
+    "riscv.rv32f.sinc@2",
+    "riscv.rv32d.sinc@2",
+    "riscv.rv64i.sinc@2",
+    "riscv.rv64a.sinc@2",
+    "riscv.rv64m.sinc@2",
+    "riscv.rv64b.sinc@2",
+    "riscv.rv64p.sinc@2",
+    "riscv.rv64f.sinc@2",
+    "riscv.rv64d.sinc@2",
+    "riscv.csr.sinc@2",
+    "riscv.priv.sinc@2",
+    "riscv.rvc.sinc@2",
+    "riscv.rvv.sinc@2",
+    "riscv.zi.sinc@2",
+    "riscv.rv64k.sinc@1",
+    "riscv.custom.sinc@1"
+  ]
+}

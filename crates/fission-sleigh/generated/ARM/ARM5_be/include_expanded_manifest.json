@@ -1,0 +1,10 @@
+{
+  "arch": "ARM",
+  "entry_spec": "ARM5_be.slaspec",
+  "entry_id": "ARM5_be",
+  "include_manifest": [
+    "ARM5_be.slaspec@0",
+    "ARM.sinc@1",
+    "ARMinstructions.sinc@2"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "arch": "Dalvik",
+  "entry_spec": "Dalvik_Base.slaspec",
+  "entry_id": "Dalvik_Base",
+  "include_manifest": [
+    "Dalvik_Base.slaspec@0",
+    "Dalvik_Base.sinc@1"
+  ]
+}

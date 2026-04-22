@@ -1,0 +1,8 @@
+{
+  "arch": "8048",
+  "entry_spec": "8048.slaspec",
+  "entry_id": "8048",
+  "include_manifest": [
+    "8048.slaspec@0"
+  ]
+}

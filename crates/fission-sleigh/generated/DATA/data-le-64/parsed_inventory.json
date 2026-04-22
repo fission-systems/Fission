@@ -1,0 +1,30 @@
+{
+  "arch": "DATA",
+  "entry_spec": "data-le-64.slaspec",
+  "entry_id": "data-le-64",
+  "definition_count": 7,
+  "macro_count": 0,
+  "constructor_count": 1,
+  "executable_constructor_count": 0,
+  "decision_node_count": 1,
+  "root_node_index": 0,
+  "pcodeop_count": 0,
+  "definitions": [
+    {"kind": "endian", "source": "data.sinc:1"},
+    {"kind": "alignment", "source": "data.sinc:3"},
+    {"kind": "space", "source": "data.sinc:5"},
+    {"kind": "space", "source": "data.sinc:7"},
+    {"kind": "register", "source": "data.sinc:13"},
+    {"kind": "register", "source": "data.sinc:16"},
+    {"kind": "context", "source": "data.sinc:18"}
+  ],
+  "constructors": [
+    {"mnemonic": "nop", "source": "data.sinc:26", "control_flow": "none", "with_depth": 0, "signature_hash": "f5441e89eb4f1351", "pattern_signature": ":nop is test=1 unimpl", "semantic_template_status": "empty", "semantic_action_hash": "cbf29ce484222325", "semantic_op_count": 0}
+  ],
+  "decision_nodes": [
+    {"probe": "terminal", "branches": [], "leaf_constructor_indexes": []}
+  ],
+  "executable_constructors": [
+
+  ]
+}
