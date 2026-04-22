@@ -55,6 +55,29 @@ jobs:
       - name: Build fission-cli (release)
         run: cargo build -p fission-cli --locked --release
 
+      - name: Setup benchmark binary build toolchain
+        run: |
+          # Install MinGW-w64 for Windows cross-compilation
+          apt-get update
+          apt-get install -y mingw-w64
+          
+          # Add Rust Windows target
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build benchmark binaries (small, medium, large)
+        run: |
+          for size in small medium large; do
+            echo "🔨 Building $size benchmark binaries..."
+            cd benchmark/binary/x86-64/window/$size
+            bash build.sh all 2>&1 | head -50
+            if [ -f "*.exe" ]; then
+              echo "✓ $size binaries built successfully"
+              ls -lh *.exe 2>/dev/null || true
+            fi
+            cd ../../../../../
+          done
+        continue-on-error: true
+
       - name: Run advisory smoke corpus benchmark
         id: benchmark
         run: |

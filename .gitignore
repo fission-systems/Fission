@@ -60,10 +60,16 @@ vendor/
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
 
-# Benchmark compiled binaries only (large files, handled separately)
-# Include source code, scripts, and documentation
-/benchmark/binary/**/binary/
+# Benchmark binaries (compiled output, built in CI)
+# Source code and build scripts are tracked; only binaries excluded
+/benchmark/binary/**/*.exe
+/benchmark/binary/**/*.exe_ghidra/
+/benchmark/binary/**/*.o
+/benchmark/binary/**/*.a
+/benchmark/binary/**/build/
 !benchmark/binary/.gitkeep
+!benchmark/binary/**/source/
+!benchmark/binary/**/build.sh
 
 # Local sample corpora and scratch projects
 samples/
