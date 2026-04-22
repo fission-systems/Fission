@@ -27,6 +27,7 @@ def print_single_benchmark_console(
     normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
     ghidra_action_metrics = ((summary.get("ghidra_action_metrics") or {}).get("fission")) or {}
     blockgraph_region_metrics = ((summary.get("blockgraph_region_metrics") or {}).get("fission")) or {}
+    alias_interleave_metrics = ((summary.get("alias_interleave_metrics") or {}).get("fission")) or {}
     giant_family_counts = summary.get("giant_function_speed_family_counts", {}) or {}
 
     console.print(
@@ -82,6 +83,14 @@ def print_single_benchmark_console(
         blockgraph_table.add_row(key, f"{float(value):.3f}")
     if blockgraph_region_metrics:
         console.print(blockgraph_table)
+
+    alias_table = Table(title="Alias Interleave Metrics", show_header=True)
+    alias_table.add_column("Metric")
+    alias_table.add_column("Value", justify="right")
+    for key, value in sorted(alias_interleave_metrics.items()):
+        alias_table.add_row(key, f"{float(value):.3f}")
+    if alias_interleave_metrics:
+        console.print(alias_table)
 
     if giant_family_counts:
         giant_table = Table(title="Giant Function Families", show_header=True)
@@ -172,6 +181,15 @@ def print_corpus_benchmark_console(
         for key, value in sorted(blockgraph_totals.items()):
             blockgraph_table.add_row(str(key), f"{float(value):.3f}")
         console.print(blockgraph_table)
+
+    alias_totals = corpus_summary.get("alias_interleave_metric_totals", {}) or {}
+    if alias_totals:
+        alias_table = Table(title="Alias Interleave Totals", show_header=True)
+        alias_table.add_column("Metric")
+        alias_table.add_column("Value", justify="right")
+        for key, value in sorted(alias_totals.items()):
+            alias_table.add_row(str(key), f"{float(value):.3f}")
+        console.print(alias_table)
 
     giant_family_totals = corpus_summary.get("giant_function_speed_family_totals", {}) or {}
     if giant_family_totals:

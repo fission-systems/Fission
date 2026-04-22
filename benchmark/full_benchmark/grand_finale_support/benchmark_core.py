@@ -215,6 +215,49 @@ BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("blockgraph_region_rejected_irreducible_count", "rejected_irreducible"),
 )
 
+ALIAS_INTERLEAVE_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    (
+        "guarded_tail_rejected_alias_interleave_conflict_count",
+        "alias_interleave_conflict",
+    ),
+    (
+        "canonicalization_failed_alias_has_nonlocal_ref_count",
+        "alias_has_nonlocal_ref",
+    ),
+    (
+        "canonicalization_failed_alias_has_nonlocal_ref_external_before_count",
+        "alias_has_nonlocal_ref_external_before",
+    ),
+    (
+        "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count",
+        "alias_has_nonlocal_ref_nested_before",
+    ),
+    (
+        "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count",
+        "alias_has_nonlocal_ref_post_segment_ref",
+    ),
+    (
+        "canonicalization_failed_alias_not_fallthrough_count",
+        "alias_not_fallthrough",
+    ),
+    (
+        "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count",
+        "alias_not_fallthrough_top_level_after_label",
+    ),
+    (
+        "canonicalization_failed_alias_not_fallthrough_nested_after_label_count",
+        "alias_not_fallthrough_nested_after_label",
+    ),
+    (
+        "canonicalization_failed_alias_has_multiple_internal_predecessors_count",
+        "alias_has_multiple_internal_predecessors",
+    ),
+    (
+        "canonicalization_failed_payload_crosses_join_count",
+        "payload_crosses_join",
+    ),
+)
+
 GIANT_RENDERED_CODE_THRESHOLD = 100000
 GIANT_REPLACEMENT_THRESHOLD = 10000
 GIANT_MATERIALIZATION_THRESHOLD = 10000
@@ -251,6 +294,11 @@ def _extract_blockgraph_region_metrics(preview_build_stats: dict[str, Any]) -> d
     return _extract_named_metrics(source, BLOCKGRAPH_REGION_METRIC_SPECS)
 
 
+def _extract_alias_interleave_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+    source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _extract_named_metrics(source, ALIAS_INTERLEAVE_METRIC_SPECS)
+
+
 def _aggregate_ghidra_action_metrics_from_entries(
     entries: dict[str, dict[str, Any]] | None,
 ) -> dict[str, float]:
@@ -277,6 +325,21 @@ def _aggregate_blockgraph_region_metrics_from_entries(
         if not isinstance(preview_build_stats, dict):
             continue
         for key, alias in BLOCKGRAPH_REGION_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
+
+
+def _aggregate_alias_interleave_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in ALIAS_INTERLEAVE_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in ALIAS_INTERLEAVE_METRIC_SPECS:
             totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
     return dict(sorted(totals.items()))
 
@@ -3001,6 +3064,33 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
         "guarded_tail_rejected_alias_interleave_conflict_count": preview_stat_total(
             "guarded_tail_rejected_alias_interleave_conflict_count"
         ),
+        "canonicalization_failed_alias_has_nonlocal_ref_count": preview_stat_total(
+            "canonicalization_failed_alias_has_nonlocal_ref_count"
+        ),
+        "canonicalization_failed_alias_has_nonlocal_ref_external_before_count": preview_stat_total(
+            "canonicalization_failed_alias_has_nonlocal_ref_external_before_count"
+        ),
+        "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count": preview_stat_total(
+            "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count"
+        ),
+        "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count": preview_stat_total(
+            "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count"
+        ),
+        "canonicalization_failed_alias_not_fallthrough_count": preview_stat_total(
+            "canonicalization_failed_alias_not_fallthrough_count"
+        ),
+        "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count": preview_stat_total(
+            "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count"
+        ),
+        "canonicalization_failed_alias_not_fallthrough_nested_after_label_count": preview_stat_total(
+            "canonicalization_failed_alias_not_fallthrough_nested_after_label_count"
+        ),
+        "canonicalization_failed_alias_has_multiple_internal_predecessors_count": preview_stat_total(
+            "canonicalization_failed_alias_has_multiple_internal_predecessors_count"
+        ),
+        "canonicalization_failed_payload_crosses_join_count": preview_stat_total(
+            "canonicalization_failed_payload_crosses_join_count"
+        ),
         "guarded_tail_rejected_ambiguous_follow_count": preview_stat_total(
             "guarded_tail_rejected_ambiguous_follow_count"
         ),
@@ -3851,6 +3941,13 @@ def build_comparison(
         blockgraph_region_metrics = _normalize_metric_map_for_json(
             _aggregate_blockgraph_region_metrics_from_entries(fission["entries"])
         )
+    alias_interleave_metrics = _normalize_metric_map_for_json(
+        _extract_alias_interleave_metrics(fission["meta"].get("preview_build_stats", {}))
+    )
+    if not any(alias_interleave_metrics.values()):
+        alias_interleave_metrics = _normalize_metric_map_for_json(
+            _aggregate_alias_interleave_metrics_from_entries(fission["entries"])
+        )
     giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
     target_structuring_rows = _build_target_structuring_rows(fission["entries"])
 
@@ -3935,6 +4032,9 @@ def build_comparison(
         },
         "blockgraph_region_metrics": {
             "fission": blockgraph_region_metrics,
+        },
+        "alias_interleave_metrics": {
+            "fission": alias_interleave_metrics,
         },
         "target_structuring_rows": target_structuring_rows,
         "giant_function_candidates": giant_function_diagnostics["giant_function_candidates"],
@@ -4118,6 +4218,42 @@ def _binary_failure_family_distribution(benchmark: dict[str, Any]) -> dict[str, 
             ),
             "canonical_alias_interleave_conflict_count": _safe_int(
                 fission_summary.get("guarded_tail_rejected_alias_interleave_conflict_count"),
+                0,
+            ),
+            "canonical_alias_has_nonlocal_ref_count": _safe_int(
+                fission_summary.get("canonicalization_failed_alias_has_nonlocal_ref_count"),
+                0,
+            ),
+            "canonical_alias_has_nonlocal_ref_external_before_count": _safe_int(
+                fission_summary.get(
+                    "canonicalization_failed_alias_has_nonlocal_ref_external_before_count"
+                ),
+                0,
+            ),
+            "canonical_alias_has_nonlocal_ref_nested_before_count": _safe_int(
+                fission_summary.get(
+                    "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count"
+                ),
+                0,
+            ),
+            "canonical_alias_has_nonlocal_ref_post_segment_ref_count": _safe_int(
+                fission_summary.get(
+                    "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count"
+                ),
+                0,
+            ),
+            "canonical_alias_not_fallthrough_count": _safe_int(
+                fission_summary.get("canonicalization_failed_alias_not_fallthrough_count"),
+                0,
+            ),
+            "canonical_alias_has_multiple_internal_predecessors_count": _safe_int(
+                fission_summary.get(
+                    "canonicalization_failed_alias_has_multiple_internal_predecessors_count"
+                ),
+                0,
+            ),
+            "canonical_payload_crosses_join_count": _safe_int(
+                fission_summary.get("canonicalization_failed_payload_crosses_join_count"),
                 0,
             ),
             "canonical_side_entry_conflict_count": _safe_int(
@@ -4409,6 +4545,7 @@ def build_corpus_assessment(
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
     ghidra_action_metrics_per_binary: dict[str, dict[str, float]] = {}
     blockgraph_region_metrics_per_binary: dict[str, dict[str, float]] = {}
+    alias_interleave_metrics_per_binary: dict[str, dict[str, float]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
@@ -4526,6 +4663,30 @@ def build_corpus_assessment(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
+        alias_interleave_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "alias_interleave_metrics", "fission"), {})
+            if isinstance(
+                _lookup_path(benchmark, ("summary", "alias_interleave_metrics", "fission"), {}),
+                dict,
+            )
+            else {}
+        )
+        if not any(alias_interleave_metrics.values()):
+            alias_interleave_metrics = _normalize_metric_map_for_json(
+                _extract_alias_interleave_metrics(
+                    _lookup_path(
+                        benchmark,
+                        ("summary", "engines", "fission", "preview_build_stats"),
+                        {},
+                    )
+                )
+            )
+        if not any(alias_interleave_metrics.values()):
+            alias_interleave_metrics = _normalize_metric_map_for_json(
+                _aggregate_alias_interleave_metrics_from_entries(
+                    _lookup_path(benchmark, ("engines", "fission", "entries"), {})
+                )
+            )
         target_structuring_rows = list(
             _lookup_path(benchmark, ("summary", "target_structuring_rows"), []) or []
         )
@@ -4595,6 +4756,7 @@ def build_corpus_assessment(
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
         ghidra_action_metrics_per_binary[binary_id] = ghidra_action_metrics
         blockgraph_region_metrics_per_binary[binary_id] = blockgraph_region_metrics
+        alias_interleave_metrics_per_binary[binary_id] = alias_interleave_metrics
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
             giant_function_diagnostics["giant_function_speed_family_counts"]
         )
@@ -4798,6 +4960,7 @@ def build_corpus_assessment(
                 "normalize_pass_metrics": normalize_pass_metrics,
                 "ghidra_action_metrics": ghidra_action_metrics,
                 "blockgraph_region_metrics": blockgraph_region_metrics,
+                "alias_interleave_metrics": alias_interleave_metrics,
                 "target_structuring_rows": target_structuring_rows,
                 "giant_function_candidates": giant_function_diagnostics[
                     "giant_function_candidates"
@@ -4837,6 +5000,9 @@ def build_corpus_assessment(
     ghidra_action_metric_totals = _merge_named_metric_totals(ghidra_action_metrics_per_binary)
     blockgraph_region_metric_totals = _merge_named_metric_totals(
         blockgraph_region_metrics_per_binary
+    )
+    alias_interleave_metric_totals = _merge_named_metric_totals(
+        alias_interleave_metrics_per_binary
     )
     giant_function_speed_family_totals = _merge_count_maps(
         giant_function_speed_family_counts_per_binary
@@ -5117,6 +5283,7 @@ def build_corpus_assessment(
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
             "ghidra_action_metric_totals": ghidra_action_metric_totals,
             "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
+            "alias_interleave_metric_totals": alias_interleave_metric_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
             "blockgraph_region_rejection_totals": {
                 key: value
@@ -5144,6 +5311,8 @@ def build_corpus_assessment(
         "ghidra_action_metrics_per_binary": ghidra_action_metrics_per_binary,
         "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
         "blockgraph_region_metrics_per_binary": blockgraph_region_metrics_per_binary,
+        "alias_interleave_metric_totals": alias_interleave_metric_totals,
+        "alias_interleave_metrics_per_binary": alias_interleave_metrics_per_binary,
         "blockgraph_region_rejection_totals": {
             key: value
             for key, value in blockgraph_region_metric_totals.items()

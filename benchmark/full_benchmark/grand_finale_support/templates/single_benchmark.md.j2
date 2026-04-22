@@ -67,6 +67,17 @@ Ghidra `BlockGraph` / `FlowBlock` clean-room proof substrate counters. These are
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+{% set alias_interleave_metrics = (summary.alias_interleave_metrics or {}).get("fission", {}) or {} %}
+## Alias Interleave Metrics
+
+Guarded-tail canonicalization blocker breakdown. These counters narrow `alias_interleave_conflict` into concrete proof-failure families.
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in alias_interleave_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
 {% set target_structuring_rows = summary.get("target_structuring_rows", []) or [] %}
 {% if target_structuring_rows %}
 ### Target Structuring Rows

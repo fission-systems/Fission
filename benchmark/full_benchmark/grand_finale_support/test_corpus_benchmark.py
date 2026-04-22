@@ -16,6 +16,7 @@ from grand_finale_support.benchmark_core import (
     _default_corpus_output_name,
     _derive_binary_arch,
     _derive_dynamic_row_targets,
+    _extract_alias_interleave_metrics,
     _extract_blockgraph_region_metrics,
     _extract_ghidra_action_metrics,
     _extract_owner_metrics_from_engine_summary,
@@ -109,6 +110,16 @@ def _minimal_single_binary_summary(
                         "blockgraph_region_rejected_follow_owner_conflict_count": 0,
                         "blockgraph_region_rejected_emit_ready_count": 1,
                         "blockgraph_region_rejected_irreducible_count": 0,
+                        "guarded_tail_rejected_alias_interleave_conflict_count": 5,
+                        "canonicalization_failed_alias_has_nonlocal_ref_count": 4,
+                        "canonicalization_failed_alias_has_nonlocal_ref_external_before_count": 1,
+                        "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count": 2,
+                        "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count": 1,
+                        "canonicalization_failed_alias_not_fallthrough_count": 3,
+                        "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count": 2,
+                        "canonicalization_failed_alias_not_fallthrough_nested_after_label_count": 1,
+                        "canonicalization_failed_alias_has_multiple_internal_predecessors_count": 1,
+                        "canonicalization_failed_payload_crosses_join_count": 2,
                         "pass_metrics": {
                             "wide_dead_assignment": {
                                 "total_time_ms": 12.0,
@@ -157,6 +168,20 @@ def _minimal_single_binary_summary(
                     "rejected_must_emit_label": 1.0,
                     "rejected_emit_ready": 1.0,
                     "rejected_irreducible": 0.0,
+                }
+            },
+            "alias_interleave_metrics": {
+                "fission": {
+                    "alias_interleave_conflict": 5.0,
+                    "alias_has_nonlocal_ref": 4.0,
+                    "alias_has_nonlocal_ref_external_before": 1.0,
+                    "alias_has_nonlocal_ref_nested_before": 2.0,
+                    "alias_has_nonlocal_ref_post_segment_ref": 1.0,
+                    "alias_not_fallthrough": 3.0,
+                    "alias_not_fallthrough_top_level_after_label": 2.0,
+                    "alias_not_fallthrough_nested_after_label": 1.0,
+                    "alias_has_multiple_internal_predecessors": 1.0,
+                    "payload_crosses_join": 2.0,
                 }
             },
             "giant_function_candidates": 1,
@@ -443,6 +468,32 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["rejected_emit_ready"], 1.0)
         self.assertEqual(metrics["rejected_irreducible"], 0.0)
 
+    def test_extract_alias_interleave_metrics(self) -> None:
+        metrics = _extract_alias_interleave_metrics(
+            {
+                "guarded_tail_rejected_alias_interleave_conflict_count": 5,
+                "canonicalization_failed_alias_has_nonlocal_ref_count": 4,
+                "canonicalization_failed_alias_has_nonlocal_ref_external_before_count": 1,
+                "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count": 2,
+                "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count": 1,
+                "canonicalization_failed_alias_not_fallthrough_count": 3,
+                "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count": 2,
+                "canonicalization_failed_alias_not_fallthrough_nested_after_label_count": 1,
+                "canonicalization_failed_alias_has_multiple_internal_predecessors_count": 1,
+                "canonicalization_failed_payload_crosses_join_count": 2,
+            }
+        )
+        self.assertEqual(metrics["alias_interleave_conflict"], 5.0)
+        self.assertEqual(metrics["alias_has_nonlocal_ref"], 4.0)
+        self.assertEqual(metrics["alias_has_nonlocal_ref_external_before"], 1.0)
+        self.assertEqual(metrics["alias_has_nonlocal_ref_nested_before"], 2.0)
+        self.assertEqual(metrics["alias_has_nonlocal_ref_post_segment_ref"], 1.0)
+        self.assertEqual(metrics["alias_not_fallthrough"], 3.0)
+        self.assertEqual(metrics["alias_not_fallthrough_top_level_after_label"], 2.0)
+        self.assertEqual(metrics["alias_not_fallthrough_nested_after_label"], 1.0)
+        self.assertEqual(metrics["alias_has_multiple_internal_predecessors"], 1.0)
+        self.assertEqual(metrics["payload_crosses_join"], 2.0)
+
     def test_shape_drift_metric_counts_synthetic_helper_calls(self) -> None:
         metrics = collect_code_metrics(
             "int f(){ return __fission_merge2(x, y) + __fission_guard(tmp); }",
@@ -644,8 +695,13 @@ class CorpusBenchmarkTests(unittest.TestCase):
             1,
         )
         self.assertEqual(corpus["blockgraph_region_metric_totals"]["candidate"], 5)
+        self.assertEqual(corpus["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4)
         self.assertEqual(
             corpus["binaries"][0]["blockgraph_region_metrics"]["complete"],
+            2,
+        )
+        self.assertEqual(
+            corpus["binaries"][0]["alias_interleave_metrics"]["alias_has_nonlocal_ref_nested_before"],
             2,
         )
         self.assertEqual(
@@ -802,6 +858,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
         self.assertEqual(payload["blockgraph_region_metric_totals"]["candidate"], 5.0)
+        self.assertEqual(payload["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4.0)
         self.assertEqual(
             payload["per_binary_rows"][0]["ghidra_action_metrics"]["blockgraph_structuring"],
             1.0,
@@ -809,6 +866,10 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             payload["per_binary_rows"][0]["blockgraph_region_metrics"]["complete"],
             2.0,
+        )
+        self.assertEqual(
+            payload["per_binary_rows"][0]["alias_interleave_metrics"]["alias_not_fallthrough"],
+            3.0,
         )
         self.assertEqual(
             payload["giant_function_speed_family_totals"]["RenderHeavy"],

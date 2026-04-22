@@ -44,6 +44,7 @@ class VerboseSingleSummary(FlexibleModel):
     normalize_pass_metrics: dict[str, Any] = Field(default_factory=dict)
     ghidra_action_metrics: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
+    alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
@@ -72,6 +73,7 @@ class VerboseCorpusBinaryRow(FlexibleModel):
     normalize_pass_metrics: dict[str, Any] = Field(default_factory=dict)
     ghidra_action_metrics: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
+    alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
     max_pathological_examples: list[dict[str, Any]] = Field(default_factory=list)
@@ -111,6 +113,8 @@ class VerboseCorpusBenchmarkArtifact(FlexibleModel):
     ghidra_action_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_metric_totals: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
+    alias_interleave_metric_totals: dict[str, Any] = Field(default_factory=dict)
+    alias_interleave_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_rejection_totals: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_totals: dict[str, Any] = Field(default_factory=dict)
@@ -147,6 +151,7 @@ class CompactBinaryRow(FlexibleModel):
     normalize_pass_metrics: dict[str, float] = Field(default_factory=dict)
     ghidra_action_metrics: dict[str, float] = Field(default_factory=dict)
     blockgraph_region_metrics: dict[str, float] = Field(default_factory=dict)
+    alias_interleave_metrics: dict[str, float] = Field(default_factory=dict)
     eligibility_reason: str = "unknown"
 
 
@@ -176,6 +181,7 @@ class CompactSingleBenchmarkSummary(FlexibleModel):
     normalize_pass_metrics: dict[str, float] = Field(default_factory=dict)
     ghidra_action_metrics: dict[str, float] = Field(default_factory=dict)
     blockgraph_region_metrics: dict[str, float] = Field(default_factory=dict)
+    alias_interleave_metrics: dict[str, float] = Field(default_factory=dict)
     giant_function_speed_family_counts: dict[str, int] = Field(default_factory=dict)
     watchlist_diagnostics: dict[str, Any] = Field(default_factory=dict)
     baseline_blockers: list[str] = Field(default_factory=list)
@@ -204,6 +210,7 @@ class CompactCorpusBenchmarkSummary(FlexibleModel):
     normalize_pass_metric_totals: dict[str, float] = Field(default_factory=dict)
     ghidra_action_metric_totals: dict[str, float] = Field(default_factory=dict)
     blockgraph_region_metric_totals: dict[str, float] = Field(default_factory=dict)
+    alias_interleave_metric_totals: dict[str, float] = Field(default_factory=dict)
     giant_function_speed_family_totals: dict[str, int] = Field(default_factory=dict)
     watchlist_reason_counts: dict[str, int] = Field(default_factory=dict)
     top_degraded_rows: list[CompactRowExample] = Field(default_factory=list)
