@@ -60,8 +60,9 @@ vendor/
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
 
-# Benchmark sample binaries (large files, handled separately)
-/benchmark/binary/**
+# Benchmark compiled binaries only (large files, handled separately)
+# Include source code, scripts, and documentation
+/benchmark/binary/**/binary/
 !benchmark/binary/.gitkeep
 
 # Local sample corpora and scratch projects
