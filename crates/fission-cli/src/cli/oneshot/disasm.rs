@@ -197,13 +197,13 @@ pub(super) fn disassemble(
 }
 
 fn runtime_frontend_for_binary(binary: &LoadedBinary) -> io::Result<RuntimeSleighFrontend> {
-    let language = binary.sleigh_language_id().ok_or_else(|| {
+    let load_spec = binary.load_spec().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::Unsupported,
             format!("missing Ghidra load spec for '{}'", binary.path),
         )
     })?;
-    RuntimeSleighFrontend::new_for_language(language).map_err(to_io_error)
+    RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(to_io_error)
 }
 
 fn to_io_error<E>(err: E) -> io::Error

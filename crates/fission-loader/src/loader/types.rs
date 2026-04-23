@@ -354,6 +354,10 @@ impl LoadedBinary {
             .map(|spec| spec.pair.language_id.as_str())
     }
 
+    pub fn load_spec(&self) -> Option<&BinaryLoadSpec> {
+        self.load_spec.as_ref()
+    }
+
     /// Get mutable reference with COW semantics
     /// Clones the inner data only if there are other references
     #[inline]

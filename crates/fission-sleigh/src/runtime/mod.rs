@@ -7,6 +7,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
+use fission_core::architecture::BinaryLoadSpec;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +15,8 @@ use crate::compiler::{
     compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
 };
 pub use registry::{
-    CompiledRuntimeRegistry, ExecutionEngineKey, ProcessorDescriptor, RuntimeFrontendDescriptor,
+    CompiledRuntimeRegistry, ExecutionEngineKey, ProcessorDescriptor, RuntimeEntrySelection,
+    RuntimeEntrySelectionError, RuntimeEntrySelectionSource, RuntimeFrontendDescriptor,
     RuntimeSupportLevel, RuntimeVariantDescriptor,
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
@@ -200,6 +202,28 @@ fn entry_matches_language_name(entry: &EntrySpec, language_name: &str) -> bool {
 }
 
 impl RuntimeSleighFrontend {
+    fn from_entry(entry: EntrySpec, language: String) -> Result<Self> {
+        let status = registry::status_for_entry(&entry);
+        let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
+            Some(compile_frontend_for_entry_spec(&entry.path)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            language,
+            entry,
+            status,
+            compiled,
+        })
+    }
+
+    fn exact_entry_for_id(entry_id: &str) -> Result<EntrySpec> {
+        discover_all_entry_specs()?
+            .into_iter()
+            .find(|entry| entry.entry_id == entry_id)
+            .ok_or_else(|| anyhow!("Sleigh runtime entry '{entry_id}' is not registered"))
+    }
+
     pub fn spec_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("specs/languages")
     }
@@ -224,18 +248,14 @@ impl RuntimeSleighFrontend {
             .ok_or_else(|| {
                 anyhow!("Sleigh runtime frontend not registered for '{language_name}'")
             })?;
-        let status = registry::status_for_entry(&entry);
-        let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
-            Some(compile_frontend_for_entry_spec(&entry.path)?)
-        } else {
-            None
-        };
-        Ok(Self {
-            language: language_name.to_string(),
-            entry,
-            status,
-            compiled,
-        })
+        Self::from_entry(entry, language_name.to_string())
+    }
+
+    pub fn new_for_load_spec(load_spec: &BinaryLoadSpec) -> Result<Self> {
+        let registry = CompiledRuntimeRegistry::discover()?;
+        let selection = registry.resolve_from_load_spec(load_spec)?;
+        let entry = Self::exact_entry_for_id(&selection.entry_id)?;
+        Self::from_entry(entry, selection.entry_id)
     }
 
     pub fn new(spec_path: &Path) -> Result<Self> {
@@ -687,7 +707,10 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_core::architecture::BinaryLoadSpec;
+    use fission_loader::loader::LoadedBinary;
     use std::collections::BTreeSet;
+    use std::path::PathBuf;
 
     fn var(offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -793,6 +816,89 @@ mod tests {
             .expect("compiled x86-64 ret runtime");
         assert_eq!(len, 1);
         assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::Return));
+    }
+
+    #[test]
+    fn runtime_registry_resolves_x86_64_load_spec_to_entry_id() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+        let load_spec = BinaryLoadSpec::new(
+            "PE",
+            0x140000000,
+            "x86:LE:64:default",
+            "windows",
+            "unit-test",
+        );
+        let selection = registry
+            .resolve_from_load_spec(&load_spec)
+            .expect("resolve x86-64 load spec");
+        assert_eq!(selection.entry_id, "x86-64");
+        assert_eq!(selection.processor, "x86");
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
+    }
+
+    #[test]
+    fn runtime_frontend_load_spec_matches_entry_id_frontend_for_ret() {
+        let load_spec = BinaryLoadSpec::new(
+            "PE",
+            0x140000000,
+            "x86:LE:64:default",
+            "windows",
+            "unit-test",
+        );
+        let from_load_spec =
+            RuntimeSleighFrontend::new_for_load_spec(&load_spec).expect("load-spec runtime");
+        let from_entry_id =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("entry-id runtime");
+
+        let (load_spec_ops, load_spec_len) = from_load_spec
+            .decode_and_lift_with_len(&[0xC3], 0x1000)
+            .expect("load-spec ret decode");
+        let (entry_ops, entry_len) = from_entry_id
+            .decode_and_lift_with_len(&[0xC3], 0x1000)
+            .expect("entry-id ret decode");
+
+        assert_eq!(from_load_spec.language(), "x86-64");
+        assert_eq!(load_spec_len, entry_len);
+        assert_eq!(load_spec_ops, entry_ops);
+    }
+
+    #[test]
+    fn runtime_frontend_load_spec_matches_entry_id_on_failing_test_functions_row() {
+        let binary_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+        let binary = LoadedBinary::from_file(&binary_path).expect("load test_functions.exe");
+        let entry_address = 0x140001450_u64;
+        let bytes = binary
+            .view_bytes(entry_address, 16)
+            .expect("view bytes for failing row");
+        let load_spec = binary.load_spec().expect("binary load spec").clone();
+
+        let from_load_spec =
+            RuntimeSleighFrontend::new_for_load_spec(&load_spec).expect("load-spec runtime");
+        let from_entry_id =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("entry-id runtime");
+
+        let load_spec_result = from_load_spec.decode_and_lift_with_len(bytes, entry_address);
+        let entry_id_result = from_entry_id.decode_and_lift_with_len(bytes, entry_address);
+
+        assert_eq!(
+            load_spec_result.is_ok(),
+            entry_id_result.is_ok(),
+            "load-spec and entry-id frontends diverged on test_functions:add @ 0x140001450"
+        );
+        match (load_spec_result, entry_id_result) {
+            (Ok((lhs_ops, lhs_len)), Ok((rhs_ops, rhs_len))) => {
+                assert_eq!(lhs_len, rhs_len);
+                assert_eq!(lhs_ops, rhs_ops);
+            }
+            (Err(lhs_err), Err(rhs_err)) => {
+                assert_eq!(format!("{lhs_err:#}"), format!("{rhs_err:#}"));
+            }
+            _ => unreachable!("success mismatch handled above"),
+        }
     }
 
     #[test]

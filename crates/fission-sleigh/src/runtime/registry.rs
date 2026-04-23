@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
+use fission_core::architecture::BinaryLoadSpec;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::{EntrySpec, GhidraLanguageManifest, GhidraLanguageManifestEntry};
@@ -69,6 +71,102 @@ pub struct CompiledRuntimeRegistry {
     frontends: Vec<RuntimeFrontendDescriptor>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeEntrySelectionSource {
+    LoadSpecLanguageId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeEntrySelection {
+    pub language_id: String,
+    pub compiler_spec_id: Option<String>,
+    pub entry_id: String,
+    pub processor: String,
+    pub runtime_status: RuntimeFrontendStatus,
+    pub selection_source: RuntimeEntrySelectionSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeEntrySelectionError {
+    UnknownLanguageId {
+        language_id: String,
+        compiler_spec_id: Option<String>,
+    },
+    AmbiguousRuntimeEntry {
+        language_id: String,
+        compiler_spec_id: Option<String>,
+        candidates: Vec<String>,
+    },
+    CompileOnlySelection {
+        language_id: String,
+        compiler_spec_id: Option<String>,
+        entry_id: String,
+    },
+    ExecutableEntryMissing {
+        language_id: String,
+        compiler_spec_id: Option<String>,
+    },
+}
+
+impl fmt::Display for RuntimeEntrySelectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownLanguageId {
+                language_id,
+                compiler_spec_id,
+            } => match compiler_spec_id {
+                Some(compiler_spec_id) => write!(
+                    f,
+                    "unknown runtime language id '{language_id}' for compiler spec '{compiler_spec_id}'"
+                ),
+                None => write!(f, "unknown runtime language id '{language_id}'"),
+            },
+            Self::AmbiguousRuntimeEntry {
+                language_id,
+                compiler_spec_id,
+                candidates,
+            } => match compiler_spec_id {
+                Some(compiler_spec_id) => write!(
+                    f,
+                    "ambiguous runtime entry for '{language_id}' / '{compiler_spec_id}': {}",
+                    candidates.join(", ")
+                ),
+                None => write!(
+                    f,
+                    "ambiguous runtime entry for '{language_id}': {}",
+                    candidates.join(", ")
+                ),
+            },
+            Self::CompileOnlySelection {
+                language_id,
+                compiler_spec_id,
+                entry_id,
+            } => match compiler_spec_id {
+                Some(compiler_spec_id) => write!(
+                    f,
+                    "runtime selection '{language_id}' / '{compiler_spec_id}' resolved to compile-only entry '{entry_id}'"
+                ),
+                None => write!(
+                    f,
+                    "runtime selection '{language_id}' resolved to compile-only entry '{entry_id}'"
+                ),
+            },
+            Self::ExecutableEntryMissing {
+                language_id,
+                compiler_spec_id,
+            } => match compiler_spec_id {
+                Some(compiler_spec_id) => write!(
+                    f,
+                    "runtime selection '{language_id}' / '{compiler_spec_id}' has no executable entry"
+                ),
+                None => write!(f, "runtime selection '{language_id}' has no executable entry"),
+            },
+        }
+    }
+}
+
+impl std::error::Error for RuntimeEntrySelectionError {}
+
 #[derive(Debug, Clone)]
 struct RegistryData {
     processors: Vec<ProcessorDescriptor>,
@@ -111,6 +209,72 @@ impl CompiledRuntimeRegistry {
                     alias == language_name || alias.eq_ignore_ascii_case(language_name)
                 })
         })
+    }
+
+    pub fn resolve_from_load_spec(
+        &self,
+        load_spec: &BinaryLoadSpec,
+    ) -> std::result::Result<RuntimeEntrySelection, RuntimeEntrySelectionError> {
+        self.resolve_from_language_pair(
+            load_spec.pair.language_id.as_str(),
+            Some(load_spec.pair.compiler_spec_id.as_str()),
+        )
+    }
+
+    pub fn resolve_from_language_pair(
+        &self,
+        language_id: &str,
+        compiler_spec_id: Option<&str>,
+    ) -> std::result::Result<RuntimeEntrySelection, RuntimeEntrySelectionError> {
+        let matched = self
+            .variants
+            .iter()
+            .filter(|variant| {
+                variant
+                    .language_ids
+                    .iter()
+                    .any(|id| id == language_id || id.eq_ignore_ascii_case(language_id))
+            })
+            .collect::<Vec<_>>();
+        if matched.is_empty() {
+            return Err(RuntimeEntrySelectionError::UnknownLanguageId {
+                language_id: language_id.to_string(),
+                compiler_spec_id: compiler_spec_id.map(str::to_string),
+            });
+        }
+
+        let executable = matched
+            .iter()
+            .copied()
+            .filter(|variant| variant.support_level == RuntimeSupportLevel::ExecutableCandidate)
+            .collect::<Vec<_>>();
+        match executable.as_slice() {
+            [variant] => Ok(RuntimeEntrySelection {
+                language_id: language_id.to_string(),
+                compiler_spec_id: compiler_spec_id.map(str::to_string),
+                entry_id: variant.entry_id.clone(),
+                processor: variant.processor.clone(),
+                runtime_status: variant.support_level.as_frontend_status(),
+                selection_source: RuntimeEntrySelectionSource::LoadSpecLanguageId,
+            }),
+            [] if matched.len() == 1 => Err(RuntimeEntrySelectionError::CompileOnlySelection {
+                language_id: language_id.to_string(),
+                compiler_spec_id: compiler_spec_id.map(str::to_string),
+                entry_id: matched[0].entry_id.clone(),
+            }),
+            [] => Err(RuntimeEntrySelectionError::ExecutableEntryMissing {
+                language_id: language_id.to_string(),
+                compiler_spec_id: compiler_spec_id.map(str::to_string),
+            }),
+            _ => Err(RuntimeEntrySelectionError::AmbiguousRuntimeEntry {
+                language_id: language_id.to_string(),
+                compiler_spec_id: compiler_spec_id.map(str::to_string),
+                candidates: executable
+                    .iter()
+                    .map(|variant| variant.entry_id.clone())
+                    .collect(),
+            }),
+        }
     }
 }
 

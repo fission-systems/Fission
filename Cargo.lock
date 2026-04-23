@@ -1564,6 +1564,8 @@ name = "fission-sleigh"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fission-core",
+ "fission-loader",
  "fission-pcode",
  "serde",
  "serde_json",

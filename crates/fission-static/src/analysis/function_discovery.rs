@@ -41,12 +41,12 @@ pub fn discover_functions_with_runtime(
     profile: FunctionDiscoveryProfile,
 ) -> FunctionDiscoveryReport {
     let mut report = FunctionDiscoveryReport::default();
-    let Some(language) = runtime_language_for(binary) else {
+    let Some(load_spec) = runtime_load_spec_for(binary) else {
         report.unsupported_runtime = true;
         return report;
     };
 
-    let Ok(frontend) = RuntimeSleighFrontend::new_for_language(language) else {
+    let Ok(frontend) = RuntimeSleighFrontend::new_for_load_spec(load_spec) else {
         report.unsupported_runtime = true;
         return report;
     };
@@ -153,8 +153,10 @@ pub fn discover_functions_with_runtime(
     report
 }
 
-fn runtime_language_for(binary: &LoadedBinary) -> Option<&str> {
-    binary.sleigh_language_id()
+fn runtime_load_spec_for(
+    binary: &LoadedBinary,
+) -> Option<&fission_loader::loader::BinaryLoadSpec> {
+    binary.load_spec()
 }
 
 fn executable_ranges(binary: &LoadedBinary) -> Vec<(u64, u64)> {

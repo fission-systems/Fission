@@ -483,14 +483,14 @@ fn decode_rust_sleigh_pcode(
         format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}")
     })?;
 
-    let language = binary.sleigh_language_id().ok_or_else(|| {
+    let load_spec = binary.load_spec().ok_or_else(|| {
         format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
             binary.path
         )
     })?;
 
-    let lifter = RuntimeSleighFrontend::new_for_language(language)
+    let lifter = RuntimeSleighFrontend::new_for_load_spec(load_spec)
         .map_err(|e| format!("rust_sleigh: {e:#}"))?;
     let lift_contract = if continue_past_indirect_branch {
         DecodeContract::decomp_function(instruction_limit)

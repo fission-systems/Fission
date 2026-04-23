@@ -23,7 +23,7 @@ fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
 ) -> Result<RenderedCode, FissionError> {
-    let _language = binary.sleigh_language_id().ok_or_else(|| {
+    let _load_spec = binary.load_spec().ok_or_else(|| {
         FissionError::decompiler(format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
             binary.path

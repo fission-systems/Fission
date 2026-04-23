@@ -1539,3 +1539,75 @@ Loader-selected Ghidra language ids are now the canonical architecture-routing b
   1. move from hardcoded selectors toward a checked-in manifest/opinion table
   2. carry `LanguageCompilerSpecPair` all the way into downstream surfaces and reduce remaining `arch_spec` compatibility checks
   3. add loader tests for more non-x86/non-AArch64 tuples before executable runtime promotion expands
+
+## 2026-04-23 LoadSpec -> Runtime Entry Resolver Wave
+
+### Summary
+
+- wave type:
+  - correctness / routing / regression triage
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/{mod,registry}.rs`
+  - loader-origin runtime consumers in CLI, static analysis, and decompiler-core
+- goal:
+  - separate loader `LanguageCompilerSpecPair` identity from executable runtime `entry_id`
+  - route loader-origin binaries through a manifest-driven runtime entry resolver
+  - prove whether the loader/load-spec boundary is the actual owner of the current `DecodeNoMatch` regression
+
+### What changed
+
+- added structured runtime entry resolution in `fission-sleigh`:
+  - `RuntimeEntrySelection`
+  - `RuntimeEntrySelectionSource`
+  - `RuntimeEntrySelectionError`
+  - `CompiledRuntimeRegistry::resolve_from_load_spec(...)`
+  - `CompiledRuntimeRegistry::resolve_from_language_pair(...)`
+- added `RuntimeSleighFrontend::new_for_load_spec(&BinaryLoadSpec)`
+  - loader-origin paths no longer pass raw Ghidra language ids directly into free-form `new_for_language(...)`
+  - `new_for_language(...)` remains as compatibility API for direct/manual entry-id lookup
+- changed runtime consumers to use `load_spec -> resolver -> entry_id`:
+  - CLI disasm
+  - CLI inventory rust-sleigh path
+  - decompiler-core rust-sleigh decode + wrapper probe
+  - static function discovery
+  - static xrefs
+- added `LoadedBinary::load_spec()` so loader-origin consumers read the canonical load-spec field directly
+- added focused parity tests:
+  - `x86:LE:64:default -> x86-64` resolver assertion
+  - load-spec runtime equals direct `x86-64` runtime on `ret`
+  - load-spec runtime equals direct `x86-64` runtime on real failing bytes from `test_functions.exe:add @ 0x140001450`
+
+### Validation
+
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `38 passed / 0 failed`
+- `cargo check -p fission-static`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- direct smoke:
+  - `target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001450 --count 8`
+  - result: still `DecodeNoMatch: x86-64 has no match at 0x140001450`
+- single-binary benchmark:
+  - command: `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --fission-bin target/release/fission_cli --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-full-processor-runtime-no-iced-latest/test-functions --output-dir benchmark/artifacts/full_benchmark/test-functions-loader-loadspec-resolver-check --timeout 120 --limit 50`
+  - result: regression persists at `avg_norm_sim=29.00%`
+  - baseline delta remains `44.56% -> 29.00%`
+  - `both_success_rate` remains `100% -> 82%`
+  - `unsupported_indirect_control_count` remains `0 -> 1`
+  - `materialization_stabilized` remains `30 -> 256`
+
+### Result
+
+The loader/load-spec boundary is now architecturally correct and deterministic: loader-origin binaries resolve through `load_spec -> runtime entry_id` instead of free-form language-name matching.
+
+The negative but useful result is that this did **not** fix the current x86-64 regression. The new parity test proves the load-spec-selected frontend and the direct `x86-64` frontend behave identically on the failing `test_functions.exe:add @ 0x140001450` bytes. That rules out `LoadSpec -> runtime entry selection` as the direct owner of the current `DecodeNoMatch` family.
+
+### Remaining risk / next owner
+
+- current direct regression owner is deeper in the shared x86-64 generated runtime, not the loader/load-spec selection layer
+- next owner should move to:
+  1. `runtime/spine/compiled_table.rs` constructor selection / decision traversal parity
+  2. terminal pattern verification and operand binding on startup/control-heavy rows
+  3. typed mismatch reporting for the exact `DecodeNoMatch` families now seen at `0x140001450`, `0x140001850`, `0x1400019c0`
