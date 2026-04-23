@@ -6,25 +6,6 @@ use super::super::decompile_targets::collect_target_functions;
 use super::super::*;
 use super::output::{attach_native_timing_if_present, decompile_and_output};
 
-fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
-    if arch_spec.starts_with("AARCH64:LE:64") && arch_spec.contains("AppleSilicon") {
-        return Some("AARCH64_AppleSilicon");
-    }
-    if arch_spec.starts_with("AARCH64:LE:64") {
-        return Some("AARCH64");
-    }
-    if arch_spec.starts_with("AARCH64:BE:64") {
-        return Some("AARCH64BE");
-    }
-    if arch_spec.starts_with("x86:LE:64") {
-        return Some("x86-64");
-    }
-    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
-        return Some("x86");
-    }
-    None
-}
-
 #[cfg(test)]
 fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
     fission_sleigh::runtime::is_terminal_control_flow(opcode)
@@ -42,10 +23,10 @@ fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
 ) -> Result<RenderedCode, FissionError> {
-    let _language = sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
+    let _language = binary.sleigh_language_id().ok_or_else(|| {
         FissionError::decompiler(format!(
-            "rust_sleigh: unsupported arch_spec '{}'",
-            binary.arch_spec
+            "rust_sleigh: missing Ghidra load spec for '{}'",
+            binary.path
         ))
     })?;
     let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();

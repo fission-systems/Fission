@@ -1,5 +1,6 @@
 use super::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, PdbDebugInfo, SectionInfo,
+    ArchitectureDescriptor, BinaryLoadSpec, FunctionInfo, LoadedBinary, LoadedBinaryBuilder,
+    LoadedBinaryInner, PdbDebugInfo, SectionInfo,
 };
 use crate::loader::strings::scan_ascii_strings_from_sections;
 use crate::prelude::*;
@@ -13,6 +14,8 @@ impl LoadedBinaryBuilder {
             hash,
             data,
             arch_spec: "x86:LE:64:default".to_string(),
+            load_spec: None,
+            architecture: None,
             entry_point: 0,
             image_base: 0,
             functions: Vec::new(),
@@ -26,7 +29,25 @@ impl LoadedBinaryBuilder {
     }
 
     pub fn arch_spec(mut self, arch_spec: impl Into<String>) -> Self {
-        self.arch_spec = arch_spec.into();
+        let arch_spec = arch_spec.into();
+        self.load_spec = Some(BinaryLoadSpec::compatibility_from_language_id(
+            self.format.clone(),
+            self.image_base,
+            arch_spec.clone(),
+        ));
+        self.arch_spec = arch_spec;
+        self
+    }
+
+    pub fn load_spec(mut self, load_spec: BinaryLoadSpec) -> Self {
+        self.arch_spec = load_spec.pair.language_id.as_str().to_string();
+        self.load_spec = Some(load_spec);
+        self
+    }
+
+    pub fn architecture(mut self, architecture: ArchitectureDescriptor) -> Self {
+        self.is_64bit = architecture.bitness == 64;
+        self.architecture = Some(architecture);
         self
     }
 
@@ -37,6 +58,9 @@ impl LoadedBinaryBuilder {
 
     pub fn image_base(mut self, image_base: u64) -> Self {
         self.image_base = image_base;
+        if let Some(load_spec) = &mut self.load_spec {
+            load_spec.image_base = image_base;
+        }
         self
     }
 
@@ -47,6 +71,9 @@ impl LoadedBinaryBuilder {
 
     pub fn format(mut self, format: impl Into<String>) -> Self {
         self.format = format.into();
+        if let Some(load_spec) = &mut self.load_spec {
+            load_spec.format = self.format.clone();
+        }
         self
     }
 
@@ -131,6 +158,8 @@ impl LoadedBinaryBuilder {
             hash: self.hash,
             data: Arc::new(self.data),
             arch_spec: self.arch_spec,
+            load_spec: self.load_spec,
+            architecture: self.architecture,
             entry_point: self.entry_point,
             image_base: self.image_base,
             functions,

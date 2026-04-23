@@ -1460,3 +1460,82 @@ Invalid P-code shape is now a correctness failure, not a quality degradation buc
   1. replace optimizer-internal raw constructors with checked builder helpers
   2. require `ValidatedPcodeFunction` in more public NIR/analysis signatures
   3. add a CI audit test that whitelists raw DTO construction only in tests, serialization, and checked builder internals
+
+## 2026-04-23 Loader / LoadSpec / Language Selection Wave
+
+### Summary
+
+- wave type:
+  - correctness / routing / fail-closed
+- primary owner:
+  - `crates/fission-core/src/architecture.rs`
+  - `crates/fission-loader/src/loader/{pe,elf,macho}/mod.rs`
+  - `crates/fission-loader/src/loader/types.rs`
+  - `crates/fission-cli/src/cli/oneshot/{disasm,inventory/emit,decompile/decompile_exec/run,binary_info}.rs`
+  - `crates/fission-static/src/analysis/{function_discovery,xrefs}/`
+  - `crates/fission-decompiler-core/src/lib.rs`
+- goal:
+  - align Fission loader/runtime routing with Ghidra `Loader -> LoadSpec -> LanguageCompilerSpecPair -> SLEIGH Runtime`
+  - eliminate `is_64bit -> x86-64` and unknown-machine `-> x86` fallback paths
+  - make loader-selected Ghidra language id the canonical runtime selection input
+
+### What changed
+
+- added shared architecture selection contracts in `fission-core`:
+  - `GhidraLanguageId`
+  - `CompilerSpecId`
+  - `LanguageCompilerSpecPair`
+  - `BinaryLoadSpec`
+  - `ArchitectureDescriptor`
+  - `ArchitectureSelectionError`
+- added authoritative format selectors:
+  - `select_pe_load_spec`
+  - `select_elf_load_spec`
+  - `select_macho_load_spec`
+- changed PE/ELF/Mach-O loaders to emit canonical `load_spec` + `architecture` instead of inventing `arch_spec` strings locally
+- kept `LoadedBinary.arch_spec` as a compatibility projection only:
+  - new canonical fields are `LoadedBinary.load_spec` and `LoadedBinary.architecture`
+  - added `LoadedBinary::sleigh_language_id()`
+- removed wrong routing from downstream consumers:
+  - CLI disasm no longer picks `x86-64` from `binary.is_64bit`
+  - CLI inventory/decompile no longer duplicate `sleigh_language_for_arch_spec`
+  - static function discovery/xref no longer hardcode `x86-64`
+  - decompiler-core now uses loader-selected language ids directly
+- changed unknown machine handling to fail closed:
+  - unsupported PE/ELF/Mach-O machine tuples now return typed loader errors
+  - x86 default fallback is removed from loader selection
+
+### Validation
+
+- `cargo test -p fission-core`
+  - result: `28 passed / 0 failed`
+- `cargo test -p fission-loader -- --test-threads=1`
+  - result: `26 passed / 0 failed`
+- `cargo check -p fission-static`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- x86-64 sample smoke:
+  - `target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 4`
+  - result: runtime routed successfully through loader-selected language id
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: `engine_used = "rust_sleigh"`, `fell_back = false`, `invalid_pcode_shape_count = 0`
+- routing audit:
+  - `rg -n "defaulting to x86|is_64bit \\? x86-64|new_for_language\\(\\\"x86-64\\\"\\)|sleigh_language_for_arch_spec" crates/fission-loader crates/fission-cli crates/fission-static crates/fission-decompiler-core`
+  - result: production fallback/routing matches removed; remaining hits are compatibility classification or tests
+
+### Result
+
+Loader-selected Ghidra language ids are now the canonical architecture-routing boundary. Wrong-runtime selection from bitness-only heuristics is blocked, and unsupported machine tuples fail closed instead of silently decoding as x86.
+
+### Remaining risk / next owner
+
+- `LoadedBinary.arch_spec` still exists for compatibility and should eventually become a derived/read-only projection or be removed outright
+- language selection is currently implemented as typed Rust selectors, not yet manifest/opinion-driven full `QueryOpinionService` parity
+- current resolver covers the active PE/ELF/Mach-O tuples in Fission, but full Ghidra-style opinion coverage across all processors remains future work
+- next owner:
+  1. move from hardcoded selectors toward a checked-in manifest/opinion table
+  2. carry `LanguageCompilerSpecPair` all the way into downstream surfaces and reduce remaining `arch_spec` compatibility checks
+  3. add loader tests for more non-x86/non-AArch64 tuples before executable runtime promotion expands

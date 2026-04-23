@@ -89,9 +89,8 @@ impl XrefDatabase {
     pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
         let mut db = Self::new();
         let frontend = binary
-            .is_64bit
-            .then(|| RuntimeSleighFrontend::new_for_language("x86-64").ok())
-            .flatten();
+            .sleigh_language_id()
+            .and_then(|language| RuntimeSleighFrontend::new_for_language(language).ok());
 
         // Analyze each section that might contain code
         for section in &binary.sections {

@@ -3,6 +3,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use binrw::BinRead;
+use fission_core::architecture::select_elf_load_spec;
 use std::io::{Cursor, Seek, SeekFrom};
 
 pub mod schema;
@@ -56,13 +57,6 @@ impl ElfLoader {
 
         let is_64bit = true;
         let entry_point = header.entry;
-
-        // Machine Arch
-        let arch_spec = match header.machine {
-            0x3E => "x86:LE:64:default", // AMD64
-            0xB7 => "AARCH64:LE:64:v8A", // AArch64
-            _ => "x86:LE:64:default",
-        };
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
@@ -133,6 +127,14 @@ impl ElfLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
+        let (architecture, load_spec) = select_elf_load_spec(
+            header.machine,
+            header.ident.class,
+            header.ident.endian,
+            header.flags,
+            image_base,
+        )
+        .map_err(|e| err!(loader, "{}", e))?;
 
         // Entry point fallback
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -147,7 +149,8 @@ impl ElfLoader {
 
         LoadedBinaryBuilder::new(path, data)
             .format("ELF64 (binrw)")
-            .arch_spec(arch_spec)
+            .architecture(architecture)
+            .load_spec(load_spec)
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
@@ -165,13 +168,6 @@ impl ElfLoader {
 
         let is_64bit = false;
         let entry_point = header.entry as u64;
-
-        // Machine Arch
-        let arch_spec = match header.machine {
-            0x03 => "x86:LE:32:default", // 386
-            0x28 => "ARM:LE:32:v7",      // ARM
-            _ => "x86:LE:32:default",
-        };
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
@@ -244,6 +240,14 @@ impl ElfLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
+        let (architecture, load_spec) = select_elf_load_spec(
+            header.machine,
+            header.ident.class,
+            header.ident.endian,
+            header.flags,
+            image_base,
+        )
+        .map_err(|e| err!(loader, "{}", e))?;
 
         // Entry point fallback
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -258,7 +262,8 @@ impl ElfLoader {
 
         LoadedBinaryBuilder::new(path, data)
             .format("ELF32 (binrw)")
-            .arch_spec(arch_spec)
+            .architecture(architecture)
+            .load_spec(load_spec)
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)

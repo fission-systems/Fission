@@ -3,7 +3,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use binrw::BinRead;
-use fission_core::core_constants::IMAGE_FILE_MACHINE_ARM64;
+use fission_core::architecture::select_pe_load_spec;
 use std::io::Cursor;
 
 mod coff;
@@ -43,18 +43,9 @@ impl PeLoader {
                 ),
             };
 
-        let arch_spec = match pe_file.nt_headers.file_header.machine {
-            0x8664 => "x86:LE:64:default", // AMD64
-            0x014c => "x86:LE:32:default", // I386
-            IMAGE_FILE_MACHINE_ARM64 => "AARCH64:LE:64:v8A",
-            _ => {
-                if is_64bit {
-                    "x86:LE:64:default"
-                } else {
-                    "x86:LE:32:default"
-                }
-            }
-        };
+        let (architecture, load_spec) =
+            select_pe_load_spec(pe_file.nt_headers.file_header.machine, is_64bit, image_base)
+                .map_err(|e| err!(loader, "{}", e))?;
 
         // Sections
         let mut sections_info = Vec::new();
@@ -211,7 +202,8 @@ impl PeLoader {
 
         LoadedBinaryBuilder::new(path, data)
             .format("PE (binrw)")
-            .arch_spec(arch_spec)
+            .architecture(architecture)
+            .load_spec(load_spec)
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
@@ -531,6 +523,8 @@ mod tests {
         assert_eq!(bin.sections.len(), 1);
         assert_eq!(bin.sections[0].name, ".text");
         assert_eq!(bin.sections[0].is_executable, true);
+        assert_eq!(bin.arch_spec, "x86:LE:32:default");
+        assert_eq!(bin.sleigh_language_id(), Some("x86:LE:32:default"));
     }
 
     #[test]
@@ -567,7 +561,36 @@ mod tests {
         assert!(result.is_ok());
         let bin = result.expect("arm64 pe should parse");
         assert_eq!(bin.arch_spec, "AARCH64:LE:64:v8A");
+        assert_eq!(bin.sleigh_language_id(), Some("AARCH64:LE:64:v8A"));
         assert!(bin.is_64bit);
+    }
+
+    #[test]
+    fn test_parse_synthetic_pe_unknown_machine_fails_closed() {
+        let mut data = vec![0u8; 1024];
+
+        data[0] = 0x4D;
+        data[1] = 0x5A;
+        data[0x3C] = 0x40;
+
+        data[0x40] = 0x50;
+        data[0x41] = 0x45;
+
+        data[0x44] = 0xff;
+        data[0x45] = 0xff; // unknown Machine = 0xffff
+        data[0x46] = 0x01;
+        data[0x54] = 0xF0;
+        data[0x55] = 0x00;
+
+        data[0x58] = 0x0B;
+        data[0x59] = 0x02; // PE32+
+        data[0x58 + 108] = 16;
+
+        let result = PeLoader::parse(DataBuffer::Heap(data), "unknown.exe".to_string());
+        assert!(result.is_err());
+        let err = format!("{}", result.expect_err("unknown machine must fail"));
+        assert!(err.contains("unsupported machine"));
+        assert!(!err.contains("defaulting to x86"));
     }
 
     #[test]

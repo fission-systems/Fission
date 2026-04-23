@@ -3,6 +3,9 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::sync::Arc;
 
 // Re-export common types from fission-core to maintain API compatibility
+pub use fission_core::architecture::{
+    ArchitectureDescriptor, BinaryLoadSpec, LanguageCompilerSpecPair,
+};
 pub use fission_core::common::types::{FunctionInfo, SectionInfo};
 
 #[path = "types_builder.rs"]
@@ -248,8 +251,14 @@ pub struct LoadedBinaryInner {
     /// Raw bytes of the file (COW enabled ArcDataBuffer)
     #[with(ArcDataWrapper)]
     pub data: Arc<DataBuffer>,
-    /// Detected architecture (e.g., "x86:LE:64:default")
+    /// Legacy Ghidra language ID projection (e.g., "x86:LE:64:default").
+    ///
+    /// New code should prefer `load_spec.pair.language_id`.
     pub arch_spec: String,
+    /// Canonical Ghidra-style load spec selected from authoritative format metadata.
+    pub load_spec: Option<BinaryLoadSpec>,
+    /// Architecture facts used to choose `load_spec`.
+    pub architecture: Option<ArchitectureDescriptor>,
     /// Entry point address
     pub entry_point: u64,
     /// Image base address
@@ -317,6 +326,9 @@ impl LoadedBinary {
 
     /// Get Ghidra-compatible compiler ID based on detections
     pub fn get_ghidra_compiler_id(&self) -> Option<String> {
+        if let Some(load_spec) = &self.load_spec {
+            return Some(load_spec.pair.compiler_spec_id.as_str().to_string());
+        }
         let detection = crate::detector::detect(self);
         let is_pe = self.format.to_ascii_uppercase().starts_with("PE");
         detection
@@ -333,6 +345,13 @@ impl LoadedBinary {
                 "clang" => "clang".to_string(),
                 _ => "default".to_string(),
             })
+    }
+
+    /// Canonical SLEIGH language ID selected by the loader.
+    pub fn sleigh_language_id(&self) -> Option<&str> {
+        self.load_spec
+            .as_ref()
+            .map(|spec| spec.pair.language_id.as_str())
     }
 
     /// Get mutable reference with COW semantics
@@ -373,6 +392,8 @@ pub struct LoadedBinaryBuilder {
     hash: String,
     data: DataBuffer,
     arch_spec: String,
+    load_spec: Option<BinaryLoadSpec>,
+    architecture: Option<ArchitectureDescriptor>,
     entry_point: u64,
     image_base: u64,
     functions: Vec<FunctionInfo>,

@@ -4,6 +4,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use binrw::BinRead;
+use fission_core::architecture::select_macho_load_spec;
 use fission_core::constants::binary_format::*;
 use std::io::{Cursor, Seek, SeekFrom};
 
@@ -56,18 +57,6 @@ impl MachoLoader {
 
         let is_64bit = true;
         let cputype = header.cputype;
-
-        let arch_spec = match cputype {
-            0x1000007 | 0x7 => "x86:LE:64:default", // x86_64 (CPU_TYPE_X86_64)
-            0x100000C | 0xC => "AARCH64:LE:64:AppleSilicon", // ARM64 (CPU_TYPE_ARM64, Mach-O uses AppleSilicon variant)
-            _ => {
-                eprintln!(
-                    "[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86_64",
-                    cputype, cputype
-                );
-                "x86:LE:64:default"
-            }
-        };
 
         let mut sections_info = Vec::new();
         let mut section_exec_map: Vec<bool> = Vec::new(); // 1-based n_sect -> is_executable
@@ -171,6 +160,9 @@ impl MachoLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
+        let (architecture, load_spec) =
+            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, image_base)
+                .map_err(|e| err!(loader, "{}", e))?;
 
         // Parse symbols after all sections are collected so n_sect can be filtered
         // against executable sections. This avoids treating data symbols as functions.
@@ -190,9 +182,9 @@ impl MachoLoader {
             // __stubs entry size differs by architecture:
             // - x86_64: 6 bytes
             // - arm64: 12 bytes
-            let stub_size = match cputype {
-                0x100000C | 0xC => 12u64, // ARM64
-                _ => 6u64,                // x86_64 and default fallback
+            let stub_size = match architecture.processor.as_str() {
+                "AARCH64" => 12u64,
+                _ => 6u64,
             };
             Self::parse_dynamic_symbols_64(
                 bytes,
@@ -261,7 +253,8 @@ impl MachoLoader {
 
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 64 (binrw)")
-            .arch_spec(arch_spec)
+            .architecture(architecture)
+            .load_spec(load_spec)
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
@@ -279,17 +272,9 @@ impl MachoLoader {
 
         let is_64bit = false;
         let cputype = header.cputype;
-        let arch_spec = match cputype {
-            0x7 => "x86:LE:32:default", // x86 (CPU_TYPE_X86)
-            0xC => "ARM:LE:32:v7",      // ARM (CPU_TYPE_ARM)
-            _ => {
-                eprintln!(
-                    "[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86",
-                    cputype, cputype
-                );
-                "x86:LE:32:default"
-            }
-        };
+        let (architecture, load_spec) =
+            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, 0)
+                .map_err(|e| err!(loader, "{}", e))?;
 
         // Logic similar to 64...
         // For brevity in POC, skipping full 32-bit implementation detail,
@@ -298,7 +283,8 @@ impl MachoLoader {
 
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 32 (binrw)")
-            .arch_spec(arch_spec)
+            .architecture(architecture)
+            .load_spec(load_spec)
             .entry_point(0)
             .image_base(0)
             .is_64bit(is_64bit)

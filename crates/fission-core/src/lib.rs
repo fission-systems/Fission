@@ -2,6 +2,7 @@
 //!
 //! Foundational utilities shared across crates.
 
+pub mod architecture;
 pub mod common;
 pub mod constants;
 pub mod core;

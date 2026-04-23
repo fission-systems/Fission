@@ -153,13 +153,8 @@ pub fn discover_functions_with_runtime(
     report
 }
 
-fn runtime_language_for(binary: &LoadedBinary) -> Option<&'static str> {
-    let arch = binary.arch_spec.to_ascii_lowercase();
-    if binary.is_64bit && arch.contains("x86") {
-        Some("x86-64")
-    } else {
-        None
-    }
+fn runtime_language_for(binary: &LoadedBinary) -> Option<&str> {
+    binary.sleigh_language_id()
 }
 
 fn executable_ranges(binary: &LoadedBinary) -> Vec<(u64, u64)> {

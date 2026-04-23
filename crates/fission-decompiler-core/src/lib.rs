@@ -102,25 +102,6 @@ pub struct RustSleighDecompileResult {
     pub hint_stats: Option<NirHintStats>,
 }
 
-fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
-    if arch_spec.starts_with("AARCH64:LE:64") && arch_spec.contains("AppleSilicon") {
-        return Some("AARCH64_AppleSilicon");
-    }
-    if arch_spec.starts_with("AARCH64:LE:64") {
-        return Some("AARCH64");
-    }
-    if arch_spec.starts_with("AARCH64:BE:64") {
-        return Some("AARCH64BE");
-    }
-    if arch_spec.starts_with("x86:LE:64") {
-        return Some("x86-64");
-    }
-    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
-        return Some("x86");
-    }
-    None
-}
-
 fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
     let marker = "decode failed at 0x";
     let idx = err.find(marker)?;
@@ -147,8 +128,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
         format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}")
     })?;
 
-    let language = sleigh_language_for_arch_spec(&binary.arch_spec)
-        .ok_or_else(|| format!("rust_sleigh: unsupported arch_spec '{}'", binary.arch_spec))?;
+    let language = binary.sleigh_language_id().ok_or_else(|| {
+        format!(
+            "rust_sleigh: missing Ghidra load spec for '{}'",
+            binary.path
+        )
+    })?;
 
     let lifter = RuntimeSleighFrontend::new_for_language(language)
         .map_err(|e| format!("rust_sleigh: {e:#}"))?;
@@ -261,7 +246,7 @@ fn probe_wrapper_contraction(
         Some(bytes) => bytes,
         None => return Ok(None),
     };
-    let language = match sleigh_language_for_arch_spec(&binary.arch_spec) {
+    let language = match binary.sleigh_language_id() {
         Some(language) => language,
         None => return Ok(None),
     };
