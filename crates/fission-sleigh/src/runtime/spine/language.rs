@@ -110,18 +110,12 @@ impl ProcessorRuntimeProfile {
             .iter()
             .find(|skeleton| skeleton.ghidra_processor == entry.arch)
             .ok_or_else(|| anyhow!("missing runtime processor skeleton for {}", entry.arch))?;
-        let status =
-            if skeleton.executable_candidate && entry.arch == "x86" && entry.entry_id == "x86-64" {
-                RuntimeFrontendStatus::ExecutableCandidate
-            } else {
-                RuntimeFrontendStatus::RegisteredCompileOnly
-            };
         Ok(Self {
             ghidra_processor: skeleton.ghidra_processor.to_string(),
             module_name: skeleton.module_name.to_string(),
             entry_id: entry.entry_id.clone(),
             entry_spec: entry.entry_spec.clone(),
-            status,
+            status: processors::status_for_entry(entry),
             endian: infer_endian(entry),
             addressable_unit_bytes: 1,
             unique_space_id: UNIQUE_SPACE_ID,

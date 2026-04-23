@@ -195,7 +195,7 @@ impl CompiledRuntimeRegistry {
             .into_iter()
             .map(|entry| RuntimeFrontendDescriptor {
                 generated_path: format!("{}/{}", entry.arch, entry.entry_id),
-                status: status_for_entry(&entry),
+                status: processors::status_for_entry(&entry),
                 processor: entry.arch.clone(),
                 arch: entry.arch,
                 entry_spec: entry.entry_spec,
@@ -285,7 +285,7 @@ impl RuntimeSleighFrontend {
             .ok_or_else(|| {
                 anyhow!("Sleigh runtime frontend not registered for '{language_name}'")
             })?;
-        let status = status_for_entry(&entry);
+        let status = processors::status_for_entry(&entry);
         let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
             Some(compile_frontend_for_entry_spec(&entry.path)?)
         } else {
@@ -352,23 +352,14 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => {
-                if self.entry.arch == "x86" && self.entry.entry_id == "x86-64" {
-                    processors::x86::generated::decode_and_lift(
-                        self.compiled.as_ref().ok_or_else(|| {
-                            anyhow!("missing compiled frontend for {}", self.entry.entry_id)
-                        })?,
-                        bytes,
-                        address,
-                    )
-                } else {
-                    Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                        language: self.entry.entry_id.clone(),
-                        reason: "executable candidate has no runtime consumer".to_string(),
-                    }
-                    .into())
-                }
-            }
+            RuntimeFrontendStatus::ExecutableCandidate => processors::decode_and_lift(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                bytes,
+                address,
+            ),
         }
     }
 
@@ -460,23 +451,14 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => {
-                if self.entry.arch == "x86" && self.entry.entry_id == "x86-64" {
-                    processors::x86::generated::decode_instruction(
-                        self.compiled.as_ref().ok_or_else(|| {
-                            anyhow!("missing compiled frontend for {}", self.entry.entry_id)
-                        })?,
-                        bytes,
-                        address,
-                    )
-                } else {
-                    Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                        language: self.entry.entry_id.clone(),
-                        reason: "executable candidate has no runtime consumer".to_string(),
-                    }
-                    .into())
-                }
-            }
+            RuntimeFrontendStatus::ExecutableCandidate => processors::decode_instruction(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                bytes,
+                address,
+            ),
         }
     }
 
@@ -580,14 +562,6 @@ impl RuntimeSleighFrontend {
             decoded_instructions: instruction_count,
             stop_reason,
         })
-    }
-}
-
-fn status_for_entry(entry: &EntrySpec) -> RuntimeFrontendStatus {
-    if entry.arch == "x86" && entry.entry_id == "x86-64" {
-        RuntimeFrontendStatus::ExecutableCandidate
-    } else {
-        RuntimeFrontendStatus::RegisteredCompileOnly
     }
 }
 

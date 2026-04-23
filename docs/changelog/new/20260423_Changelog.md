@@ -759,3 +759,65 @@ The next owner is to migrate those remaining analysis surfaces to the same gener
   1. x86-64 `DecisionNode` / `ParserWalker` parity
   2. richer `ConstructTpl` / `PcodeEmit` execution
   3. cycle-free SLEIGH-backed FID hashing reintroduction
+
+## 11. Shared Runtime Dispatch Ownership Extraction
+
+### Scope
+
+- wave type:
+  - owner cleanup / behavior-preserving shared runtime refactor
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+  - `crates/fission-sleigh/src/runtime/spine/language.rs`
+  - `crates/fission-sleigh/src/runtime/mod.rs`
+- goal:
+  - remove duplicated x86-only executable readiness and dispatch checks from `runtime/mod.rs`
+  - make processor/profile ownership decide runtime readiness and execution routing
+  - keep x86-64 as the first executable consumer without changing the public runtime API
+
+### What changed
+
+- added shared processor-owned runtime readiness:
+  - `processors::status_for_entry(entry)`
+  - readiness now lives under processor/runtime ownership instead of duplicated `runtime/mod.rs` and `spine/language.rs` checks
+- added shared processor-owned execution routing:
+  - `processors::decode_and_lift(...)`
+  - `processors::decode_instruction(...)`
+  - `RuntimeSleighFrontend` no longer directly knows about `processors::x86::generated`
+- reduced x86 exposure to processor-adapter boundary:
+  - `crates/fission-sleigh/src/runtime/processors/x86/mod.rs` now exposes:
+    - `supports_entry`
+    - `decode_and_lift`
+    - `decode_instruction`
+  - `generated.rs` remains the first executable consumer, but is now reached through the processor adapter instead of direct top-level hardcoding
+- preserved fail-closed behavior:
+  - executable status without a registered processor execution engine still returns typed `UnsupportedPcodeTemplate`
+  - compile-only variants still return typed `UnsupportedGeneratedSemantic`
+
+### Validation
+
+- `cargo fmt -p fission-sleigh`
+  - result: passed
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed
+- `git diff -- crates/fission-sleigh/generated`
+  - result: empty
+
+### Result
+
+The runtime no longer has two separate x86-only readiness owners. `RuntimeSleighFrontend` now consumes processor-owned readiness and routing, which is the correct direction for the Ghidra-style `Language -> Decision -> ParserWalker -> TemplateEvaluator` spine. This does not yet change semantic parity, but it removes one architectural blocker to making `x86-64` just the first consumer of a shared execution engine.
+
+### Remaining risk / next owner
+
+- The semantic owner is still not fully extracted from `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`.
+- `CompiledDecisionProbe` and the template evaluator are still x86-shaped in places, so this wave is not enough for second-consumer promotion.
+- The next owner remains:
+  1. generic `DecisionMatcher` probe vocabulary beyond x86-specific probe kinds
+  2. `RuntimeParserWalker` / `RuntimeConstructState` extraction from x86 generated runtime
+  3. template evaluation ownership migration from x86 semantic emitter helpers into shared spine contracts
