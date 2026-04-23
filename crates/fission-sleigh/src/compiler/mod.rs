@@ -20,10 +20,10 @@ pub use equivalence::{
     RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
 };
 pub use ir::{
-    CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstructor,
-    CompiledConstructorTemplate, CompiledConstructTpl, CompiledConstructTplKind,
-    CompiledContextField, CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge,
-    CompiledDecisionNode, CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
+    CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstructTpl, CompiledConstructTplKind,
+    CompiledConstructor, CompiledConstructorTemplate, CompiledContextField,
+    CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode,
+    CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
     CompiledLanguageLayout, CompiledMacro, CompiledOperandDecodeStep, CompiledOperandSpec,
     CompiledPatternMatcher, CompiledPatternNode, CompiledPcodeOp, CompiledRegister,

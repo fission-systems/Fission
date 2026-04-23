@@ -187,3 +187,69 @@ This wave intentionally did not reintroduce:
 - architecture-specific runtime helper modules
 - fake text formatting
 - fake p-code for unsupported semantics
+
+## 6. Raw P-code Parity Benchmark Harness
+
+Added a new raw P-code parity benchmark under:
+
+- `benchmark/raw_p_code_benchmark`
+
+The harness compares Fission's raw SLEIGH runtime output against Ghidra 12.0.4
+raw instruction P-code.
+
+### Owner Contract
+
+- Ghidra oracle path uses PyGhidra and `Instruction.getPcode()`.
+- Fission path uses `RuntimeSleighFrontend::new_for_load_spec(...)` and
+  `decode_and_lift_with_len(...)`.
+- The comparator works at the raw instruction P-code layer, not decompiler
+  `HighFunction` output.
+- Output buckets include decode errors, length mismatches, opcode mismatches,
+  arity mismatches, varnode space mismatches, and varnode size mismatches.
+
+### Added Files
+
+- `crates/fission-sleigh/examples/raw_pcode_probe.rs`
+- `benchmark/raw_p_code_benchmark/ghidra_raw_pcode.py`
+- `benchmark/raw_p_code_benchmark/fission_raw_pcode.py`
+- `benchmark/raw_p_code_benchmark/compare_raw_pcode.py`
+- `benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py`
+- `benchmark/raw_p_code_benchmark/README.md`
+
+### Smoke Results
+
+`test_functions.exe:add @ 0x140001450`
+
+- command: `run_raw_pcode_parity.py --addr 0x140001450 --count 2`
+- result:
+  - `pcode_op_count_mismatch = 2`
+  - `pcode_opcode_mismatch = 2`
+
+`test_functions.exe:_fpreset @ 0x1400025c0`
+
+- command: `run_raw_pcode_parity.py --addr 0x1400025c0 --count 2`
+- result:
+  - `decode_no_match = 1`
+  - `missing_fission_instruction = 1`
+
+These are expected first-read results: the harness is now able to show both
+shape drift and the remaining `_fpreset` decode hole at the raw SLEIGH layer.
+
+### Validation
+
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+  - result: passed
+- `cargo run -p fission-sleigh --example raw_pcode_probe -- ...`
+  - result: emitted JSON raw P-code for `0x140001450`
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+
+### Next Owner
+
+Use this harness before full decompiler benchmark runs to close:
+
+- `_fpreset` / x87 decode no-match
+- startup raw P-code opcode sequence drift
+- varnode shape and unique-temp shape mismatches

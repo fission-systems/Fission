@@ -1381,10 +1381,7 @@ fn unsupported_check_constraint_reason(signature: &str) -> Option<String> {
         }
         if matches!(
             trimmed,
-            "check_Reg32_dest"
-                | "check_Rmr32_dest"
-                | "check_rm32_dest"
-                | "check_EAX_dest"
+            "check_Reg32_dest" | "check_Rmr32_dest" | "check_rm32_dest" | "check_EAX_dest"
         ) {
             continue;
         }
@@ -1429,8 +1426,8 @@ fn build_constructor_template(
 
 fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<CompiledSemanticOp> {
     use CompiledArithmeticOpcode as Arith;
-    use CompiledSemanticOp as Op;
     use CompiledConstructTplKind as Kind;
+    use CompiledSemanticOp as Op;
 
     vec![match construct_tpl_kind {
         Kind::Nop => Op::Nop,
@@ -1553,10 +1550,11 @@ mod tests {
         assert!(!compiled.language_layout.registers.is_empty());
         assert!(!compiled.language_layout.display_templates.is_empty());
         assert!(!compiled.construct_templates.is_empty());
-        assert!(compiled.decision_tree.nodes.iter().any(|node| matches!(
-            node.probe,
-            CompiledDecisionProbe::TokenFieldRef(_)
-        )));
+        assert!(compiled
+            .decision_tree
+            .nodes
+            .iter()
+            .any(|node| matches!(node.probe, CompiledDecisionProbe::TokenFieldRef(_))));
     }
 
     #[test]

@@ -91,12 +91,7 @@ impl RuntimePcodeEmitter {
         self.append_checked(PcodeOpcode::Branch, None, vec![target], mnemonic)
     }
 
-    pub fn emit_cbranch(
-        &mut self,
-        target: Varnode,
-        cond: Varnode,
-        mnemonic: &str,
-    ) -> Result<()> {
+    pub fn emit_cbranch(&mut self, target: Varnode, cond: Varnode, mnemonic: &str) -> Result<()> {
         self.append_checked(PcodeOpcode::CBranch, None, vec![target, cond], mnemonic)
     }
 

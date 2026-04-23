@@ -6,10 +6,9 @@ use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
-    CompiledArithmeticOpcode, CompiledDecisionProbe, CompiledExecutableConstructor,
-    CompiledConstructTplKind, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
-    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternMatcher,
-    CompiledTokenFieldRef,
+    CompiledArithmeticOpcode, CompiledConstructTplKind, CompiledDecisionProbe,
+    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
+    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternMatcher, CompiledTokenFieldRef,
 };
 use crate::runtime::spine::{
     self, operand_size, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
@@ -226,9 +225,9 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             }
             CompiledDecisionProbe::ContextBitSlice { .. }
             | CompiledDecisionProbe::ContextFieldRef(_) => 0,
-            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile) => {
-                self.ctx.instruction_width_profile
-            }
+            CompiledDecisionProbe::TokenFieldRef(
+                CompiledTokenFieldRef::InstructionWidthProfile,
+            ) => self.ctx.instruction_width_profile,
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
                 ensure_token_fields(self.ctx, &mut self.cached_token_fields)?.operand_mode
             }
@@ -431,7 +430,8 @@ fn constructor_matches(
         || constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::TokenFieldRm { .. } | CompiledOperandSpec::TokenFieldReg { .. }
+                CompiledOperandSpec::TokenFieldRm { .. }
+                    | CompiledOperandSpec::TokenFieldReg { .. }
             )
         });
     if requires_token_bundle {
@@ -442,9 +442,7 @@ fn constructor_matches(
             }
         }
         if !constructor.operand_reg_values.is_empty()
-            && !constructor
-                .operand_reg_values
-                .contains(&token_fields.reg)
+            && !constructor.operand_reg_values.contains(&token_fields.reg)
         {
             bail!("operand_reg mismatch");
         }
@@ -983,8 +981,13 @@ impl CompiledTableEmitter {
         let value = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
         let rsp = gpr(4, 8);
         let new_rsp = self.tmp(8);
-        self.emitter
-            .emit_int_binop(PcodeOpcode::IntSub, new_rsp.clone(), rsp.clone(), const_u64(8, 8), "PUSH")?;
+        self.emitter.emit_int_binop(
+            PcodeOpcode::IntSub,
+            new_rsp.clone(),
+            rsp.clone(),
+            const_u64(8, 8),
+            "PUSH",
+        )?;
         self.emitter.emit_copy(rsp, new_rsp.clone(), "PUSH")?;
         self.emitter
             .emit_store(const_u64(0, 8), new_rsp, value, "PUSH")?;
@@ -1004,8 +1007,13 @@ impl CompiledTableEmitter {
             instruction.length,
             "POP",
         )?;
-        self.emitter
-            .emit_int_binop(PcodeOpcode::IntAdd, rsp.clone(), rsp, const_u64(8, 8), "POP")?;
+        self.emitter.emit_int_binop(
+            PcodeOpcode::IntAdd,
+            rsp.clone(),
+            rsp,
+            const_u64(8, 8),
+            "POP",
+        )?;
         Ok(())
     }
 
@@ -1017,8 +1025,13 @@ impl CompiledTableEmitter {
         self.emitter
             .emit_load(value.clone(), const_u64(0, 8), rsp.clone(), "LEAVE")?;
         self.emitter.emit_copy(gpr(5, 8), value, "LEAVE")?;
-        self.emitter
-            .emit_int_binop(PcodeOpcode::IntAdd, rsp.clone(), rsp, const_u64(8, 8), "LEAVE")?;
+        self.emitter.emit_int_binop(
+            PcodeOpcode::IntAdd,
+            rsp.clone(),
+            rsp,
+            const_u64(8, 8),
+            "LEAVE",
+        )?;
         Ok(())
     }
 
@@ -1143,8 +1156,12 @@ impl CompiledTableEmitter {
     }
 
     fn emit_accumulator_extend(&mut self, src_size: u32, dst_size: u32, tag: &str) -> Result<()> {
-        self.emitter
-            .emit_int_unop(PcodeOpcode::IntSExt, gpr(0, dst_size), gpr(0, src_size), tag)?;
+        self.emitter.emit_int_unop(
+            PcodeOpcode::IntSExt,
+            gpr(0, dst_size),
+            gpr(0, src_size),
+            tag,
+        )?;
         Ok(())
     }
 
@@ -1265,7 +1282,8 @@ impl CompiledTableEmitter {
                         )?;
                         extended
                     };
-                    self.emitter.emit_copy(gpr(u64::from(*index), 8), canonical, tag)?;
+                    self.emitter
+                        .emit_copy(gpr(u64::from(*index), 8), canonical, tag)?;
                 }
                 Ok(())
             }
@@ -1343,13 +1361,8 @@ impl CompiledTableEmitter {
         };
         for term in iter {
             let next = self.tmp(8);
-            self.emitter.emit_int_binop(
-                PcodeOpcode::IntAdd,
-                next.clone(),
-                acc,
-                term,
-                "EA_ADD",
-            )?;
+            self.emitter
+                .emit_int_binop(PcodeOpcode::IntAdd, next.clone(), acc, term, "EA_ADD")?;
             acc = next;
         }
         Ok(acc)
@@ -1382,25 +1395,15 @@ impl CompiledTableEmitter {
 
     fn bool_eq(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntEqual,
-            out.clone(),
-            lhs,
-            rhs,
-            tag,
-        )?;
+        self.emitter
+            .emit_int_binop(PcodeOpcode::IntEqual, out.clone(), lhs, rhs, tag)?;
         Ok(out)
     }
 
     fn bool_ne(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntNotEqual,
-            out.clone(),
-            lhs,
-            rhs,
-            tag,
-        )?;
+        self.emitter
+            .emit_int_binop(PcodeOpcode::IntNotEqual, out.clone(), lhs, rhs, tag)?;
         Ok(out)
     }
 }
@@ -1551,8 +1554,7 @@ mod tests {
         assert_eq!(len, bytes.len() as u64);
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
         assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy
-                && op.output.as_ref().is_some_and(|out| out.size == 8)
+            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
     }
 
@@ -1578,8 +1580,7 @@ mod tests {
         assert_eq!(len, bytes.len() as u64);
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt));
         assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy
-                && op.output.as_ref().is_some_and(|out| out.size == 8)
+            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
     }
 
@@ -1591,12 +1592,10 @@ mod tests {
             decode_and_lift(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
         assert_eq!(len, bytes.len() as u64);
         assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::IntZExt
-                && op.output.as_ref().is_some_and(|out| out.size == 8)
+            op.opcode == PcodeOpcode::IntZExt && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
         assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy
-                && op.output.as_ref().is_some_and(|out| out.size == 8)
+            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
     }
 }

@@ -517,12 +517,12 @@ impl RuntimeSleighFrontend {
         let function = PcodeFunction {
             blocks: build_cfg_blocks(entry_address, ops),
         };
-        function.validate().map_err(|err| {
-            RuntimeSleighError::InvalidPcodeShape {
+        function
+            .validate()
+            .map_err(|err| RuntimeSleighError::InvalidPcodeShape {
                 language: self.entry.entry_id.clone(),
                 reason: err.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(DecodedPcodeFunction {
             function,
