@@ -100,7 +100,7 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         .iter()
         .map(|ctor| {
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"template_class\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(&ctor.display),
@@ -110,7 +110,7 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
                 render_u8_array(&ctor.operand_reg_values),
                 render_u8_array(&ctor.opsize_variants),
                 render_operand_specs(&ctor.operand_specs),
-                json_string(ctor.template_class.as_str()),
+                json_string(ctor.construct_tpl_kind.as_str()),
                 render_constructor_template(&ctor.constructor_template),
                 ctor.runtime_ready,
                 render_optional_string(ctor.unsupported_template_kind.as_deref())
@@ -155,8 +155,43 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         })
         .collect::<Vec<_>>()
         .join(",\n");
+    let address_spaces = render_named_sources(
+        compiled
+            .language_layout
+            .address_spaces
+            .iter()
+            .map(|entry| (&entry.name, &entry.source)),
+    );
+    let registers = render_named_sources(
+        compiled
+            .language_layout
+            .registers
+            .iter()
+            .map(|entry| (&entry.name, &entry.source)),
+    );
+    let token_fields = render_named_sources(
+        compiled
+            .language_layout
+            .token_fields
+            .iter()
+            .map(|entry| (&entry.name, &entry.source)),
+    );
+    let context_fields = render_named_sources(
+        compiled
+            .language_layout
+            .context_fields
+            .iter()
+            .map(|entry| (&entry.name, &entry.source)),
+    );
+    let subtables = render_named_sources(
+        compiled
+            .language_layout
+            .subtables
+            .iter()
+            .map(|entry| (&entry.name, &entry.source)),
+    );
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [\n{}\n  ],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [\n{}\n  ],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
         json_string(&compiled.entry_id),
@@ -167,11 +202,36 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         compiled.decision_tree.decision_node_count,
         compiled.decision_tree.root_node_index,
         compiled.pcode_ops.len(),
+        compiled.language_layout.address_spaces.len(),
+        compiled.language_layout.registers.len(),
+        compiled.language_layout.token_fields.len(),
+        compiled.language_layout.context_fields.len(),
+        compiled.language_layout.subtables.len(),
+        compiled.construct_templates.len(),
+        address_spaces,
+        registers,
+        token_fields,
+        context_fields,
+        subtables,
         definition_lines,
         constructor_lines,
         decision_node_lines,
         executable_lines
     )
+}
+
+fn render_named_sources<'a>(entries: impl Iterator<Item = (&'a String, &'a String)>) -> String {
+    let rows = entries
+        .map(|(name, source)| {
+            format!(
+                "{{\"name\": {}, \"source\": {}}}",
+                json_string(name),
+                json_string(source)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{rows}]")
 }
 
 fn render_pattern_graph(compiled: &CompiledFrontend) -> String {
@@ -283,18 +343,18 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
     )
 }
 
-fn render_matcher(matcher: &crate::compiler::CompiledOpcodeMatcher) -> String {
+fn render_matcher(matcher: &crate::compiler::CompiledPatternMatcher) -> String {
     match matcher {
-        crate::compiler::CompiledOpcodeMatcher::ExactBytes(bytes) => format!(
+        crate::compiler::CompiledPatternMatcher::ExactBytes(bytes) => format!(
             "{{\"kind\": \"exact_bytes\", \"bytes\": {}}}",
             render_u8_array(bytes)
         ),
-        crate::compiler::CompiledOpcodeMatcher::RowCc { prefix, row } => format!(
+        crate::compiler::CompiledPatternMatcher::RowCc { prefix, row } => format!(
             "{{\"kind\": \"row_cc\", \"prefix\": {}, \"row\": {}}}",
             render_u8_array(prefix),
             row
         ),
-        crate::compiler::CompiledOpcodeMatcher::RowPage { row, page } => format!(
+        crate::compiler::CompiledPatternMatcher::RowPage { row, page } => format!(
             "{{\"kind\": \"row_page\", \"row\": {}, \"page\": {}}}",
             row, page
         ),
@@ -307,11 +367,26 @@ fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> Strin
         crate::compiler::CompiledDecisionProbe::InstructionBitSlice { offset, mask, shift } => format!(
             "{{\"kind\": \"instruction_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
         ),
-        crate::compiler::CompiledDecisionProbe::SizeMode => {
-            json_string("size_mode")
+        crate::compiler::CompiledDecisionProbe::ContextBitSlice { offset, mask, shift } => format!(
+            "{{\"kind\": \"context_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
+        ),
+        crate::compiler::CompiledDecisionProbe::TokenFieldRef(field) => format!(
+            "{{\"kind\": \"token_field_ref\", \"field\": {}}}",
+            json_string(match field {
+                crate::compiler::CompiledTokenFieldRef::InstructionWidthProfile => "instruction_width_profile",
+                crate::compiler::CompiledTokenFieldRef::AddressingForm => "addressing_form",
+                crate::compiler::CompiledTokenFieldRef::RegisterSelector => "register_selector",
+            })
+        ),
+        crate::compiler::CompiledDecisionProbe::ContextFieldRef(field) => format!(
+            "{{\"kind\": \"context_field_ref\", \"field\": {}}}",
+            json_string(match field {
+                crate::compiler::CompiledContextFieldRef::DefaultContext => "default_context",
+            })
+        ),
+        crate::compiler::CompiledDecisionProbe::TerminalPatternCheck => {
+            json_string("terminal_pattern_check")
         }
-        crate::compiler::CompiledDecisionProbe::OperandFieldMode => json_string("operand_mode"),
-        crate::compiler::CompiledDecisionProbe::OperandFieldReg => json_string("operand_reg"),
     }
 }
 
@@ -319,16 +394,16 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     let rows = specs
         .iter()
         .map(|spec| match spec {
-            crate::compiler::CompiledOperandSpec::OperandFieldRm { size, memory_only } => {
+            crate::compiler::CompiledOperandSpec::TokenFieldRm { size, memory_only } => {
                 format!(
-                    "{{\"kind\": \"operand_field_byte_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
+                    "{{\"kind\": \"token_field_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::OperandFieldReg { size } => {
-                format!("{{\"kind\": \"operand_field_byte_reg\", \"size\": {size}}}")
+            crate::compiler::CompiledOperandSpec::TokenFieldReg { size } => {
+                format!("{{\"kind\": \"token_field_reg\", \"size\": {size}}}")
             }
-            crate::compiler::CompiledOperandSpec::OpcodeFieldReg { size } => {
-                format!("{{\"kind\": \"opcode_reg\", \"size\": {size}}}")
+            crate::compiler::CompiledOperandSpec::OpcodeTokenReg { size } => {
+                format!("{{\"kind\": \"opcode_token_reg\", \"size\": {size}}}")
             }
             crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
                 format!("{{\"kind\": \"immediate\", \"size\": {size}, \"signed\": {signed}}}")
@@ -365,8 +440,8 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         .decode_steps
         .iter()
         .map(|step| match step {
-            crate::compiler::CompiledOperandDecodeStep::ConsumeOperandFieldByte => {
-                "{\"kind\": \"consume_operand_field_byte\"}".to_string()
+            crate::compiler::CompiledOperandDecodeStep::ConsumeTokenFields => {
+                "{\"kind\": \"consume_token_fields\"}".to_string()
             }
             crate::compiler::CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                 format!("{{\"kind\": \"decode_operand\", \"operand_index\": {operand_index}}}")

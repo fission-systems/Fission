@@ -9,11 +9,11 @@ pub trait RuntimeSemanticEmitter {
     fn emit_call(&mut self, state: &RuntimeConstructState) -> Result<()>;
     fn emit_jump(&mut self, state: &RuntimeConstructState) -> Result<()>;
     fn emit_conditional_jump(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_copy_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_address_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_stack_store_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_stack_load_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_frame_teardown_template(&mut self) -> Result<()>;
+    fn emit_copy_op(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_address_op(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_store_stack_op(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_load_stack_op(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_frame_teardown_op(&mut self) -> Result<()>;
     fn emit_binary(
         &mut self,
         state: &RuntimeConstructState,
@@ -50,11 +50,11 @@ where
                 CompiledSemanticOp::Call => self.emitter.emit_call(state)?,
                 CompiledSemanticOp::Jump => self.emitter.emit_jump(state)?,
                 CompiledSemanticOp::ConditionalJump => self.emitter.emit_conditional_jump(state)?,
-                CompiledSemanticOp::Copy => self.emitter.emit_copy_template(state)?,
-                CompiledSemanticOp::AddressOf => self.emitter.emit_address_template(state)?,
-                CompiledSemanticOp::StackStore => self.emitter.emit_stack_store_template(state)?,
-                CompiledSemanticOp::StackLoad => self.emitter.emit_stack_load_template(state)?,
-                CompiledSemanticOp::FrameTeardown => self.emitter.emit_frame_teardown_template()?,
+                CompiledSemanticOp::Copy => self.emitter.emit_copy_op(state)?,
+                CompiledSemanticOp::AddressOf => self.emitter.emit_address_op(state)?,
+                CompiledSemanticOp::StackStore => self.emitter.emit_store_stack_op(state)?,
+                CompiledSemanticOp::StackLoad => self.emitter.emit_load_stack_op(state)?,
+                CompiledSemanticOp::FrameTeardown => self.emitter.emit_frame_teardown_op()?,
                 CompiledSemanticOp::Binary { opcode } => {
                     self.emitter.emit_binary(state, *opcode)?
                 }

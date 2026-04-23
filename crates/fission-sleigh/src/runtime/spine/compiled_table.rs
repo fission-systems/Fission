@@ -3,8 +3,9 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
     CompiledArithmeticOpcode, CompiledDecisionProbe, CompiledExecutableConstructor,
-    CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate, CompiledOpcodeMatcher,
-    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledTemplateClass,
+    CompiledConstructTplKind, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
+    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternMatcher,
+    CompiledTokenFieldRef,
 };
 use crate::runtime::spine::{
     self, operand_size, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
@@ -16,11 +17,11 @@ use crate::runtime::{
     RuntimeSleighError, UNIQUE_SPACE_ID,
 };
 
-const REGISTER_SPACE_BASE: u64 = 0xA860_0000;
-const FLAG_SPACE_BASE: u64 = 0xA86F_0000;
+const SYNTHETIC_REGISTER_SPACE_ROOT: u64 = 0xA860_0000;
+const SYNTHETIC_STATUS_SPACE_ROOT: u64 = 0xA86F_0000;
 
 #[derive(Debug, Clone, Copy)]
-struct PrefixState {
+struct InstructionExtensionState {
     w: bool,
     r: bool,
     x: bool,
@@ -30,7 +31,7 @@ struct PrefixState {
 #[derive(Debug, Clone)]
 struct CompiledInstructionContext<'a> {
     inner: RuntimeInstructionContext<'a>,
-    extension_prefix: PrefixState,
+    extension_state: InstructionExtensionState,
 }
 
 impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
@@ -48,7 +49,7 @@ impl<'a> CompiledInstructionContext<'a> {
         }
         let mut cursor = 0usize;
         let mut operand_size_override = false;
-        let mut extension_prefix = PrefixState {
+        let mut extension_state = InstructionExtensionState {
             w: false,
             r: false,
             x: false,
@@ -64,7 +65,7 @@ impl<'a> CompiledInstructionContext<'a> {
                     cursor += 1;
                 }
                 value @ 0x40..=0x4F => {
-                    extension_prefix = PrefixState {
+                    extension_state = InstructionExtensionState {
                         w: value & 0x08 != 0,
                         r: value & 0x04 != 0,
                         x: value & 0x02 != 0,
@@ -75,7 +76,7 @@ impl<'a> CompiledInstructionContext<'a> {
                 _ => break,
             }
         }
-        let size_mode = if extension_prefix.w {
+        let instruction_width_profile = if extension_state.w {
             2
         } else if operand_size_override {
             0
@@ -83,14 +84,19 @@ impl<'a> CompiledInstructionContext<'a> {
             1
         };
         Ok(Self {
-            inner: RuntimeInstructionContext::new(bytes, address, cursor, size_mode),
-            extension_prefix,
+            inner: RuntimeInstructionContext::new(
+                bytes,
+                address,
+                cursor,
+                instruction_width_profile,
+            ),
+            extension_state,
         })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct OperandFieldByte {
+struct TokenFieldBundle {
     operand_mode: u8,
     reg: u8,
     rm: u8,
@@ -144,7 +150,7 @@ pub(crate) fn decode_instruction(
         BoundOperand::Relative { target } => Some(*target),
         _ => None,
     });
-    let flow_kind = flow_kind_for(decoded.template_class);
+    let flow_kind = flow_kind_for(decoded.construct_tpl_kind);
     let references = decoded_references(address, length, flow_kind, &decoded.operands);
     Ok(DecodedInstruction {
         address,
@@ -163,7 +169,7 @@ fn select_constructor<'a>(
     ctx: &CompiledInstructionContext<'_>,
 ) -> Option<RuntimeSelection<'a>> {
     let mut roots = vec![("global".to_string(), compiled.decision_tree.root_node_index)];
-    if let Some(bucket_keys) = candidate_decision_bucket_keys(ctx) {
+    if let Some(bucket_keys) = decision_root_keys(ctx) {
         for bucket_key in bucket_keys {
             if let Some(bucket) = compiled
                 .decision_tree
@@ -186,14 +192,14 @@ fn select_constructor<'a>(
 
 struct CompiledDecisionProbeEvaluator<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
-    cached_operand_field_byte: Option<OperandFieldByte>,
+    cached_token_fields: Option<TokenFieldBundle>,
 }
 
 impl<'a, 'b> CompiledDecisionProbeEvaluator<'a, 'b> {
     fn new(ctx: &'a CompiledInstructionContext<'b>) -> Self {
         Self {
             ctx,
-            cached_operand_field_byte: None,
+            cached_token_fields: None,
         }
     }
 }
@@ -214,19 +220,23 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
                 (byte & mask) >> shift
             }
-            CompiledDecisionProbe::SizeMode => self.ctx.size_mode,
-            CompiledDecisionProbe::OperandFieldMode => {
-                ensure_operand_field_byte(self.ctx, &mut self.cached_operand_field_byte)?
-                    .operand_mode
+            CompiledDecisionProbe::ContextBitSlice { .. }
+            | CompiledDecisionProbe::ContextFieldRef(_) => 0,
+            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile) => {
+                self.ctx.instruction_width_profile
             }
-            CompiledDecisionProbe::OperandFieldReg => {
-                ensure_operand_field_byte(self.ctx, &mut self.cached_operand_field_byte)?.reg
+            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
+                ensure_token_fields(self.ctx, &mut self.cached_token_fields)?.operand_mode
             }
+            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
+                ensure_token_fields(self.ctx, &mut self.cached_token_fields)?.reg
+            }
+            CompiledDecisionProbe::TerminalPatternCheck => 0,
         })
     }
 }
 
-fn candidate_decision_bucket_keys(ctx: &CompiledInstructionContext<'_>) -> Option<Vec<String>> {
+fn decision_root_keys(ctx: &CompiledInstructionContext<'_>) -> Option<Vec<String>> {
     let first = *ctx.bytes.get(ctx.cursor)?;
     let mut keys = vec![format!("byte_{first:02x}")];
     if first == 0x0f {
@@ -239,19 +249,19 @@ fn candidate_decision_bucket_keys(ctx: &CompiledInstructionContext<'_>) -> Optio
     Some(keys)
 }
 
-fn ensure_operand_field_byte<'a>(
+fn ensure_token_fields<'a>(
     ctx: &CompiledInstructionContext<'_>,
-    cached_operand_field_byte: &'a mut Option<OperandFieldByte>,
-) -> Result<&'a OperandFieldByte> {
-    if cached_operand_field_byte.is_none() {
-        *cached_operand_field_byte = Some(parse_operand_field_byte(
+    cached_token_fields: &'a mut Option<TokenFieldBundle>,
+) -> Result<&'a TokenFieldBundle> {
+    if cached_token_fields.is_none() {
+        *cached_token_fields = Some(parse_token_fields(
             ctx,
             ctx.cursor + opcode_len_from_context(ctx)?,
         )?);
     }
-    cached_operand_field_byte
+    cached_token_fields
         .as_ref()
-        .ok_or_else(|| anyhow!("missing cached operand_field_byte"))
+        .ok_or_else(|| anyhow!("missing cached token fields"))
 }
 
 fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
@@ -262,20 +272,20 @@ fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize
     Ok(if opcode == 0x0f { 2 } else { 1 })
 }
 
-fn parse_operand_field_byte(
+fn parse_token_fields(
     ctx: &CompiledInstructionContext<'_>,
     offset: usize,
-) -> Result<OperandFieldByte> {
+) -> Result<TokenFieldBundle> {
     let byte = *ctx
         .bytes
         .get(offset)
-        .ok_or_else(|| anyhow!("missing operand_field_byte at {offset}"))?;
+        .ok_or_else(|| anyhow!("missing token field bundle at {offset}"))?;
     let operand_mode = byte >> 6;
-    let reg = ((byte >> 3) & 0x7) | ((ctx.extension_prefix.r as u8) << 3);
+    let reg = ((byte >> 3) & 0x7) | ((ctx.extension_state.r as u8) << 3);
     let rm_low = byte & 0x7;
-    let rm = rm_low | ((ctx.extension_prefix.b as u8) << 3);
+    let rm = rm_low | ((ctx.extension_state.b as u8) << 3);
     if operand_mode == 3 {
-        return Ok(OperandFieldByte {
+        return Ok(TokenFieldBundle {
             operand_mode,
             reg,
             rm,
@@ -305,14 +315,14 @@ fn parse_operand_field_byte(
         let index_low = (sib >> 3) & 0x7;
         let base_low = sib & 0x7;
         if index_low != 4 {
-            index = Some(index_low | ((ctx.extension_prefix.x as u8) << 3));
+            index = Some(index_low | ((ctx.extension_state.x as u8) << 3));
         }
         if operand_mode == 0 && base_low == 5 {
             base = None;
             displacement = read_sint(ctx.bytes, offset + length, 4)?;
             length += 4;
         } else {
-            base = Some(base_low | ((ctx.extension_prefix.b as u8) << 3));
+            base = Some(base_low | ((ctx.extension_state.b as u8) << 3));
         }
     } else if operand_mode == 0 && rm_low == 5 {
         base = None;
@@ -333,7 +343,7 @@ fn parse_operand_field_byte(
         _ => {}
     }
 
-    Ok(OperandFieldByte {
+    Ok(TokenFieldBundle {
         operand_mode,
         reg,
         rm,
@@ -377,19 +387,19 @@ fn constructor_matches(
         && !constructor
             .opsize_variants
             .iter()
-            .any(|opsize| *opsize == ctx.size_mode)
+            .any(|opsize| *opsize == ctx.instruction_width_profile)
     {
         bail!("opsize mismatch");
     }
 
     let opcode_len = opcode_len_from_matcher(&constructor.matcher);
     match &constructor.matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => {
+        CompiledPatternMatcher::ExactBytes(bytes) => {
             if ctx.bytes.get(ctx.cursor..ctx.cursor + bytes.len()) != Some(bytes.as_slice()) {
                 bail!("exact opcode mismatch");
             }
         }
-        CompiledOpcodeMatcher::RowCc { prefix, row } => {
+        CompiledPatternMatcher::RowCc { prefix, row } => {
             if ctx.bytes.get(ctx.cursor..ctx.cursor + prefix.len()) != Some(prefix.as_slice()) {
                 bail!("prefix mismatch");
             }
@@ -401,7 +411,7 @@ fn constructor_matches(
                 bail!("row mismatch");
             }
         }
-        CompiledOpcodeMatcher::RowPage { row, page } => {
+        CompiledPatternMatcher::RowPage { row, page } => {
             let opcode = *ctx
                 .bytes
                 .get(ctx.cursor)
@@ -412,40 +422,39 @@ fn constructor_matches(
         }
     }
 
-    let requires_operand_field_byte = constructor.mod_constraint.is_some()
+    let requires_token_bundle = constructor.mod_constraint.is_some()
         || !constructor.operand_reg_values.is_empty()
         || constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::OperandFieldRm { .. }
-                    | CompiledOperandSpec::OperandFieldReg { .. }
+                CompiledOperandSpec::TokenFieldRm { .. } | CompiledOperandSpec::TokenFieldReg { .. }
             )
         });
-    if requires_operand_field_byte {
-        let operand_field_byte = parse_operand_field_byte(ctx, ctx.cursor + opcode_len)?;
+    if requires_token_bundle {
+        let token_fields = parse_token_fields(ctx, ctx.cursor + opcode_len)?;
         if let Some(expected) = constructor.mod_constraint {
-            if operand_field_byte.operand_mode != expected {
+            if token_fields.operand_mode != expected {
                 bail!("mod mismatch");
             }
         }
         if !constructor.operand_reg_values.is_empty()
             && !constructor
                 .operand_reg_values
-                .contains(&operand_field_byte.reg)
+                .contains(&token_fields.reg)
         {
             bail!("operand_reg mismatch");
         }
         if constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::OperandFieldRm {
+                CompiledOperandSpec::TokenFieldRm {
                     memory_only: true,
                     ..
                 }
             )
-        }) && operand_field_byte.operand_mode == 3
+        }) && token_fields.operand_mode == 3
         {
-            bail!("memory-only operand_field_byte mismatch");
+            bail!("memory-only token field mismatch");
         }
     }
 
@@ -464,7 +473,7 @@ struct CompiledParserWalker<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     cursor: usize,
-    operand_field_byte: Option<OperandFieldByte>,
+    token_fields: Option<TokenFieldBundle>,
     handles: Vec<Option<RuntimeHandle>>,
     walker: spine::RuntimeParserWalker,
 }
@@ -478,7 +487,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(Self {
             ctx,
             cursor: ctx.cursor + opcode_len,
-            operand_field_byte: None,
+            token_fields: None,
             handles: vec![None; selection.constructor.constructor_template.handles.len()],
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             selection,
@@ -494,8 +503,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .clone();
         for step in decode_steps {
             match step {
-                CompiledOperandDecodeStep::ConsumeOperandFieldByte => {
-                    self.ensure_operand_field_byte()?;
+                CompiledOperandDecodeStep::ConsumeTokenFields => {
+                    self.ensure_token_fields()?;
                 }
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                     self.decode_operand(operand_index)?;
@@ -515,15 +524,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .collect::<Vec<_>>();
 
         let condition_code = match &self.selection.constructor.matcher {
-            CompiledOpcodeMatcher::RowCc { prefix, .. } => {
+            CompiledPatternMatcher::RowCc { prefix, .. } => {
                 Some(self.ctx.bytes[self.ctx.cursor + prefix.len()] & 0x0f)
             }
             _ if matches!(
-                self.selection.constructor.template_class,
-                CompiledTemplateClass::Setcc
+                self.selection.constructor.construct_tpl_kind,
+                CompiledConstructTplKind::Setcc
             ) && matches!(
                 self.selection.constructor.matcher,
-                CompiledOpcodeMatcher::ExactBytes(_)
+                CompiledPatternMatcher::ExactBytes(_)
             ) =>
             {
                 let opcode = self.ctx.bytes[self.ctx.cursor
@@ -535,7 +544,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         };
 
         Ok(RuntimeConstructState {
-            template_class: self.selection.constructor.template_class,
+            construct_tpl_kind: self.selection.constructor.construct_tpl_kind,
             constructor_template: self.selection.constructor.constructor_template.clone(),
             construct_nodes: self.walker.into_nodes(),
             handles,
@@ -580,54 +589,54 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn ensure_operand_field_byte(&mut self) -> Result<OperandFieldByte> {
-        if self.operand_field_byte.is_none() {
-            let decoded = parse_operand_field_byte(self.ctx, self.cursor)?;
+    fn ensure_token_fields(&mut self) -> Result<TokenFieldBundle> {
+        if self.token_fields.is_none() {
+            let decoded = parse_token_fields(self.ctx, self.cursor)?;
             self.cursor += decoded.length;
-            self.operand_field_byte = Some(decoded);
+            self.token_fields = Some(decoded);
         }
-        self.operand_field_byte
-            .ok_or_else(|| anyhow!("failed to decode operand_field_byte"))
+        self.token_fields
+            .ok_or_else(|| anyhow!("failed to decode token fields"))
     }
 
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<BoundOperand> {
         match &template.spec {
-            CompiledOperandSpec::OperandFieldRm { size, memory_only } => {
-                let operand_field_byte = self.ensure_operand_field_byte()?;
-                if operand_field_byte.operand_mode == 3 {
+            CompiledOperandSpec::TokenFieldRm { size, memory_only } => {
+                let token_fields = self.ensure_token_fields()?;
+                if token_fields.operand_mode == 3 {
                     if *memory_only {
-                        bail!("memory-only operand_field_byte operand cannot bind register");
+                        bail!("memory-only token field operand cannot bind register");
                     }
                     Ok(BoundOperand::Register {
-                        index: operand_field_byte.rm,
+                        index: token_fields.rm,
                         size: *size,
                     })
                 } else {
                     Ok(BoundOperand::Memory {
-                        base: operand_field_byte.base,
-                        index: operand_field_byte.index,
-                        scale: operand_field_byte.scale,
-                        displacement: operand_field_byte.displacement,
-                        rip_relative: operand_field_byte.rip_relative,
+                        base: token_fields.base,
+                        index: token_fields.index,
+                        scale: token_fields.scale,
+                        displacement: token_fields.displacement,
+                        rip_relative: token_fields.rip_relative,
                         size: *size,
                     })
                 }
             }
-            CompiledOperandSpec::OperandFieldReg { size } => {
-                let operand_field_byte = self.ensure_operand_field_byte()?;
+            CompiledOperandSpec::TokenFieldReg { size } => {
+                let token_fields = self.ensure_token_fields()?;
                 Ok(BoundOperand::Register {
-                    index: operand_field_byte.reg,
+                    index: token_fields.reg,
                     size: *size,
                 })
             }
-            CompiledOperandSpec::OpcodeFieldReg { size } => {
+            CompiledOperandSpec::OpcodeTokenReg { size } => {
                 let opcode_len = opcode_len_from_matcher(&self.selection.constructor.matcher);
                 let opcode = *self
                     .ctx
                     .bytes
                     .get(self.ctx.cursor + opcode_len - 1)
                     .ok_or_else(|| anyhow!("missing opcode reg byte"))?;
-                let reg = (opcode & 0x7) | ((self.ctx.extension_prefix.b as u8) << 3);
+                let reg = (opcode & 0x7) | ((self.ctx.extension_state.b as u8) << 3);
                 Ok(BoundOperand::Register {
                     index: reg,
                     size: *size,
@@ -660,20 +669,20 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 }
 
-fn opcode_len_from_matcher(matcher: &CompiledOpcodeMatcher) -> usize {
+fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> usize {
     match matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledOpcodeMatcher::RowCc { prefix, .. } => prefix.len() + 1,
-        CompiledOpcodeMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
+        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
+        CompiledPatternMatcher::RowPage { .. } => 1,
     }
 }
 
-fn flow_kind_for(kind: CompiledTemplateClass) -> DecodedFlowKind {
+fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
     match kind {
-        CompiledTemplateClass::Call => DecodedFlowKind::Call,
-        CompiledTemplateClass::Jmp => DecodedFlowKind::Jump,
-        CompiledTemplateClass::Jcc => DecodedFlowKind::ConditionalJump,
-        CompiledTemplateClass::Ret => DecodedFlowKind::Return,
+        CompiledConstructTplKind::Call => DecodedFlowKind::Call,
+        CompiledConstructTplKind::Jmp => DecodedFlowKind::Jump,
+        CompiledConstructTplKind::Jcc => DecodedFlowKind::ConditionalJump,
+        CompiledConstructTplKind::Ret => DecodedFlowKind::Return,
         _ => DecodedFlowKind::None,
     }
 }
@@ -830,24 +839,24 @@ impl RuntimeSemanticEmitter for CompiledTableEmitter {
         self.emit_jcc(state)
     }
 
-    fn emit_copy_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
+    fn emit_copy_op(&mut self, state: &RuntimeConstructState) -> Result<()> {
         self.emit_mov(state)
     }
 
-    fn emit_address_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_address_template(self, state)
+    fn emit_address_op(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_address_op(self, state)
     }
 
-    fn emit_stack_store_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_stack_store_template(self, state)
+    fn emit_store_stack_op(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_store_stack_op(self, state)
     }
 
-    fn emit_stack_load_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_stack_load_template(self, state)
+    fn emit_load_stack_op(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_load_stack_op(self, state)
     }
 
-    fn emit_frame_teardown_template(&mut self) -> Result<()> {
-        CompiledTableEmitter::emit_frame_teardown_template(self)
+    fn emit_frame_teardown_op(&mut self) -> Result<()> {
+        CompiledTableEmitter::emit_frame_teardown_op(self)
     }
 
     fn emit_binary(
@@ -903,7 +912,7 @@ impl RuntimeSemanticEmitter for CompiledTableEmitter {
         src_size: u32,
         dst_size: u32,
     ) -> Result<()> {
-        self.emit_accumulator_extend(src_size, dst_size, state.template_class.as_str())
+        self.emit_accumulator_extend(src_size, dst_size, state.construct_tpl_kind.as_str())
     }
 }
 
@@ -931,7 +940,7 @@ impl CompiledTableEmitter {
 
     fn emit_jcc(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let target = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
-        let cond = self.condition_varnode(
+        let cond = self.status_predicate_varnode(
             instruction
                 .condition_code
                 .ok_or_else(|| anyhow!("missing jcc condition"))?,
@@ -952,7 +961,7 @@ impl CompiledTableEmitter {
         )
     }
 
-    fn emit_address_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_address_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let size = operand_size(&instruction.operands[0]).max(8);
         let BoundOperand::Memory { .. } = &instruction.operands[1] else {
             bail!("lea source must be memory");
@@ -967,7 +976,7 @@ impl CompiledTableEmitter {
         )
     }
 
-    fn emit_stack_store_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_store_stack_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let value = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
         let rsp = gpr(4, 8);
         let new_rsp = self.tmp(8);
@@ -987,7 +996,7 @@ impl CompiledTableEmitter {
         Ok(())
     }
 
-    fn emit_stack_load_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_load_stack_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let rsp = gpr(4, 8);
         let size = operand_size(&instruction.operands[0]).max(8);
         let value = self.tmp(size);
@@ -1013,7 +1022,7 @@ impl CompiledTableEmitter {
         Ok(())
     }
 
-    fn emit_frame_teardown_template(&mut self) -> Result<()> {
+    fn emit_frame_teardown_op(&mut self) -> Result<()> {
         let rsp = gpr(4, 8);
         let rbp = gpr(5, 8);
         self.push(PcodeOpcode::Copy, Some(rsp.clone()), vec![rbp], "LEAVE");
@@ -1136,7 +1145,7 @@ impl CompiledTableEmitter {
     }
 
     fn emit_setcc(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let cond = self.condition_varnode(
+        let cond = self.status_predicate_varnode(
             instruction
                 .condition_code
                 .ok_or_else(|| anyhow!("missing setcc condition"))?,
@@ -1160,7 +1169,7 @@ impl CompiledTableEmitter {
         Ok(())
     }
 
-    fn condition_varnode(&mut self, condition_code: u8) -> Result<Varnode> {
+    fn status_predicate_varnode(&mut self, condition_code: u8) -> Result<Varnode> {
         Ok(match condition_code {
             0x0 => flag(11),
             0x1 => self.bool_not(flag(11), "JNO_PRED"),
@@ -1437,7 +1446,7 @@ fn const_u64(val: u64, size: u32) -> Varnode {
 fn gpr(index: u64, size: u32) -> Varnode {
     Varnode {
         space_id: UNIQUE_SPACE_ID,
-        offset: REGISTER_SPACE_BASE + index * 8,
+        offset: SYNTHETIC_REGISTER_SPACE_ROOT + index * 8,
         size,
         is_constant: false,
         constant_val: 0,
@@ -1447,7 +1456,7 @@ fn gpr(index: u64, size: u32) -> Varnode {
 fn flag(bit: u64) -> Varnode {
     Varnode {
         space_id: UNIQUE_SPACE_ID,
-        offset: FLAG_SPACE_BASE + bit,
+        offset: SYNTHETIC_STATUS_SPACE_ROOT + bit,
         size: 1,
         is_constant: false,
         constant_val: 0,
@@ -1548,6 +1557,6 @@ mod tests {
         assert!(state
             .handles
             .iter()
-            .any(|handle| matches!(handle.spec, CompiledOperandSpec::OperandFieldRm { .. })));
+            .any(|handle| matches!(handle.spec, CompiledOperandSpec::TokenFieldRm { .. })));
     }
 }

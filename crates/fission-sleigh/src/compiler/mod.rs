@@ -20,12 +20,15 @@ pub use equivalence::{
     RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
 };
 pub use ir::{
-    CompiledArithmeticOpcode, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode, CompiledDecisionProbe,
-    CompiledDecisionTree, CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend,
-    CompiledHandleTemplate, CompiledMacro, CompiledOpcodeMatcher, CompiledOperandDecodeStep,
-    CompiledOperandSpec, CompiledPatternNode, CompiledPcodeOp, CompiledSemanticOp,
-    CompiledSemanticTemplate, CompiledSpecDefinition, CompiledTemplateClass, ControlFlowClass,
+    CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstructor,
+    CompiledConstructorTemplate, CompiledConstructTpl, CompiledConstructTplKind,
+    CompiledContextField, CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge,
+    CompiledDecisionNode, CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
+    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
+    CompiledLanguageLayout, CompiledMacro, CompiledOperandDecodeStep, CompiledOperandSpec,
+    CompiledPatternMatcher, CompiledPatternNode, CompiledPcodeOp, CompiledRegister,
+    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpecDefinition, CompiledSubtable,
+    CompiledTokenField, CompiledTokenFieldRef, ControlFlowClass,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use token::{Token, TokenKind, TokenizedLine};

@@ -1301,3 +1301,79 @@ The runtime still executes the same first compiled-table consumer, but the Rust-
   1. compile actual token/context field layout from SLEIGH definitions
   2. make `DecisionMatcher` read `TokenFieldRef` / `ContextFieldRef` instead of compatibility field probes
   3. replace stack/frame/address template hooks with primitive `COPY/LOAD/STORE/BRANCH/CBRANCH/CALL/RETURN/INT_*` op templates emitted from constructor semantics
+
+## 2026-04-23 - SLEIGH spec-driven execution IR scaffold
+
+### Summary
+
+- wave type:
+  - runtime spine hardcoding reduction / executable IR scaffold
+- primary owner:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-sleigh/src/compiler/codegen.rs`
+- goal:
+  - remove the remaining explicit compatibility-owner names from runtime/compiler policy
+  - expose SLEIGH-derived language layout and construct-template summaries in generated artifacts
+  - keep the current x86-64 smoke path working while preventing new architecture-specific helper modules
+
+### What changed
+
+- added compiler IR scaffolding for spec-derived execution metadata:
+  - address spaces
+  - registers
+  - token fields
+  - context fields
+  - subtables
+  - display templates
+  - construct template inventory
+- renamed the compiled-table decision/matcher vocabulary toward Ghidra owner names:
+  - `CompiledPatternMatcher`
+  - `CompiledConstructTplKind`
+  - `CompiledConstructTpl`
+  - `TokenFieldRef`
+  - `ContextFieldRef`
+- moved runtime context naming away from width-mode compatibility language:
+  - parser-context state now exposes `instruction_width_profile`
+  - old explicit prefix/operand-byte/register/flag owner names are gone from runtime/compiler policy paths
+- updated generated `parsed_inventory.json` for all `146` variants with additive layout/template counts and lists.
+- updated `crates/fission-sleigh/AGENTS.md` to pin `ConstructTpl -> CompiledConstructTpl / CompiledConstructorTemplate`.
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed, `38 processors / 146 variants`
+- codegen determinism:
+  - regenerated artifacts, reran generation, and compared generated-tree SHA256 rollup
+  - result: byte-stable
+- x86-64 CLI smoke:
+  - `0x140001470`
+    - result: passed, `engine_used=rust_sleigh`, `fell_back=false`
+  - `0x1400013e0`
+    - result: passed, `engine_used=rust_sleigh`, `fell_back=false`
+  - `0x140001400`
+    - result: passed, `engine_used=rust_sleigh`, `fell_back=false`
+- hardcoding audit:
+  - `rg -n "PrefixState|OperandFieldByte|candidate_decision_bucket_keys|size_mode|OperandField|CompiledTemplateClass|REGISTER_SPACE_BASE|FLAG_SPACE_BASE|condition_varnode|constructor_is_runtime_candidate|classify_template_class" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/compiler`
+  - result: `0` matches
+
+### Result
+
+This wave does not claim complete Ghidra `ConstructTpl` execution. It removes the most explicit remaining compatibility owner names and adds checked-in spec-derived metadata so the next wave can replace compatibility-normalized field probes with real SLEIGH token/context field evaluation.
+
+### Remaining risk / next owner
+
+- the current compiled-table executor still derives some behavior from compatibility-normalized constructor signatures
+- `classify_construct_tpl_kind` is still a transitional semantic classifier and must be replaced by parsed constructor semantic bodies
+- next owner:
+  1. parse token/context field definitions into executable bit ranges
+  2. evaluate decision probes from those field definitions instead of normalized compatibility fields
+  3. compile constructor bodies into primitive `ConstructTpl` op sequences and remove transitional semantic classification

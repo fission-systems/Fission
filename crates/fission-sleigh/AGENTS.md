@@ -84,8 +84,13 @@ Clean-room owner mapping is fixed as:
 - `DecisionNode` -> `CompiledDecisionTree` plus `runtime::spine` traversal
 - `ConstructState` -> `runtime::spine::RuntimeConstructState`
 - `ParserWalker` -> `runtime::spine::RuntimeParserWalker`
-- `ConstructTpl` -> compiler-produced templates
+- `ConstructTpl` -> `CompiledConstructTpl` / `CompiledConstructorTemplate`
 - `PcodeEmit` -> `runtime::spine::RuntimePcodeEmitter`
+
+Runtime policy must be driven by token/context fields, constructor patterns,
+display templates, and compiled p-code templates. Architecture-specific byte
+parsers or mnemonic-family emitters are only transitional compatibility debt and
+must not be moved into new `helpers`, `providers`, `quirks`, or `text` modules.
 
 ## Anti-Patterns
 

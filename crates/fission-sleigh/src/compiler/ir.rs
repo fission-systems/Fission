@@ -17,8 +17,56 @@ pub struct CompiledFrontend {
     pub constructors: Vec<CompiledConstructor>,
     pub executable_constructors: Vec<CompiledExecutableConstructor>,
     pub decision_tree: CompiledDecisionTree,
+    pub language_layout: CompiledLanguageLayout,
+    pub construct_templates: Vec<CompiledConstructTpl>,
     pub pcode_ops: Vec<CompiledPcodeOp>,
     pub pattern_nodes: Vec<CompiledPatternNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledLanguageLayout {
+    pub address_spaces: Vec<CompiledAddressSpace>,
+    pub registers: Vec<CompiledRegister>,
+    pub token_fields: Vec<CompiledTokenField>,
+    pub context_fields: Vec<CompiledContextField>,
+    pub subtables: Vec<CompiledSubtable>,
+    pub display_templates: Vec<CompiledDisplayTemplate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledAddressSpace {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledRegister {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledTokenField {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledContextField {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledSubtable {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDisplayTemplate {
+    pub constructor_hash: u64,
+    pub display: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,12 +102,12 @@ pub struct CompiledExecutableConstructor {
     pub source: String,
     pub display: String,
     pub signature_hash: u64,
-    pub matcher: CompiledOpcodeMatcher,
+    pub matcher: CompiledPatternMatcher,
     pub mod_constraint: Option<u8>,
     pub operand_reg_values: Vec<u8>,
     pub opsize_variants: Vec<u8>,
     pub operand_specs: Vec<CompiledOperandSpec>,
-    pub template_class: CompiledTemplateClass,
+    pub construct_tpl_kind: CompiledConstructTplKind,
     pub constructor_template: CompiledConstructorTemplate,
     pub runtime_ready: bool,
     pub unsupported_template_kind: Option<String>,
@@ -96,19 +144,32 @@ pub struct CompiledDecisionEdge {
 pub enum CompiledDecisionProbe {
     Terminal,
     InstructionBitSlice { offset: u8, mask: u8, shift: u8 },
-    SizeMode,
-    OperandFieldMode,
-    OperandFieldReg,
+    ContextBitSlice { offset: u8, mask: u8, shift: u8 },
+    TokenFieldRef(CompiledTokenFieldRef),
+    ContextFieldRef(CompiledContextFieldRef),
+    TerminalPatternCheck,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompiledOpcodeMatcher {
+pub enum CompiledPatternMatcher {
     ExactBytes(Vec<u8>),
     RowCc { prefix: Vec<u8>, row: u8 },
     RowPage { row: u8, page: u8 },
 }
 
-impl CompiledOpcodeMatcher {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledTokenFieldRef {
+    InstructionWidthProfile,
+    AddressingForm,
+    RegisterSelector,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledContextFieldRef {
+    DefaultContext,
+}
+
+impl CompiledPatternMatcher {
     pub fn key(&self) -> String {
         match self {
             Self::ExactBytes(bytes) => bytes
@@ -129,14 +190,14 @@ impl CompiledOpcodeMatcher {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandSpec {
-    OperandFieldRm {
+    TokenFieldRm {
         size: u32,
         memory_only: bool,
     },
-    OperandFieldReg {
+    TokenFieldReg {
         size: u32,
     },
-    OpcodeFieldReg {
+    OpcodeTokenReg {
         size: u32,
     },
     Immediate {
@@ -167,7 +228,7 @@ pub struct CompiledHandleTemplate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandDecodeStep {
-    ConsumeOperandFieldByte,
+    ConsumeTokenFields,
     DecodeOperand { operand_index: usize },
 }
 
@@ -188,6 +249,12 @@ pub enum CompiledSemanticOp {
     Extend { signed: bool },
     SetCc,
     AccumulatorExtend { src_size: u32, dst_size: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledConstructTpl {
+    pub constructor_hash: u64,
+    pub ops: Vec<CompiledSemanticOp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,7 +278,7 @@ pub enum CompiledFixedRegister {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompiledTemplateClass {
+pub enum CompiledConstructTplKind {
     Nop,
     Ret,
     Call,
@@ -245,7 +312,7 @@ pub enum CompiledTemplateClass {
     Cdqe,
 }
 
-impl CompiledTemplateClass {
+impl CompiledConstructTplKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Nop => "nop",
@@ -288,9 +355,20 @@ impl CompiledDecisionProbe {
         match self {
             Self::Terminal => "terminal",
             Self::InstructionBitSlice { .. } => "instruction_bit_slice",
-            Self::SizeMode => "size_mode",
-            Self::OperandFieldMode => "operand_mode",
-            Self::OperandFieldReg => "operand_reg",
+            Self::ContextBitSlice { .. } => "context_bit_slice",
+            Self::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile) => {
+                "token_field_instruction_width"
+            }
+            Self::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
+                "token_field_addressing_form"
+            }
+            Self::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
+                "token_field_register_selector"
+            }
+            Self::ContextFieldRef(CompiledContextFieldRef::DefaultContext) => {
+                "context_field_default"
+            }
+            Self::TerminalPatternCheck => "terminal_pattern_check",
         }
     }
 }
@@ -303,11 +381,11 @@ impl CompiledSemanticOp {
             Self::Call => "call",
             Self::Jump => "jump",
             Self::ConditionalJump => "conditional_jump",
-            Self::Copy => "move",
-            Self::AddressOf => "lea",
-            Self::StackStore => "push",
-            Self::StackLoad => "pop",
-            Self::FrameTeardown => "leave",
+            Self::Copy => "copy",
+            Self::AddressOf => "address_of",
+            Self::StackStore => "store_stack",
+            Self::StackLoad => "load_stack",
+            Self::FrameTeardown => "frame_teardown",
             Self::Binary { .. } => "binary",
             Self::Compare { bitwise: false } => "compare",
             Self::Compare { bitwise: true } => "test",
@@ -398,6 +476,8 @@ pub fn compile_frontend(
     };
     collector.collect_items(&ast.items, &mut Vec::new());
 
+    let language_layout = collector.language_layout();
+    let construct_templates = collector.construct_templates();
     let mut pcode_ops = collector
         .pcode_ops
         .into_iter()
@@ -442,6 +522,8 @@ pub fn compile_frontend(
         constructors: collector.constructors,
         executable_constructors: collector.executable_constructors,
         decision_tree,
+        language_layout,
+        construct_templates,
         pcode_ops,
         pattern_nodes: collector.pattern_nodes,
     })
@@ -458,6 +540,65 @@ struct Collector {
 }
 
 impl Collector {
+    fn language_layout(&self) -> CompiledLanguageLayout {
+        let mut address_spaces = Vec::new();
+        let mut registers = Vec::new();
+        let mut token_fields = Vec::new();
+        let mut context_fields = Vec::new();
+        let mut subtables = Vec::new();
+        for definition in &self.definitions {
+            match definition.kind.as_str() {
+                "space" => address_spaces.push(CompiledAddressSpace {
+                    name: definition_name(&definition.statement),
+                    source: definition.source.clone(),
+                }),
+                "register" => registers.push(CompiledRegister {
+                    name: definition_name(&definition.statement),
+                    source: definition.source.clone(),
+                }),
+                "token" => token_fields.push(CompiledTokenField {
+                    name: definition_name(&definition.statement),
+                    source: definition.source.clone(),
+                }),
+                "context" => context_fields.push(CompiledContextField {
+                    name: definition_name(&definition.statement),
+                    source: definition.source.clone(),
+                }),
+                "table" => subtables.push(CompiledSubtable {
+                    name: definition_name(&definition.statement),
+                    source: definition.source.clone(),
+                }),
+                _ => {}
+            }
+        }
+        let display_templates = self
+            .constructors
+            .iter()
+            .map(|constructor| CompiledDisplayTemplate {
+                constructor_hash: constructor.signature_hash,
+                display: constructor.display.clone(),
+            })
+            .collect();
+        CompiledLanguageLayout {
+            address_spaces,
+            registers,
+            token_fields,
+            context_fields,
+            subtables,
+            display_templates,
+        }
+    }
+
+    fn construct_templates(&self) -> Vec<CompiledConstructTpl> {
+        self.executable_constructors
+            .iter()
+            .map(|constructor| CompiledConstructTpl {
+                constructor_hash: constructor.signature_hash,
+                ops: constructor.constructor_template.semantic_ops.clone(),
+            })
+            .collect()
+    }
+
     fn collect_items(&mut self, items: &[AstItem], with_stack: &mut Vec<WithContextFrame>) {
         for item in items {
             match item {
@@ -604,6 +745,15 @@ fn macro_name(signature: &str) -> String {
         .to_string()
 }
 
+fn definition_name(statement: &str) -> String {
+    statement
+        .split_whitespace()
+        .nth(2)
+        .unwrap_or("<unknown>")
+        .trim_matches(|ch| ch == ';' || ch == ':' || ch == '(' || ch == ')')
+        .to_string()
+}
+
 fn classify_control_flow(body: &str) -> ControlFlowClass {
     let lower = body.to_ascii_lowercase();
     let has_call = lower.contains("call ");
@@ -678,7 +828,7 @@ fn decision_probes_for_constructors(
 ) -> Vec<CompiledDecisionProbe> {
     let max_opcode_len = constructors
         .iter()
-        .map(|ctor| opcode_matcher_probe_len(&ctor.matcher))
+        .map(|ctor| pattern_matcher_probe_len(&ctor.matcher))
         .max()
         .unwrap_or(1)
         .min(4);
@@ -691,18 +841,18 @@ fn decision_probes_for_constructors(
         })
         .collect::<Vec<_>>();
     probes.extend([
-        CompiledDecisionProbe::SizeMode,
-        CompiledDecisionProbe::OperandFieldMode,
-        CompiledDecisionProbe::OperandFieldReg,
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile),
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm),
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector),
     ]);
     probes
 }
 
-fn opcode_matcher_probe_len(matcher: &CompiledOpcodeMatcher) -> usize {
+fn pattern_matcher_probe_len(matcher: &CompiledPatternMatcher) -> usize {
     match matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledOpcodeMatcher::RowCc { prefix, .. } => prefix.len() + 1,
-        CompiledOpcodeMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
+        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
+        CompiledPatternMatcher::RowPage { .. } => 1,
     }
 }
 
@@ -796,22 +946,24 @@ fn decision_feature_values(
             .into_iter()
             .map(|value| (value & mask) >> shift)
             .collect(),
-        CompiledDecisionProbe::SizeMode => constructor.opsize_variants.clone(),
-        CompiledDecisionProbe::OperandFieldMode => {
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile) => {
+            constructor.opsize_variants.clone()
+        }
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
             if let Some(value) = constructor.mod_constraint {
                 return vec![value];
             }
-            let has_operand_field_byte = constructor.operand_specs.iter().any(|spec| {
+            let has_token_bundle = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::OperandFieldRm { .. }
-                        | CompiledOperandSpec::OperandFieldReg { .. }
+                    CompiledOperandSpec::TokenFieldRm { .. }
+                        | CompiledOperandSpec::TokenFieldReg { .. }
                 )
             });
             let memory_only = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::OperandFieldRm {
+                    CompiledOperandSpec::TokenFieldRm {
                         memory_only: true,
                         ..
                     }
@@ -819,22 +971,27 @@ fn decision_feature_values(
             });
             if memory_only {
                 vec![0, 1, 2]
-            } else if has_operand_field_byte {
+            } else if has_token_bundle {
                 vec![0, 1, 2, 3]
             } else {
                 Vec::new()
             }
         }
-        CompiledDecisionProbe::OperandFieldReg => constructor.operand_reg_values.clone(),
+        CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
+            constructor.operand_reg_values.clone()
+        }
+        CompiledDecisionProbe::ContextBitSlice { .. }
+        | CompiledDecisionProbe::ContextFieldRef(_)
+        | CompiledDecisionProbe::TerminalPatternCheck => Vec::new(),
     }
 }
 
-fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> Vec<u8> {
+fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<u8> {
     match matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => {
+        CompiledPatternMatcher::ExactBytes(bytes) => {
             bytes.get(offset).copied().into_iter().collect()
         }
-        CompiledOpcodeMatcher::RowCc { prefix, row } => {
+        CompiledPatternMatcher::RowCc { prefix, row } => {
             if let Some(byte) = prefix.get(offset) {
                 return vec![*byte];
             }
@@ -843,7 +1000,7 @@ fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> V
             }
             Vec::new()
         }
-        CompiledOpcodeMatcher::RowPage { row, page } => {
+        CompiledPatternMatcher::RowPage { row, page } => {
             if offset == 0 {
                 return (0u8..=7)
                     .map(|low| (row << 4) | (page << 3) | low)
@@ -865,7 +1022,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .filter(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::OperandFieldRm {
+                CompiledOperandSpec::TokenFieldRm {
                     memory_only: true,
                     ..
                 }
@@ -874,9 +1031,9 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .count()
         * 2;
     score += match &constructor.matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledOpcodeMatcher::RowCc { prefix, .. } => prefix.len() + 1,
-        CompiledOpcodeMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
+        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
+        CompiledPatternMatcher::RowPage { .. } => 1,
     };
     score
 }
@@ -887,21 +1044,21 @@ fn compile_executable_constructor(
     source: &str,
     signature_hash: u64,
 ) -> Option<CompiledExecutableConstructor> {
-    if !constructor_is_runtime_candidate(signature) {
+    if !runtime_signature_is_supported(signature) {
         return None;
     }
     let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-    let template_class = classify_template_class(&normalized_mnemonic)?;
+    let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic)?;
     let matcher = parse_opcode_matcher(signature)?;
-    let operand_specs = parse_operand_specs(signature, &matcher, template_class).ok()?;
+    let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
     let mod_constraint = parse_single_value(signature, "mod=");
     let operand_selector_key = format!("{}{}=", "reg_", "opcode");
     let operand_reg_values = parse_value_list(signature, &operand_selector_key);
     let opsize_variants = parse_opsize_variants(signature);
     let unsupported_template_kind =
-        unsupported_template_reason(signature, template_class, &operand_specs);
+        unsupported_template_reason(signature, construct_tpl_kind, &operand_specs);
     let runtime_ready = unsupported_template_kind.is_none();
-    let constructor_template = build_constructor_template(&operand_specs, template_class);
+    let constructor_template = build_constructor_template(&operand_specs, construct_tpl_kind);
 
     Some(CompiledExecutableConstructor {
         mnemonic: normalized_mnemonic,
@@ -913,7 +1070,7 @@ fn compile_executable_constructor(
         operand_reg_values,
         opsize_variants,
         operand_specs,
-        template_class,
+        construct_tpl_kind,
         constructor_template,
         runtime_ready,
         unsupported_template_kind,
@@ -936,7 +1093,7 @@ fn normalize_executable_mnemonic(mnemonic: &str) -> String {
         .to_string()
 }
 
-fn constructor_is_runtime_candidate(signature: &str) -> bool {
+fn runtime_signature_is_supported(signature: &str) -> bool {
     if signature.contains("$(LONGMODE_OFF)") {
         return false;
     }
@@ -950,64 +1107,64 @@ fn constructor_is_runtime_candidate(signature: &str) -> bool {
     true
 }
 
-fn classify_template_class(mnemonic: &str) -> Option<CompiledTemplateClass> {
+fn classify_construct_tpl_kind(mnemonic: &str) -> Option<CompiledConstructTplKind> {
     Some(match mnemonic.to_ascii_uppercase().as_str() {
-        "NOP" | "PAUSE" => CompiledTemplateClass::Nop,
-        "RET" => CompiledTemplateClass::Ret,
-        "CALL" => CompiledTemplateClass::Call,
-        "JMP" => CompiledTemplateClass::Jmp,
-        "J^CC" => CompiledTemplateClass::Jcc,
-        "MOV" => CompiledTemplateClass::Mov,
-        "LEA" => CompiledTemplateClass::AddressOf,
-        "PUSH" => CompiledTemplateClass::StackStore,
-        "POP" => CompiledTemplateClass::StackLoad,
-        "LEAVE" => CompiledTemplateClass::FrameTeardown,
-        "ADD" => CompiledTemplateClass::Add,
-        "SUB" => CompiledTemplateClass::Sub,
-        "AND" => CompiledTemplateClass::And,
-        "OR" => CompiledTemplateClass::Or,
-        "XOR" => CompiledTemplateClass::Xor,
-        "IMUL" => CompiledTemplateClass::Imul,
-        "MUL" => CompiledTemplateClass::Mul,
-        "SHL" | "SAL" => CompiledTemplateClass::Shl,
-        "SHR" => CompiledTemplateClass::Shr,
-        "SAR" => CompiledTemplateClass::Sar,
-        "INC" => CompiledTemplateClass::Inc,
-        "DEC" => CompiledTemplateClass::Dec,
-        "CMP" => CompiledTemplateClass::Cmp,
-        "TEST" => CompiledTemplateClass::Test,
-        "MOVZX" => CompiledTemplateClass::Movzx,
-        "MOVSX" => CompiledTemplateClass::Movsx,
-        "MOVSXD" => CompiledTemplateClass::Movsxd,
-        "SET^CC" => CompiledTemplateClass::Setcc,
-        "CBW" => CompiledTemplateClass::Cbw,
-        "CWDE" => CompiledTemplateClass::Cwde,
-        "CDQE" => CompiledTemplateClass::Cdqe,
+        "NOP" | "PAUSE" => CompiledConstructTplKind::Nop,
+        "RET" => CompiledConstructTplKind::Ret,
+        "CALL" => CompiledConstructTplKind::Call,
+        "JMP" => CompiledConstructTplKind::Jmp,
+        "J^CC" => CompiledConstructTplKind::Jcc,
+        "MOV" => CompiledConstructTplKind::Mov,
+        "LEA" => CompiledConstructTplKind::AddressOf,
+        "PUSH" => CompiledConstructTplKind::StackStore,
+        "POP" => CompiledConstructTplKind::StackLoad,
+        "LEAVE" => CompiledConstructTplKind::FrameTeardown,
+        "ADD" => CompiledConstructTplKind::Add,
+        "SUB" => CompiledConstructTplKind::Sub,
+        "AND" => CompiledConstructTplKind::And,
+        "OR" => CompiledConstructTplKind::Or,
+        "XOR" => CompiledConstructTplKind::Xor,
+        "IMUL" => CompiledConstructTplKind::Imul,
+        "MUL" => CompiledConstructTplKind::Mul,
+        "SHL" | "SAL" => CompiledConstructTplKind::Shl,
+        "SHR" => CompiledConstructTplKind::Shr,
+        "SAR" => CompiledConstructTplKind::Sar,
+        "INC" => CompiledConstructTplKind::Inc,
+        "DEC" => CompiledConstructTplKind::Dec,
+        "CMP" => CompiledConstructTplKind::Cmp,
+        "TEST" => CompiledConstructTplKind::Test,
+        "MOVZX" => CompiledConstructTplKind::Movzx,
+        "MOVSX" => CompiledConstructTplKind::Movsx,
+        "MOVSXD" => CompiledConstructTplKind::Movsxd,
+        "SET^CC" => CompiledConstructTplKind::Setcc,
+        "CBW" => CompiledConstructTplKind::Cbw,
+        "CWDE" => CompiledConstructTplKind::Cwde,
+        "CDQE" => CompiledConstructTplKind::Cdqe,
         _ => return None,
     })
 }
 
-fn parse_opcode_matcher(signature: &str) -> Option<CompiledOpcodeMatcher> {
+fn parse_opcode_matcher(signature: &str) -> Option<CompiledPatternMatcher> {
     let bytes = parse_byte_sequence(signature);
     if let Some(row) = parse_single_value(signature, "row=") {
         if signature.contains("& cc") {
-            return Some(CompiledOpcodeMatcher::RowCc { prefix: bytes, row });
+            return Some(CompiledPatternMatcher::RowCc { prefix: bytes, row });
         }
         if let Some(page) = parse_single_value(signature, "page=") {
-            return Some(CompiledOpcodeMatcher::RowPage { row, page });
+            return Some(CompiledPatternMatcher::RowPage { row, page });
         }
     }
     if bytes.is_empty() {
         None
     } else {
-        Some(CompiledOpcodeMatcher::ExactBytes(bytes))
+        Some(CompiledPatternMatcher::ExactBytes(bytes))
     }
 }
 
 fn parse_operand_specs(
     signature: &str,
-    matcher: &CompiledOpcodeMatcher,
-    template_class: CompiledTemplateClass,
+    matcher: &CompiledPatternMatcher,
+    construct_tpl_kind: CompiledConstructTplKind,
 ) -> Result<Vec<CompiledOperandSpec>> {
     let head = signature
         .trim_start_matches(':')
@@ -1057,10 +1214,10 @@ fn parse_operand_specs(
         }
         if let Some(size) = register_size_token(token) {
             let spec = match matcher {
-                CompiledOpcodeMatcher::RowPage { .. }
+                CompiledPatternMatcher::RowPage { .. }
                     if token.starts_with("Rmr") || token.starts_with("CRmr") =>
                 {
-                    CompiledOperandSpec::OpcodeFieldReg { size }
+                    CompiledOperandSpec::OpcodeTokenReg { size }
                 }
                 _ if token.starts_with("Reg")
                     || token == "Sreg"
@@ -1069,9 +1226,9 @@ fn parse_operand_specs(
                     || token == "debugreg"
                     || token == "debugreg_x" =>
                 {
-                    CompiledOperandSpec::OperandFieldReg { size }
+                    CompiledOperandSpec::TokenFieldReg { size }
                 }
-                _ => CompiledOperandSpec::OperandFieldRm {
+                _ => CompiledOperandSpec::TokenFieldRm {
                     size,
                     memory_only: token.starts_with('m'),
                 },
@@ -1087,7 +1244,7 @@ fn parse_operand_specs(
         ));
     }
 
-    if matches!(template_class, CompiledTemplateClass::Setcc) && specs.len() != 1 {
+    if matches!(construct_tpl_kind, CompiledConstructTplKind::Setcc) && specs.len() != 1 {
         return Err(anyhow::anyhow!("setcc expects one operand"));
     }
     Ok(specs)
@@ -1151,7 +1308,7 @@ fn parse_opsize_variants(signature: &str) -> Vec<u8> {
 
 fn unsupported_template_reason(
     signature: &str,
-    template_class: CompiledTemplateClass,
+    construct_tpl_kind: CompiledConstructTplKind,
     operand_specs: &[CompiledOperandSpec],
 ) -> Option<String> {
     if signature.contains("currentCS")
@@ -1169,44 +1326,44 @@ fn unsupported_template_reason(
         return Some("unsupported_runtime_constraint".to_string());
     }
 
-    match template_class {
-        CompiledTemplateClass::Nop
-        | CompiledTemplateClass::Ret
-        | CompiledTemplateClass::Call
-        | CompiledTemplateClass::Jmp
-        | CompiledTemplateClass::Jcc
-        | CompiledTemplateClass::Mov
-        | CompiledTemplateClass::AddressOf
-        | CompiledTemplateClass::StackStore
-        | CompiledTemplateClass::StackLoad
-        | CompiledTemplateClass::FrameTeardown
-        | CompiledTemplateClass::Add
-        | CompiledTemplateClass::Sub
-        | CompiledTemplateClass::And
-        | CompiledTemplateClass::Or
-        | CompiledTemplateClass::Xor
-        | CompiledTemplateClass::Imul
-        | CompiledTemplateClass::Mul
-        | CompiledTemplateClass::Shl
-        | CompiledTemplateClass::Shr
-        | CompiledTemplateClass::Sar
-        | CompiledTemplateClass::Inc
-        | CompiledTemplateClass::Dec
-        | CompiledTemplateClass::Cmp
-        | CompiledTemplateClass::Test
-        | CompiledTemplateClass::Movzx
-        | CompiledTemplateClass::Movsx
-        | CompiledTemplateClass::Movsxd
-        | CompiledTemplateClass::Setcc
-        | CompiledTemplateClass::Cbw
-        | CompiledTemplateClass::Cwde
-        | CompiledTemplateClass::Cdqe => {}
+    match construct_tpl_kind {
+        CompiledConstructTplKind::Nop
+        | CompiledConstructTplKind::Ret
+        | CompiledConstructTplKind::Call
+        | CompiledConstructTplKind::Jmp
+        | CompiledConstructTplKind::Jcc
+        | CompiledConstructTplKind::Mov
+        | CompiledConstructTplKind::AddressOf
+        | CompiledConstructTplKind::StackStore
+        | CompiledConstructTplKind::StackLoad
+        | CompiledConstructTplKind::FrameTeardown
+        | CompiledConstructTplKind::Add
+        | CompiledConstructTplKind::Sub
+        | CompiledConstructTplKind::And
+        | CompiledConstructTplKind::Or
+        | CompiledConstructTplKind::Xor
+        | CompiledConstructTplKind::Imul
+        | CompiledConstructTplKind::Mul
+        | CompiledConstructTplKind::Shl
+        | CompiledConstructTplKind::Shr
+        | CompiledConstructTplKind::Sar
+        | CompiledConstructTplKind::Inc
+        | CompiledConstructTplKind::Dec
+        | CompiledConstructTplKind::Cmp
+        | CompiledConstructTplKind::Test
+        | CompiledConstructTplKind::Movzx
+        | CompiledConstructTplKind::Movsx
+        | CompiledConstructTplKind::Movsxd
+        | CompiledConstructTplKind::Setcc
+        | CompiledConstructTplKind::Cbw
+        | CompiledConstructTplKind::Cwde
+        | CompiledConstructTplKind::Cdqe => {}
     }
 
     if operand_specs.len() > 2
         && !matches!(
-            template_class,
-            CompiledTemplateClass::StackStore | CompiledTemplateClass::StackLoad
+            construct_tpl_kind,
+            CompiledConstructTplKind::StackStore | CompiledConstructTplKind::StackLoad
         )
     {
         return Some("unsupported_operand_arity".to_string());
@@ -1216,7 +1373,7 @@ fn unsupported_template_reason(
 
 fn build_constructor_template(
     operand_specs: &[CompiledOperandSpec],
-    template_class: CompiledTemplateClass,
+    construct_tpl_kind: CompiledConstructTplKind,
 ) -> CompiledConstructorTemplate {
     let handles = operand_specs
         .iter()
@@ -1231,17 +1388,16 @@ fn build_constructor_template(
     if operand_specs.iter().any(|spec| {
         matches!(
             spec,
-            CompiledOperandSpec::OperandFieldRm { .. }
-                | CompiledOperandSpec::OperandFieldReg { .. }
+            CompiledOperandSpec::TokenFieldRm { .. } | CompiledOperandSpec::TokenFieldReg { .. }
         )
     }) {
-        decode_steps.push(CompiledOperandDecodeStep::ConsumeOperandFieldByte);
+        decode_steps.push(CompiledOperandDecodeStep::ConsumeTokenFields);
     }
     decode_steps.extend(
         (0..operand_specs.len())
             .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
     );
-    let semantic_ops = semantic_ops_for_kind(template_class);
+    let semantic_ops = semantic_ops_for_kind(construct_tpl_kind);
     CompiledConstructorTemplate {
         handles,
         decode_steps,
@@ -1249,12 +1405,12 @@ fn build_constructor_template(
     }
 }
 
-fn semantic_ops_for_kind(template_class: CompiledTemplateClass) -> Vec<CompiledSemanticOp> {
+fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<CompiledSemanticOp> {
     use CompiledArithmeticOpcode as Arith;
     use CompiledSemanticOp as Op;
-    use CompiledTemplateClass as Kind;
+    use CompiledConstructTplKind as Kind;
 
-    vec![match template_class {
+    vec![match construct_tpl_kind {
         Kind::Nop => Op::Nop,
         Kind::Ret => Op::Return,
         Kind::Call => Op::Call,
@@ -1371,6 +1527,14 @@ mod tests {
             .iter()
             .any(|item| item.mnemonic.eq_ignore_ascii_case("RET")
                 || item.control_flow != ControlFlowClass::None));
+        assert!(!compiled.language_layout.address_spaces.is_empty());
+        assert!(!compiled.language_layout.registers.is_empty());
+        assert!(!compiled.language_layout.display_templates.is_empty());
+        assert!(!compiled.construct_templates.is_empty());
+        assert!(compiled.decision_tree.nodes.iter().any(|node| matches!(
+            node.probe,
+            CompiledDecisionProbe::TokenFieldRef(_)
+        )));
     }
 
     #[test]
