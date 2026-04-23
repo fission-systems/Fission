@@ -5,7 +5,7 @@ use crate::compiler::{CompiledFrontend, EntrySpec};
 use crate::runtime::{registry, DecodedInstruction, ExecutionEngineKey, RuntimeSleighError};
 
 #[path = "processors/x86/generated.rs"]
-mod x86_generated_runtime;
+mod generated_runtime_holdout;
 
 pub(crate) fn decode_and_lift(
     entry: &EntrySpec,
@@ -14,10 +14,8 @@ pub(crate) fn decode_and_lift(
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64)> {
     match registry::executable_engine_key_for_entry(entry) {
-        Some(ExecutionEngineKey::GeneratedX86_64)
-            if entry.entry_id.eq_ignore_ascii_case("x86-64") =>
-        {
-            x86_generated_runtime::decode_and_lift(compiled, bytes, address)
+        Some(ExecutionEngineKey::CompiledTable) => {
+            generated_runtime_holdout::decode_and_lift(compiled, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
@@ -37,10 +35,8 @@ pub(crate) fn decode_instruction(
     address: u64,
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
-        Some(ExecutionEngineKey::GeneratedX86_64)
-            if entry.entry_id.eq_ignore_ascii_case("x86-64") =>
-        {
-            x86_generated_runtime::decode_instruction(compiled, bytes, address)
+        Some(ExecutionEngineKey::CompiledTable) => {
+            generated_runtime_holdout::decode_instruction(compiled, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),

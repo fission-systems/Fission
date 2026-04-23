@@ -27,7 +27,7 @@ impl RuntimeSupportLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionEngineKey {
-    GeneratedX86_64,
+    CompiledTable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,8 +214,8 @@ fn support_level_for_manifest_entry(entry: &GhidraLanguageManifestEntry) -> Runt
 fn execution_engine_key_for_manifest_entry(
     entry: &GhidraLanguageManifestEntry,
 ) -> Option<ExecutionEngineKey> {
-    match (entry.processor.as_str(), entry.entry_id.as_str()) {
-        ("x86", "x86-64") => Some(ExecutionEngineKey::GeneratedX86_64),
+    match entry.runtime_status.as_str() {
+        "executable_candidate" => Some(ExecutionEngineKey::CompiledTable),
         _ => None,
     }
 }

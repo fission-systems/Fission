@@ -1,8 +1,6 @@
 mod engine;
-mod helpers;
 mod registry;
 mod spine;
-mod text;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;

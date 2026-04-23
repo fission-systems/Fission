@@ -1082,3 +1082,78 @@ The runtime no longer presents the x86 execution path as a provider/quirk split.
   1. move `RuntimeParserWalker` / `RuntimeConstructState` behavior out of `generated.rs`
   2. move template evaluation and emission primitives into `runtime/spine`
   3. hard-delete the remaining `runtime/processors/x86/generated.rs`
+
+## 2026-04-23 - SLEIGH architecture-hardcoded helper/text removal
+
+### Summary
+
+- wave type:
+  - owner correction / behavior-preserving hardcoding containment
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/engine.rs`
+  - `crates/fission-sleigh/src/runtime/registry.rs`
+  - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+- goal:
+  - remove standalone architecture-specific helper/text modules from the runtime layer
+  - avoid presenting x86-specific decode/text policy as reusable runtime architecture
+  - contain the remaining x86-specific compatibility code inside the single known deletion target
+
+### What changed
+
+- deleted:
+  - `crates/fission-sleigh/src/runtime/helpers/mod.rs`
+  - `crates/fission-sleigh/src/runtime/helpers/x86_decode.rs`
+  - `crates/fission-sleigh/src/runtime/text/mod.rs`
+  - `crates/fission-sleigh/src/runtime/text/x86.rs`
+- moved the temporary x86 decode compatibility code back into:
+  - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+- removed hardcoded text rendering tables from runtime modules:
+  - register name table
+  - x86 memory operand string formatter
+  - Jcc suffix table
+- decode text now uses generic placeholders until SLEIGH display template execution is implemented:
+  - constructor mnemonic projection
+  - `reg<size>_<index>` register projection
+  - structural memory operand projection
+- renamed the executable dispatch key:
+  - `ExecutionEngineKey::GeneratedX86_64` -> `ExecutionEngineKey::CompiledTable`
+- executable readiness still comes from the checked-in manifest; the engine key is no longer named after x86-64
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed
+- `git diff -- crates/fission-sleigh/generated`
+  - result: empty
+- hardcoded helper/text audit:
+  - `rg -n "runtime/text|text::x86|runtime/helpers|helpers::x86_decode|GeneratedX86_64|x86_decode\\.rs|text/x86\\.rs" crates/fission-sleigh/src`
+  - result: `0` matches
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json`
+  - result: passed
+
+### Result
+
+The runtime layer no longer has standalone `helpers/x86_decode.rs` or `text/x86.rs` files. This intentionally avoids treating x86-specific prefix/ModRM/SIB parsing or x86 disassembly text formatting as reusable runtime architecture. The remaining x86-specific code is contained in `runtime/processors/x86/generated.rs`, which is now the explicit compatibility holdout and next deletion target.
+
+### Remaining risk / next owner
+
+- this is not full Ghidra parity yet:
+  - `generated.rs` still contains x86-specific prefix / ModRM / SIB / displacement parsing
+  - `generated.rs` still contains constructor binding and p-code emission policy
+- next owner is no longer another rename:
+  1. compiler must emit executable token/context/register/display/template IR
+  2. shared `runtime/spine` must consume that IR for `DecisionNode`, `ParserWalker`, and `PcodeEmit`
+  3. `runtime/processors/x86/generated.rs` must be deleted once the compiled-table path is executable without x86-specific Rust policy
