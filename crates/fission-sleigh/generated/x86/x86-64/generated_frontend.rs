@@ -13,8 +13,8 @@ pub semantic_template_status: &'static str,
 pub const GENERATED_ARCH: &str = "x86";
 pub const GENERATED_ENTRY_SPEC: &str = "x86-64.slaspec";
 pub const GENERATED_ENTRY_ID: &str = "x86-64";
-pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = 342;
-pub const GENERATED_DECISION_NODE_COUNT: usize = 2396;
+pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = 1187;
+pub const GENERATED_DECISION_NODE_COUNT: usize = 14608;
 pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[
     GeneratedConstructor { mnemonic: "^instruction", source: "ia.sinc:2346", control_flow: "none", signature_hash: 0x56f7baa7fd17d230, semantic_template_status: "empty" },
     GeneratedConstructor { mnemonic: "^instruction", source: "ia.sinc:2347", control_flow: "none", signature_hash: 0xae10222713ada6e3, semantic_template_status: "empty" },

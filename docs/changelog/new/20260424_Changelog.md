@@ -238,6 +238,97 @@ shape drift and the remaining `_fpreset` decode hole at the raw SLEIGH layer.
 ### Validation
 
 - `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+
+## 7. Compiled-Table Compatibility Holdout Narrowing
+
+### Scope
+
+- canonical owner:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/runtime/spine/decision.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+
+### What changed
+
+- constructor selection no longer bootstraps from `decision_root_keys(...)`.
+  - the canonical path now starts from the generated global decision-tree root and
+    closes at deterministic terminal constructor verification
+- runtime leaf selection no longer drops non-`runtime_ready` constructor matches on
+  the floor.
+  - a matching unsupported constructor is now preserved as typed fallback instead of
+    collapsing into `DecodeNoMatch`
+- `CompiledConstructTplKind::Unsupported` was added as an explicit compatibility
+  holdout marker in the compiler IR.
+  - unsupported constructors remain visible in generated executable inventory
+  - they still fail closed at lift time through `UnsupportedPcodeTemplate`
+- token-field probe evaluation now tolerates constructors that do not materialize a
+  ModRM/token bundle.
+  - this removed the `ret` regression introduced by the root-bucket removal
+- generated runtime tests were added for:
+  - `fninit` decode without `DecodeNoMatch`
+  - `fninit` typed `UnsupportedPcodeTemplate`
+
+### Result
+
+The remaining `_fpreset` first-instruction hole is no longer an unexplained decode
+miss:
+
+- before this wave:
+  - `_fpreset @ 0x1400025c0` -> `DecodeNoMatch`
+- after this wave:
+  - `_fpreset @ 0x1400025c0` -> `UnsupportedPcodeTemplate: x86-64: unsupported_template_kind`
+
+This is a strict fail-closed improvement. The common spine now distinguishes
+"constructor matched but template is not executable yet" from "no constructor
+matched at all."
+
+## 8. Raw P-code Gate Readout After Holdout Narrowing
+
+Canonical manifest run:
+
+- command:
+  - `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --output-dir benchmark/artifacts/raw_p_code_benchmark/20260424_compiled_table_holdout`
+
+Bucket totals:
+
+- `compat_emitter_used = 32`
+- `fission_decode_error = 1`
+- `pcode_opcode_mismatch = 22`
+- `pcode_op_count_mismatch = 14`
+- `full_match = 4`
+
+Per-row interpretation:
+
+- `test_functions.exe:_fpreset @ 0x1400025c0`
+  - now fails closed as typed unsupported, not `DecodeNoMatch`
+- `test_functions.exe:add @ 0x140001450`
+  - still mismatches at raw P-code opcode/count level
+- `test_functions.exe:fibonacci @ 0x140001470`
+  - still mismatches at opcode ordering/selection level
+- `test_functions.exe:WinMainCRTStartup @ 0x1400013e0`
+  - still mismatches in startup flag semantics
+- `test_functions.exe:mainCRTStartup @ 0x140001400`
+  - still mismatches in startup flag semantics
+
+### Interpretation
+
+This wave fixed the constructor-selection failure family but did not yet improve raw
+P-code parity totals. The next direct owner remains the compatibility semantic
+emitter inside `compiled_table.rs`.
+
+What improved:
+
+- unexplained `_fpreset` decode hole removed
+- unsupported constructors now surface as typed unsupported
+- `ret` and other no-ModRM constructors remain decodable after removing
+  root-bucket bootstrap
+
+What still remains:
+
+- `compat_emitter_used` is still present across the canonical rows
+- opcode/count mismatch totals did not decrease
+- startup/control-flow rows still diverge from Ghidra raw P-code because the
+  mnemonic-family emitter remains the active semantic owner
   - result: passed
 - `cargo run -p fission-sleigh --example raw_pcode_probe -- ...`
   - result: emitted JSON raw P-code for `0x140001450`

@@ -360,6 +360,7 @@ pub enum CompiledFixedRegister {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompiledConstructTplKind {
+    Unsupported,
     Nop,
     Ret,
     Call,
@@ -396,6 +397,7 @@ pub enum CompiledConstructTplKind {
 impl CompiledConstructTplKind {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Unsupported => "unsupported",
             Self::Nop => "nop",
             Self::Ret => "ret",
             Self::Call => "call",
@@ -1178,7 +1180,7 @@ fn compile_executable_constructor(
         return None;
     }
     let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-    let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic)?;
+    let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic);
     let matcher = parse_opcode_matcher(signature)?;
     let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
     let mod_constraint = parse_single_value(signature, "mod=");
@@ -1237,8 +1239,9 @@ fn runtime_signature_is_supported(signature: &str) -> bool {
     true
 }
 
-fn classify_construct_tpl_kind(mnemonic: &str) -> Option<CompiledConstructTplKind> {
-    Some(match mnemonic.to_ascii_uppercase().as_str() {
+fn classify_construct_tpl_kind(mnemonic: &str) -> CompiledConstructTplKind {
+    match mnemonic.to_ascii_uppercase().as_str() {
+        "FINIT" | "FNINIT" => CompiledConstructTplKind::Unsupported,
         "NOP" | "PAUSE" => CompiledConstructTplKind::Nop,
         "RET" => CompiledConstructTplKind::Ret,
         "CALL" => CompiledConstructTplKind::Call,
@@ -1270,8 +1273,8 @@ fn classify_construct_tpl_kind(mnemonic: &str) -> Option<CompiledConstructTplKin
         "CBW" => CompiledConstructTplKind::Cbw,
         "CWDE" => CompiledConstructTplKind::Cwde,
         "CDQE" => CompiledConstructTplKind::Cdqe,
-        _ => return None,
-    })
+        _ => CompiledConstructTplKind::Unsupported,
+    }
 }
 
 fn parse_opcode_matcher(signature: &str) -> Option<CompiledPatternMatcher> {
@@ -1459,6 +1462,9 @@ fn unsupported_template_reason(
     }
 
     match construct_tpl_kind {
+        CompiledConstructTplKind::Unsupported => {
+            return Some("unsupported_template_kind".to_string());
+        }
         CompiledConstructTplKind::Nop
         | CompiledConstructTplKind::Ret
         | CompiledConstructTplKind::Call
@@ -1563,6 +1569,7 @@ fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<Co
     use CompiledSemanticOp as Op;
 
     vec![match construct_tpl_kind {
+        Kind::Unsupported => Op::Nop,
         Kind::Nop => Op::Nop,
         Kind::Ret => Op::Return,
         Kind::Call => Op::Call,

@@ -73,16 +73,19 @@ where
         match node.probe {
             CompiledDecisionProbe::Terminal => {
                 trace.leaf_constructor_indexes = node.leaf_constructor_indexes.clone();
+                let mut unsupported_fallback = None;
                 for constructor_index in &node.leaf_constructor_indexes {
                     let constructor = compiled.executable_constructors.get(*constructor_index)?;
-                    if !constructor.runtime_ready {
-                        continue;
-                    }
                     if constructor_matches(constructor).is_ok() {
-                        return Some(RuntimeSelection { constructor, trace });
+                        if constructor.runtime_ready {
+                            return Some(RuntimeSelection { constructor, trace });
+                        }
+                        if unsupported_fallback.is_none() {
+                            unsupported_fallback = Some(constructor);
+                        }
                     }
                 }
-                return None;
+                return unsupported_fallback.map(|constructor| RuntimeSelection { constructor, trace });
             }
             probe => {
                 let value = evaluator.probe_value(probe).ok()?;

@@ -122,6 +122,9 @@ pub(crate) fn decode_and_lift(
             language: compiled.entry_id.clone(),
             address,
         })?;
+    if !selection.constructor.runtime_ready {
+        return Err(unsupported_constructor_error(compiled, selection.constructor).into());
+    }
     let decoded = bind_instruction(&ctx, selection)?;
     let mut emitter = CompiledTableEmitter::new(address);
     RuntimeTemplateEvaluator::new(&mut emitter).emit(&decoded)?;
@@ -171,23 +174,9 @@ fn select_constructor<'a>(
     compiled: &'a CompiledFrontend,
     ctx: &CompiledInstructionContext<'_>,
 ) -> Option<RuntimeSelection<'a>> {
-    let mut roots = vec![("global".to_string(), compiled.decision_tree.root_node_index)];
-    if let Some(bucket_keys) = decision_root_keys(ctx) {
-        for bucket_key in bucket_keys {
-            if let Some(bucket) = compiled
-                .decision_tree
-                .root_buckets
-                .iter()
-                .find(|bucket| bucket.key == bucket_key)
-            {
-                roots.push((bucket.key.clone(), bucket.node_index));
-            }
-        }
-    }
-
     spine::select_constructor(
         compiled,
-        roots,
+        [("global".to_string(), compiled.decision_tree.root_node_index)],
         || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
     )
@@ -229,27 +218,31 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 CompiledTokenFieldRef::InstructionWidthProfile,
             ) => self.ctx.instruction_width_profile,
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                ensure_token_fields(self.ctx, &mut self.cached_token_fields)?.operand_mode
+                ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                    .map(|bundle| bundle.operand_mode)
+                    .unwrap_or(0)
             }
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                ensure_token_fields(self.ctx, &mut self.cached_token_fields)?.reg
+                ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                    .map(|bundle| bundle.reg)
+                    .unwrap_or(0)
             }
             CompiledDecisionProbe::TerminalPatternCheck => 0,
         })
     }
 }
 
-fn decision_root_keys(ctx: &CompiledInstructionContext<'_>) -> Option<Vec<String>> {
-    let first = *ctx.bytes.get(ctx.cursor)?;
-    let mut keys = vec![format!("byte_{first:02x}")];
-    if first == 0x0f {
-        if let Some(second) = ctx.bytes.get(ctx.cursor + 1) {
-            keys.push(format!("row_{}_after_0f", second >> 4));
-        }
+fn unsupported_constructor_error(
+    compiled: &CompiledFrontend,
+    constructor: &CompiledExecutableConstructor,
+) -> RuntimeSleighError {
+    RuntimeSleighError::UnsupportedPcodeTemplate {
+        language: compiled.entry_id.clone(),
+        reason: constructor
+            .unsupported_template_kind
+            .clone()
+            .unwrap_or_else(|| "unsupported_constructor_template".to_string()),
     }
-    keys.push(format!("row_{}_page_{}", first >> 4, (first >> 3) & 0x1));
-    keys.push(format!("row_{}", first >> 4));
-    Some(keys)
 }
 
 fn ensure_token_fields<'a>(
@@ -681,6 +674,7 @@ fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> usize {
 
 fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
     match kind {
+        CompiledConstructTplKind::Unsupported => DecodedFlowKind::None,
         CompiledConstructTplKind::Call => DecodedFlowKind::Call,
         CompiledConstructTplKind::Jmp => DecodedFlowKind::Jump,
         CompiledConstructTplKind::Jcc => DecodedFlowKind::ConditionalJump,
@@ -1597,5 +1591,27 @@ mod tests {
         assert!(ops.iter().any(|op| {
             op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
+    }
+
+    #[test]
+    fn generated_runtime_decodes_fninit_without_decode_no_match() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0xdb, 0xe3];
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1400_25c0).expect("generated fninit decode");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "fninit");
+        assert!(matches!(decoded.flow_kind, DecodedFlowKind::None));
+    }
+
+    #[test]
+    fn generated_runtime_reports_unsupported_template_for_fninit() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0xdb, 0xe3];
+        let err =
+            decode_and_lift(&compiled, &bytes, 0x1400_25c0).expect_err("fninit must fail closed");
+        let rendered = err.to_string();
+        assert!(rendered.contains("UnsupportedPcodeTemplate"));
+        assert!(rendered.contains("unsupported_template_kind"));
     }
 }
