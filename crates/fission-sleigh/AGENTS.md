@@ -31,8 +31,7 @@ crates/fission-sleigh/
 │   │   └── equivalence.rs     # Compiler-only bucketed equivalence report
 │   └── runtime/
 │       ├── mod.rs             # Runtime registry, decode contracts, CFG helpers
-│       ├── spine/             # Ghidra-style common runtime owners
-│       └── processors/        # 38 Ghidra Processor adapter skeletons
+│       └── spine/             # Ghidra-style common runtime owners and compiled-table execution
 └── specs/
    └── languages/             # Local Sleigh spec set used for language resolution
        ├── AARCH64/
@@ -69,10 +68,10 @@ crates/fission-sleigh/
    - Sleigh-to-pcode mapping changes belong here, not CLI output layers.
    - Compiler-only front-end changes belong under `src/compiler/`, not benchmark or CLI glue.
    - Runtime execution ownership belongs under `src/runtime/spine/`.
-   - Processor modules may extract fields and map registers/address spaces, but they must not
-     become mnemonic-by-mnemonic semantic owners.
-   - `src/runtime/processors/` must mirror the checked-in Ghidra Processor inventory as
-     compile-only skeletons before any individual Processor is promoted to executable runtime.
+   - Do not reintroduce `src/runtime/processors/`, `src/runtime/helpers/<arch>.rs`,
+     `src/runtime/text/<arch>.rs`, or `src/runtime/providers/<arch>.rs`.
+   - Processor differences must come from checked-in SLEIGH specs, generated IR, runtime
+     registry metadata, and typed unsupported buckets until the common spine can execute them.
 4. Use vendor implementations as references only.
    - Borrow invariants and ideas, but keep executable logic owned in this crate.
 

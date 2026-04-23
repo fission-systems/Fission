@@ -9,11 +9,11 @@ pub trait RuntimeSemanticEmitter {
     fn emit_call(&mut self, state: &RuntimeConstructState) -> Result<()>;
     fn emit_jump(&mut self, state: &RuntimeConstructState) -> Result<()>;
     fn emit_conditional_jump(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_move(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_lea(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_push(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_pop(&mut self, state: &RuntimeConstructState) -> Result<()>;
-    fn emit_leave(&mut self) -> Result<()>;
+    fn emit_copy_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_address_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_stack_store_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_stack_load_template(&mut self, state: &RuntimeConstructState) -> Result<()>;
+    fn emit_frame_teardown_template(&mut self) -> Result<()>;
     fn emit_binary(
         &mut self,
         state: &RuntimeConstructState,
@@ -50,11 +50,11 @@ where
                 CompiledSemanticOp::Call => self.emitter.emit_call(state)?,
                 CompiledSemanticOp::Jump => self.emitter.emit_jump(state)?,
                 CompiledSemanticOp::ConditionalJump => self.emitter.emit_conditional_jump(state)?,
-                CompiledSemanticOp::Move => self.emitter.emit_move(state)?,
-                CompiledSemanticOp::Lea => self.emitter.emit_lea(state)?,
-                CompiledSemanticOp::Push => self.emitter.emit_push(state)?,
-                CompiledSemanticOp::Pop => self.emitter.emit_pop(state)?,
-                CompiledSemanticOp::Leave => self.emitter.emit_leave()?,
+                CompiledSemanticOp::Copy => self.emitter.emit_copy_template(state)?,
+                CompiledSemanticOp::AddressOf => self.emitter.emit_address_template(state)?,
+                CompiledSemanticOp::StackStore => self.emitter.emit_stack_store_template(state)?,
+                CompiledSemanticOp::StackLoad => self.emitter.emit_stack_load_template(state)?,
+                CompiledSemanticOp::FrameTeardown => self.emitter.emit_frame_teardown_template()?,
                 CompiledSemanticOp::Binary { opcode } => {
                     self.emitter.emit_binary(state, *opcode)?
                 }

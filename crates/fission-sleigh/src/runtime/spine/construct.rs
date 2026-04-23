@@ -1,11 +1,11 @@
-use crate::compiler::{CompiledConstructorTemplate, CompiledOperandSpec, CompiledSemanticKind};
+use crate::compiler::{CompiledConstructorTemplate, CompiledOperandSpec, CompiledTemplateClass};
 
 use super::RuntimeMatchTrace;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct RuntimeConstructState {
-    pub semantic_kind: CompiledSemanticKind,
+    pub template_class: CompiledTemplateClass,
     pub constructor_template: CompiledConstructorTemplate,
     pub construct_nodes: Vec<RuntimeConstructNode>,
     pub handles: Vec<RuntimeHandle>,

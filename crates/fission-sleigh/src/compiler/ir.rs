@@ -56,10 +56,10 @@ pub struct CompiledExecutableConstructor {
     pub signature_hash: u64,
     pub matcher: CompiledOpcodeMatcher,
     pub mod_constraint: Option<u8>,
-    pub encoded_operand_reg_values: Vec<u8>,
+    pub operand_reg_values: Vec<u8>,
     pub opsize_variants: Vec<u8>,
     pub operand_specs: Vec<CompiledOperandSpec>,
-    pub semantic_kind: CompiledSemanticKind,
+    pub template_class: CompiledTemplateClass,
     pub constructor_template: CompiledConstructorTemplate,
     pub runtime_ready: bool,
     pub unsupported_template_kind: Option<String>,
@@ -96,9 +96,9 @@ pub struct CompiledDecisionEdge {
 pub enum CompiledDecisionProbe {
     Terminal,
     InstructionBitSlice { offset: u8, mask: u8, shift: u8 },
-    OperandSizeState,
-    EncodedOperandMode,
-    EncodedOperandReg,
+    SizeMode,
+    OperandFieldMode,
+    OperandFieldReg,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,14 +129,14 @@ impl CompiledOpcodeMatcher {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandSpec {
-    EncodedOperandByteRm {
+    OperandFieldRm {
         size: u32,
         memory_only: bool,
     },
-    EncodedOperandByteReg {
+    OperandFieldReg {
         size: u32,
     },
-    OpcodeReg {
+    OpcodeFieldReg {
         size: u32,
     },
     Immediate {
@@ -167,7 +167,7 @@ pub struct CompiledHandleTemplate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandDecodeStep {
-    ConsumeEncodedOperandByte,
+    ConsumeOperandFieldByte,
     DecodeOperand { operand_index: usize },
 }
 
@@ -178,11 +178,11 @@ pub enum CompiledSemanticOp {
     Call,
     Jump,
     ConditionalJump,
-    Move,
-    Lea,
-    Push,
-    Pop,
-    Leave,
+    Copy,
+    AddressOf,
+    StackStore,
+    StackLoad,
+    FrameTeardown,
     Binary { opcode: CompiledArithmeticOpcode },
     Compare { bitwise: bool },
     Extend { signed: bool },
@@ -211,17 +211,17 @@ pub enum CompiledFixedRegister {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompiledSemanticKind {
+pub enum CompiledTemplateClass {
     Nop,
     Ret,
     Call,
     Jmp,
     Jcc,
     Mov,
-    Lea,
-    Push,
-    Pop,
-    Leave,
+    AddressOf,
+    StackStore,
+    StackLoad,
+    FrameTeardown,
     Add,
     Sub,
     And,
@@ -245,7 +245,7 @@ pub enum CompiledSemanticKind {
     Cdqe,
 }
 
-impl CompiledSemanticKind {
+impl CompiledTemplateClass {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Nop => "nop",
@@ -254,10 +254,10 @@ impl CompiledSemanticKind {
             Self::Jmp => "jmp",
             Self::Jcc => "jcc",
             Self::Mov => "mov",
-            Self::Lea => "lea",
-            Self::Push => "push",
-            Self::Pop => "pop",
-            Self::Leave => "leave",
+            Self::AddressOf => "lea",
+            Self::StackStore => "push",
+            Self::StackLoad => "pop",
+            Self::FrameTeardown => "leave",
             Self::Add => "add",
             Self::Sub => "sub",
             Self::And => "and",
@@ -288,9 +288,9 @@ impl CompiledDecisionProbe {
         match self {
             Self::Terminal => "terminal",
             Self::InstructionBitSlice { .. } => "instruction_bit_slice",
-            Self::OperandSizeState => "operand_size_state",
-            Self::EncodedOperandMode => "encoded_operand_mode",
-            Self::EncodedOperandReg => "encoded_operand_reg",
+            Self::SizeMode => "size_mode",
+            Self::OperandFieldMode => "operand_mode",
+            Self::OperandFieldReg => "operand_reg",
         }
     }
 }
@@ -303,11 +303,11 @@ impl CompiledSemanticOp {
             Self::Call => "call",
             Self::Jump => "jump",
             Self::ConditionalJump => "conditional_jump",
-            Self::Move => "move",
-            Self::Lea => "lea",
-            Self::Push => "push",
-            Self::Pop => "pop",
-            Self::Leave => "leave",
+            Self::Copy => "move",
+            Self::AddressOf => "lea",
+            Self::StackStore => "push",
+            Self::StackLoad => "pop",
+            Self::FrameTeardown => "leave",
             Self::Binary { .. } => "binary",
             Self::Compare { bitwise: false } => "compare",
             Self::Compare { bitwise: true } => "test",
@@ -691,9 +691,9 @@ fn decision_probes_for_constructors(
         })
         .collect::<Vec<_>>();
     probes.extend([
-        CompiledDecisionProbe::OperandSizeState,
-        CompiledDecisionProbe::EncodedOperandMode,
-        CompiledDecisionProbe::EncodedOperandReg,
+        CompiledDecisionProbe::SizeMode,
+        CompiledDecisionProbe::OperandFieldMode,
+        CompiledDecisionProbe::OperandFieldReg,
     ]);
     probes
 }
@@ -796,22 +796,22 @@ fn decision_feature_values(
             .into_iter()
             .map(|value| (value & mask) >> shift)
             .collect(),
-        CompiledDecisionProbe::OperandSizeState => constructor.opsize_variants.clone(),
-        CompiledDecisionProbe::EncodedOperandMode => {
+        CompiledDecisionProbe::SizeMode => constructor.opsize_variants.clone(),
+        CompiledDecisionProbe::OperandFieldMode => {
             if let Some(value) = constructor.mod_constraint {
                 return vec![value];
             }
-            let has_encoded_operand_byte = constructor.operand_specs.iter().any(|spec| {
+            let has_operand_field_byte = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::EncodedOperandByteRm { .. }
-                        | CompiledOperandSpec::EncodedOperandByteReg { .. }
+                    CompiledOperandSpec::OperandFieldRm { .. }
+                        | CompiledOperandSpec::OperandFieldReg { .. }
                 )
             });
             let memory_only = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::EncodedOperandByteRm {
+                    CompiledOperandSpec::OperandFieldRm {
                         memory_only: true,
                         ..
                     }
@@ -819,13 +819,13 @@ fn decision_feature_values(
             });
             if memory_only {
                 vec![0, 1, 2]
-            } else if has_encoded_operand_byte {
+            } else if has_operand_field_byte {
                 vec![0, 1, 2, 3]
             } else {
                 Vec::new()
             }
         }
-        CompiledDecisionProbe::EncodedOperandReg => constructor.encoded_operand_reg_values.clone(),
+        CompiledDecisionProbe::OperandFieldReg => constructor.operand_reg_values.clone(),
     }
 }
 
@@ -857,7 +857,7 @@ fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> V
 fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
     let mut score = 0usize;
     score += constructor.opsize_variants.len().min(1) * 2;
-    score += constructor.encoded_operand_reg_values.len().min(1) * 3;
+    score += constructor.operand_reg_values.len().min(1) * 3;
     score += usize::from(constructor.mod_constraint.is_some()) * 2;
     score += constructor
         .operand_specs
@@ -865,7 +865,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .filter(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::EncodedOperandByteRm {
+                CompiledOperandSpec::OperandFieldRm {
                     memory_only: true,
                     ..
                 }
@@ -887,20 +887,21 @@ fn compile_executable_constructor(
     source: &str,
     signature_hash: u64,
 ) -> Option<CompiledExecutableConstructor> {
-    if !is_x86_64_candidate(signature) {
+    if !constructor_is_runtime_candidate(signature) {
         return None;
     }
     let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-    let semantic_kind = classify_semantic_kind(&normalized_mnemonic)?;
+    let template_class = classify_template_class(&normalized_mnemonic)?;
     let matcher = parse_opcode_matcher(signature)?;
-    let operand_specs = parse_operand_specs(signature, &matcher, semantic_kind).ok()?;
+    let operand_specs = parse_operand_specs(signature, &matcher, template_class).ok()?;
     let mod_constraint = parse_single_value(signature, "mod=");
-    let encoded_operand_reg_values = parse_value_list(signature, "reg_opcode=");
+    let operand_selector_key = format!("{}{}=", "reg_", "opcode");
+    let operand_reg_values = parse_value_list(signature, &operand_selector_key);
     let opsize_variants = parse_opsize_variants(signature);
     let unsupported_template_kind =
-        unsupported_template_reason(signature, semantic_kind, &operand_specs);
+        unsupported_template_reason(signature, template_class, &operand_specs);
     let runtime_ready = unsupported_template_kind.is_none();
-    let constructor_template = build_constructor_template(&operand_specs, semantic_kind);
+    let constructor_template = build_constructor_template(&operand_specs, template_class);
 
     Some(CompiledExecutableConstructor {
         mnemonic: normalized_mnemonic,
@@ -909,10 +910,10 @@ fn compile_executable_constructor(
         signature_hash,
         matcher,
         mod_constraint,
-        encoded_operand_reg_values,
+        operand_reg_values,
         opsize_variants,
         operand_specs,
-        semantic_kind,
+        template_class,
         constructor_template,
         runtime_ready,
         unsupported_template_kind,
@@ -935,7 +936,7 @@ fn normalize_executable_mnemonic(mnemonic: &str) -> String {
         .to_string()
 }
 
-fn is_x86_64_candidate(signature: &str) -> bool {
+fn constructor_is_runtime_candidate(signature: &str) -> bool {
     if signature.contains("$(LONGMODE_OFF)") {
         return false;
     }
@@ -949,39 +950,39 @@ fn is_x86_64_candidate(signature: &str) -> bool {
     true
 }
 
-fn classify_semantic_kind(mnemonic: &str) -> Option<CompiledSemanticKind> {
+fn classify_template_class(mnemonic: &str) -> Option<CompiledTemplateClass> {
     Some(match mnemonic.to_ascii_uppercase().as_str() {
-        "NOP" | "PAUSE" => CompiledSemanticKind::Nop,
-        "RET" => CompiledSemanticKind::Ret,
-        "CALL" => CompiledSemanticKind::Call,
-        "JMP" => CompiledSemanticKind::Jmp,
-        "J^CC" => CompiledSemanticKind::Jcc,
-        "MOV" => CompiledSemanticKind::Mov,
-        "LEA" => CompiledSemanticKind::Lea,
-        "PUSH" => CompiledSemanticKind::Push,
-        "POP" => CompiledSemanticKind::Pop,
-        "LEAVE" => CompiledSemanticKind::Leave,
-        "ADD" => CompiledSemanticKind::Add,
-        "SUB" => CompiledSemanticKind::Sub,
-        "AND" => CompiledSemanticKind::And,
-        "OR" => CompiledSemanticKind::Or,
-        "XOR" => CompiledSemanticKind::Xor,
-        "IMUL" => CompiledSemanticKind::Imul,
-        "MUL" => CompiledSemanticKind::Mul,
-        "SHL" | "SAL" => CompiledSemanticKind::Shl,
-        "SHR" => CompiledSemanticKind::Shr,
-        "SAR" => CompiledSemanticKind::Sar,
-        "INC" => CompiledSemanticKind::Inc,
-        "DEC" => CompiledSemanticKind::Dec,
-        "CMP" => CompiledSemanticKind::Cmp,
-        "TEST" => CompiledSemanticKind::Test,
-        "MOVZX" => CompiledSemanticKind::Movzx,
-        "MOVSX" => CompiledSemanticKind::Movsx,
-        "MOVSXD" => CompiledSemanticKind::Movsxd,
-        "SET^CC" => CompiledSemanticKind::Setcc,
-        "CBW" => CompiledSemanticKind::Cbw,
-        "CWDE" => CompiledSemanticKind::Cwde,
-        "CDQE" => CompiledSemanticKind::Cdqe,
+        "NOP" | "PAUSE" => CompiledTemplateClass::Nop,
+        "RET" => CompiledTemplateClass::Ret,
+        "CALL" => CompiledTemplateClass::Call,
+        "JMP" => CompiledTemplateClass::Jmp,
+        "J^CC" => CompiledTemplateClass::Jcc,
+        "MOV" => CompiledTemplateClass::Mov,
+        "LEA" => CompiledTemplateClass::AddressOf,
+        "PUSH" => CompiledTemplateClass::StackStore,
+        "POP" => CompiledTemplateClass::StackLoad,
+        "LEAVE" => CompiledTemplateClass::FrameTeardown,
+        "ADD" => CompiledTemplateClass::Add,
+        "SUB" => CompiledTemplateClass::Sub,
+        "AND" => CompiledTemplateClass::And,
+        "OR" => CompiledTemplateClass::Or,
+        "XOR" => CompiledTemplateClass::Xor,
+        "IMUL" => CompiledTemplateClass::Imul,
+        "MUL" => CompiledTemplateClass::Mul,
+        "SHL" | "SAL" => CompiledTemplateClass::Shl,
+        "SHR" => CompiledTemplateClass::Shr,
+        "SAR" => CompiledTemplateClass::Sar,
+        "INC" => CompiledTemplateClass::Inc,
+        "DEC" => CompiledTemplateClass::Dec,
+        "CMP" => CompiledTemplateClass::Cmp,
+        "TEST" => CompiledTemplateClass::Test,
+        "MOVZX" => CompiledTemplateClass::Movzx,
+        "MOVSX" => CompiledTemplateClass::Movsx,
+        "MOVSXD" => CompiledTemplateClass::Movsxd,
+        "SET^CC" => CompiledTemplateClass::Setcc,
+        "CBW" => CompiledTemplateClass::Cbw,
+        "CWDE" => CompiledTemplateClass::Cwde,
+        "CDQE" => CompiledTemplateClass::Cdqe,
         _ => return None,
     })
 }
@@ -1006,7 +1007,7 @@ fn parse_opcode_matcher(signature: &str) -> Option<CompiledOpcodeMatcher> {
 fn parse_operand_specs(
     signature: &str,
     matcher: &CompiledOpcodeMatcher,
-    semantic_kind: CompiledSemanticKind,
+    template_class: CompiledTemplateClass,
 ) -> Result<Vec<CompiledOperandSpec>> {
     let head = signature
         .trim_start_matches(':')
@@ -1059,7 +1060,7 @@ fn parse_operand_specs(
                 CompiledOpcodeMatcher::RowPage { .. }
                     if token.starts_with("Rmr") || token.starts_with("CRmr") =>
                 {
-                    CompiledOperandSpec::OpcodeReg { size }
+                    CompiledOperandSpec::OpcodeFieldReg { size }
                 }
                 _ if token.starts_with("Reg")
                     || token == "Sreg"
@@ -1068,9 +1069,9 @@ fn parse_operand_specs(
                     || token == "debugreg"
                     || token == "debugreg_x" =>
                 {
-                    CompiledOperandSpec::EncodedOperandByteReg { size }
+                    CompiledOperandSpec::OperandFieldReg { size }
                 }
-                _ => CompiledOperandSpec::EncodedOperandByteRm {
+                _ => CompiledOperandSpec::OperandFieldRm {
                     size,
                     memory_only: token.starts_with('m'),
                 },
@@ -1086,7 +1087,7 @@ fn parse_operand_specs(
         ));
     }
 
-    if matches!(semantic_kind, CompiledSemanticKind::Setcc) && specs.len() != 1 {
+    if matches!(template_class, CompiledTemplateClass::Setcc) && specs.len() != 1 {
         return Err(anyhow::anyhow!("setcc expects one operand"));
     }
     Ok(specs)
@@ -1150,7 +1151,7 @@ fn parse_opsize_variants(signature: &str) -> Vec<u8> {
 
 fn unsupported_template_reason(
     signature: &str,
-    semantic_kind: CompiledSemanticKind,
+    template_class: CompiledTemplateClass,
     operand_specs: &[CompiledOperandSpec],
 ) -> Option<String> {
     if signature.contains("currentCS")
@@ -1168,44 +1169,44 @@ fn unsupported_template_reason(
         return Some("unsupported_runtime_constraint".to_string());
     }
 
-    match semantic_kind {
-        CompiledSemanticKind::Nop
-        | CompiledSemanticKind::Ret
-        | CompiledSemanticKind::Call
-        | CompiledSemanticKind::Jmp
-        | CompiledSemanticKind::Jcc
-        | CompiledSemanticKind::Mov
-        | CompiledSemanticKind::Lea
-        | CompiledSemanticKind::Push
-        | CompiledSemanticKind::Pop
-        | CompiledSemanticKind::Leave
-        | CompiledSemanticKind::Add
-        | CompiledSemanticKind::Sub
-        | CompiledSemanticKind::And
-        | CompiledSemanticKind::Or
-        | CompiledSemanticKind::Xor
-        | CompiledSemanticKind::Imul
-        | CompiledSemanticKind::Mul
-        | CompiledSemanticKind::Shl
-        | CompiledSemanticKind::Shr
-        | CompiledSemanticKind::Sar
-        | CompiledSemanticKind::Inc
-        | CompiledSemanticKind::Dec
-        | CompiledSemanticKind::Cmp
-        | CompiledSemanticKind::Test
-        | CompiledSemanticKind::Movzx
-        | CompiledSemanticKind::Movsx
-        | CompiledSemanticKind::Movsxd
-        | CompiledSemanticKind::Setcc
-        | CompiledSemanticKind::Cbw
-        | CompiledSemanticKind::Cwde
-        | CompiledSemanticKind::Cdqe => {}
+    match template_class {
+        CompiledTemplateClass::Nop
+        | CompiledTemplateClass::Ret
+        | CompiledTemplateClass::Call
+        | CompiledTemplateClass::Jmp
+        | CompiledTemplateClass::Jcc
+        | CompiledTemplateClass::Mov
+        | CompiledTemplateClass::AddressOf
+        | CompiledTemplateClass::StackStore
+        | CompiledTemplateClass::StackLoad
+        | CompiledTemplateClass::FrameTeardown
+        | CompiledTemplateClass::Add
+        | CompiledTemplateClass::Sub
+        | CompiledTemplateClass::And
+        | CompiledTemplateClass::Or
+        | CompiledTemplateClass::Xor
+        | CompiledTemplateClass::Imul
+        | CompiledTemplateClass::Mul
+        | CompiledTemplateClass::Shl
+        | CompiledTemplateClass::Shr
+        | CompiledTemplateClass::Sar
+        | CompiledTemplateClass::Inc
+        | CompiledTemplateClass::Dec
+        | CompiledTemplateClass::Cmp
+        | CompiledTemplateClass::Test
+        | CompiledTemplateClass::Movzx
+        | CompiledTemplateClass::Movsx
+        | CompiledTemplateClass::Movsxd
+        | CompiledTemplateClass::Setcc
+        | CompiledTemplateClass::Cbw
+        | CompiledTemplateClass::Cwde
+        | CompiledTemplateClass::Cdqe => {}
     }
 
     if operand_specs.len() > 2
         && !matches!(
-            semantic_kind,
-            CompiledSemanticKind::Push | CompiledSemanticKind::Pop
+            template_class,
+            CompiledTemplateClass::StackStore | CompiledTemplateClass::StackLoad
         )
     {
         return Some("unsupported_operand_arity".to_string());
@@ -1215,7 +1216,7 @@ fn unsupported_template_reason(
 
 fn build_constructor_template(
     operand_specs: &[CompiledOperandSpec],
-    semantic_kind: CompiledSemanticKind,
+    template_class: CompiledTemplateClass,
 ) -> CompiledConstructorTemplate {
     let handles = operand_specs
         .iter()
@@ -1230,17 +1231,17 @@ fn build_constructor_template(
     if operand_specs.iter().any(|spec| {
         matches!(
             spec,
-            CompiledOperandSpec::EncodedOperandByteRm { .. }
-                | CompiledOperandSpec::EncodedOperandByteReg { .. }
+            CompiledOperandSpec::OperandFieldRm { .. }
+                | CompiledOperandSpec::OperandFieldReg { .. }
         )
     }) {
-        decode_steps.push(CompiledOperandDecodeStep::ConsumeEncodedOperandByte);
+        decode_steps.push(CompiledOperandDecodeStep::ConsumeOperandFieldByte);
     }
     decode_steps.extend(
         (0..operand_specs.len())
             .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
     );
-    let semantic_ops = semantic_ops_for_kind(semantic_kind);
+    let semantic_ops = semantic_ops_for_kind(template_class);
     CompiledConstructorTemplate {
         handles,
         decode_steps,
@@ -1248,22 +1249,22 @@ fn build_constructor_template(
     }
 }
 
-fn semantic_ops_for_kind(semantic_kind: CompiledSemanticKind) -> Vec<CompiledSemanticOp> {
+fn semantic_ops_for_kind(template_class: CompiledTemplateClass) -> Vec<CompiledSemanticOp> {
     use CompiledArithmeticOpcode as Arith;
-    use CompiledSemanticKind as Kind;
     use CompiledSemanticOp as Op;
+    use CompiledTemplateClass as Kind;
 
-    vec![match semantic_kind {
+    vec![match template_class {
         Kind::Nop => Op::Nop,
         Kind::Ret => Op::Return,
         Kind::Call => Op::Call,
         Kind::Jmp => Op::Jump,
         Kind::Jcc => Op::ConditionalJump,
-        Kind::Mov => Op::Move,
-        Kind::Lea => Op::Lea,
-        Kind::Push => Op::Push,
-        Kind::Pop => Op::Pop,
-        Kind::Leave => Op::Leave,
+        Kind::Mov => Op::Copy,
+        Kind::AddressOf => Op::AddressOf,
+        Kind::StackStore => Op::StackStore,
+        Kind::StackLoad => Op::StackLoad,
+        Kind::FrameTeardown => Op::FrameTeardown,
         Kind::Add => Op::Binary { opcode: Arith::Add },
         Kind::Sub => Op::Binary { opcode: Arith::Sub },
         Kind::And => Op::Binary { opcode: Arith::And },

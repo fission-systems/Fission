@@ -4,7 +4,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use crate::compiler::{
     CompiledArithmeticOpcode, CompiledDecisionProbe, CompiledExecutableConstructor,
     CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate, CompiledOpcodeMatcher,
-    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledSemanticKind,
+    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledTemplateClass,
 };
 use crate::runtime::spine::{
     self, operand_size, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
@@ -75,7 +75,7 @@ impl<'a> CompiledInstructionContext<'a> {
                 _ => break,
             }
         }
-        let operand_size_state = if extension_prefix.w {
+        let size_mode = if extension_prefix.w {
             2
         } else if operand_size_override {
             0
@@ -83,15 +83,15 @@ impl<'a> CompiledInstructionContext<'a> {
             1
         };
         Ok(Self {
-            inner: RuntimeInstructionContext::new(bytes, address, cursor, operand_size_state),
+            inner: RuntimeInstructionContext::new(bytes, address, cursor, size_mode),
             extension_prefix,
         })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct EncodedOperandByte {
-    encoded_operand_mode: u8,
+struct OperandFieldByte {
+    operand_mode: u8,
     reg: u8,
     rm: u8,
     base: Option<u8>,
@@ -144,7 +144,7 @@ pub(crate) fn decode_instruction(
         BoundOperand::Relative { target } => Some(*target),
         _ => None,
     });
-    let flow_kind = flow_kind_for(decoded.semantic_kind);
+    let flow_kind = flow_kind_for(decoded.template_class);
     let references = decoded_references(address, length, flow_kind, &decoded.operands);
     Ok(DecodedInstruction {
         address,
@@ -186,14 +186,14 @@ fn select_constructor<'a>(
 
 struct CompiledDecisionProbeEvaluator<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
-    cached_encoded_operand_byte: Option<EncodedOperandByte>,
+    cached_operand_field_byte: Option<OperandFieldByte>,
 }
 
 impl<'a, 'b> CompiledDecisionProbeEvaluator<'a, 'b> {
     fn new(ctx: &'a CompiledInstructionContext<'b>) -> Self {
         Self {
             ctx,
-            cached_encoded_operand_byte: None,
+            cached_operand_field_byte: None,
         }
     }
 }
@@ -214,13 +214,13 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
                 (byte & mask) >> shift
             }
-            CompiledDecisionProbe::OperandSizeState => self.ctx.operand_size_state,
-            CompiledDecisionProbe::EncodedOperandMode => {
-                ensure_encoded_operand_byte(self.ctx, &mut self.cached_encoded_operand_byte)?
-                    .encoded_operand_mode
+            CompiledDecisionProbe::SizeMode => self.ctx.size_mode,
+            CompiledDecisionProbe::OperandFieldMode => {
+                ensure_operand_field_byte(self.ctx, &mut self.cached_operand_field_byte)?
+                    .operand_mode
             }
-            CompiledDecisionProbe::EncodedOperandReg => {
-                ensure_encoded_operand_byte(self.ctx, &mut self.cached_encoded_operand_byte)?.reg
+            CompiledDecisionProbe::OperandFieldReg => {
+                ensure_operand_field_byte(self.ctx, &mut self.cached_operand_field_byte)?.reg
             }
         })
     }
@@ -239,19 +239,19 @@ fn candidate_decision_bucket_keys(ctx: &CompiledInstructionContext<'_>) -> Optio
     Some(keys)
 }
 
-fn ensure_encoded_operand_byte<'a>(
+fn ensure_operand_field_byte<'a>(
     ctx: &CompiledInstructionContext<'_>,
-    cached_encoded_operand_byte: &'a mut Option<EncodedOperandByte>,
-) -> Result<&'a EncodedOperandByte> {
-    if cached_encoded_operand_byte.is_none() {
-        *cached_encoded_operand_byte = Some(parse_encoded_operand_byte(
+    cached_operand_field_byte: &'a mut Option<OperandFieldByte>,
+) -> Result<&'a OperandFieldByte> {
+    if cached_operand_field_byte.is_none() {
+        *cached_operand_field_byte = Some(parse_operand_field_byte(
             ctx,
             ctx.cursor + opcode_len_from_context(ctx)?,
         )?);
     }
-    cached_encoded_operand_byte
+    cached_operand_field_byte
         .as_ref()
-        .ok_or_else(|| anyhow!("missing cached encoded_operand_byte"))
+        .ok_or_else(|| anyhow!("missing cached operand_field_byte"))
 }
 
 fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
@@ -262,21 +262,21 @@ fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize
     Ok(if opcode == 0x0f { 2 } else { 1 })
 }
 
-fn parse_encoded_operand_byte(
+fn parse_operand_field_byte(
     ctx: &CompiledInstructionContext<'_>,
     offset: usize,
-) -> Result<EncodedOperandByte> {
+) -> Result<OperandFieldByte> {
     let byte = *ctx
         .bytes
         .get(offset)
-        .ok_or_else(|| anyhow!("missing encoded_operand_byte at {offset}"))?;
-    let encoded_operand_mode = byte >> 6;
+        .ok_or_else(|| anyhow!("missing operand_field_byte at {offset}"))?;
+    let operand_mode = byte >> 6;
     let reg = ((byte >> 3) & 0x7) | ((ctx.extension_prefix.r as u8) << 3);
     let rm_low = byte & 0x7;
     let rm = rm_low | ((ctx.extension_prefix.b as u8) << 3);
-    if encoded_operand_mode == 3 {
-        return Ok(EncodedOperandByte {
-            encoded_operand_mode,
+    if operand_mode == 3 {
+        return Ok(OperandFieldByte {
+            operand_mode,
             reg,
             rm,
             base: Some(rm),
@@ -307,21 +307,21 @@ fn parse_encoded_operand_byte(
         if index_low != 4 {
             index = Some(index_low | ((ctx.extension_prefix.x as u8) << 3));
         }
-        if encoded_operand_mode == 0 && base_low == 5 {
+        if operand_mode == 0 && base_low == 5 {
             base = None;
             displacement = read_sint(ctx.bytes, offset + length, 4)?;
             length += 4;
         } else {
             base = Some(base_low | ((ctx.extension_prefix.b as u8) << 3));
         }
-    } else if encoded_operand_mode == 0 && rm_low == 5 {
+    } else if operand_mode == 0 && rm_low == 5 {
         base = None;
         rip_relative = true;
         displacement = read_sint(ctx.bytes, offset + length, 4)?;
         length += 4;
     }
 
-    match encoded_operand_mode {
+    match operand_mode {
         1 => {
             displacement = displacement.wrapping_add(read_sint(ctx.bytes, offset + length, 1)?);
             length += 1;
@@ -333,8 +333,8 @@ fn parse_encoded_operand_byte(
         _ => {}
     }
 
-    Ok(EncodedOperandByte {
-        encoded_operand_mode,
+    Ok(OperandFieldByte {
+        operand_mode,
         reg,
         rm,
         base,
@@ -377,7 +377,7 @@ fn constructor_matches(
         && !constructor
             .opsize_variants
             .iter()
-            .any(|opsize| *opsize == ctx.operand_size_state)
+            .any(|opsize| *opsize == ctx.size_mode)
     {
         bail!("opsize mismatch");
     }
@@ -412,40 +412,40 @@ fn constructor_matches(
         }
     }
 
-    let requires_encoded_operand_byte = constructor.mod_constraint.is_some()
-        || !constructor.encoded_operand_reg_values.is_empty()
+    let requires_operand_field_byte = constructor.mod_constraint.is_some()
+        || !constructor.operand_reg_values.is_empty()
         || constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::EncodedOperandByteRm { .. }
-                    | CompiledOperandSpec::EncodedOperandByteReg { .. }
+                CompiledOperandSpec::OperandFieldRm { .. }
+                    | CompiledOperandSpec::OperandFieldReg { .. }
             )
         });
-    if requires_encoded_operand_byte {
-        let encoded_operand_byte = parse_encoded_operand_byte(ctx, ctx.cursor + opcode_len)?;
+    if requires_operand_field_byte {
+        let operand_field_byte = parse_operand_field_byte(ctx, ctx.cursor + opcode_len)?;
         if let Some(expected) = constructor.mod_constraint {
-            if encoded_operand_byte.encoded_operand_mode != expected {
+            if operand_field_byte.operand_mode != expected {
                 bail!("mod mismatch");
             }
         }
-        if !constructor.encoded_operand_reg_values.is_empty()
+        if !constructor.operand_reg_values.is_empty()
             && !constructor
-                .encoded_operand_reg_values
-                .contains(&encoded_operand_byte.reg)
+                .operand_reg_values
+                .contains(&operand_field_byte.reg)
         {
-            bail!("encoded_operand_reg mismatch");
+            bail!("operand_reg mismatch");
         }
         if constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::EncodedOperandByteRm {
+                CompiledOperandSpec::OperandFieldRm {
                     memory_only: true,
                     ..
                 }
             )
-        }) && encoded_operand_byte.encoded_operand_mode == 3
+        }) && operand_field_byte.operand_mode == 3
         {
-            bail!("memory-only encoded_operand_byte mismatch");
+            bail!("memory-only operand_field_byte mismatch");
         }
     }
 
@@ -464,7 +464,7 @@ struct CompiledParserWalker<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     cursor: usize,
-    encoded_operand_byte: Option<EncodedOperandByte>,
+    operand_field_byte: Option<OperandFieldByte>,
     handles: Vec<Option<RuntimeHandle>>,
     walker: spine::RuntimeParserWalker,
 }
@@ -478,7 +478,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(Self {
             ctx,
             cursor: ctx.cursor + opcode_len,
-            encoded_operand_byte: None,
+            operand_field_byte: None,
             handles: vec![None; selection.constructor.constructor_template.handles.len()],
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             selection,
@@ -494,8 +494,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .clone();
         for step in decode_steps {
             match step {
-                CompiledOperandDecodeStep::ConsumeEncodedOperandByte => {
-                    self.ensure_encoded_operand_byte()?;
+                CompiledOperandDecodeStep::ConsumeOperandFieldByte => {
+                    self.ensure_operand_field_byte()?;
                 }
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                     self.decode_operand(operand_index)?;
@@ -519,8 +519,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Some(self.ctx.bytes[self.ctx.cursor + prefix.len()] & 0x0f)
             }
             _ if matches!(
-                self.selection.constructor.semantic_kind,
-                CompiledSemanticKind::Setcc
+                self.selection.constructor.template_class,
+                CompiledTemplateClass::Setcc
             ) && matches!(
                 self.selection.constructor.matcher,
                 CompiledOpcodeMatcher::ExactBytes(_)
@@ -535,7 +535,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         };
 
         Ok(RuntimeConstructState {
-            semantic_kind: self.selection.constructor.semantic_kind,
+            template_class: self.selection.constructor.template_class,
             constructor_template: self.selection.constructor.constructor_template.clone(),
             construct_nodes: self.walker.into_nodes(),
             handles,
@@ -580,47 +580,47 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn ensure_encoded_operand_byte(&mut self) -> Result<EncodedOperandByte> {
-        if self.encoded_operand_byte.is_none() {
-            let decoded = parse_encoded_operand_byte(self.ctx, self.cursor)?;
+    fn ensure_operand_field_byte(&mut self) -> Result<OperandFieldByte> {
+        if self.operand_field_byte.is_none() {
+            let decoded = parse_operand_field_byte(self.ctx, self.cursor)?;
             self.cursor += decoded.length;
-            self.encoded_operand_byte = Some(decoded);
+            self.operand_field_byte = Some(decoded);
         }
-        self.encoded_operand_byte
-            .ok_or_else(|| anyhow!("failed to decode encoded_operand_byte"))
+        self.operand_field_byte
+            .ok_or_else(|| anyhow!("failed to decode operand_field_byte"))
     }
 
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<BoundOperand> {
         match &template.spec {
-            CompiledOperandSpec::EncodedOperandByteRm { size, memory_only } => {
-                let encoded_operand_byte = self.ensure_encoded_operand_byte()?;
-                if encoded_operand_byte.encoded_operand_mode == 3 {
+            CompiledOperandSpec::OperandFieldRm { size, memory_only } => {
+                let operand_field_byte = self.ensure_operand_field_byte()?;
+                if operand_field_byte.operand_mode == 3 {
                     if *memory_only {
-                        bail!("memory-only encoded_operand_byte operand cannot bind register");
+                        bail!("memory-only operand_field_byte operand cannot bind register");
                     }
                     Ok(BoundOperand::Register {
-                        index: encoded_operand_byte.rm,
+                        index: operand_field_byte.rm,
                         size: *size,
                     })
                 } else {
                     Ok(BoundOperand::Memory {
-                        base: encoded_operand_byte.base,
-                        index: encoded_operand_byte.index,
-                        scale: encoded_operand_byte.scale,
-                        displacement: encoded_operand_byte.displacement,
-                        rip_relative: encoded_operand_byte.rip_relative,
+                        base: operand_field_byte.base,
+                        index: operand_field_byte.index,
+                        scale: operand_field_byte.scale,
+                        displacement: operand_field_byte.displacement,
+                        rip_relative: operand_field_byte.rip_relative,
                         size: *size,
                     })
                 }
             }
-            CompiledOperandSpec::EncodedOperandByteReg { size } => {
-                let encoded_operand_byte = self.ensure_encoded_operand_byte()?;
+            CompiledOperandSpec::OperandFieldReg { size } => {
+                let operand_field_byte = self.ensure_operand_field_byte()?;
                 Ok(BoundOperand::Register {
-                    index: encoded_operand_byte.reg,
+                    index: operand_field_byte.reg,
                     size: *size,
                 })
             }
-            CompiledOperandSpec::OpcodeReg { size } => {
+            CompiledOperandSpec::OpcodeFieldReg { size } => {
                 let opcode_len = opcode_len_from_matcher(&self.selection.constructor.matcher);
                 let opcode = *self
                     .ctx
@@ -668,12 +668,12 @@ fn opcode_len_from_matcher(matcher: &CompiledOpcodeMatcher) -> usize {
     }
 }
 
-fn flow_kind_for(kind: CompiledSemanticKind) -> DecodedFlowKind {
+fn flow_kind_for(kind: CompiledTemplateClass) -> DecodedFlowKind {
     match kind {
-        CompiledSemanticKind::Call => DecodedFlowKind::Call,
-        CompiledSemanticKind::Jmp => DecodedFlowKind::Jump,
-        CompiledSemanticKind::Jcc => DecodedFlowKind::ConditionalJump,
-        CompiledSemanticKind::Ret => DecodedFlowKind::Return,
+        CompiledTemplateClass::Call => DecodedFlowKind::Call,
+        CompiledTemplateClass::Jmp => DecodedFlowKind::Jump,
+        CompiledTemplateClass::Jcc => DecodedFlowKind::ConditionalJump,
+        CompiledTemplateClass::Ret => DecodedFlowKind::Return,
         _ => DecodedFlowKind::None,
     }
 }
@@ -830,24 +830,24 @@ impl RuntimeSemanticEmitter for CompiledTableEmitter {
         self.emit_jcc(state)
     }
 
-    fn emit_move(&mut self, state: &RuntimeConstructState) -> Result<()> {
+    fn emit_copy_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
         self.emit_mov(state)
     }
 
-    fn emit_lea(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_lea(self, state)
+    fn emit_address_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_address_template(self, state)
     }
 
-    fn emit_push(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_push(self, state)
+    fn emit_stack_store_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_stack_store_template(self, state)
     }
 
-    fn emit_pop(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        CompiledTableEmitter::emit_pop(self, state)
+    fn emit_stack_load_template(&mut self, state: &RuntimeConstructState) -> Result<()> {
+        CompiledTableEmitter::emit_stack_load_template(self, state)
     }
 
-    fn emit_leave(&mut self) -> Result<()> {
-        CompiledTableEmitter::emit_leave(self)
+    fn emit_frame_teardown_template(&mut self) -> Result<()> {
+        CompiledTableEmitter::emit_frame_teardown_template(self)
     }
 
     fn emit_binary(
@@ -903,7 +903,7 @@ impl RuntimeSemanticEmitter for CompiledTableEmitter {
         src_size: u32,
         dst_size: u32,
     ) -> Result<()> {
-        self.emit_accumulator_extend(src_size, dst_size, state.semantic_kind.as_str())
+        self.emit_accumulator_extend(src_size, dst_size, state.template_class.as_str())
     }
 }
 
@@ -952,7 +952,7 @@ impl CompiledTableEmitter {
         )
     }
 
-    fn emit_lea(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_address_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let size = operand_size(&instruction.operands[0]).max(8);
         let BoundOperand::Memory { .. } = &instruction.operands[1] else {
             bail!("lea source must be memory");
@@ -967,7 +967,7 @@ impl CompiledTableEmitter {
         )
     }
 
-    fn emit_push(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_stack_store_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let value = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
         let rsp = gpr(4, 8);
         let new_rsp = self.tmp(8);
@@ -987,7 +987,7 @@ impl CompiledTableEmitter {
         Ok(())
     }
 
-    fn emit_pop(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
+    fn emit_stack_load_template(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let rsp = gpr(4, 8);
         let size = operand_size(&instruction.operands[0]).max(8);
         let value = self.tmp(size);
@@ -1013,7 +1013,7 @@ impl CompiledTableEmitter {
         Ok(())
     }
 
-    fn emit_leave(&mut self) -> Result<()> {
+    fn emit_frame_teardown_template(&mut self) -> Result<()> {
         let rsp = gpr(4, 8);
         let rbp = gpr(5, 8);
         self.push(PcodeOpcode::Copy, Some(rsp.clone()), vec![rbp], "LEAVE");
@@ -1545,9 +1545,9 @@ mod tests {
         assert_eq!(state.match_trace.root_bucket, "global");
         assert!(!state.match_trace.probes.is_empty());
         assert!(!state.construct_nodes.is_empty());
-        assert!(state.handles.iter().any(|handle| matches!(
-            handle.spec,
-            CompiledOperandSpec::EncodedOperandByteRm { .. }
-        )));
+        assert!(state
+            .handles
+            .iter()
+            .any(|handle| matches!(handle.spec, CompiledOperandSpec::OperandFieldRm { .. })));
     }
 }

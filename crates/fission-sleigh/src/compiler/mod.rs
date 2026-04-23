@@ -24,8 +24,8 @@ pub use ir::{
     CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode, CompiledDecisionProbe,
     CompiledDecisionTree, CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend,
     CompiledHandleTemplate, CompiledMacro, CompiledOpcodeMatcher, CompiledOperandDecodeStep,
-    CompiledOperandSpec, CompiledPatternNode, CompiledPcodeOp, CompiledSemanticKind,
-    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpecDefinition, ControlFlowClass,
+    CompiledOperandSpec, CompiledPatternNode, CompiledPcodeOp, CompiledSemanticOp,
+    CompiledSemanticTemplate, CompiledSpecDefinition, CompiledTemplateClass, ControlFlowClass,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use token::{Token, TokenKind, TokenizedLine};

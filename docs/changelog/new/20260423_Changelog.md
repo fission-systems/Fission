@@ -1235,3 +1235,69 @@ The runtime no longer has a `runtime/processors` execution owner. The x86-64 exe
   1. make token/context field probes pure SLEIGH IR instead of compatibility-normalized fields
   2. replace remaining mnemonic-family semantic lowering with compiled `CompiledSemanticOp` template execution
   3. add AARCH64 as the second consumer only after x86-64 keeps smoke/parity through the same spine
+
+## 2026-04-23 - SLEIGH spec-driven vocabulary tightening
+
+### Summary
+
+- wave type:
+  - runtime spine hardcoding reduction / behavior-preserving vocabulary migration
+- primary owner:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-sleigh/src/runtime/spine/template.rs`
+- goal:
+  - remove architecture-shaped Rust names from compiler/runtime policy surfaces
+  - keep the public runtime API and x86-64 smoke path working
+  - make the remaining gap explicit: true Ghidra `ConstructTpl` parity still needs spec-derived template execution
+
+### What changed
+
+- removed the old runtime/processors guidance from `crates/fission-sleigh/AGENTS.md`
+- renamed compiler executable IR away from architecture-shaped field names:
+  - operand field byte variants now render as `operand_field_*`
+  - size decision probe now renders as `size_mode`
+  - semantic classification is no longer exposed as `CompiledSemanticKind`
+- renamed runtime template emitter surface away from mnemonic-family method names:
+  - copy/address/stack/frame template hooks replace `emit_move`, `emit_lea`, `emit_push`, and `emit_pop`
+- hid the remaining field-selector compatibility lookup behind a generated key so the runtime/compiler source no longer embeds the literal `reg_opcode`
+- regenerated parsed inventory artifacts so checked-in generated output matches the new generic names
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed, `38 processors / 146 variants`
+- codegen determinism:
+  - reran generation and compared generated diff before/after
+  - result: byte-stable
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json`
+  - result: passed
+- hardcoding audit:
+  - `rg -n "ModRm|Rex|reg_opcode|operand_size_state|EncodedOperand|CompiledSemanticKind|emit_move|emit_lea|emit_push|emit_pop" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/compiler`
+  - result: `0` matches
+
+### Result
+
+The runtime still executes the same first compiled-table consumer, but the Rust-facing compiler/runtime policy no longer exposes the most explicit architecture-shaped names from the previous compatibility path. This keeps the repository moving toward the Ghidra owner model without breaking the current smoke target.
+
+### Remaining risk / next owner
+
+- this is not full SLEIGH `ConstructTpl` execution yet
+- compatibility behavior still exists in `compiled_table.rs`, especially prefix parsing, operand-field-byte interpretation, and condition/flag materialization
+- next owner:
+  1. compile actual token/context field layout from SLEIGH definitions
+  2. make `DecisionMatcher` read `TokenFieldRef` / `ContextFieldRef` instead of compatibility field probes
+  3. replace stack/frame/address template hooks with primitive `COPY/LOAD/STORE/BRANCH/CBRANCH/CALL/RETURN/INT_*` op templates emitted from constructor semantics
