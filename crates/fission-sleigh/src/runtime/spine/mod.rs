@@ -5,6 +5,7 @@
 //! and PcodeEmit. Processor modules provide only field extraction and
 //! architecture-specific varnode mapping.
 
+pub mod compiled_table;
 pub mod construct;
 pub mod context;
 pub mod decision;

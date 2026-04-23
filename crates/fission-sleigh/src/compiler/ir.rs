@@ -56,7 +56,7 @@ pub struct CompiledExecutableConstructor {
     pub signature_hash: u64,
     pub matcher: CompiledOpcodeMatcher,
     pub mod_constraint: Option<u8>,
-    pub reg_opcode_values: Vec<u8>,
+    pub encoded_operand_reg_values: Vec<u8>,
     pub opsize_variants: Vec<u8>,
     pub operand_specs: Vec<CompiledOperandSpec>,
     pub semantic_kind: CompiledSemanticKind,
@@ -95,10 +95,10 @@ pub struct CompiledDecisionEdge {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompiledDecisionProbe {
     Terminal,
-    InstructionByte { offset: u8, mask: u8, shift: u8 },
-    OperandSizeCode,
-    ModBits,
-    RegOpcode,
+    InstructionBitSlice { offset: u8, mask: u8, shift: u8 },
+    OperandSizeState,
+    EncodedOperandMode,
+    EncodedOperandReg,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,11 +129,11 @@ impl CompiledOpcodeMatcher {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandSpec {
-    ModRmRm {
+    EncodedOperandByteRm {
         size: u32,
         memory_only: bool,
     },
-    ModRmReg {
+    EncodedOperandByteReg {
         size: u32,
     },
     OpcodeReg {
@@ -167,7 +167,7 @@ pub struct CompiledHandleTemplate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOperandDecodeStep {
-    ConsumeModRm,
+    ConsumeEncodedOperandByte,
     DecodeOperand { operand_index: usize },
 }
 
@@ -287,10 +287,10 @@ impl CompiledDecisionProbe {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Terminal => "terminal",
-            Self::InstructionByte { .. } => "instruction_byte",
-            Self::OperandSizeCode => "operand_size_code",
-            Self::ModBits => "mod_bits",
-            Self::RegOpcode => "reg_opcode",
+            Self::InstructionBitSlice { .. } => "instruction_bit_slice",
+            Self::OperandSizeState => "operand_size_state",
+            Self::EncodedOperandMode => "encoded_operand_mode",
+            Self::EncodedOperandReg => "encoded_operand_reg",
         }
     }
 }
@@ -684,16 +684,16 @@ fn decision_probes_for_constructors(
         .min(4);
 
     let mut probes = (0..max_opcode_len)
-        .map(|offset| CompiledDecisionProbe::InstructionByte {
+        .map(|offset| CompiledDecisionProbe::InstructionBitSlice {
             offset: offset as u8,
             mask: 0xff,
             shift: 0,
         })
         .collect::<Vec<_>>();
     probes.extend([
-        CompiledDecisionProbe::OperandSizeCode,
-        CompiledDecisionProbe::ModBits,
-        CompiledDecisionProbe::RegOpcode,
+        CompiledDecisionProbe::OperandSizeState,
+        CompiledDecisionProbe::EncodedOperandMode,
+        CompiledDecisionProbe::EncodedOperandReg,
     ]);
     probes
 }
@@ -788,7 +788,7 @@ fn decision_feature_values(
 ) -> Vec<u8> {
     match probe {
         CompiledDecisionProbe::Terminal => Vec::new(),
-        CompiledDecisionProbe::InstructionByte {
+        CompiledDecisionProbe::InstructionBitSlice {
             offset,
             mask,
             shift,
@@ -796,21 +796,22 @@ fn decision_feature_values(
             .into_iter()
             .map(|value| (value & mask) >> shift)
             .collect(),
-        CompiledDecisionProbe::OperandSizeCode => constructor.opsize_variants.clone(),
-        CompiledDecisionProbe::ModBits => {
+        CompiledDecisionProbe::OperandSizeState => constructor.opsize_variants.clone(),
+        CompiledDecisionProbe::EncodedOperandMode => {
             if let Some(value) = constructor.mod_constraint {
                 return vec![value];
             }
-            let has_modrm = constructor.operand_specs.iter().any(|spec| {
+            let has_encoded_operand_byte = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::ModRmRm { .. } | CompiledOperandSpec::ModRmReg { .. }
+                    CompiledOperandSpec::EncodedOperandByteRm { .. }
+                        | CompiledOperandSpec::EncodedOperandByteReg { .. }
                 )
             });
             let memory_only = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::ModRmRm {
+                    CompiledOperandSpec::EncodedOperandByteRm {
                         memory_only: true,
                         ..
                     }
@@ -818,13 +819,13 @@ fn decision_feature_values(
             });
             if memory_only {
                 vec![0, 1, 2]
-            } else if has_modrm {
+            } else if has_encoded_operand_byte {
                 vec![0, 1, 2, 3]
             } else {
                 Vec::new()
             }
         }
-        CompiledDecisionProbe::RegOpcode => constructor.reg_opcode_values.clone(),
+        CompiledDecisionProbe::EncodedOperandReg => constructor.encoded_operand_reg_values.clone(),
     }
 }
 
@@ -856,7 +857,7 @@ fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> V
 fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
     let mut score = 0usize;
     score += constructor.opsize_variants.len().min(1) * 2;
-    score += constructor.reg_opcode_values.len().min(1) * 3;
+    score += constructor.encoded_operand_reg_values.len().min(1) * 3;
     score += usize::from(constructor.mod_constraint.is_some()) * 2;
     score += constructor
         .operand_specs
@@ -864,7 +865,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .filter(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::ModRmRm {
+                CompiledOperandSpec::EncodedOperandByteRm {
                     memory_only: true,
                     ..
                 }
@@ -894,7 +895,7 @@ fn compile_executable_constructor(
     let matcher = parse_opcode_matcher(signature)?;
     let operand_specs = parse_operand_specs(signature, &matcher, semantic_kind).ok()?;
     let mod_constraint = parse_single_value(signature, "mod=");
-    let reg_opcode_values = parse_value_list(signature, "reg_opcode=");
+    let encoded_operand_reg_values = parse_value_list(signature, "reg_opcode=");
     let opsize_variants = parse_opsize_variants(signature);
     let unsupported_template_kind =
         unsupported_template_reason(signature, semantic_kind, &operand_specs);
@@ -908,7 +909,7 @@ fn compile_executable_constructor(
         signature_hash,
         matcher,
         mod_constraint,
-        reg_opcode_values,
+        encoded_operand_reg_values,
         opsize_variants,
         operand_specs,
         semantic_kind,
@@ -1067,9 +1068,9 @@ fn parse_operand_specs(
                     || token == "debugreg"
                     || token == "debugreg_x" =>
                 {
-                    CompiledOperandSpec::ModRmReg { size }
+                    CompiledOperandSpec::EncodedOperandByteReg { size }
                 }
-                _ => CompiledOperandSpec::ModRmRm {
+                _ => CompiledOperandSpec::EncodedOperandByteRm {
                     size,
                     memory_only: token.starts_with('m'),
                 },
@@ -1229,10 +1230,11 @@ fn build_constructor_template(
     if operand_specs.iter().any(|spec| {
         matches!(
             spec,
-            CompiledOperandSpec::ModRmRm { .. } | CompiledOperandSpec::ModRmReg { .. }
+            CompiledOperandSpec::EncodedOperandByteRm { .. }
+                | CompiledOperandSpec::EncodedOperandByteReg { .. }
         )
     }) {
-        decode_steps.push(CompiledOperandDecodeStep::ConsumeModRm);
+        decode_steps.push(CompiledOperandDecodeStep::ConsumeEncodedOperandByte);
     }
     decode_steps.extend(
         (0..operand_specs.len())

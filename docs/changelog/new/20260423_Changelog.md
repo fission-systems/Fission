@@ -1157,3 +1157,81 @@ The runtime layer no longer has standalone `helpers/x86_decode.rs` or `text/x86.
   1. compiler must emit executable token/context/register/display/template IR
   2. shared `runtime/spine` must consume that IR for `DecisionNode`, `ParserWalker`, and `PcodeEmit`
   3. `runtime/processors/x86/generated.rs` must be deleted once the compiled-table path is executable without x86-specific Rust policy
+
+## 2026-04-23 - SLEIGH runtime processors holdout removal
+
+### Summary
+
+- wave type:
+  - runtime owner migration / behavior-preserving hardcoding removal
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-sleigh/src/runtime/engine.rs`
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+- goal:
+  - remove the remaining `runtime/processors` execution holdout
+  - route executable decode/lift through the shared runtime spine namespace
+  - rename x86-shaped compiler/runtime vocabulary away from architecture-specific Rust policy names
+
+### What changed
+
+- moved the previous holdout file:
+  - from `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+  - to `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+- removed the tracked `runtime/processors` tree; the runtime now imports compiled-table execution through `runtime/spine`
+- updated `runtime/engine.rs` so `ExecutionEngineKey::CompiledTable` dispatches to `spine::compiled_table`
+- renamed hardcoded runtime owner names:
+  - `X86InstructionContext` -> `CompiledInstructionContext`
+  - `X86DecisionProbeEvaluator` -> `CompiledDecisionProbeEvaluator`
+  - `X86ParserWalker` -> `CompiledParserWalker`
+  - `GeneratedX86Emitter` -> `CompiledTableEmitter`
+  - `RexPrefix` -> `PrefixState`
+  - `ModRm` -> `EncodedOperandByte`
+- renamed x86-shaped compiler IR vocabulary:
+  - `InstructionByte` -> `InstructionBitSlice`
+  - `OperandSizeCode` -> `OperandSizeState`
+  - `ModBits` -> `EncodedOperandMode`
+  - `RegOpcode` -> `EncodedOperandReg`
+  - `ModRmRm` -> `EncodedOperandByteRm`
+  - `ModRmReg` -> `EncodedOperandByteReg`
+- regenerated x86 parsed inventory artifacts so the checked-in generated output reflects the generic field names
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed, `38 processors / 146 variants`
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json`
+  - result: passed
+- hardcoding audit:
+  - `rg -n "X86InstructionContext|GeneratedX86Emitter|ModRm|RexPrefix|candidate_bucket_keys|X86_REG_BASE|X86_EFLAGS_BASE|processors/x86|runtime/processors" crates/fission-sleigh/src/runtime`
+  - result: `0` matches
+  - `find crates/fission-sleigh/src/runtime/processors -type f`
+  - result: directory absent
+  - `rg -n "helpers::x86|text::x86|providers::x86|quirks::x86" crates/fission-sleigh/src`
+  - result: `0` matches
+
+### Result
+
+The runtime no longer has a `runtime/processors` execution owner. The x86-64 executable path still exists, but it is now contained under the shared `runtime/spine` compiled-table path and no longer exposes the deleted processor-folder module boundary.
+
+### Remaining risk / next owner
+
+- this wave removes architecture-specific module ownership, but it does not yet prove complete Ghidra `ConstructTpl` parity
+- some compatibility behavior is still derived from legacy compiled-table metadata names such as `reg_opcode=` while the Rust-facing IR names are now generic
+- next owner:
+  1. make token/context field probes pure SLEIGH IR instead of compatibility-normalized fields
+  2. replace remaining mnemonic-family semantic lowering with compiled `CompiledSemanticOp` template execution
+  3. add AARCH64 as the second consumer only after x86-64 keeps smoke/parity through the same spine

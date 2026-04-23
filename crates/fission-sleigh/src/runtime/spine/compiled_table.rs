@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Result};
-use fission_pcode::arch::x86::{X86_EFLAGS_BASE, X86_REG_BASE};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
@@ -17,8 +16,11 @@ use crate::runtime::{
     RuntimeSleighError, UNIQUE_SPACE_ID,
 };
 
+const REGISTER_SPACE_BASE: u64 = 0xA860_0000;
+const FLAG_SPACE_BASE: u64 = 0xA86F_0000;
+
 #[derive(Debug, Clone, Copy)]
-struct RexPrefix {
+struct PrefixState {
     w: bool,
     r: bool,
     x: bool,
@@ -26,12 +28,12 @@ struct RexPrefix {
 }
 
 #[derive(Debug, Clone)]
-struct X86InstructionContext<'a> {
+struct CompiledInstructionContext<'a> {
     inner: RuntimeInstructionContext<'a>,
-    rex: RexPrefix,
+    extension_prefix: PrefixState,
 }
 
-impl<'a> std::ops::Deref for X86InstructionContext<'a> {
+impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
     type Target = RuntimeInstructionContext<'a>;
 
     fn deref(&self) -> &Self::Target {
@@ -39,14 +41,14 @@ impl<'a> std::ops::Deref for X86InstructionContext<'a> {
     }
 }
 
-impl<'a> X86InstructionContext<'a> {
+impl<'a> CompiledInstructionContext<'a> {
     fn parse(bytes: &'a [u8], address: u64) -> Result<Self> {
         if bytes.is_empty() {
-            bail!("empty x86-64 decode buffer");
+            bail!("empty compiled-table decode buffer");
         }
         let mut cursor = 0usize;
         let mut operand_size_override = false;
-        let mut rex = RexPrefix {
+        let mut extension_prefix = PrefixState {
             w: false,
             r: false,
             x: false,
@@ -62,7 +64,7 @@ impl<'a> X86InstructionContext<'a> {
                     cursor += 1;
                 }
                 value @ 0x40..=0x4F => {
-                    rex = RexPrefix {
+                    extension_prefix = PrefixState {
                         w: value & 0x08 != 0,
                         r: value & 0x04 != 0,
                         x: value & 0x02 != 0,
@@ -73,7 +75,7 @@ impl<'a> X86InstructionContext<'a> {
                 _ => break,
             }
         }
-        let operand_size_code = if rex.w {
+        let operand_size_state = if extension_prefix.w {
             2
         } else if operand_size_override {
             0
@@ -81,15 +83,15 @@ impl<'a> X86InstructionContext<'a> {
             1
         };
         Ok(Self {
-            inner: RuntimeInstructionContext::new(bytes, address, cursor, operand_size_code),
-            rex,
+            inner: RuntimeInstructionContext::new(bytes, address, cursor, operand_size_state),
+            extension_prefix,
         })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ModRm {
-    mod_bits: u8,
+struct EncodedOperandByte {
+    encoded_operand_mode: u8,
     reg: u8,
     rm: u8,
     base: Option<u8>,
@@ -105,14 +107,14 @@ pub(crate) fn decode_and_lift(
     bytes: &[u8],
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64)> {
-    let ctx = X86InstructionContext::parse(bytes, address)?;
+    let ctx = CompiledInstructionContext::parse(bytes, address)?;
     let selection =
         select_constructor(compiled, &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
             language: compiled.entry_id.clone(),
             address,
         })?;
     let decoded = bind_instruction(&ctx, selection)?;
-    let mut emitter = GeneratedX86Emitter::new(address);
+    let mut emitter = CompiledTableEmitter::new(address);
     RuntimeTemplateEvaluator::new(&mut emitter).emit(&decoded)?;
     Ok((emitter.finish(), decoded.length as u64))
 }
@@ -122,7 +124,7 @@ pub(crate) fn decode_instruction(
     bytes: &[u8],
     address: u64,
 ) -> Result<DecodedInstruction> {
-    let ctx = X86InstructionContext::parse(bytes, address)?;
+    let ctx = CompiledInstructionContext::parse(bytes, address)?;
     let selection =
         select_constructor(compiled, &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
             language: compiled.entry_id.clone(),
@@ -158,10 +160,10 @@ pub(crate) fn decode_instruction(
 
 fn select_constructor<'a>(
     compiled: &'a CompiledFrontend,
-    ctx: &X86InstructionContext<'_>,
+    ctx: &CompiledInstructionContext<'_>,
 ) -> Option<RuntimeSelection<'a>> {
     let mut roots = vec![("global".to_string(), compiled.decision_tree.root_node_index)];
-    if let Some(bucket_keys) = candidate_bucket_keys(ctx) {
+    if let Some(bucket_keys) = candidate_decision_bucket_keys(ctx) {
         for bucket_key in bucket_keys {
             if let Some(bucket) = compiled
                 .decision_tree
@@ -177,30 +179,30 @@ fn select_constructor<'a>(
     spine::select_constructor(
         compiled,
         roots,
-        || X86DecisionProbeEvaluator::new(ctx),
+        || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
     )
 }
 
-struct X86DecisionProbeEvaluator<'a, 'b> {
-    ctx: &'a X86InstructionContext<'b>,
-    cached_modrm: Option<ModRm>,
+struct CompiledDecisionProbeEvaluator<'a, 'b> {
+    ctx: &'a CompiledInstructionContext<'b>,
+    cached_encoded_operand_byte: Option<EncodedOperandByte>,
 }
 
-impl<'a, 'b> X86DecisionProbeEvaluator<'a, 'b> {
-    fn new(ctx: &'a X86InstructionContext<'b>) -> Self {
+impl<'a, 'b> CompiledDecisionProbeEvaluator<'a, 'b> {
+    fn new(ctx: &'a CompiledInstructionContext<'b>) -> Self {
         Self {
             ctx,
-            cached_modrm: None,
+            cached_encoded_operand_byte: None,
         }
     }
 }
 
-impl DecisionProbeEvaluator for X86DecisionProbeEvaluator<'_, '_> {
+impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
     fn probe_value(&mut self, probe: CompiledDecisionProbe) -> Result<u8> {
         Ok(match probe {
             CompiledDecisionProbe::Terminal => 0,
-            CompiledDecisionProbe::InstructionByte {
+            CompiledDecisionProbe::InstructionBitSlice {
                 offset,
                 mask,
                 shift,
@@ -212,16 +214,19 @@ impl DecisionProbeEvaluator for X86DecisionProbeEvaluator<'_, '_> {
                     .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
                 (byte & mask) >> shift
             }
-            CompiledDecisionProbe::OperandSizeCode => self.ctx.operand_size_code,
-            CompiledDecisionProbe::ModBits => {
-                ensure_modrm(self.ctx, &mut self.cached_modrm)?.mod_bits
+            CompiledDecisionProbe::OperandSizeState => self.ctx.operand_size_state,
+            CompiledDecisionProbe::EncodedOperandMode => {
+                ensure_encoded_operand_byte(self.ctx, &mut self.cached_encoded_operand_byte)?
+                    .encoded_operand_mode
             }
-            CompiledDecisionProbe::RegOpcode => ensure_modrm(self.ctx, &mut self.cached_modrm)?.reg,
+            CompiledDecisionProbe::EncodedOperandReg => {
+                ensure_encoded_operand_byte(self.ctx, &mut self.cached_encoded_operand_byte)?.reg
+            }
         })
     }
 }
 
-fn candidate_bucket_keys(ctx: &X86InstructionContext<'_>) -> Option<Vec<String>> {
+fn candidate_decision_bucket_keys(ctx: &CompiledInstructionContext<'_>) -> Option<Vec<String>> {
     let first = *ctx.bytes.get(ctx.cursor)?;
     let mut keys = vec![format!("byte_{first:02x}")];
     if first == 0x0f {
@@ -234,22 +239,22 @@ fn candidate_bucket_keys(ctx: &X86InstructionContext<'_>) -> Option<Vec<String>>
     Some(keys)
 }
 
-fn ensure_modrm<'a>(
-    ctx: &X86InstructionContext<'_>,
-    cached_modrm: &'a mut Option<ModRm>,
-) -> Result<&'a ModRm> {
-    if cached_modrm.is_none() {
-        *cached_modrm = Some(parse_modrm(
+fn ensure_encoded_operand_byte<'a>(
+    ctx: &CompiledInstructionContext<'_>,
+    cached_encoded_operand_byte: &'a mut Option<EncodedOperandByte>,
+) -> Result<&'a EncodedOperandByte> {
+    if cached_encoded_operand_byte.is_none() {
+        *cached_encoded_operand_byte = Some(parse_encoded_operand_byte(
             ctx,
             ctx.cursor + opcode_len_from_context(ctx)?,
         )?);
     }
-    cached_modrm
+    cached_encoded_operand_byte
         .as_ref()
-        .ok_or_else(|| anyhow!("missing cached modrm"))
+        .ok_or_else(|| anyhow!("missing cached encoded_operand_byte"))
 }
 
-fn opcode_len_from_context(ctx: &X86InstructionContext<'_>) -> Result<usize> {
+fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
     let opcode = *ctx
         .bytes
         .get(ctx.cursor)
@@ -257,18 +262,21 @@ fn opcode_len_from_context(ctx: &X86InstructionContext<'_>) -> Result<usize> {
     Ok(if opcode == 0x0f { 2 } else { 1 })
 }
 
-fn parse_modrm(ctx: &X86InstructionContext<'_>, offset: usize) -> Result<ModRm> {
+fn parse_encoded_operand_byte(
+    ctx: &CompiledInstructionContext<'_>,
+    offset: usize,
+) -> Result<EncodedOperandByte> {
     let byte = *ctx
         .bytes
         .get(offset)
-        .ok_or_else(|| anyhow!("missing modrm at {offset}"))?;
-    let mod_bits = byte >> 6;
-    let reg = ((byte >> 3) & 0x7) | ((ctx.rex.r as u8) << 3);
+        .ok_or_else(|| anyhow!("missing encoded_operand_byte at {offset}"))?;
+    let encoded_operand_mode = byte >> 6;
+    let reg = ((byte >> 3) & 0x7) | ((ctx.extension_prefix.r as u8) << 3);
     let rm_low = byte & 0x7;
-    let rm = rm_low | ((ctx.rex.b as u8) << 3);
-    if mod_bits == 3 {
-        return Ok(ModRm {
-            mod_bits,
+    let rm = rm_low | ((ctx.extension_prefix.b as u8) << 3);
+    if encoded_operand_mode == 3 {
+        return Ok(EncodedOperandByte {
+            encoded_operand_mode,
             reg,
             rm,
             base: Some(rm),
@@ -297,23 +305,23 @@ fn parse_modrm(ctx: &X86InstructionContext<'_>, offset: usize) -> Result<ModRm> 
         let index_low = (sib >> 3) & 0x7;
         let base_low = sib & 0x7;
         if index_low != 4 {
-            index = Some(index_low | ((ctx.rex.x as u8) << 3));
+            index = Some(index_low | ((ctx.extension_prefix.x as u8) << 3));
         }
-        if mod_bits == 0 && base_low == 5 {
+        if encoded_operand_mode == 0 && base_low == 5 {
             base = None;
             displacement = read_sint(ctx.bytes, offset + length, 4)?;
             length += 4;
         } else {
-            base = Some(base_low | ((ctx.rex.b as u8) << 3));
+            base = Some(base_low | ((ctx.extension_prefix.b as u8) << 3));
         }
-    } else if mod_bits == 0 && rm_low == 5 {
+    } else if encoded_operand_mode == 0 && rm_low == 5 {
         base = None;
         rip_relative = true;
         displacement = read_sint(ctx.bytes, offset + length, 4)?;
         length += 4;
     }
 
-    match mod_bits {
+    match encoded_operand_mode {
         1 => {
             displacement = displacement.wrapping_add(read_sint(ctx.bytes, offset + length, 1)?);
             length += 1;
@@ -325,8 +333,8 @@ fn parse_modrm(ctx: &X86InstructionContext<'_>, offset: usize) -> Result<ModRm> 
         _ => {}
     }
 
-    Ok(ModRm {
-        mod_bits,
+    Ok(EncodedOperandByte {
+        encoded_operand_mode,
         reg,
         rm,
         base,
@@ -362,14 +370,14 @@ fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
 }
 
 fn constructor_matches(
-    ctx: &X86InstructionContext<'_>,
+    ctx: &CompiledInstructionContext<'_>,
     constructor: &CompiledExecutableConstructor,
 ) -> Result<()> {
     if !constructor.opsize_variants.is_empty()
         && !constructor
             .opsize_variants
             .iter()
-            .any(|opsize| *opsize == ctx.operand_size_code)
+            .any(|opsize| *opsize == ctx.operand_size_state)
     {
         bail!("opsize mismatch");
     }
@@ -404,37 +412,40 @@ fn constructor_matches(
         }
     }
 
-    let requires_modrm = constructor.mod_constraint.is_some()
-        || !constructor.reg_opcode_values.is_empty()
+    let requires_encoded_operand_byte = constructor.mod_constraint.is_some()
+        || !constructor.encoded_operand_reg_values.is_empty()
         || constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::ModRmRm { .. } | CompiledOperandSpec::ModRmReg { .. }
+                CompiledOperandSpec::EncodedOperandByteRm { .. }
+                    | CompiledOperandSpec::EncodedOperandByteReg { .. }
             )
         });
-    if requires_modrm {
-        let modrm = parse_modrm(ctx, ctx.cursor + opcode_len)?;
+    if requires_encoded_operand_byte {
+        let encoded_operand_byte = parse_encoded_operand_byte(ctx, ctx.cursor + opcode_len)?;
         if let Some(expected) = constructor.mod_constraint {
-            if modrm.mod_bits != expected {
+            if encoded_operand_byte.encoded_operand_mode != expected {
                 bail!("mod mismatch");
             }
         }
-        if !constructor.reg_opcode_values.is_empty()
-            && !constructor.reg_opcode_values.contains(&modrm.reg)
+        if !constructor.encoded_operand_reg_values.is_empty()
+            && !constructor
+                .encoded_operand_reg_values
+                .contains(&encoded_operand_byte.reg)
         {
-            bail!("reg_opcode mismatch");
+            bail!("encoded_operand_reg mismatch");
         }
         if constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::ModRmRm {
+                CompiledOperandSpec::EncodedOperandByteRm {
                     memory_only: true,
                     ..
                 }
             )
-        }) && modrm.mod_bits == 3
+        }) && encoded_operand_byte.encoded_operand_mode == 3
         {
-            bail!("memory-only modrm mismatch");
+            bail!("memory-only encoded_operand_byte mismatch");
         }
     }
 
@@ -442,29 +453,32 @@ fn constructor_matches(
 }
 
 fn bind_instruction(
-    ctx: &X86InstructionContext<'_>,
+    ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'_>,
 ) -> Result<RuntimeConstructState> {
     constructor_matches(ctx, selection.constructor)?;
-    X86ParserWalker::new(ctx, selection)?.walk()
+    CompiledParserWalker::new(ctx, selection)?.walk()
 }
 
-struct X86ParserWalker<'a, 'b> {
-    ctx: &'a X86InstructionContext<'b>,
+struct CompiledParserWalker<'a, 'b> {
+    ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     cursor: usize,
-    modrm: Option<ModRm>,
+    encoded_operand_byte: Option<EncodedOperandByte>,
     handles: Vec<Option<RuntimeHandle>>,
     walker: spine::RuntimeParserWalker,
 }
 
-impl<'a, 'b> X86ParserWalker<'a, 'b> {
-    fn new(ctx: &'a X86InstructionContext<'b>, selection: RuntimeSelection<'a>) -> Result<Self> {
+impl<'a, 'b> CompiledParserWalker<'a, 'b> {
+    fn new(
+        ctx: &'a CompiledInstructionContext<'b>,
+        selection: RuntimeSelection<'a>,
+    ) -> Result<Self> {
         let opcode_len = opcode_len_from_matcher(&selection.constructor.matcher);
         Ok(Self {
             ctx,
             cursor: ctx.cursor + opcode_len,
-            modrm: None,
+            encoded_operand_byte: None,
             handles: vec![None; selection.constructor.constructor_template.handles.len()],
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             selection,
@@ -480,8 +494,8 @@ impl<'a, 'b> X86ParserWalker<'a, 'b> {
             .clone();
         for step in decode_steps {
             match step {
-                CompiledOperandDecodeStep::ConsumeModRm => {
-                    self.ensure_modrm()?;
+                CompiledOperandDecodeStep::ConsumeEncodedOperandByte => {
+                    self.ensure_encoded_operand_byte()?;
                 }
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                     self.decode_operand(operand_index)?;
@@ -566,42 +580,43 @@ impl<'a, 'b> X86ParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn ensure_modrm(&mut self) -> Result<ModRm> {
-        if self.modrm.is_none() {
-            let decoded = parse_modrm(self.ctx, self.cursor)?;
+    fn ensure_encoded_operand_byte(&mut self) -> Result<EncodedOperandByte> {
+        if self.encoded_operand_byte.is_none() {
+            let decoded = parse_encoded_operand_byte(self.ctx, self.cursor)?;
             self.cursor += decoded.length;
-            self.modrm = Some(decoded);
+            self.encoded_operand_byte = Some(decoded);
         }
-        self.modrm.ok_or_else(|| anyhow!("failed to decode modrm"))
+        self.encoded_operand_byte
+            .ok_or_else(|| anyhow!("failed to decode encoded_operand_byte"))
     }
 
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<BoundOperand> {
         match &template.spec {
-            CompiledOperandSpec::ModRmRm { size, memory_only } => {
-                let modrm = self.ensure_modrm()?;
-                if modrm.mod_bits == 3 {
+            CompiledOperandSpec::EncodedOperandByteRm { size, memory_only } => {
+                let encoded_operand_byte = self.ensure_encoded_operand_byte()?;
+                if encoded_operand_byte.encoded_operand_mode == 3 {
                     if *memory_only {
-                        bail!("memory-only modrm operand cannot bind register");
+                        bail!("memory-only encoded_operand_byte operand cannot bind register");
                     }
                     Ok(BoundOperand::Register {
-                        index: modrm.rm,
+                        index: encoded_operand_byte.rm,
                         size: *size,
                     })
                 } else {
                     Ok(BoundOperand::Memory {
-                        base: modrm.base,
-                        index: modrm.index,
-                        scale: modrm.scale,
-                        displacement: modrm.displacement,
-                        rip_relative: modrm.rip_relative,
+                        base: encoded_operand_byte.base,
+                        index: encoded_operand_byte.index,
+                        scale: encoded_operand_byte.scale,
+                        displacement: encoded_operand_byte.displacement,
+                        rip_relative: encoded_operand_byte.rip_relative,
                         size: *size,
                     })
                 }
             }
-            CompiledOperandSpec::ModRmReg { size } => {
-                let modrm = self.ensure_modrm()?;
+            CompiledOperandSpec::EncodedOperandByteReg { size } => {
+                let encoded_operand_byte = self.ensure_encoded_operand_byte()?;
                 Ok(BoundOperand::Register {
-                    index: modrm.reg,
+                    index: encoded_operand_byte.reg,
                     size: *size,
                 })
             }
@@ -612,7 +627,7 @@ impl<'a, 'b> X86ParserWalker<'a, 'b> {
                     .bytes
                     .get(self.ctx.cursor + opcode_len - 1)
                     .ok_or_else(|| anyhow!("missing opcode reg byte"))?;
-                let reg = (opcode & 0x7) | ((self.ctx.rex.b as u8) << 3);
+                let reg = (opcode & 0x7) | ((self.ctx.extension_prefix.b as u8) << 3);
                 Ok(BoundOperand::Register {
                     index: reg,
                     size: *size,
@@ -776,12 +791,12 @@ fn add_signed(base: u64, delta: i64) -> u64 {
 }
 
 #[derive(Debug, Clone)]
-struct GeneratedX86Emitter {
+struct CompiledTableEmitter {
     address: u64,
     emitter: RuntimePcodeEmitter,
 }
 
-impl GeneratedX86Emitter {
+impl CompiledTableEmitter {
     fn new(address: u64) -> Self {
         Self {
             address,
@@ -797,14 +812,14 @@ impl GeneratedX86Emitter {
     }
 }
 
-impl RuntimeSemanticEmitter for GeneratedX86Emitter {
+impl RuntimeSemanticEmitter for CompiledTableEmitter {
     fn emit_return(&mut self) -> Result<()> {
         self.push(PcodeOpcode::Return, None, Vec::new(), "RET");
         Ok(())
     }
 
     fn emit_call(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        GeneratedX86Emitter::emit_call(self, state)
+        CompiledTableEmitter::emit_call(self, state)
     }
 
     fn emit_jump(&mut self, state: &RuntimeConstructState) -> Result<()> {
@@ -820,19 +835,19 @@ impl RuntimeSemanticEmitter for GeneratedX86Emitter {
     }
 
     fn emit_lea(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        GeneratedX86Emitter::emit_lea(self, state)
+        CompiledTableEmitter::emit_lea(self, state)
     }
 
     fn emit_push(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        GeneratedX86Emitter::emit_push(self, state)
+        CompiledTableEmitter::emit_push(self, state)
     }
 
     fn emit_pop(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        GeneratedX86Emitter::emit_pop(self, state)
+        CompiledTableEmitter::emit_pop(self, state)
     }
 
     fn emit_leave(&mut self) -> Result<()> {
-        GeneratedX86Emitter::emit_leave(self)
+        CompiledTableEmitter::emit_leave(self)
     }
 
     fn emit_binary(
@@ -856,7 +871,7 @@ impl RuntimeSemanticEmitter for GeneratedX86Emitter {
     }
 
     fn emit_compare(&mut self, state: &RuntimeConstructState, bitwise: bool) -> Result<()> {
-        GeneratedX86Emitter::emit_compare(
+        CompiledTableEmitter::emit_compare(
             self,
             state,
             bitwise,
@@ -870,7 +885,7 @@ impl RuntimeSemanticEmitter for GeneratedX86Emitter {
         } else {
             PcodeOpcode::IntZExt
         };
-        GeneratedX86Emitter::emit_extend(
+        CompiledTableEmitter::emit_extend(
             self,
             state,
             opcode,
@@ -879,7 +894,7 @@ impl RuntimeSemanticEmitter for GeneratedX86Emitter {
     }
 
     fn emit_setcc(&mut self, state: &RuntimeConstructState) -> Result<()> {
-        GeneratedX86Emitter::emit_setcc(self, state)
+        CompiledTableEmitter::emit_setcc(self, state)
     }
 
     fn emit_accumulator_extend(
@@ -892,7 +907,7 @@ impl RuntimeSemanticEmitter for GeneratedX86Emitter {
     }
 }
 
-impl GeneratedX86Emitter {
+impl CompiledTableEmitter {
     fn emit_call(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let target = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
         self.push(PcodeOpcode::Call, None, vec![target], "CALL");
@@ -1422,7 +1437,7 @@ fn const_u64(val: u64, size: u32) -> Varnode {
 fn gpr(index: u64, size: u32) -> Varnode {
     Varnode {
         space_id: UNIQUE_SPACE_ID,
-        offset: X86_REG_BASE + index * 8,
+        offset: REGISTER_SPACE_BASE + index * 8,
         size,
         is_constant: false,
         constant_val: 0,
@@ -1432,7 +1447,7 @@ fn gpr(index: u64, size: u32) -> Varnode {
 fn flag(bit: u64) -> Varnode {
     Varnode {
         space_id: UNIQUE_SPACE_ID,
-        offset: X86_EFLAGS_BASE + bit,
+        offset: FLAG_SPACE_BASE + bit,
         size: 1,
         is_constant: false,
         constant_val: 0,
@@ -1446,7 +1461,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_ret() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let (ops, len) = decode_and_lift(&compiled, &[0xC3], 0x1000).expect("generated ret");
         assert_eq!(len, 1);
         assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::Return));
@@ -1454,7 +1469,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_mov_imm64() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1000).expect("generated mov");
         assert_eq!(len, bytes.len() as u64);
@@ -1463,7 +1478,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_jcc_rel8() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let (ops, len) = decode_and_lift(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
         assert_eq!(len, 2);
         assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::CBranch));
@@ -1471,7 +1486,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_startup_store_mov_mem32_imm32() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xC7, 0x00, 0x01, 0x00, 0x00, 0x00];
         let (ops, len) =
             decode_and_lift(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
@@ -1481,7 +1496,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_startup_sub_rsp_imm8() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x83, 0xEC, 0x28];
         let (ops, len) =
             decode_and_lift(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
@@ -1492,7 +1507,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_startup_rip_relative_load() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x8B, 0x05, 0x15, 0x30, 0x00, 0x00];
         let address = 0x1400_013e4;
         let (ops, len) =
@@ -1512,7 +1527,7 @@ mod tests {
 
     #[test]
     fn generated_runtime_decodes_startup_call_rel32() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xE8, 0x1A, 0xFC, 0xFF, 0xFF];
         let (ops, len) =
             decode_and_lift(&compiled, &bytes, 0x1400_013ef).expect("generated call rel32");
@@ -1522,17 +1537,17 @@ mod tests {
 
     #[test]
     fn generated_runtime_records_decision_trace_for_startup_store() {
-        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
-        let ctx = X86InstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
             .expect("decode context");
         let selection = select_constructor(&compiled, &ctx).expect("constructor selection");
         let state = bind_instruction(&ctx, selection).expect("bind instruction");
         assert_eq!(state.match_trace.root_bucket, "global");
         assert!(!state.match_trace.probes.is_empty());
         assert!(!state.construct_nodes.is_empty());
-        assert!(state
-            .handles
-            .iter()
-            .any(|handle| matches!(handle.spec, CompiledOperandSpec::ModRmRm { .. })));
+        assert!(state.handles.iter().any(|handle| matches!(
+            handle.spec,
+            CompiledOperandSpec::EncodedOperandByteRm { .. }
+        )));
     }
 }

@@ -2,10 +2,8 @@ use anyhow::Result;
 use fission_pcode::PcodeOp;
 
 use crate::compiler::{CompiledFrontend, EntrySpec};
+use crate::runtime::spine::compiled_table;
 use crate::runtime::{registry, DecodedInstruction, ExecutionEngineKey, RuntimeSleighError};
-
-#[path = "processors/x86/generated.rs"]
-mod generated_runtime_holdout;
 
 pub(crate) fn decode_and_lift(
     entry: &EntrySpec,
@@ -15,7 +13,7 @@ pub(crate) fn decode_and_lift(
 ) -> Result<(Vec<PcodeOp>, u64)> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => {
-            generated_runtime_holdout::decode_and_lift(compiled, bytes, address)
+            compiled_table::decode_and_lift(compiled, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
@@ -36,7 +34,7 @@ pub(crate) fn decode_instruction(
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => {
-            generated_runtime_holdout::decode_instruction(compiled, bytes, address)
+            compiled_table::decode_instruction(compiled, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),

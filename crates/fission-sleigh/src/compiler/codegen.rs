@@ -100,14 +100,14 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         .iter()
         .map(|ctor| {
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"reg_opcode_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"semantic_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"encoded_operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"semantic_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(&ctor.display),
                 ctor.signature_hash,
                 render_matcher(&ctor.matcher),
                 render_optional_u8(ctor.mod_constraint),
-                render_u8_array(&ctor.reg_opcode_values),
+                render_u8_array(&ctor.encoded_operand_reg_values),
                 render_u8_array(&ctor.opsize_variants),
                 render_operand_specs(&ctor.operand_specs),
                 json_string(ctor.semantic_kind.as_str()),
@@ -304,14 +304,14 @@ fn render_matcher(matcher: &crate::compiler::CompiledOpcodeMatcher) -> String {
 fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> String {
     match probe {
         crate::compiler::CompiledDecisionProbe::Terminal => json_string("terminal"),
-        crate::compiler::CompiledDecisionProbe::InstructionByte { offset, mask, shift } => format!(
-            "{{\"kind\": \"instruction_byte\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
+        crate::compiler::CompiledDecisionProbe::InstructionBitSlice { offset, mask, shift } => format!(
+            "{{\"kind\": \"instruction_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
         ),
-        crate::compiler::CompiledDecisionProbe::OperandSizeCode => {
-            json_string("operand_size_code")
+        crate::compiler::CompiledDecisionProbe::OperandSizeState => {
+            json_string("operand_size_state")
         }
-        crate::compiler::CompiledDecisionProbe::ModBits => json_string("mod_bits"),
-        crate::compiler::CompiledDecisionProbe::RegOpcode => json_string("reg_opcode"),
+        crate::compiler::CompiledDecisionProbe::EncodedOperandMode => json_string("encoded_operand_mode"),
+        crate::compiler::CompiledDecisionProbe::EncodedOperandReg => json_string("encoded_operand_reg"),
     }
 }
 
@@ -319,13 +319,13 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     let rows = specs
         .iter()
         .map(|spec| match spec {
-            crate::compiler::CompiledOperandSpec::ModRmRm { size, memory_only } => {
+            crate::compiler::CompiledOperandSpec::EncodedOperandByteRm { size, memory_only } => {
                 format!(
-                    "{{\"kind\": \"modrm_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
+                    "{{\"kind\": \"encoded_operand_byte_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::ModRmReg { size } => {
-                format!("{{\"kind\": \"modrm_reg\", \"size\": {size}}}")
+            crate::compiler::CompiledOperandSpec::EncodedOperandByteReg { size } => {
+                format!("{{\"kind\": \"encoded_operand_byte_reg\", \"size\": {size}}}")
             }
             crate::compiler::CompiledOperandSpec::OpcodeReg { size } => {
                 format!("{{\"kind\": \"opcode_reg\", \"size\": {size}}}")
@@ -365,8 +365,8 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         .decode_steps
         .iter()
         .map(|step| match step {
-            crate::compiler::CompiledOperandDecodeStep::ConsumeModRm => {
-                "{\"kind\": \"consume_modrm\"}".to_string()
+            crate::compiler::CompiledOperandDecodeStep::ConsumeEncodedOperandByte => {
+                "{\"kind\": \"consume_encoded_operand_byte\"}".to_string()
             }
             crate::compiler::CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                 format!("{{\"kind\": \"decode_operand\", \"operand_index\": {operand_index}}}")
