@@ -13,7 +13,10 @@ use crate::runtime::spine::{
     RuntimeInstructionContext, RuntimePcodeEmitter, RuntimeSelection, RuntimeSemanticEmitter,
     RuntimeTemplateEvaluator,
 };
-use crate::runtime::{DecodedFlowKind, DecodedInstruction, RuntimeSleighError, UNIQUE_SPACE_ID};
+use crate::runtime::{
+    DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,
+    RuntimeSleighError, UNIQUE_SPACE_ID,
+};
 
 pub(crate) fn decode_and_lift(
     compiled: &CompiledFrontend,
@@ -57,14 +60,17 @@ pub(crate) fn decode_instruction(
         BoundOperand::Relative { target } => Some(*target),
         _ => None,
     });
+    let flow_kind = flow_kind_for(decoded.semantic_kind);
+    let references = decoded_references(address, length, flow_kind, &decoded.operands);
     Ok(DecodedInstruction {
         address,
         bytes: bytes.get(..length).unwrap_or(bytes).to_vec(),
         length,
         mnemonic,
         operands_text,
-        flow_kind: flow_kind_for(decoded.semantic_kind),
+        flow_kind,
         direct_target,
+        references,
     })
 }
 
@@ -708,6 +714,82 @@ fn format_operand(operand: &BoundOperand) -> String {
             rip_relative,
             ..
         } => format_memory_operand(*base, *index, *scale, *displacement, *rip_relative),
+    }
+}
+
+fn decoded_references(
+    address: u64,
+    length: usize,
+    flow_kind: DecodedFlowKind,
+    operands: &[BoundOperand],
+) -> Vec<DecodedReference> {
+    let mut refs = Vec::new();
+    for (operand_index, operand) in operands.iter().enumerate() {
+        match operand {
+            BoundOperand::Relative { target } => {
+                let kind = match flow_kind {
+                    DecodedFlowKind::Call => DecodedReferenceKind::CallTarget,
+                    DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+                        DecodedReferenceKind::BranchTarget
+                    }
+                    _ => continue,
+                };
+                refs.push(DecodedReference {
+                    target: *target,
+                    kind,
+                    operand_index,
+                });
+            }
+            BoundOperand::Memory {
+                base,
+                index,
+                displacement,
+                rip_relative,
+                ..
+            } => {
+                let target = if *rip_relative {
+                    Some(add_signed(
+                        address.saturating_add(length as u64),
+                        *displacement,
+                    ))
+                } else if *displacement > 0 {
+                    Some(*displacement as u64)
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    let kind = if *rip_relative {
+                        DecodedReferenceKind::RipRelativeAddress
+                    } else if base.is_none() && index.is_none() {
+                        DecodedReferenceKind::MemoryAddress
+                    } else {
+                        DecodedReferenceKind::MemoryAddress
+                    };
+                    refs.push(DecodedReference {
+                        target,
+                        kind,
+                        operand_index,
+                    });
+                }
+            }
+            BoundOperand::Immediate { value, .. } if *value != 0 => {
+                refs.push(DecodedReference {
+                    target: *value,
+                    kind: DecodedReferenceKind::ImmediateAddress,
+                    operand_index,
+                });
+            }
+            _ => {}
+        }
+    }
+    refs
+}
+
+fn add_signed(base: u64, delta: i64) -> u64 {
+    if delta >= 0 {
+        base.saturating_add(delta as u64)
+    } else {
+        base.saturating_sub(delta.unsigned_abs())
     }
 }
 

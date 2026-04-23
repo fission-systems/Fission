@@ -586,3 +586,88 @@ The next owner is not “remove more old code”; it is still x86-64 semantic pa
 - `fission-dynamic`
 
 The next owner is to migrate those remaining analysis surfaces to the same generated runtime decode API or to explicitly keep them as independent non-SLEIGH utilities with documented ownership.
+
+## 9. Repo-wide `iced-x86` Removal and Runtime Decode Owner Consolidation
+
+### Scope
+
+- wave type:
+  - dependency deletion / runtime decode owner migration
+- primary owner:
+  - `fission-sleigh::runtime`
+- goal:
+  - remove all remaining repo-wide `iced-x86` references
+  - move xref/listing/assembly/CFG/string-xref decode consumers to `RuntimeSleighFrontend`
+  - remove cycle-prone FID hashing until a SLEIGH-backed owner can be reintroduced without dependency cycles
+
+### What changed
+
+- extended runtime disasm payloads:
+  - added `DecodedReference`
+  - added `DecodedReferenceKind`
+  - added `DecodedInstruction::references`
+- migrated static xref analysis:
+  - `fission-static::analysis::xrefs` now consumes `RuntimeSleighFrontend::decode_window`
+  - call/jump/data xrefs are derived from `DecodedFlowKind` and `DecodedReferenceKind`
+- migrated Tauri decode consumers:
+  - assembly view
+  - listing view
+  - CFG builder
+  - xrefs command
+  - string xrefs
+  - cross-image wrapper detection
+- added a Tauri runtime decode helper module:
+  - `crates/fission-tauri/src-tauri/src/services/runtime_decode.rs`
+- removed remaining direct `iced-x86` dependencies from:
+  - `fission-static`
+  - `fission-signatures`
+  - `fission-dynamic`
+  - `fission-tauri`
+- removed `fission-signatures::fid_hash`.
+  - Reason: `fission-signatures -> fission-sleigh` would create a cycle through `fission-sleigh -> fission-pcode -> fission-signatures`.
+  - Reintroduction owner: cycle-free SLEIGH-backed FID hashing, likely under `fission-sleigh` or a lower-level shared signature utility crate.
+- updated the desktop About dialog from `iced-x86` to `Fission SLEIGH runtime`.
+
+### Validation
+
+- `rg -n "iced-x86|iced_x86|use iced_x86|fission_disasm|fission-disasm" Cargo.toml Cargo.lock crates -g '!**/target/**'`
+  - result: `0` matches
+- `rg -n "compute_fid_hash|FidHashQuad|FnvHasher64|fid_hash" crates Cargo.toml`
+  - result: `0` matches
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-static`
+  - result: passed
+- `cargo test -p fission-static xref -- --test-threads=1`
+  - result: `3 passed / 0 failed`
+- `cargo check -p fission-signatures`
+  - result: passed
+- `cargo check -p fission-dynamic`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo check -p fission-tauri`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- CLI smoke:
+  - `target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 8`
+  - result: generated-runtime disassembly emitted x86-64 instructions
+- decomp smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: JSON output produced successfully
+
+### Result
+
+`iced-x86` is no longer present in `Cargo.toml`, `Cargo.lock`, or `crates/`. Decode/disasm/xref/CFG/listing surfaces now consume the same runtime decode owner instead of maintaining parallel decoder logic in static analysis or UI layers.
+
+### Remaining risk / next owner
+
+- 32-bit x86 and non-x86 executable decode remain typed fail-closed until their SLEIGH runtime consumers are promoted.
+- FID hashing is intentionally absent until a cycle-free SLEIGH-backed implementation is added.
+- The next owner is x86-64 generated-runtime semantic parity:
+  1. data-reference precision for memory operands
+  2. richer template execution for startup/control-heavy rows
+  3. cycle-free FID hash reintroduction

@@ -1,6 +1,6 @@
 use fission_core::common::types::FunctionInfo;
 use fission_loader::loader::LoadedBinary;
-use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
+use fission_sleigh::runtime::{DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -196,35 +196,32 @@ fn detect_wrapper_candidate(
     }
 
     let bytes = current.view_bytes(func.address, func.size as usize)?;
-    let bitness = if current.is_64bit { 64 } else { 32 };
-    let mut decoder = Decoder::with_ip(bitness, bytes, func.address, DecoderOptions::NONE);
-    let instr = decoder.decode();
-    if instr.is_invalid() {
-        return None;
-    }
+    let frontend = current
+        .is_64bit
+        .then(|| RuntimeSleighFrontend::new_for_language("x86-64").ok())
+        .flatten()?;
+    let instr = frontend.decode_window(bytes, func.address, 1).ok()?.pop()?;
 
-    match instr.flow_control() {
-        FlowControl::UnconditionalBranch | FlowControl::Call => {
-            if matches!(
-                instr.op0_kind(),
-                OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64
-            ) {
-                let target = instr.near_branch_target();
+    match instr.flow_kind {
+        DecodedFlowKind::Jump | DecodedFlowKind::Call => {
+            if let Some(target) = instr.direct_target {
                 return resolve_target_name(current, target, siblings);
-            }
-
-            if matches!(instr.op0_kind(), OpKind::Memory) {
-                let target = instr.memory_displacement64();
-                return resolve_import_symbol(current.iat_symbols.get(&target), siblings);
-            }
-        }
-        FlowControl::IndirectBranch | FlowControl::IndirectCall => {
-            if matches!(instr.op0_kind(), OpKind::Memory) {
-                let target = instr.memory_displacement64();
-                return resolve_import_symbol(current.iat_symbols.get(&target), siblings);
             }
         }
         _ => {}
+    }
+
+    for reference in instr.references {
+        match reference.kind {
+            DecodedReferenceKind::MemoryAddress | DecodedReferenceKind::RipRelativeAddress => {
+                let target = reference.target;
+                return resolve_import_symbol(current.iat_symbols.get(&target), siblings);
+            }
+            DecodedReferenceKind::CallTarget | DecodedReferenceKind::BranchTarget => {
+                return resolve_target_name(current, reference.target, siblings);
+            }
+            DecodedReferenceKind::ImmediateAddress => {}
+        }
     }
 
     None

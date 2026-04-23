@@ -2,6 +2,7 @@
 //!
 //! Analyzes binary code to find call/jump/data references between addresses.
 
+use fission_sleigh::runtime::{DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend};
 use rustc_hash::FxHashMap;
 
 /// Type of cross-reference
@@ -87,6 +88,10 @@ impl XrefDatabase {
     /// Build xref database from disassembled code
     pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
         let mut db = Self::new();
+        let frontend = binary
+            .is_64bit
+            .then(|| RuntimeSleighFrontend::new_for_language("x86-64").ok())
+            .flatten();
 
         // Analyze each section that might contain code
         for section in &binary.sections {
@@ -105,7 +110,9 @@ impl XrefDatabase {
             if let Some(code) = binary.data.as_slice().get(start..end) {
                 // section.virtual_address is already the loaded address (includes image_base)
                 let base_addr = section.virtual_address;
-                db.analyze_code(code, base_addr);
+                if let Some(frontend) = frontend.as_ref() {
+                    db.analyze_code(frontend, code, base_addr);
+                }
             }
         }
 
@@ -118,99 +125,57 @@ impl XrefDatabase {
     /// - Pre-computes address bounds once instead of per-instruction
     /// - Uses batch insertion approach to reduce HashMap overhead
     /// - Tracks refs count before iteration to avoid redundant total_refs() call
-    fn analyze_code(&mut self, code: &[u8], base_addr: u64) {
-        use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
-
+    fn analyze_code(&mut self, frontend: &RuntimeSleighFrontend, code: &[u8], base_addr: u64) {
         // Pre-compute bounds for address validation (used multiple times per instruction)
         let addr_upper_bound = base_addr + code.len() as u64 * 2;
 
-        // Track initial refs count to check if we found anything
-        let initial_refs = self.refs_to.len();
-
-        // Try 64-bit first, then 32-bit
-        for bitness in [64, 32] {
-            let mut decoder = Decoder::with_ip(bitness, code, base_addr, DecoderOptions::NONE);
-
-            for instr in &mut decoder {
-                if instr.is_invalid() {
-                    continue;
-                }
-
-                let from_addr = instr.ip();
-
-                match instr.flow_control() {
-                    FlowControl::Call | FlowControl::IndirectCall => {
-                        // Direct call target
-                        if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16
-                            | OpKind::NearBranch32
-                            | OpKind::NearBranch64 = instr.op0_kind()
-                            {
-                                let to_addr = instr.near_branch_target();
-                                self.add_xref(Xref {
-                                    from_addr,
-                                    to_addr,
-                                    xref_type: XrefType::Call,
-                                });
-                            }
+        let Ok(instructions) = frontend.decode_window(code, base_addr, usize::MAX) else {
+            return;
+        };
+        for instr in instructions {
+            let has_control_reference = instr.references.iter().any(|reference| {
+                matches!(
+                    reference.kind,
+                    DecodedReferenceKind::CallTarget | DecodedReferenceKind::BranchTarget
+                )
+            });
+            if !has_control_reference {
+                if let Some(to_addr) = instr.direct_target {
+                    let xref_type = match instr.flow_kind {
+                        DecodedFlowKind::Call => Some(XrefType::Call),
+                        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+                            Some(XrefType::Jump)
                         }
-                    }
-                    FlowControl::UnconditionalBranch | FlowControl::ConditionalBranch => {
-                        // Jump target
-                        if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16
-                            | OpKind::NearBranch32
-                            | OpKind::NearBranch64 = instr.op0_kind()
-                            {
-                                let to_addr = instr.near_branch_target();
-                                self.add_xref(Xref {
-                                    from_addr,
-                                    to_addr,
-                                    xref_type: XrefType::Jump,
-                                });
-                            }
-                        }
-                    }
-                    _ => {
-                        // Check for memory references (LEA, MOV with immediate addresses)
-                        let op_count = instr.op_count();
-                        for i in 0..op_count {
-                            match instr.op_kind(i) {
-                                OpKind::Memory => {
-                                    // Memory operand with displacement
-                                    let disp = instr.memory_displacement64();
-                                    // Use pre-computed bounds
-                                    if disp > base_addr && disp < addr_upper_bound {
-                                        self.add_xref(Xref {
-                                            from_addr,
-                                            to_addr: disp,
-                                            xref_type: XrefType::Data,
-                                        });
-                                    }
-                                }
-                                OpKind::Immediate64 | OpKind::Immediate32to64 => {
-                                    let imm = instr.immediate64();
-                                    // Heuristic: if immediate looks like an address
-                                    // Use pre-computed bounds
-                                    if imm > base_addr && imm < addr_upper_bound {
-                                        self.add_xref(Xref {
-                                            from_addr,
-                                            to_addr: imm,
-                                            xref_type: XrefType::Data,
-                                        });
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
+                        _ => None,
+                    };
+                    if let Some(xref_type) = xref_type {
+                        self.add_xref(Xref {
+                            from_addr: instr.address,
+                            to_addr,
+                            xref_type,
+                        });
                     }
                 }
             }
 
-            // If we found refs in 64-bit mode, don't try 32-bit
-            // Use direct HashMap len() check instead of summing all values
-            if self.refs_to.len() > initial_refs {
-                break;
+            for reference in instr.references {
+                let xref_type = match reference.kind {
+                    DecodedReferenceKind::CallTarget => XrefType::Call,
+                    DecodedReferenceKind::BranchTarget => XrefType::Jump,
+                    DecodedReferenceKind::MemoryAddress
+                    | DecodedReferenceKind::ImmediateAddress
+                    | DecodedReferenceKind::RipRelativeAddress => XrefType::Data,
+                };
+                if matches!(xref_type, XrefType::Data)
+                    && (reference.target <= base_addr || reference.target >= addr_upper_bound)
+                {
+                    continue;
+                }
+                self.add_xref(Xref {
+                    from_addr: instr.address,
+                    to_addr: reference.target,
+                    xref_type,
+                });
             }
         }
     }

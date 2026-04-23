@@ -9,7 +9,6 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
-pub mod fid_hash;
 pub mod fidbf;
 pub mod win_api;
 pub mod win_constants;
@@ -35,7 +34,6 @@ pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =
     std::sync::LazyLock::new(SignatureDatabase::new);
 
 // Re-export lazily-initialized global databases for efficient reuse
-pub use fid_hash::{FidHashQuad, FnvHasher64, compute_fid_hash};
 pub use fidbf::{
     FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation, discover_fidbf_paths,
     parse_all_fidbf_for_arch, parse_fidbf,

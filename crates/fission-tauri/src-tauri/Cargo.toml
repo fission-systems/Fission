@@ -20,7 +20,6 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-iced-x86 = { version = "1.21", features = ["std"] }
 
 # Fission crates
 fission-core = { path = "../../fission-core" }

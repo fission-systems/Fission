@@ -2,8 +2,10 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::runtime_decode::decode_window_for_binary;
 use crate::state::AppState;
 use fission_core::{parse_address, MAX_HEX_READ, MAX_XREF_DECODE};
+use fission_sleigh::runtime::DecodedFlowKind;
 use tauri::State;
 
 // ============================================================================
@@ -12,11 +14,10 @@ use tauri::State;
 
 /// Build a Control Flow Graph for the function at `address`.
 ///
-/// Uses iced-x86 to decode the function body, finds basic-block leaders from
+/// Uses the shared SLEIGH runtime to decode the function body, finds basic-block leaders from
 /// branch targets and fall-through boundaries, then constructs nodes + edges.
 #[tauri::command]
 pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<CfgDto> {
-    use iced_x86::{Decoder, DecoderOptions, FlowControl, Formatter, IntelFormatter};
     use std::collections::{HashMap, HashSet};
 
     let address = parse_address(&address)
@@ -49,7 +50,6 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
         .get_bytes(address, decode_size)
         .ok_or_else(|| CmdError::other(format!("Cannot read bytes at 0x{:x}", address)))?;
 
-    let bitness: u32 = if binary.is_64bit { 64 } else { 32 };
     let end_addr = address + bytes.len() as u64;
 
     // --- Raw instruction record ---
@@ -58,43 +58,33 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
         ip: u64,
         len: usize,
         text: String,
-        flow: FlowControl,
-        target: u64,
+        flow: DecodedFlowKind,
+        target: Option<u64>,
     }
 
-    let mut formatter = IntelFormatter::new();
     let mut insns: Vec<RawInsn> = Vec::new();
     let mut leaders: HashSet<u64> = HashSet::new();
     leaders.insert(address); // entry is always a leader
 
     // Pass 1: decode & collect leaders
     {
-        let mut decoder = Decoder::with_ip(bitness, &bytes, address, DecoderOptions::NONE);
-        while decoder.can_decode() {
-            let insn = decoder.decode();
-            if insn.is_invalid() {
-                break;
-            }
-
-            let mut out = String::new();
-            formatter.format(&insn, &mut out);
-
-            let flow = insn.flow_control();
-            let target = insn.near_branch_target();
-            let in_range = target >= address && target < end_addr;
-            let next_ip = insn.ip() + insn.len() as u64;
+        let decoded = decode_window_for_binary(binary, address, bytes.len(), MAX_XREF_DECODE)?;
+        for insn in decoded {
+            let flow = insn.flow_kind;
+            let target = insn.direct_target;
+            let in_range = target.is_some_and(|target| target >= address && target < end_addr);
+            let next_ip = insn.address + insn.length as u64;
 
             // Branch target is a new leader (if inside the function)
-            if in_range && target != 0 {
-                leaders.insert(target);
+            if in_range {
+                leaders.insert(target.expect("checked target range"));
             }
 
             // The instruction after an unconditional branch / return is a leader
             match flow {
-                FlowControl::UnconditionalBranch
-                | FlowControl::Return
-                | FlowControl::Exception
-                | FlowControl::ConditionalBranch => {
+                DecodedFlowKind::Jump
+                | DecodedFlowKind::Return
+                | DecodedFlowKind::ConditionalJump => {
                     if next_ip < end_addr {
                         leaders.insert(next_ip);
                     }
@@ -103,9 +93,9 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
             }
 
             insns.push(RawInsn {
-                ip: insn.ip(),
-                len: insn.len(),
-                text: out,
+                ip: insn.address,
+                len: insn.length,
+                text: insn.instruction_text(),
                 flow,
                 target,
             });
@@ -156,12 +146,15 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
         node.instructions.push(ri.text.clone());
 
         match ri.flow {
-            FlowControl::Return | FlowControl::Exception => {
+            DecodedFlowKind::Return => {
                 node.is_exit = true;
             }
-            FlowControl::UnconditionalBranch => {
-                if ri.target >= address && ri.target < end_addr {
-                    if let Some(&tid) = addr_to_block.get(&ri.target) {
+            DecodedFlowKind::Jump => {
+                if let Some(target) = ri
+                    .target
+                    .filter(|target| *target >= address && *target < end_addr)
+                {
+                    if let Some(&tid) = addr_to_block.get(&target) {
                         edges.push(CfgEdge {
                             from: bid,
                             to: tid,
@@ -171,10 +164,13 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
                 }
                 cur_block = None;
             }
-            FlowControl::ConditionalBranch => {
+            DecodedFlowKind::ConditionalJump => {
                 // True branch (taken)
-                if ri.target >= address && ri.target < end_addr {
-                    if let Some(&tid) = addr_to_block.get(&ri.target) {
+                if let Some(target) = ri
+                    .target
+                    .filter(|target| *target >= address && *target < end_addr)
+                {
+                    if let Some(&tid) = addr_to_block.get(&target) {
                         edges.push(CfgEdge {
                             from: bid,
                             to: tid,

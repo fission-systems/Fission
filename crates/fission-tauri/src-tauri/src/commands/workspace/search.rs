@@ -2,8 +2,10 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::runtime_decode::runtime_frontend_for_binary;
 use crate::state::AppState;
 use fission_core::{parse_address, MAX_SCAN_PER_SECTION};
+use fission_sleigh::runtime::DecodedReferenceKind;
 use tauri::State;
 
 // ============================================================================
@@ -134,9 +136,9 @@ pub async fn search_binary(
 /// Strategy:
 ///  1. Scan every section with `binary.get_bytes(va, size)` looking for runs of
 ///     printable ASCII of at least `min_length`.  Record string_va → content.
-///  2. Decode every executable section with iced-x86.  For each instruction
-///     check RIP-relative, memory-displacement, and immediate operands for a
-///     match against the string VA map.
+///  2. Decode every executable section with the shared SLEIGH runtime.  For each
+///     instruction, check decoded memory/immediate references for a match against
+///     the string VA map.
 ///  3. Return at most 2 000 results sorted by descending reference count.
 #[tauri::command]
 pub async fn get_string_xrefs(
@@ -144,7 +146,6 @@ pub async fn get_string_xrefs(
     min_length: usize,
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<StringXrefDto>> {
-    use iced_x86::{Decoder, DecoderOptions, OpKind};
     use std::collections::HashMap;
 
     let inner = state.inner.lock().await;
@@ -236,7 +237,7 @@ pub async fn get_string_xrefs(
 
     // ── Step 2: scan executable sections for references ──────────────────────
     let mut callsites: HashMap<u64, Vec<StringXrefCallsiteDto>> = HashMap::new();
-    let bitness: u32 = if binary.is_64bit { 64 } else { 32 };
+    let frontend = runtime_frontend_for_binary(binary)?;
 
     for section in &binary.sections {
         if !section.is_executable {
@@ -247,51 +248,27 @@ pub async fn get_string_xrefs(
             continue;
         };
 
-        let mut decoder = Decoder::with_ip(
-            bitness,
-            &bytes,
-            section.virtual_address,
-            DecoderOptions::NONE,
-        );
+        let Ok(decoded) = frontend.decode_window(&bytes, section.virtual_address, usize::MAX)
+        else {
+            continue;
+        };
 
-        while decoder.can_decode() {
-            let insn = decoder.decode();
-            if insn.is_invalid() {
-                break;
-            }
-            let ip = insn.ip();
-            let mut addrs: Vec<u64> = Vec::new();
-
-            // RIP-relative memory (x64 primary case: lea rax, [rip+offset])
-            if insn.is_ip_rel_memory_operand() {
-                addrs.push(insn.ip_rel_memory_address());
-            }
-
-            for op_i in 0..insn.op_count() {
-                match insn.op_kind(op_i) {
-                    OpKind::Memory => {
-                        let disp = insn.memory_displacement64();
-                        if disp > binary.image_base {
-                            addrs.push(disp);
-                        }
+        for insn in decoded {
+            let ip = insn.address;
+            for addr in insn
+                .references
+                .iter()
+                .filter_map(|reference| match reference.kind {
+                    DecodedReferenceKind::MemoryAddress
+                    | DecodedReferenceKind::ImmediateAddress
+                    | DecodedReferenceKind::RipRelativeAddress
+                        if reference.target > binary.image_base =>
+                    {
+                        Some(reference.target)
                     }
-                    OpKind::Immediate32 | OpKind::Immediate32to64 => {
-                        let imm = insn.immediate32() as u64;
-                        if imm > binary.image_base {
-                            addrs.push(imm);
-                        }
-                    }
-                    OpKind::Immediate64 => {
-                        let imm = insn.immediate64();
-                        if imm > binary.image_base {
-                            addrs.push(imm);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            for addr in addrs {
+                    _ => None,
+                })
+            {
                 if string_map.contains_key(&addr) {
                     let func_name = binary.function_at(ip).map(|f| {
                         inner

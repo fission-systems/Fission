@@ -119,6 +119,22 @@ pub enum DecodedFlowKind {
     Syscall,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecodedReferenceKind {
+    BranchTarget,
+    CallTarget,
+    MemoryAddress,
+    ImmediateAddress,
+    RipRelativeAddress,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecodedReference {
+    pub target: u64,
+    pub kind: DecodedReferenceKind,
+    pub operand_index: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecodedInstruction {
     pub address: u64,
@@ -128,6 +144,7 @@ pub struct DecodedInstruction {
     pub operands_text: String,
     pub flow_kind: DecodedFlowKind,
     pub direct_target: Option<u64>,
+    pub references: Vec<DecodedReference>,
 }
 
 impl DecodedInstruction {

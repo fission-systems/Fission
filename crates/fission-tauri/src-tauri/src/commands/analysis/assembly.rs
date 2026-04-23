@@ -2,6 +2,7 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::runtime_decode::{decode_window_for_binary, hex_bytes};
 use crate::state::AppState;
 use fission_decompiler_core::{
     decompile_with_rust_sleigh, fallback_reason_with_kind, RustSleighDecompileConfig,
@@ -153,47 +154,19 @@ pub async fn get_assembly(
         .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
     let byte_count = count * 15;
-    let bytes = binary
-        .get_bytes(address, byte_count)
-        .ok_or_else(|| CmdError::other(format!("Cannot read bytes at 0x{:x}", address)))?;
-
-    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter};
-
-    let bitness = if binary.is_64bit { 64 } else { 32 };
-    let mut decoder = Decoder::with_ip(bitness, &bytes, address, DecoderOptions::NONE);
-    let mut formatter = IntelFormatter::new();
-    let mut output = String::new();
     let mut instructions = Vec::with_capacity(count);
 
-    let mut i = 0;
-    while decoder.can_decode() && i < count {
-        let insn = decoder.decode();
-        output.clear();
-        formatter.format(&insn, &mut output);
-
-        let start = (insn.ip() - address) as usize;
-        let end = start + insn.len();
-        let hex_bytes: String = bytes[start..end]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let parts: Vec<&str> = output.splitn(2, ' ').collect();
-        let mnemonic = parts.first().unwrap_or(&"").to_string();
-        let operands = parts.get(1).unwrap_or(&"").to_string();
-
-        let comment = inner.comments.get(&insn.ip()).cloned();
+    let decoded = decode_window_for_binary(binary, address, byte_count, count)?;
+    for insn in decoded {
+        let comment = inner.comments.get(&insn.address).cloned();
 
         instructions.push(AsmInstructionDto {
-            address: format!("0x{:x}", insn.ip()),
-            bytes: hex_bytes,
-            mnemonic,
-            operands,
+            address: format!("0x{:x}", insn.address),
+            bytes: hex_bytes(&insn.bytes),
+            mnemonic: insn.mnemonic,
+            operands: insn.operands_text,
             comment,
         });
-
-        i += 1;
     }
 
     Ok(instructions)

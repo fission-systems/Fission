@@ -31,7 +31,6 @@ fission-plugin = { path = "../fission-plugin", optional = true, default-features
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static", default-features = false }
 object = "0.32"
-iced-x86 = { version = "1.21", features = ["std"] }
 bytes = "1.11"
 tokio = { version = "1.36", features = ["full", "rt-multi-thread"], optional = true }
 anyhow = "1.0"

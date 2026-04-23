@@ -2,8 +2,10 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::runtime_decode::runtime_frontend_for_binary;
 use crate::state::AppState;
 use fission_core::{MAX_XREF_DECODE, MAX_XREF_INCOMING, MAX_XREF_OUTGOING};
+use fission_sleigh::runtime::DecodedFlowKind;
 use tauri::State;
 
 // ============================================================================
@@ -11,19 +13,17 @@ use tauri::State;
 // ============================================================================
 
 /// Get cross-references for an address.
-/// Scans all executable sections with iced-x86 to find CALL/JMP/Jcc instructions
+/// Scans all executable sections with the shared SLEIGH runtime to find CALL/JMP/Jcc instructions
 /// that target `address`, and returns both incoming (callers) and outgoing refs.
 #[tauri::command]
 pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Vec<XrefDto>> {
-    use iced_x86::{Decoder, DecoderOptions, FlowControl};
-
     let inner = state.inner.lock().await;
     let binary = inner
         .loaded_binary
         .as_ref()
         .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
-    let bitness: u32 = if binary.is_64bit { 64 } else { 32 };
+    let frontend = runtime_frontend_for_binary(binary)?;
     let mut results: Vec<XrefDto> = Vec::new();
 
     for section in binary.executable_sections() {
@@ -32,31 +32,17 @@ pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Ve
             continue;
         };
 
-        let mut decoder = Decoder::with_ip(
-            bitness,
-            &bytes,
-            section.virtual_address,
-            DecoderOptions::NONE,
-        );
+        let Ok(decoded) = frontend.decode_window(&bytes, section.virtual_address, usize::MAX)
+        else {
+            continue;
+        };
 
-        while decoder.can_decode() {
-            let insn = decoder.decode();
-            if insn.is_invalid() {
-                break;
-            }
-
-            let target: u64 = match insn.flow_control() {
-                FlowControl::Call
-                | FlowControl::UnconditionalBranch
-                | FlowControl::ConditionalBranch => insn.near_branch_target(),
-                _ => 0,
-            };
-
-            if target != address {
+        for insn in decoded {
+            if insn.direct_target != Some(address) {
                 continue;
             }
 
-            let from_addr = insn.ip();
+            let from_addr = insn.address;
 
             // Resolve enclosing function name
             let from_function = binary
@@ -73,9 +59,9 @@ pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Ve
                         .unwrap_or_else(|| f.name.clone())
                 });
 
-            let xref_type = match insn.flow_control() {
-                FlowControl::Call => "call",
-                FlowControl::ConditionalBranch => "jcc",
+            let xref_type = match insn.flow_kind {
+                DecodedFlowKind::Call => "call",
+                DecodedFlowKind::ConditionalJump => "jcc",
                 _ => "jmp",
             };
 
@@ -101,19 +87,14 @@ pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Ve
             256
         };
         if let Some(bytes) = binary.get_bytes(address, size.min(MAX_XREF_DECODE)) {
-            let mut decoder = Decoder::with_ip(bitness, &bytes, address, DecoderOptions::NONE);
-            while decoder.can_decode() {
-                let insn = decoder.decode();
-                if insn.is_invalid() {
-                    break;
-                }
-                let target: u64 = match insn.flow_control() {
-                    FlowControl::Call
-                    | FlowControl::UnconditionalBranch
-                    | FlowControl::ConditionalBranch => insn.near_branch_target(),
-                    _ => 0,
+            let Ok(decoded) = frontend.decode_window(&bytes, address, MAX_XREF_DECODE) else {
+                return Ok(results);
+            };
+            for insn in decoded {
+                let Some(target) = insn.direct_target else {
+                    continue;
                 };
-                if target == 0 || target == address {
+                if target == address {
                     continue;
                 }
 
@@ -129,14 +110,14 @@ pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Ve
                             .unwrap_or_else(|| f.name.clone())
                     });
 
-                let xref_type = match insn.flow_control() {
-                    FlowControl::Call => "call",
-                    FlowControl::ConditionalBranch => "jcc",
+                let xref_type = match insn.flow_kind {
+                    DecodedFlowKind::Call => "call",
+                    DecodedFlowKind::ConditionalJump => "jcc",
                     _ => "jmp",
                 };
 
                 results.push(XrefDto {
-                    from_address: format!("0x{:x}", insn.ip()),
+                    from_address: format!("0x{:x}", insn.address),
                     to_address: format!("0x{:x}", target),
                     xref_type: xref_type.to_string(),
                     from_function: to_function,

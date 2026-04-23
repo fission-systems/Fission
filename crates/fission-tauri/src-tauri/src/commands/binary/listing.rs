@@ -2,6 +2,7 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::runtime_decode::{decode_window_for_binary, hex_bytes, mnemonic_type};
 use crate::state::AppState;
 use fission_core::parse_address;
 use tauri::State;
@@ -53,7 +54,6 @@ pub async fn get_listing_chunk(
     count: usize,
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<ListingRow>> {
-    use iced_x86::{Decoder, DecoderOptions, FlowControl, Formatter, IntelFormatter};
     use std::collections::HashMap;
 
     let start_address = parse_address(&start_address)
@@ -106,26 +106,12 @@ pub async fn get_listing_chunk(
     let section_end = section.virtual_address + section.virtual_size;
     let decode_size = (section_end - effective_start) as usize;
 
-    let bytes = binary
-        .get_bytes(effective_start, decode_size)
-        .ok_or_else(|| CmdError::other(format!("Cannot read bytes at 0x{:x}", effective_start)))?;
-
-    let bitness: u32 = if binary.is_64bit { 64 } else { 32 };
-    let mut decoder = Decoder::with_ip(bitness, &bytes, effective_start, DecoderOptions::NONE);
-    let mut formatter = IntelFormatter::new();
-
     let max_count = count.min(500); // safety cap
     let mut rows: Vec<ListingRow> = Vec::with_capacity(max_count + 10);
-    let mut insn_count = 0;
+    let decoded = decode_window_for_binary(binary, effective_start, decode_size, max_count)?;
 
-    while decoder.can_decode() && insn_count < max_count {
-        let insn = decoder.decode();
-        if insn.is_invalid() {
-            break;
-        }
-
-        let ip = insn.ip();
-
+    for insn in decoded {
+        let ip = insn.address;
         // Insert a label row if a function starts here
         if let Some(name) = func_names.get(&ip) {
             rows.push(ListingRow {
@@ -140,65 +126,19 @@ pub async fn get_listing_chunk(
             });
         }
 
-        let start = (ip - effective_start) as usize;
-        let end = start + insn.len();
-        let hex_bytes: String = bytes[start..end]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let mut out = String::new();
-        formatter.format(&insn, &mut out);
-        let parts: Vec<&str> = out.splitn(2, ' ').collect();
-        let mnemonic = parts.first().unwrap_or(&"").to_string();
-        let operands = parts.get(1).unwrap_or(&"").to_string();
-
         let comment = inner.comments.get(&ip).cloned();
-
-        // Classify mnemonic for syntax highlighting (x64dbg-style categories)
-        let mnemonic_type = match insn.flow_control() {
-            FlowControl::Call | FlowControl::IndirectCall => "call",
-            FlowControl::UnconditionalBranch | FlowControl::IndirectBranch => "jmp",
-            FlowControl::ConditionalBranch => "cjmp",
-            FlowControl::Return => "ret",
-            FlowControl::Interrupt => "int",
-            _ => {
-                let m = mnemonic.as_str();
-                if m == "nop" || m.starts_with("nop") {
-                    "nop"
-                } else if m == "push"
-                    || m == "pop"
-                    || m == "pusha"
-                    || m == "popa"
-                    || m == "pushf"
-                    || m == "popf"
-                    || m == "pushfq"
-                    || m == "popfq"
-                {
-                    "push_pop"
-                } else if m.starts_with("mov") || m == "lea" || m == "xchg" {
-                    "mov"
-                } else if m == "cmp" || m == "test" {
-                    "cmp"
-                } else {
-                    "normal"
-                }
-            }
-        };
+        let mnemonic_type = mnemonic_type(&insn);
 
         rows.push(ListingRow {
             address: format!("0x{:x}", ip),
-            bytes: hex_bytes,
-            mnemonic,
-            operands,
+            bytes: hex_bytes(&insn.bytes),
+            mnemonic: insn.mnemonic,
+            operands: insn.operands_text,
             label: None,
             comment,
             row_type: "instruction".to_string(),
             mnemonic_type: mnemonic_type.to_string(),
         });
-
-        insn_count += 1;
     }
 
     Ok(rows)

@@ -35,7 +35,7 @@ export default function AboutDialog({ open, onClose }: AboutDialogProps) {
                             </tr>
                             <tr>
                                 <td>Disassembler</td>
-                                <td>iced-x86</td>
+                                <td>Fission SLEIGH runtime</td>
                             </tr>
                         </tbody>
                     </table>
