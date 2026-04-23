@@ -1553,7 +1553,7 @@ fn build_constructor_template(
             .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
     );
     let semantic_ops = semantic_ops_for_kind(construct_tpl_kind);
-    let op_templates = op_templates_for_semantic_ops(&semantic_ops);
+    let op_templates = op_templates_for_constructor(operand_specs, construct_tpl_kind);
     CompiledConstructorTemplate {
         handles,
         decode_steps,
@@ -1611,51 +1611,125 @@ fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<Co
     }]
 }
 
-fn op_templates_for_semantic_ops(semantic_ops: &[CompiledSemanticOp]) -> Vec<CompiledOpTpl> {
-    semantic_ops
-        .iter()
-        .map(|op| CompiledOpTpl {
-            opcode: op_tpl_opcode_for_semantic_op(op),
+fn op_templates_for_constructor(
+    operand_specs: &[CompiledOperandSpec],
+    construct_tpl_kind: CompiledConstructTplKind,
+) -> Vec<CompiledOpTpl> {
+    use CompiledConstructTplKind as Kind;
+    use CompiledConstTpl as ConstTpl;
+    use CompiledOpTplOpcode as Opcode;
+    use CompiledVarnodeTpl as VnTpl;
+
+    let handle = |operand_index| VnTpl::Handle { operand_index };
+    let sized_const = |value: i64, size: u32| VnTpl::Const(ConstTpl::Integer { value, size });
+    let binary_tpl = |opcode| {
+        vec![CompiledOpTpl {
+            opcode,
+            output: Some(handle(0)),
+            inputs: vec![handle(0), handle(1)],
+            label: None,
+        }]
+    };
+
+    match construct_tpl_kind {
+        Kind::Nop | Kind::Unsupported => Vec::new(),
+        Kind::Ret => vec![CompiledOpTpl {
+            opcode: Opcode::Return,
             output: None,
             inputs: Vec::new(),
             label: None,
-        })
-        .collect()
+        }],
+        Kind::Call => vec![CompiledOpTpl {
+            opcode: Opcode::Call,
+            output: None,
+            inputs: vec![handle(0)],
+            label: None,
+        }],
+        Kind::Jmp => vec![CompiledOpTpl {
+            opcode: Opcode::Branch,
+            output: None,
+            inputs: vec![handle(0)],
+            label: None,
+        }],
+        Kind::Mov => {
+            if operand_specs.len() < 2 {
+                return Vec::new();
+            }
+            vec![CompiledOpTpl {
+                opcode: Opcode::Copy,
+                output: Some(handle(0)),
+                inputs: vec![handle(1)],
+                label: None,
+            }]
+        }
+        Kind::Movzx => {
+            if operand_specs.len() < 2 {
+                return Vec::new();
+            }
+            vec![CompiledOpTpl {
+                opcode: Opcode::IntZExt,
+                output: Some(handle(0)),
+                inputs: vec![handle(1)],
+                label: None,
+            }]
+        }
+        Kind::Movsx | Kind::Movsxd => {
+            if operand_specs.len() < 2 {
+                return Vec::new();
+            }
+            vec![CompiledOpTpl {
+                opcode: Opcode::IntSExt,
+                output: Some(handle(0)),
+                inputs: vec![handle(1)],
+                label: None,
+            }]
+        }
+        Kind::Add => binary_tpl(Opcode::IntAdd),
+        Kind::Sub => binary_tpl(Opcode::IntSub),
+        Kind::And => binary_tpl(Opcode::IntAnd),
+        Kind::Or => binary_tpl(Opcode::IntOr),
+        Kind::Xor => binary_tpl(Opcode::IntXor),
+        Kind::Imul | Kind::Mul => binary_tpl(Opcode::IntMult),
+        Kind::Shl => binary_tpl(Opcode::IntLeft),
+        Kind::Shr => binary_tpl(Opcode::IntRight),
+        Kind::Sar => binary_tpl(Opcode::IntSRight),
+        Kind::Inc | Kind::Dec => {
+            let Some(size) = operand_specs.first().map(operand_spec_size) else {
+                return Vec::new();
+            };
+            vec![CompiledOpTpl {
+                opcode: match construct_tpl_kind {
+                    Kind::Inc => Opcode::IntAdd,
+                    Kind::Dec => Opcode::IntSub,
+                    _ => unreachable!(),
+                },
+                output: Some(handle(0)),
+                inputs: vec![handle(0), sized_const(1, size)],
+                label: None,
+            }]
+        }
+        Kind::AddressOf
+        | Kind::StackStore
+        | Kind::StackLoad
+        | Kind::FrameTeardown
+        | Kind::Jcc
+        | Kind::Cmp
+        | Kind::Test
+        | Kind::Setcc
+        | Kind::Cbw
+        | Kind::Cwde
+        | Kind::Cdqe => Vec::new(),
+    }
 }
 
-fn op_tpl_opcode_for_semantic_op(op: &CompiledSemanticOp) -> CompiledOpTplOpcode {
-    match op {
-        CompiledSemanticOp::Nop => CompiledOpTplOpcode::Label,
-        CompiledSemanticOp::Return => CompiledOpTplOpcode::Return,
-        CompiledSemanticOp::Call => CompiledOpTplOpcode::Call,
-        CompiledSemanticOp::Jump => CompiledOpTplOpcode::Branch,
-        CompiledSemanticOp::ConditionalJump => CompiledOpTplOpcode::CBranch,
-        CompiledSemanticOp::Copy => CompiledOpTplOpcode::Copy,
-        CompiledSemanticOp::AddressOf => CompiledOpTplOpcode::IntAdd,
-        CompiledSemanticOp::StackStore => CompiledOpTplOpcode::Store,
-        CompiledSemanticOp::StackLoad => CompiledOpTplOpcode::Load,
-        CompiledSemanticOp::FrameTeardown => CompiledOpTplOpcode::Load,
-        CompiledSemanticOp::Binary { opcode } => match opcode {
-            CompiledArithmeticOpcode::Add | CompiledArithmeticOpcode::Inc => {
-                CompiledOpTplOpcode::IntAdd
-            }
-            CompiledArithmeticOpcode::Sub | CompiledArithmeticOpcode::Dec => {
-                CompiledOpTplOpcode::IntSub
-            }
-            CompiledArithmeticOpcode::And => CompiledOpTplOpcode::IntAnd,
-            CompiledArithmeticOpcode::Or => CompiledOpTplOpcode::IntOr,
-            CompiledArithmeticOpcode::Xor => CompiledOpTplOpcode::IntXor,
-            CompiledArithmeticOpcode::Mul => CompiledOpTplOpcode::IntMult,
-            CompiledArithmeticOpcode::Shl => CompiledOpTplOpcode::IntLeft,
-            CompiledArithmeticOpcode::Shr => CompiledOpTplOpcode::IntRight,
-            CompiledArithmeticOpcode::Sar => CompiledOpTplOpcode::IntSRight,
-        },
-        CompiledSemanticOp::Compare { bitwise: true } => CompiledOpTplOpcode::IntAnd,
-        CompiledSemanticOp::Compare { bitwise: false } => CompiledOpTplOpcode::IntSub,
-        CompiledSemanticOp::Extend { signed: false } => CompiledOpTplOpcode::IntZExt,
-        CompiledSemanticOp::Extend { signed: true } => CompiledOpTplOpcode::IntSExt,
-        CompiledSemanticOp::SetCc => CompiledOpTplOpcode::Copy,
-        CompiledSemanticOp::AccumulatorExtend { .. } => CompiledOpTplOpcode::IntSExt,
+fn operand_spec_size(spec: &CompiledOperandSpec) -> u32 {
+    match spec {
+        CompiledOperandSpec::TokenFieldRm { size, .. }
+        | CompiledOperandSpec::TokenFieldReg { size }
+        | CompiledOperandSpec::OpcodeTokenReg { size }
+        | CompiledOperandSpec::Immediate { size, .. }
+        | CompiledOperandSpec::Relative { size }
+        | CompiledOperandSpec::FixedRegister { size, .. } => *size,
     }
 }
 

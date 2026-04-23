@@ -24,5 +24,5 @@ pub use decision::{
 };
 pub use emitter::RuntimePcodeEmitter;
 pub use language::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
-pub use template::{RuntimeSemanticEmitter, RuntimeTemplateEvaluator};
+pub use template::{RuntimeTemplateEvaluator, RuntimeTemplateExecutor};
 pub use walker::RuntimeParserWalker;

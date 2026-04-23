@@ -120,7 +120,14 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
         detail["ghidra_error"] = ghidra.get("error")
     if fission.get("status") != "ok":
         err = str(fission.get("error") or "")
-        buckets.append("decode_no_match" if "DecodeNoMatch" in err else "fission_decode_error")
+        if "DecodeNoMatch" in err:
+            buckets.append("decode_no_match")
+        elif "UnsupportedPcodeTemplate" in err:
+            buckets.append("unsupported_template")
+        elif "InvalidPcodeShape" in err:
+            buckets.append("invalid_pcode_shape")
+        else:
+            buckets.append("fission_decode_error")
         detail["fission_error"] = err
         return buckets, detail
 

@@ -239,6 +239,128 @@ shape drift and the remaining `_fpreset` decode hole at the raw SLEIGH layer.
 
 - `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
 
+## 7. Semantic Emitter Cutover
+
+This wave moved the first executable slice of `compiled_table.rs` away from the
+handwritten mnemonic-family emitter and into compiled op-template execution.
+
+### Scope
+
+- compiler owner:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+- runtime owners:
+  - `crates/fission-sleigh/src/runtime/spine/template.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-sleigh/examples/raw_pcode_probe.rs`
+
+### What changed
+
+- `RuntimeSleighFrontend` now exposes an additive `decode_and_lift_with_details(...)`
+  API so the raw parity harness can observe whether an instruction actually used
+  compatibility emission.
+- `RuntimeTemplateEvaluator` no longer dispatches only through handwritten
+  `emit_*` semantic-family methods.
+  - if a constructor has executable `op_templates`, it now runs them first
+  - if it has no executable template path yet, it still falls back to
+    compatibility emission
+- compatibility-lowered constructor templates now carry real operand-bearing
+  `CompiledOpTpl` sequences for the currently supported primitive families:
+  - `RETURN`
+  - `CALL`
+  - `BRANCH`
+  - `COPY`
+  - `INT_ZEXT`
+  - `INT_SEXT`
+  - `INT_ADD`
+  - `INT_SUB`
+  - `INT_AND`
+  - `INT_OR`
+  - `INT_XOR`
+  - `INT_MULT`
+  - `INT_LEFT`
+  - `INT_RIGHT`
+  - `INT_SRIGHT`
+- handwritten semantic fallback remains the canonical owner for:
+  - `jcc`
+  - `cmp/test`
+  - `setcc`
+  - stack helpers
+  - `lea`
+  - accumulator extends
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - passed
+- `cargo check -p fission-cli`
+  - passed
+- `cargo build -p fission-cli --release`
+  - passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - rerun deterministic
+  - manifest remained `38 processors / 146 variants`
+
+### Raw P-code gate outcome
+
+Full feature-expanded manifest:
+
+- report:
+  - `benchmark/artifacts/raw_p_code_benchmark/20260424_cutover_full/aggregate_raw_pcode_parity_report.json`
+- bucket totals:
+  - `compat_emitter_used = 26`
+  - `full_match = 4`
+  - `pcode_op_count_mismatch = 23`
+  - `pcode_opcode_mismatch = 36`
+  - `varnode_space_mismatch = 2`
+  - `unsupported_template = 1`
+
+Compared with the previous expanded baseline:
+
+- previous `compat_emitter_used = 48`
+- current `compat_emitter_used = 26`
+
+Feature slices now separate cleanly by owner:
+
+- `control_flow`
+  - `compat_emitter_used = 2`
+  - report:
+    - `benchmark/artifacts/raw_p_code_benchmark/20260424_cutover_control_flow/aggregate_raw_pcode_parity_report.json`
+- `memory`
+  - `compat_emitter_used = 0`
+  - report:
+    - `benchmark/artifacts/raw_p_code_benchmark/20260424_cutover_memory/aggregate_raw_pcode_parity_report.json`
+- `stack`
+  - `compat_emitter_used = 4`
+  - report:
+    - `benchmark/artifacts/raw_p_code_benchmark/20260424_cutover_stack/aggregate_raw_pcode_parity_report.json`
+- `flags`
+  - `compat_emitter_used = 1`
+  - report:
+    - `benchmark/artifacts/raw_p_code_benchmark/20260424_cutover_flags/aggregate_raw_pcode_parity_report.json`
+
+### Interpretation
+
+This wave did not solve raw parity end to end.
+
+What it did prove:
+
+- call/jump/return and simple move/extend families can execute through compiled
+  op templates inside the common spine
+- the parity harness now measures real compatibility-emitter usage instead of
+  hardcoding it to `true`
+- `control_flow` and `memory` are no longer completely blocked on the handwritten
+  semantic emitter
+
+What still directly owns the remaining mismatch:
+
+- flag production and condition-code materialization
+- stack helper lowering
+- `lea` / address shaping
+- unsupported template classification still buckets as a generic Fission runtime
+  error no longer blocks owner attribution in the parity comparator
+
 ## 7. Compiled-Table Compatibility Holdout Narrowing
 
 ### Scope

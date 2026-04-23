@@ -83,6 +83,11 @@ impl fmt::Display for RuntimeSleighError {
 
 impl std::error::Error for RuntimeSleighError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeExecutionDetails {
+    pub compat_emitter_used: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeSleighFrontend {
     language: String,
@@ -291,11 +296,11 @@ impl RuntimeSleighFrontend {
         Ok(ops)
     }
 
-    pub fn decode_and_lift_with_len(
+    pub fn decode_and_lift_with_details(
         &self,
         bytes: &[u8],
         address: u64,
-    ) -> Result<(Vec<PcodeOp>, u64)> {
+    ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
         if bytes.is_empty() {
             return Err(RuntimeSleighError::DecodeNoMatch {
                 language: self.entry.entry_id.clone(),
@@ -311,7 +316,7 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_and_lift(
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_and_lift_with_details(
                 &self.entry,
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
@@ -320,6 +325,15 @@ impl RuntimeSleighFrontend {
                 address,
             ),
         }
+    }
+
+    pub fn decode_and_lift_with_len(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64)> {
+        let (ops, len, _) = self.decode_and_lift_with_details(bytes, address)?;
+        Ok((ops, len))
     }
 
     pub fn decode_window(

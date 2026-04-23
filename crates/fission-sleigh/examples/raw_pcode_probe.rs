@@ -86,15 +86,15 @@ fn main() -> Result<()> {
         };
 
         let decoded = frontend.decode_window(bytes, current, 1);
-        match frontend.decode_and_lift_with_len(bytes, current) {
-            Ok((ops, len)) => {
+        match frontend.decode_and_lift_with_details(bytes, current) {
+            Ok((ops, len, details)) => {
                 instructions.push(InstructionReport {
                     address: current,
                     status: "ok".to_string(),
                     error: None,
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: Some(len),
-                    compat_emitter_used: true,
+                    compat_emitter_used: details.compat_emitter_used,
                     pcode: ops.iter().map(SerializablePcodeOp::from).collect(),
                 });
                 if len == 0 {
@@ -122,7 +122,7 @@ fn main() -> Result<()> {
         language_id: Some(load_spec.pair.language_id.as_str().to_string()),
         compiler_spec_id: Some(load_spec.pair.compiler_spec_id.as_str().to_string()),
         entry_id: frontend.entry().entry_id.clone(),
-        execution_mode: "compiled_table_compatibility".to_string(),
+        execution_mode: "compiled_table_mixed".to_string(),
         compat_emitter_used: instructions
             .iter()
             .any(|instruction| instruction.compat_emitter_used),
