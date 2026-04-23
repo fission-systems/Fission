@@ -1,3 +1,7 @@
+//! Transitional compiled-table executor for the common SLEIGH runtime spine.
+//! The canonical owner mapping remains `DecisionNode -> RuntimeInstructionContext ->
+//! RuntimeConstructState/RuntimeParserWalker -> RuntimeTemplateEvaluator -> RuntimePcodeEmitter`.
+
 use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
@@ -1246,8 +1250,23 @@ impl CompiledTableEmitter {
     ) -> Result<()> {
         match operand {
             BoundOperand::Register { index, size } => {
-                self.emitter
-                    .emit_copy(gpr(u64::from(*index), *size), value, tag)?;
+                let destination = gpr(u64::from(*index), *size);
+                self.emitter.emit_copy(destination, value.clone(), tag)?;
+                if *size == 4 {
+                    let canonical = if value.size == 8 {
+                        value
+                    } else {
+                        let extended = self.tmp(8);
+                        self.emitter.emit_int_unop(
+                            PcodeOpcode::IntZExt,
+                            extended.clone(),
+                            value,
+                            tag,
+                        )?;
+                        extended
+                    };
+                    self.emitter.emit_copy(gpr(u64::from(*index), 8), canonical, tag)?;
+                }
                 Ok(())
             }
             BoundOperand::Memory { .. } => {
@@ -1522,5 +1541,62 @@ mod tests {
             .handles
             .iter()
             .any(|handle| matches!(handle.spec, CompiledOperandSpec::TokenFieldRm { .. })));
+    }
+
+    #[test]
+    fn generated_runtime_decodes_reg32_lea_without_decode_no_match() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x8d, 0x04, 0x11];
+        let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1400_1450).expect("generated lea");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+        assert!(ops.iter().any(|op| {
+            op.opcode == PcodeOpcode::Copy
+                && op.output.as_ref().is_some_and(|out| out.size == 8)
+        }));
+    }
+
+    #[test]
+    fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1400_19c0).expect("generated mov rip-relative");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "mov");
+        assert!(matches!(
+            decoded.references.first().map(|reference| reference.kind),
+            Some(DecodedReferenceKind::RipRelativeAddress)
+        ));
+    }
+
+    #[test]
+    fn generated_runtime_decodes_movsxd_without_decode_no_match() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x48, 0x63, 0x41, 0x3c];
+        let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt));
+        assert!(ops.iter().any(|op| {
+            op.opcode == PcodeOpcode::Copy
+                && op.output.as_ref().is_some_and(|out| out.size == 8)
+        }));
+    }
+
+    #[test]
+    fn generated_runtime_zero_extends_reg32_writes_to_full_register() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x31, 0xc0];
+        let (ops, len) =
+            decode_and_lift(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(ops.iter().any(|op| {
+            op.opcode == PcodeOpcode::IntZExt
+                && op.output.as_ref().is_some_and(|out| out.size == 8)
+        }));
+        assert!(ops.iter().any(|op| {
+            op.opcode == PcodeOpcode::Copy
+                && op.output.as_ref().is_some_and(|out| out.size == 8)
+        }));
     }
 }

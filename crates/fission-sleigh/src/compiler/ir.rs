@@ -1311,9 +1311,11 @@ fn unsupported_template_reason(
     construct_tpl_kind: CompiledConstructTplKind,
     operand_specs: &[CompiledOperandSpec],
 ) -> Option<String> {
+    if let Some(reason) = unsupported_check_constraint_reason(signature) {
+        return Some(reason);
+    }
+
     if signature.contains("currentCS")
-        || signature.contains("check_")
-        || signature.contains("bit64=")
         || signature.contains("rexRprefix=")
         || signature.contains("creg")
         || signature.contains("debugreg")
@@ -1367,6 +1369,26 @@ fn unsupported_template_reason(
         )
     {
         return Some("unsupported_operand_arity".to_string());
+    }
+    None
+}
+
+fn unsupported_check_constraint_reason(signature: &str) -> Option<String> {
+    for token in signature.split(|ch: char| ch.is_whitespace() || ch == '&' || ch == ';') {
+        let trimmed = token.trim_matches(|ch| ch == '(' || ch == ')' || ch == ',');
+        if !trimmed.starts_with("check_") {
+            continue;
+        }
+        if matches!(
+            trimmed,
+            "check_Reg32_dest"
+                | "check_Rmr32_dest"
+                | "check_rm32_dest"
+                | "check_EAX_dest"
+        ) {
+            continue;
+        }
+        return Some("unsupported_runtime_constraint".to_string());
     }
     None
 }
