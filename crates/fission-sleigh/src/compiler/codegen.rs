@@ -476,10 +476,80 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let op_templates = template
+        .op_templates
+        .iter()
+        .map(render_op_template)
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
-        "{{\"handles\": [{}], \"decode_steps\": [{}], \"semantic_ops\": [{}]}}",
-        handles, decode_steps, semantic_ops
+        "{{\"handles\": [{}], \"decode_steps\": [{}], \"semantic_ops\": [{}], \"op_templates\": [{}], \"template_source\": {}}}",
+        handles,
+        decode_steps,
+        semantic_ops,
+        op_templates,
+        json_string(template.template_source.as_str())
     )
+}
+
+fn render_op_template(template: &crate::compiler::CompiledOpTpl) -> String {
+    let output = template
+        .output
+        .as_ref()
+        .map(render_varnode_template)
+        .unwrap_or_else(|| "null".to_string());
+    let inputs = template
+        .inputs
+        .iter()
+        .map(render_varnode_template)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let label = template
+        .label
+        .as_ref()
+        .map(|label| json_string(&label.name))
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"opcode\": {}, \"output\": {}, \"inputs\": [{}], \"label\": {}}}",
+        json_string(template.opcode.as_str()),
+        output,
+        inputs,
+        label
+    )
+}
+
+fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> String {
+    match template {
+        crate::compiler::CompiledVarnodeTpl::Handle { operand_index } => {
+            format!("{{\"kind\": \"handle\", \"operand_index\": {operand_index}}}")
+        }
+        crate::compiler::CompiledVarnodeTpl::Const(value) => match value {
+            crate::compiler::CompiledConstTpl::Integer { value, size } => {
+                format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")
+            }
+            crate::compiler::CompiledConstTpl::RelativeAddress => {
+                "{\"kind\": \"relative_address\"}".to_string()
+            }
+            crate::compiler::CompiledConstTpl::InstStart => {
+                "{\"kind\": \"inst_start\"}".to_string()
+            }
+            crate::compiler::CompiledConstTpl::InstNext => "{\"kind\": \"inst_next\"}".to_string(),
+            crate::compiler::CompiledConstTpl::InstNext2 => {
+                "{\"kind\": \"inst_next2\"}".to_string()
+            }
+        },
+        crate::compiler::CompiledVarnodeTpl::Space(space) => format!(
+            "{{\"kind\": \"space\", \"name\": {}}}",
+            json_string(&space.name)
+        ),
+        crate::compiler::CompiledVarnodeTpl::Temp { size } => {
+            format!("{{\"kind\": \"temp\", \"size\": {size}}}")
+        }
+        crate::compiler::CompiledVarnodeTpl::Register { name, size } => format!(
+            "{{\"kind\": \"register\", \"name\": {}, \"size\": {size}}}",
+            json_string(name)
+        ),
+    }
 }
 
 fn render_u8_array(values: &[u8]) -> String {

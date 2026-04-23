@@ -2,8 +2,9 @@
 //!
 //! This module owns the shared runtime concepts that map to Ghidra's
 //! SleighParserContext, DecisionNode, ConstructState/ParserWalker, ConstructTpl,
-//! and PcodeEmit. Processor modules provide only field extraction and
-//! architecture-specific varnode mapping.
+//! and PcodeEmit. Processor-specific runtime policy must not live in side
+//! modules; temporary compiled-table compatibility paths must be made visible
+//! through telemetry and replaced by spec-derived template execution.
 
 pub mod compiled_table;
 pub mod construct;

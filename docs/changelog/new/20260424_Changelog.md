@@ -253,3 +253,43 @@ Use this harness before full decompiler benchmark runs to close:
 - `_fpreset` / x87 decode no-match
 - startup raw P-code opcode sequence drift
 - varnode shape and unique-temp shape mismatches
+
+## 7. Raw P-code Canonical Gate and ConstructTpl Compatibility Telemetry
+
+This wave promoted the raw P-code benchmark from single-row smoke to a canonical
+gate and added explicit compatibility telemetry to the current compiled-table
+runtime path.
+
+### Added
+
+- `benchmark/raw_p_code_benchmark/canonical_rows.json`
+- manifest-driven aggregate execution in `run_raw_pcode_parity.py`
+- `compat_emitter_used` telemetry in the Fission raw P-code probe and compare
+  report
+- additive compiler IR scaffold for `ConstructTpl`-style primitive op templates
+  with `template_source`
+
+### Validation
+
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical-current`
+  - result:
+    - `compat_emitter_used = 30`
+    - `decode_no_match = 1`
+    - `pcode_opcode_mismatch = 22`
+    - `pcode_op_count_mismatch = 14`
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `42 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `target/release/fission_cli decomp ... --addr 0x140001470 --json`
+  - result: `rust_sleigh`, `fell_back=false`
+
+### Interpretation
+
+- the raw P-code gate is now stable enough to serve as the first correctness bar
+  before full decompiler benchmark runs
+- current execution is still visibly `compatibility_lowered`
+- the next direct owner remains `compiled_table.rs` constructor/template
+  execution, especially `_fpreset` and startup flag semantics

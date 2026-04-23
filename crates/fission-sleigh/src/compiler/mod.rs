@@ -20,15 +20,16 @@ pub use equivalence::{
     RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
 };
 pub use ir::{
-    CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstructTpl, CompiledConstructTplKind,
-    CompiledConstructor, CompiledConstructorTemplate, CompiledContextField,
-    CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode,
-    CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
+    CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
+    CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
+    CompiledContextField, CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge,
+    CompiledDecisionNode, CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
-    CompiledLanguageLayout, CompiledMacro, CompiledOperandDecodeStep, CompiledOperandSpec,
-    CompiledPatternMatcher, CompiledPatternNode, CompiledPcodeOp, CompiledRegister,
-    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpecDefinition, CompiledSubtable,
-    CompiledTokenField, CompiledTokenFieldRef, ControlFlowClass,
+    CompiledLabelRef, CompiledLanguageLayout, CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode,
+    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternMatcher, CompiledPatternNode,
+    CompiledPcodeOp, CompiledRegister, CompiledSemanticOp, CompiledSemanticTemplate,
+    CompiledSpaceRef, CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource,
+    CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use token::{Token, TokenKind, TokenizedLine};

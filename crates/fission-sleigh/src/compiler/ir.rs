@@ -218,6 +218,8 @@ pub struct CompiledConstructorTemplate {
     pub handles: Vec<CompiledHandleTemplate>,
     pub decode_steps: Vec<CompiledOperandDecodeStep>,
     pub semantic_ops: Vec<CompiledSemanticOp>,
+    pub op_templates: Vec<CompiledOpTpl>,
+    pub template_source: CompiledTemplateSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +257,85 @@ pub enum CompiledSemanticOp {
 pub struct CompiledConstructTpl {
     pub constructor_hash: u64,
     pub ops: Vec<CompiledSemanticOp>,
+    pub op_templates: Vec<CompiledOpTpl>,
+    pub template_source: CompiledTemplateSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledTemplateSource {
+    SpecDerived,
+    CompatibilityLowered,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledOpTpl {
+    pub opcode: CompiledOpTplOpcode,
+    pub output: Option<CompiledVarnodeTpl>,
+    pub inputs: Vec<CompiledVarnodeTpl>,
+    pub label: Option<CompiledLabelRef>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledOpTplOpcode {
+    Copy,
+    Load,
+    Store,
+    IntAdd,
+    IntSub,
+    IntAnd,
+    IntOr,
+    IntXor,
+    IntMult,
+    IntLeft,
+    IntRight,
+    IntSRight,
+    IntEqual,
+    IntNotEqual,
+    IntLess,
+    IntSLess,
+    BoolNegate,
+    BoolAnd,
+    BoolOr,
+    IntZExt,
+    IntSExt,
+    Subpiece,
+    Piece,
+    Branch,
+    CBranch,
+    Call,
+    Return,
+    CallOther,
+    Build,
+    Label,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledVarnodeTpl {
+    Handle { operand_index: usize },
+    Const(CompiledConstTpl),
+    Space(CompiledSpaceRef),
+    Temp { size: u32 },
+    Register { name: String, size: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledConstTpl {
+    Integer { value: i64, size: u32 },
+    RelativeAddress,
+    InstStart,
+    InstNext,
+    InstNext2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledSpaceRef {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledLabelRef {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -393,6 +474,53 @@ impl CompiledSemanticOp {
             Self::Extend { signed: true } => "sext",
             Self::SetCc => "setcc",
             Self::AccumulatorExtend { .. } => "accumulator_extend",
+        }
+    }
+}
+
+impl CompiledTemplateSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SpecDerived => "spec_derived",
+            Self::CompatibilityLowered => "compatibility_lowered",
+        }
+    }
+}
+
+impl CompiledOpTplOpcode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Copy => "COPY",
+            Self::Load => "LOAD",
+            Self::Store => "STORE",
+            Self::IntAdd => "INT_ADD",
+            Self::IntSub => "INT_SUB",
+            Self::IntAnd => "INT_AND",
+            Self::IntOr => "INT_OR",
+            Self::IntXor => "INT_XOR",
+            Self::IntMult => "INT_MULT",
+            Self::IntLeft => "INT_LEFT",
+            Self::IntRight => "INT_RIGHT",
+            Self::IntSRight => "INT_SRIGHT",
+            Self::IntEqual => "INT_EQUAL",
+            Self::IntNotEqual => "INT_NOTEQUAL",
+            Self::IntLess => "INT_LESS",
+            Self::IntSLess => "INT_SLESS",
+            Self::BoolNegate => "BOOL_NEGATE",
+            Self::BoolAnd => "BOOL_AND",
+            Self::BoolOr => "BOOL_OR",
+            Self::IntZExt => "INT_ZEXT",
+            Self::IntSExt => "INT_SEXT",
+            Self::Subpiece => "SUBPIECE",
+            Self::Piece => "PIECE",
+            Self::Branch => "BRANCH",
+            Self::CBranch => "CBRANCH",
+            Self::Call => "CALL",
+            Self::Return => "RETURN",
+            Self::CallOther => "CALLOTHER",
+            Self::Build => "BUILD",
+            Self::Label => "LABEL",
+            Self::Unsupported => "UNSUPPORTED",
         }
     }
 }
@@ -595,6 +723,8 @@ impl Collector {
             .map(|constructor| CompiledConstructTpl {
                 constructor_hash: constructor.signature_hash,
                 ops: constructor.constructor_template.semantic_ops.clone(),
+                op_templates: constructor.constructor_template.op_templates.clone(),
+                template_source: constructor.constructor_template.template_source,
             })
             .collect()
     }
@@ -1417,10 +1547,13 @@ fn build_constructor_template(
             .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
     );
     let semantic_ops = semantic_ops_for_kind(construct_tpl_kind);
+    let op_templates = op_templates_for_semantic_ops(&semantic_ops);
     CompiledConstructorTemplate {
         handles,
         decode_steps,
         semantic_ops,
+        op_templates,
+        template_source: CompiledTemplateSource::CompatibilityLowered,
     }
 }
 
@@ -1469,6 +1602,54 @@ fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<Co
             dst_size: 8,
         },
     }]
+}
+
+fn op_templates_for_semantic_ops(semantic_ops: &[CompiledSemanticOp]) -> Vec<CompiledOpTpl> {
+    semantic_ops
+        .iter()
+        .map(|op| CompiledOpTpl {
+            opcode: op_tpl_opcode_for_semantic_op(op),
+            output: None,
+            inputs: Vec::new(),
+            label: None,
+        })
+        .collect()
+}
+
+fn op_tpl_opcode_for_semantic_op(op: &CompiledSemanticOp) -> CompiledOpTplOpcode {
+    match op {
+        CompiledSemanticOp::Nop => CompiledOpTplOpcode::Label,
+        CompiledSemanticOp::Return => CompiledOpTplOpcode::Return,
+        CompiledSemanticOp::Call => CompiledOpTplOpcode::Call,
+        CompiledSemanticOp::Jump => CompiledOpTplOpcode::Branch,
+        CompiledSemanticOp::ConditionalJump => CompiledOpTplOpcode::CBranch,
+        CompiledSemanticOp::Copy => CompiledOpTplOpcode::Copy,
+        CompiledSemanticOp::AddressOf => CompiledOpTplOpcode::IntAdd,
+        CompiledSemanticOp::StackStore => CompiledOpTplOpcode::Store,
+        CompiledSemanticOp::StackLoad => CompiledOpTplOpcode::Load,
+        CompiledSemanticOp::FrameTeardown => CompiledOpTplOpcode::Load,
+        CompiledSemanticOp::Binary { opcode } => match opcode {
+            CompiledArithmeticOpcode::Add | CompiledArithmeticOpcode::Inc => {
+                CompiledOpTplOpcode::IntAdd
+            }
+            CompiledArithmeticOpcode::Sub | CompiledArithmeticOpcode::Dec => {
+                CompiledOpTplOpcode::IntSub
+            }
+            CompiledArithmeticOpcode::And => CompiledOpTplOpcode::IntAnd,
+            CompiledArithmeticOpcode::Or => CompiledOpTplOpcode::IntOr,
+            CompiledArithmeticOpcode::Xor => CompiledOpTplOpcode::IntXor,
+            CompiledArithmeticOpcode::Mul => CompiledOpTplOpcode::IntMult,
+            CompiledArithmeticOpcode::Shl => CompiledOpTplOpcode::IntLeft,
+            CompiledArithmeticOpcode::Shr => CompiledOpTplOpcode::IntRight,
+            CompiledArithmeticOpcode::Sar => CompiledOpTplOpcode::IntSRight,
+        },
+        CompiledSemanticOp::Compare { bitwise: true } => CompiledOpTplOpcode::IntAnd,
+        CompiledSemanticOp::Compare { bitwise: false } => CompiledOpTplOpcode::IntSub,
+        CompiledSemanticOp::Extend { signed: false } => CompiledOpTplOpcode::IntZExt,
+        CompiledSemanticOp::Extend { signed: true } => CompiledOpTplOpcode::IntSExt,
+        CompiledSemanticOp::SetCc => CompiledOpTplOpcode::Copy,
+        CompiledSemanticOp::AccumulatorExtend { .. } => CompiledOpTplOpcode::IntSExt,
+    }
 }
 
 fn register_size_token(token: &str) -> Option<u32> {

@@ -68,6 +68,7 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     detail["address"] = address
     detail["ghidra_status"] = ghidra.get("status")
     detail["fission_status"] = fission.get("status")
+    detail["compat_emitter_used"] = bool(fission.get("compat_emitter_used"))
 
     if ghidra.get("status") != "ok":
         buckets.append("ghidra_decode_error")
@@ -149,12 +150,15 @@ def main() -> int:
     totals: Counter[str] = Counter()
     rows = []
     for idx in range(max(len(g_instrs), len(f_instrs))):
+        fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
         buckets, detail = bucket_instruction(
             g_instrs[idx] if idx < len(g_instrs) else None,
-            f_instrs[idx] if idx < len(f_instrs) else None,
+            fission_instruction,
         )
         for bucket in set(buckets):
             totals[bucket] += 1
+        if fission_instruction and fission_instruction.get("compat_emitter_used"):
+            totals["compat_emitter_used"] += 1
         detail["index"] = idx
         detail["buckets"] = buckets
         rows.append(detail)
@@ -166,6 +170,7 @@ def main() -> int:
         "ghidra_compiler_spec_id": ghidra.get("compiler_spec_id"),
         "fission_language_id": fission.get("language_id"),
         "fission_entry_id": fission.get("entry_id"),
+        "fission_execution_mode": fission.get("execution_mode"),
         "total_instructions": len(rows),
         "bucket_totals": dict(sorted(totals.items())),
         "rows": rows,

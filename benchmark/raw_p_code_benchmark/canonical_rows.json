@@ -1,0 +1,50 @@
+{
+  "description": "Canonical raw P-code parity rows for the first SLEIGH runtime validation wave.",
+  "rows": [
+    {
+      "name": "test-functions-add",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "addr": "0x140001450",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "test-functions-fibonacci",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "addr": "0x140001470",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "test-functions-winmaincrtstartup",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "addr": "0x1400013e0",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "test-functions-maincrtstartup",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "addr": "0x140001400",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "test-functions-fpreset",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "addr": "0x1400025c0",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    }
+  ]
+}

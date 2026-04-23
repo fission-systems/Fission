@@ -13,6 +13,8 @@ struct ProbeReport {
     language_id: Option<String>,
     compiler_spec_id: Option<String>,
     entry_id: String,
+    execution_mode: String,
+    compat_emitter_used: bool,
     start_address: u64,
     requested_count: usize,
     instructions: Vec<InstructionReport>,
@@ -25,6 +27,7 @@ struct InstructionReport {
     error: Option<String>,
     decoded: Option<DecodedInstruction>,
     length: Option<u64>,
+    compat_emitter_used: bool,
     pcode: Vec<SerializablePcodeOp>,
 }
 
@@ -76,6 +79,7 @@ fn main() -> Result<()> {
                 error: Some(format!("unable to read bytes at 0x{current:x}")),
                 decoded: None,
                 length: None,
+                compat_emitter_used: false,
                 pcode: Vec::new(),
             });
             break;
@@ -90,6 +94,7 @@ fn main() -> Result<()> {
                     error: None,
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: Some(len),
+                    compat_emitter_used: true,
                     pcode: ops.iter().map(SerializablePcodeOp::from).collect(),
                 });
                 if len == 0 {
@@ -104,6 +109,7 @@ fn main() -> Result<()> {
                     error: Some(err.to_string()),
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: None,
+                    compat_emitter_used: false,
                     pcode: Vec::new(),
                 });
                 break;
@@ -116,6 +122,10 @@ fn main() -> Result<()> {
         language_id: Some(load_spec.pair.language_id.as_str().to_string()),
         compiler_spec_id: Some(load_spec.pair.compiler_spec_id.as_str().to_string()),
         entry_id: frontend.entry().entry_id.clone(),
+        execution_mode: "compiled_table_compatibility".to_string(),
+        compat_emitter_used: instructions
+            .iter()
+            .any(|instruction| instruction.compat_emitter_used),
         start_address: args.address,
         requested_count: args.count,
         instructions,

@@ -88,8 +88,10 @@ Clean-room owner mapping is fixed as:
 - `PcodeEmit` -> `runtime::spine::RuntimePcodeEmitter`
 
 Runtime policy must be driven by token/context fields, constructor patterns,
-display templates, and compiled p-code templates. Architecture-specific byte
-parsers or mnemonic-family emitters are only transitional compatibility debt and
+display templates, and compiled p-code templates. The current compiled-table
+executor may still report `compatibility_lowered` template usage while the
+Ghidra `ConstructTpl -> PcodeEmit` migration is incomplete. Architecture-specific
+byte parsers or mnemonic-family emitters are transitional compatibility debt and
 must not be moved into new `helpers`, `providers`, `quirks`, or `text` modules.
 
 ## Anti-Patterns

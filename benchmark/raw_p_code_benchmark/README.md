@@ -30,6 +30,21 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
   --output-dir benchmark/artifacts/raw_p_code_benchmark/test-functions-add
 ```
 
+## Canonical row gate
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical-latest
+```
+
+The aggregate output is:
+
+- `aggregate_raw_pcode_parity_report.json`
+
+Each manifest row also writes the normal per-window files under a row-named
+subdirectory.
+
 Outputs:
 
 - `ghidra_raw_pcode.json`
@@ -51,6 +66,7 @@ The comparator currently reports:
 - `varnode_space_mismatch`
 - `ghidra_decode_error`
 - `fission_decode_error`
+- `compat_emitter_used`
 
 The expected workflow is targeted:
 
