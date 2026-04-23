@@ -901,3 +901,89 @@ The non-x86 processor inventory is no longer represented as per-processor Rust s
   1. move x86 execution entrypoint to `runtime/providers/x86_64.rs`
   2. delete `runtime/processors/x86/mod.rs`
   3. then extract semantic owner out of `x86/generated.rs`
+
+## 13. Runtime Provider Extraction and X86 Field Helper Split
+
+### Scope
+
+- wave type:
+  - owner cleanup / behavior-preserving runtime routing migration
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/providers/`
+  - `crates/fission-sleigh/src/runtime/quirks/x86_fields.rs`
+  - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+- goal:
+  - remove `runtime/processors/x86/mod.rs` from the executable path
+  - route x86-64 execution through a provider layer
+  - split x86 field extraction and disassembly helpers out of `generated.rs`
+
+### What changed
+
+- added provider dispatch owner:
+  - `crates/fission-sleigh/src/runtime/providers/mod.rs`
+  - `crates/fission-sleigh/src/runtime/providers/x86_64.rs`
+- `RuntimeSleighFrontend::{decode_and_lift_with_len, decode_instruction_with_len}` now dispatch through:
+  - `registry::executable_provider_key_for_entry(...)`
+  - `providers::provider_for_key(...)`
+  - provider-owned `decode_*` entrypoints
+- deleted `crates/fission-sleigh/src/runtime/processors/x86/mod.rs`
+- added x86 helper boundary:
+  - `crates/fission-sleigh/src/runtime/quirks/mod.rs`
+  - `crates/fission-sleigh/src/runtime/quirks/x86_fields.rs`
+- moved x86-specific helper ownership out of `generated.rs`:
+  - instruction context / prefix parse
+  - ModRM/SIB/displacement extraction
+  - candidate bucket derivation
+  - immediate signed/unsigned reads
+  - register/disassembly formatting helpers
+  - Jcc suffix formatting
+- `crates/fission-sleigh/src/runtime/processors/x86/generated.rs` remains the first executable consumer, but it is now reached through the provider layer and consumes x86 helper code from `runtime/quirks/`
+- `runtime/processors/` is now reduced to:
+  - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+  - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `37 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed
+- `git diff -- crates/fission-sleigh/generated`
+  - result: empty
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json`
+  - result: passed
+- routing audit:
+  - `rg -n "processors::x86::|runtime::processors|processors::decode_|processors::" crates/fission-sleigh/src/runtime`
+  - result: `0` matches
+- folder audit:
+  - `find crates/fission-sleigh/src/runtime/processors -type f | sort`
+  - result:
+    - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+    - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+
+### Result
+
+The executable routing owner is no longer `runtime/processors`. X86-64 now enters the runtime through a provider layer, which matches the intended `registry -> provider -> shared spine` direction. The x86 helper boundary is also explicit now: prefix/field extraction and textual register formatting moved to `runtime/quirks/x86_fields.rs`, reducing the amount of non-semantic glue mixed into `generated.rs`.
+
+### Remaining risk / next owner
+
+- `crates/fission-sleigh/src/runtime/processors/x86/generated.rs` still owns too much semantic/runtime behavior:
+  - constructor binding walk
+  - template evaluation
+  - p-code emission helpers
+- `RuntimeTemplateEvaluator` and `CompiledDecisionProbe` are still x86-shaped in places
+- next owner remains:
+  1. generic probe vocabulary beyond current x86-derived probe kinds
+  2. `RuntimeParserWalker` / `RuntimeConstructState` extraction from `generated.rs`
+  3. `runtime/processors/x86/generated.rs` hard-delete after spine/quirk/provider split is complete

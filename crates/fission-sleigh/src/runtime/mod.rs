@@ -1,4 +1,5 @@
-mod processors;
+mod providers;
+mod quirks;
 mod registry;
 mod spine;
 
@@ -284,7 +285,7 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => processors::decode_and_lift(
+            RuntimeFrontendStatus::ExecutableCandidate => providers::decode_and_lift(
                 &self.entry,
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
@@ -383,7 +384,7 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => processors::decode_instruction(
+            RuntimeFrontendStatus::ExecutableCandidate => providers::decode_instruction(
                 &self.entry,
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
