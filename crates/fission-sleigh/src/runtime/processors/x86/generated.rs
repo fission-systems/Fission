@@ -7,14 +7,15 @@ use crate::compiler::{
     CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate, CompiledOpcodeMatcher,
     CompiledOperandDecodeStep, CompiledOperandSpec, CompiledSemanticKind,
 };
-use crate::runtime::quirks::x86_fields::{
-    candidate_bucket_keys, ensure_modrm, format_memory_operand, jcc_suffix, parse_modrm, read_sint,
-    read_uint, register_name, ModRm, X86InstructionContext,
+use crate::runtime::helpers::x86_decode::{
+    candidate_bucket_keys, ensure_modrm, parse_modrm, read_sint, read_uint, ModRm,
+    X86InstructionContext,
 };
 use crate::runtime::spine::{
     self, operand_size, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
     RuntimePcodeEmitter, RuntimeSelection, RuntimeSemanticEmitter, RuntimeTemplateEvaluator,
 };
+use crate::runtime::text::x86::{format_memory_operand, jcc_suffix, register_name};
 use crate::runtime::{
     DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,
     RuntimeSleighError, UNIQUE_SPACE_ID,

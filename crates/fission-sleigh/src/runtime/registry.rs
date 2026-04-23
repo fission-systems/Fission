@@ -26,8 +26,8 @@ impl RuntimeSupportLevel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExecutionProviderKey {
-    X86_64Generated,
+pub enum ExecutionEngineKey {
+    GeneratedX86_64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub struct RuntimeVariantDescriptor {
     pub generated_path: String,
     pub endian: RuntimeEndian,
     pub support_level: RuntimeSupportLevel,
-    pub execution_provider_key: Option<ExecutionProviderKey>,
+    pub execution_engine_key: Option<ExecutionEngineKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,10 +139,10 @@ pub fn status_for_entry(entry: &EntrySpec) -> RuntimeFrontendStatus {
         .unwrap_or(RuntimeFrontendStatus::RegisteredCompileOnly)
 }
 
-pub fn executable_provider_key_for_entry(entry: &EntrySpec) -> Option<ExecutionProviderKey> {
+pub fn executable_engine_key_for_entry(entry: &EntrySpec) -> Option<ExecutionEngineKey> {
     runtime_variant_for_entry(entry)
         .ok()
-        .and_then(|variant| variant.execution_provider_key)
+        .and_then(|variant| variant.execution_engine_key)
 }
 
 fn registry_data() -> &'static RegistryData {
@@ -160,7 +160,7 @@ fn load_registry_data() -> RegistryData {
         processor_names.insert(entry.processor.clone());
         let module_name = module_name_for_processor(&entry.processor);
         let support_level = support_level_for_manifest_entry(entry);
-        let execution_provider_key = execution_provider_key_for_manifest_entry(entry);
+        let execution_engine_key = execution_engine_key_for_manifest_entry(entry);
         let variant = RuntimeVariantDescriptor {
             processor: entry.processor.clone(),
             module_name: module_name.clone(),
@@ -171,7 +171,7 @@ fn load_registry_data() -> RegistryData {
             generated_path: format!("{}/{}", entry.processor, entry.entry_id),
             endian: endian_from_manifest(entry),
             support_level,
-            execution_provider_key,
+            execution_engine_key,
         };
         frontends.push(RuntimeFrontendDescriptor {
             arch: variant.processor.clone(),
@@ -211,11 +211,11 @@ fn support_level_for_manifest_entry(entry: &GhidraLanguageManifestEntry) -> Runt
     }
 }
 
-fn execution_provider_key_for_manifest_entry(
+fn execution_engine_key_for_manifest_entry(
     entry: &GhidraLanguageManifestEntry,
-) -> Option<ExecutionProviderKey> {
+) -> Option<ExecutionEngineKey> {
     match (entry.processor.as_str(), entry.entry_id.as_str()) {
-        ("x86", "x86-64") => Some(ExecutionProviderKey::X86_64Generated),
+        ("x86", "x86-64") => Some(ExecutionEngineKey::GeneratedX86_64),
         _ => None,
     }
 }

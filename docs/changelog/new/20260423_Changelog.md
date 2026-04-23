@@ -987,3 +987,98 @@ The executable routing owner is no longer `runtime/processors`. X86-64 now enter
   1. generic probe vocabulary beyond current x86-derived probe kinds
   2. `RuntimeParserWalker` / `RuntimeConstructState` extraction from `generated.rs`
   3. `runtime/processors/x86/generated.rs` hard-delete after spine/quirk/provider split is complete
+
+## 2026-04-23 - SLEIGH runtime provider rollback into shared engine
+
+### Summary
+
+- wave type:
+  - owner correction / behavior-preserving runtime structure migration
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/engine.rs`
+  - `crates/fission-sleigh/src/runtime/helpers/x86_decode.rs`
+  - `crates/fission-sleigh/src/runtime/text/x86.rs`
+  - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+- goal:
+  - remove `provider` / `quirk` naming that preserved an x86-backend shape
+  - restore a shared runtime execution owner
+  - separate raw x86 decode helpers from text rendering helpers
+
+### Why this correction was necessary
+
+- `runtime/providers/x86_64.rs` was still effectively an x86-specific backend entrypoint, just under a new name
+- `runtime/quirks/x86_fields.rs` owned more than raw field extraction:
+  - candidate bucket selection
+  - register naming
+  - memory operand text formatting
+  - Jcc suffix rendering
+- this did not match the intended Ghidra-like ownership split of shared execution spine plus narrow ISA-specific helpers
+
+### What changed
+
+- deleted:
+  - `crates/fission-sleigh/src/runtime/providers/mod.rs`
+  - `crates/fission-sleigh/src/runtime/providers/x86_64.rs`
+  - `crates/fission-sleigh/src/runtime/quirks/mod.rs`
+  - `crates/fission-sleigh/src/runtime/quirks/x86_fields.rs`
+  - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+- added shared execution owner:
+  - `crates/fission-sleigh/src/runtime/engine.rs`
+- added x86 decode helper boundary:
+  - `crates/fission-sleigh/src/runtime/helpers/mod.rs`
+  - `crates/fission-sleigh/src/runtime/helpers/x86_decode.rs`
+- added text projection boundary:
+  - `crates/fission-sleigh/src/runtime/text/mod.rs`
+  - `crates/fission-sleigh/src/runtime/text/x86.rs`
+- renamed runtime dispatch vocabulary:
+  - `ExecutionProviderKey` -> `ExecutionEngineKey`
+  - `execution_provider_key` -> `execution_engine_key`
+  - `executable_provider_key_for_entry(...)` -> `executable_engine_key_for_entry(...)`
+- `RuntimeSleighFrontend::{decode_instruction_with_len, decode_and_lift_with_len}` now dispatch through:
+  - registry lookup
+  - shared `runtime::engine`
+  - x86 generated runtime path as the first executable consumer
+- `crates/fission-sleigh/src/runtime/processors/x86/generated.rs` now consumes:
+  - raw x86 decode helpers from `runtime/helpers/x86_decode.rs`
+  - x86 text rendering helpers from `runtime/text/x86.rs`
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed
+- `git diff -- crates/fission-sleigh/generated`
+  - result: empty
+- routing cleanup audit:
+  - `rg -n "providers::|quirks::|ExecutionProviderKey|execution_provider_key|runtime/processors/x86/mod.rs|processors::x86::" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/lib.rs`
+  - result: `0` matches
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json`
+  - result: passed
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json`
+  - result: passed
+
+### Result
+
+The runtime no longer presents the x86 execution path as a provider/quirk split. The canonical routing owner is back to a shared execution engine, while x86-specific code is narrowed into decode helpers and text projection helpers. This is still not the final Ghidra-style end state, but it removes the misleading architectural shape introduced by the previous wave.
+
+### Remaining risk / next owner
+
+- `crates/fission-sleigh/src/runtime/processors/x86/generated.rs` still owns semantic/runtime behavior that belongs in the shared spine:
+  - constructor binding walk
+  - template evaluation
+  - p-code emission helpers
+- `candidate_bucket_keys` remains in the x86 decode helper layer and should eventually disappear into generic decision-tree traversal
+- next owner remains:
+  1. move `RuntimeParserWalker` / `RuntimeConstructState` behavior out of `generated.rs`
+  2. move template evaluation and emission primitives into `runtime/spine`
+  3. hard-delete the remaining `runtime/processors/x86/generated.rs`

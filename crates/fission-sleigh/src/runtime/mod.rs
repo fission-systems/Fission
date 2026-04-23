@@ -1,7 +1,8 @@
-mod providers;
-mod quirks;
+mod engine;
+mod helpers;
 mod registry;
 mod spine;
+mod text;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -15,7 +16,7 @@ use crate::compiler::{
     compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
 };
 pub use registry::{
-    CompiledRuntimeRegistry, ExecutionProviderKey, ProcessorDescriptor, RuntimeFrontendDescriptor,
+    CompiledRuntimeRegistry, ExecutionEngineKey, ProcessorDescriptor, RuntimeFrontendDescriptor,
     RuntimeSupportLevel, RuntimeVariantDescriptor,
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
@@ -285,7 +286,7 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => providers::decode_and_lift(
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_and_lift(
                 &self.entry,
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
@@ -384,7 +385,7 @@ impl RuntimeSleighFrontend {
                 }
                 .into())
             }
-            RuntimeFrontendStatus::ExecutableCandidate => providers::decode_instruction(
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_instruction(
                 &self.entry,
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
