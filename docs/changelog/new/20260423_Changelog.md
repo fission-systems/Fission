@@ -821,3 +821,83 @@ The runtime no longer has two separate x86-only readiness owners. `RuntimeSleigh
   1. generic `DecisionMatcher` probe vocabulary beyond x86-specific probe kinds
   2. `RuntimeParserWalker` / `RuntimeConstructState` extraction from x86 generated runtime
   3. template evaluation ownership migration from x86 semantic emitter helpers into shared spine contracts
+
+## 12. Runtime Processor Inventory Extraction
+
+### Scope
+
+- wave type:
+  - owner cleanup / behavior-preserving inventory migration
+- primary owner:
+  - `crates/fission-sleigh/src/runtime/registry.rs`
+  - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+  - `crates/fission-sleigh/src/runtime/spine/language.rs`
+- goal:
+  - remove non-x86 processor skeleton inventory from `runtime/processors/*`
+  - replace `PROCESSOR_SKELETONS` with a manifest-driven runtime registry
+  - keep only the first executable x86-64 consumer path under `runtime/processors/`
+
+### What changed
+
+- added manifest-driven runtime registry:
+  - `ProcessorDescriptor`
+  - `RuntimeVariantDescriptor`
+  - `RuntimeSupportLevel`
+  - `ExecutionProviderKey`
+  - `CompiledRuntimeRegistry`
+- registry source of truth is now the checked-in language manifest:
+  - `crates/fission-sleigh/specs/ghidra_language_manifest.json`
+- `ProcessorRuntimeProfile::from_entry()` no longer reads processor skeleton modules.
+  - It now resolves processor/module/endian/support from `runtime::registry`.
+- `RuntimeSleighFrontend` and runtime discovery now use registry-owned runtime status.
+- removed non-x86 processor skeleton source files from `runtime/processors/`.
+  - remaining files under `runtime/processors/` are now only:
+    - `mod.rs`
+    - `x86/mod.rs`
+    - `x86/generated.rs`
+- preserved fail-closed behavior:
+  - compile-only variants still return typed unsupported runtime errors
+  - x86-64 remains the only executable candidate path
+
+### Validation
+
+- `cargo fmt -p fission-sleigh`
+  - result: passed
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: passed
+- `git diff -- crates/fission-sleigh/generated`
+  - result: empty
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: passed
+- inventory audit:
+  - `find crates/fission-sleigh/src/runtime/processors -type f | sort`
+  - result:
+    - `crates/fission-sleigh/src/runtime/processors/mod.rs`
+    - `crates/fission-sleigh/src/runtime/processors/x86/mod.rs`
+    - `crates/fission-sleigh/src/runtime/processors/x86/generated.rs`
+- static audit:
+  - `rg -n "PROCESSOR_SKELETONS" crates/fission-sleigh/src`
+  - result: `0` matches
+
+### Result
+
+The non-x86 processor inventory is no longer represented as per-processor Rust skeleton files. Runtime processor/variant ownership now comes from the checked-in manifest through `runtime/registry.rs`. This makes the remaining `runtime/processors/` subtree an execution-only holdout for the first x86-64 consumer, which is the correct starting point for the next deletion wave.
+
+### Remaining risk / next owner
+
+- `runtime/processors/` still exists because x86-64 execution is still routed through:
+  - `runtime/processors/x86/mod.rs`
+  - `runtime/processors/x86/generated.rs`
+- provider extraction is still pending:
+  1. move x86 execution entrypoint to `runtime/providers/x86_64.rs`
+  2. delete `runtime/processors/x86/mod.rs`
+  3. then extract semantic owner out of `x86/generated.rs`

@@ -1,4 +1,5 @@
 mod processors;
+mod registry;
 mod spine;
 
 use std::collections::{BTreeSet, HashMap};
@@ -11,6 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::compiler::{
     compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
+};
+pub use registry::{
+    CompiledRuntimeRegistry, ExecutionProviderKey, ProcessorDescriptor, RuntimeFrontendDescriptor,
+    RuntimeSupportLevel, RuntimeVariantDescriptor,
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
 
@@ -75,23 +80,6 @@ pub struct RuntimeSleighFrontend {
     entry: EntrySpec,
     status: RuntimeFrontendStatus,
     compiled: Option<CompiledFrontend>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeFrontendDescriptor {
-    pub arch: String,
-    pub processor: String,
-    pub entry_spec: String,
-    pub entry_id: String,
-    pub language_ids: Vec<String>,
-    pub compatibility_aliases: Vec<String>,
-    pub generated_path: String,
-    pub status: RuntimeFrontendStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompiledRuntimeRegistry {
-    frontends: Vec<RuntimeFrontendDescriptor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,62 +177,6 @@ pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
         .is_terminal_control_flow(opcode)
 }
 
-impl CompiledRuntimeRegistry {
-    pub fn discover() -> Result<Self> {
-        let frontends = discover_all_entry_specs()?
-            .into_iter()
-            .map(|entry| RuntimeFrontendDescriptor {
-                generated_path: format!("{}/{}", entry.arch, entry.entry_id),
-                status: processors::status_for_entry(&entry),
-                processor: entry.arch.clone(),
-                arch: entry.arch,
-                entry_spec: entry.entry_spec,
-                entry_id: entry.entry_id,
-                language_ids: entry.language_ids,
-                compatibility_aliases: entry.compatibility_aliases,
-            })
-            .collect::<Vec<_>>();
-        validate_processor_skeleton_coverage(&frontends);
-        Ok(Self { frontends })
-    }
-
-    pub fn frontends(&self) -> &[RuntimeFrontendDescriptor] {
-        &self.frontends
-    }
-
-    pub fn lookup(&self, language_name: &str) -> Option<&RuntimeFrontendDescriptor> {
-        self.frontends.iter().find(|frontend| {
-            frontend.entry_id == language_name
-                || frontend.entry_spec == format!("{language_name}.slaspec")
-                || frontend.processor == language_name
-                || frontend.entry_id.eq_ignore_ascii_case(language_name)
-                || frontend.processor.eq_ignore_ascii_case(language_name)
-                || frontend
-                    .language_ids
-                    .iter()
-                    .any(|id| id == language_name || id.eq_ignore_ascii_case(language_name))
-                || frontend.compatibility_aliases.iter().any(|alias| {
-                    alias == language_name || alias.eq_ignore_ascii_case(language_name)
-                })
-        })
-    }
-}
-
-fn validate_processor_skeleton_coverage(frontends: &[RuntimeFrontendDescriptor]) {
-    let manifest_processors = frontends
-        .iter()
-        .map(|frontend| frontend.processor.as_str())
-        .collect::<BTreeSet<_>>();
-    let skeleton_processors = processors::PROCESSOR_SKELETONS
-        .iter()
-        .map(|skeleton| skeleton.ghidra_processor)
-        .collect::<BTreeSet<_>>();
-    debug_assert_eq!(skeleton_processors, manifest_processors);
-    debug_assert!(processors::PROCESSOR_SKELETONS
-        .iter()
-        .all(|skeleton| !skeleton.module_name.is_empty()));
-}
-
 fn entry_matches_language_name(entry: &EntrySpec, language_name: &str) -> bool {
     entry.entry_id == language_name
         || entry.entry_spec == format!("{language_name}.slaspec")
@@ -285,7 +217,7 @@ impl RuntimeSleighFrontend {
             .ok_or_else(|| {
                 anyhow!("Sleigh runtime frontend not registered for '{language_name}'")
             })?;
-        let status = processors::status_for_entry(&entry);
+        let status = registry::status_for_entry(&entry);
         let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
             Some(compile_frontend_for_entry_spec(&entry.path)?)
         } else {
@@ -740,6 +672,7 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn var(offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -786,25 +719,27 @@ mod tests {
     }
 
     #[test]
-    fn processor_skeletons_cover_all_ghidra_processors() {
+    fn runtime_registry_covers_all_ghidra_processors() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
         let manifest_processors = registry
             .frontends()
             .iter()
             .map(|frontend| frontend.processor.as_str())
             .collect::<BTreeSet<_>>();
-        let skeleton_processors = processors::PROCESSOR_SKELETONS
+        let registry_processors = registry
+            .processors()
             .iter()
-            .map(|skeleton| skeleton.ghidra_processor)
+            .map(|descriptor| descriptor.ghidra_processor.as_str())
             .collect::<BTreeSet<_>>();
 
         assert_eq!(manifest_processors.len(), 38);
-        assert_eq!(skeleton_processors, manifest_processors);
+        assert_eq!(registry_processors, manifest_processors);
         assert_eq!(
-            processors::PROCESSOR_SKELETONS
+            registry
+                .frontends()
                 .iter()
-                .filter(|skeleton| skeleton.executable_candidate)
-                .map(|skeleton| skeleton.ghidra_processor)
+                .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
+                .map(|frontend| frontend.processor.as_str())
                 .collect::<Vec<_>>(),
             vec!["x86"]
         );

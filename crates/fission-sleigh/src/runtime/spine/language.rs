@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::{compile_frontend_for_entry_spec, CompiledFrontend, EntrySpec};
-use crate::runtime::{processors, RuntimeFrontendStatus, RuntimeSleighError, UNIQUE_SPACE_ID};
+use crate::runtime::{registry, RuntimeFrontendStatus, RuntimeSleighError, UNIQUE_SPACE_ID};
 
 #[derive(Debug, Clone)]
 pub struct LanguageRuntime {
@@ -106,44 +106,16 @@ impl LanguageRuntime {
 
 impl ProcessorRuntimeProfile {
     pub fn from_entry(entry: &EntrySpec) -> Result<Self> {
-        let skeleton = processors::PROCESSOR_SKELETONS
-            .iter()
-            .find(|skeleton| skeleton.ghidra_processor == entry.arch)
-            .ok_or_else(|| anyhow!("missing runtime processor skeleton for {}", entry.arch))?;
+        let variant = registry::runtime_variant_for_entry(entry)?;
         Ok(Self {
-            ghidra_processor: skeleton.ghidra_processor.to_string(),
-            module_name: skeleton.module_name.to_string(),
+            ghidra_processor: variant.processor,
+            module_name: variant.module_name,
             entry_id: entry.entry_id.clone(),
             entry_spec: entry.entry_spec.clone(),
-            status: processors::status_for_entry(entry),
-            endian: infer_endian(entry),
+            status: variant.support_level.as_frontend_status(),
+            endian: variant.endian,
             addressable_unit_bytes: 1,
             unique_space_id: UNIQUE_SPACE_ID,
         })
-    }
-}
-
-fn infer_endian(entry: &EntrySpec) -> RuntimeEndian {
-    let haystack = std::iter::once(entry.entry_id.as_str())
-        .chain(std::iter::once(entry.entry_spec.as_str()))
-        .chain(entry.language_ids.iter().map(String::as_str))
-        .collect::<Vec<_>>()
-        .join(":")
-        .to_ascii_lowercase();
-    if haystack.contains(":be:")
-        || haystack.contains("_be")
-        || haystack.contains("-be")
-        || haystack.ends_with("be")
-    {
-        RuntimeEndian::Big
-    } else if haystack.contains(":le:")
-        || haystack.contains("_le")
-        || haystack.contains("-le")
-        || haystack.ends_with("le")
-        || haystack.contains("x86")
-    {
-        RuntimeEndian::Little
-    } else {
-        RuntimeEndian::Unknown
     }
 }
