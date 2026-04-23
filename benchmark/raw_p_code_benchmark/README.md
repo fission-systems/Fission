@@ -38,12 +38,26 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
   --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical-latest
 ```
 
+Target one feature slice from the same manifest:
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --feature relative_call \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/relative-call-latest
+```
+
 The aggregate output is:
 
 - `aggregate_raw_pcode_parity_report.json`
 
 Each manifest row also writes the normal per-window files under a row-named
 subdirectory.
+
+The aggregate manifest report now also includes:
+
+- `feature_totals`
+- `group_totals`
 
 Outputs:
 
@@ -64,13 +78,35 @@ The comparator currently reports:
 - `pcode_arity_mismatch`
 - `varnode_size_mismatch`
 - `varnode_space_mismatch`
+- `input_varnode_mismatch`
+- `output_varnode_mismatch`
+- `temp_space_mismatch`
+- `label_target_mismatch`
 - `ghidra_decode_error`
 - `fission_decode_error`
 - `compat_emitter_used`
 
-The expected workflow is targeted:
+## Manifest intent
 
-1. reproduce a bad decompiler row
-2. run this benchmark on the failing address
+`canonical_rows.json` keeps two surfaces at once:
+
+- legacy coarse rows for continuity with earlier waves
+- feature-isolated rows for owner-local debugging
+
+Each row can declare:
+
+- `feature_group`
+- `feature`
+- `owner`
+- `notes`
+
+The expected workflow is no longer just “run all rows.” It is:
+
+1. identify the failing owner family
+2. run `--feature` or `--group` against the manifest
 3. fix the raw p-code bucket first
-4. only then rerun the full decompiler benchmark
+4. then rerun the full canonical manifest
+5. only then rerun the full decompiler benchmark
+
+The goal is breadth with separation, not one giant startup row that mixes every
+problem family together.

@@ -97,8 +97,18 @@ def run_manifest(args: argparse.Namespace) -> int:
         rows = [row for row in rows if row.get("name") == args.row]
         if not rows:
             raise SystemExit(f"no row named {args.row!r} in {manifest_path}")
+    if args.feature:
+        rows = [row for row in rows if row.get("feature") == args.feature]
+        if not rows:
+            raise SystemExit(f"no row with feature {args.feature!r} in {manifest_path}")
+    if args.group:
+        rows = [row for row in rows if row.get("feature_group") == args.group]
+        if not rows:
+            raise SystemExit(f"no row with feature_group {args.group!r} in {manifest_path}")
 
     aggregate_totals: dict[str, int] = {}
+    feature_totals: dict[str, dict[str, int]] = {}
+    group_totals: dict[str, dict[str, int]] = {}
     row_reports = []
     for row in rows:
         binary = Path(row.get("binary", args.binary or ""))
@@ -106,6 +116,8 @@ def run_manifest(args: argparse.Namespace) -> int:
             raise SystemExit(f"row {row.get('name', '<unnamed>')} is missing binary")
         binary = binary if binary.is_absolute() else ROOT / binary
         row_name = row.get("name", f"0x{parse_int(str(row['addr'])):x}")
+        feature = row.get("feature", "unclassified")
+        feature_group = row.get("feature_group", "ungrouped")
         output_dir = args.output_dir / row_name
         report = run_one(
             binary=binary,
@@ -119,6 +131,10 @@ def run_manifest(args: argparse.Namespace) -> int:
         )
         for bucket, count in report["bucket_totals"].items():
             aggregate_totals[bucket] = aggregate_totals.get(bucket, 0) + int(count)
+            feature_bucket_totals = feature_totals.setdefault(feature, {})
+            feature_bucket_totals[bucket] = feature_bucket_totals.get(bucket, 0) + int(count)
+            group_bucket_totals = group_totals.setdefault(feature_group, {})
+            group_bucket_totals[bucket] = group_bucket_totals.get(bucket, 0) + int(count)
         first_mismatch = next(
             (entry for entry in report["rows"] if entry.get("buckets") != ["full_match"]),
             None,
@@ -126,6 +142,10 @@ def run_manifest(args: argparse.Namespace) -> int:
         row_reports.append(
             {
                 "name": row_name,
+                "feature": feature,
+                "feature_group": feature_group,
+                "owner": row.get("owner"),
+                "notes": row.get("notes"),
                 "binary": str(binary),
                 "addr": row["addr"],
                 "report": report["report"],
@@ -139,6 +159,14 @@ def run_manifest(args: argparse.Namespace) -> int:
         "manifest": str(manifest_path),
         "row_count": len(row_reports),
         "bucket_totals": dict(sorted(aggregate_totals.items())),
+        "feature_totals": {
+            feature: dict(sorted(buckets.items()))
+            for feature, buckets in sorted(feature_totals.items())
+        },
+        "group_totals": {
+            group: dict(sorted(buckets.items()))
+            for group, buckets in sorted(group_totals.items())
+        },
         "rows": row_reports,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +176,8 @@ def run_manifest(args: argparse.Namespace) -> int:
         "report": str(aggregate_path),
         "row_count": aggregate["row_count"],
         "bucket_totals": aggregate["bucket_totals"],
+        "feature_count": len(aggregate["feature_totals"]),
+        "group_count": len(aggregate["group_totals"]),
     }, indent=2, sort_keys=True))
     return 0
 
@@ -162,6 +192,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "benchmark/artifacts/raw_p_code_benchmark/latest")
     parser.add_argument("--manifest", type=Path, help="Run every row from a raw p-code parity manifest")
     parser.add_argument("--row", help="Run one named manifest row")
+    parser.add_argument("--feature", help="Run only rows matching one feature tag from the manifest")
+    parser.add_argument("--group", help="Run only rows matching one feature_group tag from the manifest")
     parser.add_argument("--no-analyze", action="store_true")
     parser.add_argument("--fission-release", action="store_true")
     args = parser.parse_args()

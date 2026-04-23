@@ -329,6 +329,64 @@ What still remains:
 - opcode/count mismatch totals did not decrease
 - startup/control-flow rows still diverge from Ghidra raw P-code because the
   mnemonic-family emitter remains the active semantic owner
+
+## 9. Raw P-code Benchmark Feature Expansion
+
+The raw P-code parity harness was expanded from a coarse 5-row gate into a
+feature-tagged manifest.
+
+Added benchmark capabilities:
+
+- manifest rows now carry:
+  - `feature_group`
+  - `feature`
+  - `owner`
+  - `notes`
+- `run_raw_pcode_parity.py` now supports:
+  - `--feature`
+  - `--group`
+- aggregate reports now emit:
+  - `feature_totals`
+  - `group_totals`
+- comparator buckets now include more explicit varnode/target classes:
+  - `input_varnode_mismatch`
+  - `output_varnode_mismatch`
+  - `temp_space_mismatch`
+  - `label_target_mismatch`
+
+Expanded canonical manifest:
+
+- legacy coarse rows were kept for continuity
+- feature-isolated rows were added for:
+  - `stack_prologue_sub`
+  - `rip_relative_load`
+  - `memory_store_imm`
+  - `relative_call`
+  - `relative_jump`
+  - `return`
+  - `lea`
+  - `compare`
+  - `push_prologue`
+  - `cmp_and_jcc`
+  - `unsupported_template`
+
+Validation:
+
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+  - passed
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --feature return --output-dir benchmark/artifacts/raw_p_code_benchmark/feature-return-check`
+  - passed
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --output-dir benchmark/artifacts/raw_p_code_benchmark/20260424_feature_expanded`
+  - passed
+
+Expanded aggregate readout:
+
+- `row_count = 17`
+- `feature_count = 14`
+- `group_count = 7`
+
+This does not claim semantic parity. It changes the benchmark surface so the next
+runtime work can be sliced by owner family instead of by one mixed startup row.
   - result: passed
 - `cargo run -p fission-sleigh --example raw_pcode_probe -- ...`
   - result: emitted JSON raw P-code for `0x140001450`

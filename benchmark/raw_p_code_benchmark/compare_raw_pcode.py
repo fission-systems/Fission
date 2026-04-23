@@ -53,6 +53,51 @@ def normalize_ops(instruction: dict[str, Any]) -> list[dict[str, Any]]:
     return ops
 
 
+BRANCH_LIKE_OPCODES = {
+    "BRANCH",
+    "CBRANCH",
+    "CALL",
+    "BRANCHIND",
+    "CALLIND",
+    "RETURN",
+}
+
+
+def classify_varnode_delta(
+    *,
+    opcode: str,
+    side: str,
+    index: int | None,
+    ghidra: dict[str, Any] | None,
+    fission: dict[str, Any] | None,
+) -> tuple[str, str]:
+    g_space = ghidra.get("space") if ghidra else None
+    f_space = fission.get("space") if fission else None
+    if g_space != f_space:
+        if "unique" in {g_space, f_space}:
+            return "temp_space_mismatch", "space"
+        return "varnode_space_mismatch", "space"
+
+    g_size = ghidra.get("size") if ghidra else None
+    f_size = fission.get("size") if fission else None
+    if g_size != f_size:
+        return "varnode_size_mismatch", "size"
+
+    if opcode in BRANCH_LIKE_OPCODES and side == "input" and index == 0:
+        g_value = ghidra.get("value", ghidra.get("offset")) if ghidra else None
+        f_value = fission.get("value", fission.get("offset")) if fission else None
+        if g_value != f_value:
+            return "label_target_mismatch", "value"
+
+    if (ghidra or {}).get("space") == "unique":
+        if ghidra != fission:
+            return "temp_space_mismatch", "value"
+
+    if side == "output":
+        return "output_varnode_mismatch", "value"
+    return "input_varnode_mismatch", "value"
+
+
 def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | None) -> tuple[list[str], dict[str, Any]]:
     buckets: list[str] = []
     detail: dict[str, Any] = {}
@@ -111,24 +156,36 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
             buckets.append("pcode_arity_mismatch")
             detail.setdefault("first_arity_mismatch", {"index": idx, "ghidra": gop, "fission": fop})
             break
-        if [v.get("size") if v else None for v in gop["inputs"]] != [
-            v.get("size") if v else None for v in fop["inputs"]
-        ]:
-            buckets.append("varnode_size_mismatch")
-            detail.setdefault("first_size_mismatch", {"index": idx, "ghidra": gop, "fission": fop})
-            break
-        g_out_size = gop["output"].get("size") if gop["output"] else None
-        f_out_size = fop["output"].get("size") if fop["output"] else None
-        if g_out_size != f_out_size:
-            buckets.append("varnode_size_mismatch")
-            detail.setdefault("first_size_mismatch", {"index": idx, "ghidra": gop, "fission": fop})
-            break
-        if [v.get("space") if v else None for v in gop["inputs"]] != [
-            v.get("space") if v else None for v in fop["inputs"]
-        ]:
-            buckets.append("varnode_space_mismatch")
-            detail.setdefault("first_space_mismatch", {"index": idx, "ghidra": gop, "fission": fop})
-            break
+        for input_index, (g_in, f_in) in enumerate(zip(gop["inputs"], fop["inputs"])):
+            if g_in != f_in:
+                bucket, mismatch_kind = classify_varnode_delta(
+                    opcode=gop["opcode"],
+                    side="input",
+                    index=input_index,
+                    ghidra=g_in,
+                    fission=f_in,
+                )
+                buckets.append(bucket)
+                detail.setdefault(
+                    f"first_{mismatch_kind}_mismatch",
+                    {"index": idx, "operand_index": input_index, "ghidra": gop, "fission": fop},
+                )
+                break
+        else:
+            if gop["output"] != fop["output"]:
+                bucket, mismatch_kind = classify_varnode_delta(
+                    opcode=gop["opcode"],
+                    side="output",
+                    index=None,
+                    ghidra=gop["output"],
+                    fission=fop["output"],
+                )
+                buckets.append(bucket)
+                detail.setdefault(
+                    f"first_{mismatch_kind}_mismatch",
+                    {"index": idx, "ghidra": gop, "fission": fop},
+                )
+                break
 
     if not buckets:
         buckets.append("full_match")
