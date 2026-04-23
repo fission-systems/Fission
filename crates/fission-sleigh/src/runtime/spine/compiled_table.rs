@@ -823,8 +823,7 @@ impl CompiledTableEmitter {
 
 impl RuntimeSemanticEmitter for CompiledTableEmitter {
     fn emit_return(&mut self) -> Result<()> {
-        self.push(PcodeOpcode::Return, None, Vec::new(), "RET");
-        Ok(())
+        self.emitter.emit_return("RET")
     }
 
     fn emit_call(&mut self, state: &RuntimeConstructState) -> Result<()> {
@@ -919,7 +918,7 @@ impl RuntimeSemanticEmitter for CompiledTableEmitter {
 impl CompiledTableEmitter {
     fn emit_call(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
         let target = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
-        self.push(PcodeOpcode::Call, None, vec![target], "CALL");
+        self.emitter.emit_call(target, "CALL")?;
         Ok(())
     }
 
@@ -928,11 +927,11 @@ impl CompiledTableEmitter {
         match operand {
             BoundOperand::Relative { .. } => {
                 let target = self.read_operand(operand, 8, instruction.length)?;
-                self.push(PcodeOpcode::Branch, None, vec![target], "JMP");
+                self.emitter.emit_branch(target, "JMP")?;
             }
             _ => {
                 let target = self.read_operand(operand, 8, instruction.length)?;
-                self.push(PcodeOpcode::BranchInd, None, vec![target], "JMP");
+                self.emitter.emit_branch_ind(target, "JMP")?;
             }
         }
         Ok(())
@@ -945,7 +944,7 @@ impl CompiledTableEmitter {
                 .condition_code
                 .ok_or_else(|| anyhow!("missing jcc condition"))?,
         )?;
-        self.push(PcodeOpcode::CBranch, None, vec![target, cond], "JCC");
+        self.emitter.emit_cbranch(target, cond, "JCC")?;
         Ok(())
     }
 
@@ -980,19 +979,11 @@ impl CompiledTableEmitter {
         let value = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
         let rsp = gpr(4, 8);
         let new_rsp = self.tmp(8);
-        self.push(
-            PcodeOpcode::IntSub,
-            Some(new_rsp.clone()),
-            vec![rsp.clone(), const_u64(8, 8)],
-            "PUSH",
-        );
-        self.push(PcodeOpcode::Copy, Some(rsp), vec![new_rsp.clone()], "PUSH");
-        self.push(
-            PcodeOpcode::Store,
-            None,
-            vec![const_u64(0, 8), new_rsp, value],
-            "PUSH",
-        );
+        self.emitter
+            .emit_int_binop(PcodeOpcode::IntSub, new_rsp.clone(), rsp.clone(), const_u64(8, 8), "PUSH")?;
+        self.emitter.emit_copy(rsp, new_rsp.clone(), "PUSH")?;
+        self.emitter
+            .emit_store(const_u64(0, 8), new_rsp, value, "PUSH")?;
         Ok(())
     }
 
@@ -1000,12 +991,8 @@ impl CompiledTableEmitter {
         let rsp = gpr(4, 8);
         let size = operand_size(&instruction.operands[0]).max(8);
         let value = self.tmp(size);
-        self.push(
-            PcodeOpcode::Load,
-            Some(value.clone()),
-            vec![const_u64(0, 8), rsp.clone()],
-            "POP",
-        );
+        self.emitter
+            .emit_load(value.clone(), const_u64(0, 8), rsp.clone(), "POP")?;
         self.write_operand(
             &instruction.operands[0],
             value,
@@ -1013,33 +1000,21 @@ impl CompiledTableEmitter {
             instruction.length,
             "POP",
         )?;
-        self.push(
-            PcodeOpcode::IntAdd,
-            Some(rsp.clone()),
-            vec![rsp, const_u64(8, 8)],
-            "POP",
-        );
+        self.emitter
+            .emit_int_binop(PcodeOpcode::IntAdd, rsp.clone(), rsp, const_u64(8, 8), "POP")?;
         Ok(())
     }
 
     fn emit_frame_teardown_op(&mut self) -> Result<()> {
         let rsp = gpr(4, 8);
         let rbp = gpr(5, 8);
-        self.push(PcodeOpcode::Copy, Some(rsp.clone()), vec![rbp], "LEAVE");
+        self.emitter.emit_copy(rsp.clone(), rbp, "LEAVE")?;
         let value = self.tmp(8);
-        self.push(
-            PcodeOpcode::Load,
-            Some(value.clone()),
-            vec![const_u64(0, 8), rsp.clone()],
-            "LEAVE",
-        );
-        self.push(PcodeOpcode::Copy, Some(gpr(5, 8)), vec![value], "LEAVE");
-        self.push(
-            PcodeOpcode::IntAdd,
-            Some(rsp.clone()),
-            vec![rsp, const_u64(8, 8)],
-            "LEAVE",
-        );
+        self.emitter
+            .emit_load(value.clone(), const_u64(0, 8), rsp.clone(), "LEAVE")?;
+        self.emitter.emit_copy(gpr(5, 8), value, "LEAVE")?;
+        self.emitter
+            .emit_int_binop(PcodeOpcode::IntAdd, rsp.clone(), rsp, const_u64(8, 8), "LEAVE")?;
         Ok(())
     }
 
@@ -1053,7 +1028,8 @@ impl CompiledTableEmitter {
         let lhs = self.read_operand(&instruction.operands[0], size, instruction.length)?;
         let rhs = self.read_operand(&instruction.operands[1], size, instruction.length)?;
         let result = self.tmp(size);
-        self.push(opcode, Some(result.clone()), vec![lhs, rhs], tag);
+        self.emitter
+            .emit_int_binop(opcode, result.clone(), lhs, rhs, tag)?;
         self.write_operand(
             &instruction.operands[0],
             result.clone(),
@@ -1061,7 +1037,7 @@ impl CompiledTableEmitter {
             instruction.length,
             tag,
         )?;
-        self.emit_basic_result_flags(result, size, tag);
+        self.emit_basic_result_flags(result, size, tag)?;
         Ok(())
     }
 
@@ -1079,7 +1055,8 @@ impl CompiledTableEmitter {
         } else {
             (PcodeOpcode::IntSub, const_u64(delta.unsigned_abs(), size))
         };
-        self.push(opcode, Some(result.clone()), vec![lhs, rhs], tag);
+        self.emitter
+            .emit_int_binop(opcode, result.clone(), lhs, rhs, tag)?;
         self.write_operand(
             &instruction.operands[0],
             result.clone(),
@@ -1087,7 +1064,7 @@ impl CompiledTableEmitter {
             instruction.length,
             tag,
         )?;
-        self.emit_basic_result_flags(result, size, tag);
+        self.emit_basic_result_flags(result, size, tag)?;
         Ok(())
     }
 
@@ -1102,25 +1079,27 @@ impl CompiledTableEmitter {
         let lhs = self.read_operand(&instruction.operands[0], size, instruction.length)?;
         let rhs = self.read_operand(&instruction.operands[1], size, instruction.length)?;
         let result = self.tmp(size);
-        self.push(
+        self.emitter.emit_int_binop(
             if bitwise {
                 PcodeOpcode::IntAnd
             } else {
                 PcodeOpcode::IntSub
             },
-            Some(result.clone()),
-            vec![lhs.clone(), rhs.clone()],
+            result.clone(),
+            lhs.clone(),
+            rhs.clone(),
             tag,
-        );
-        self.emit_basic_result_flags(result, size, tag);
+        )?;
+        self.emit_basic_result_flags(result, size, tag)?;
         let cf_value = if bitwise {
             const_u64(0, 1)
         } else {
             let cf = self.tmp(1);
-            self.push(PcodeOpcode::IntLess, Some(cf.clone()), vec![lhs, rhs], tag);
+            self.emitter
+                .emit_int_binop(PcodeOpcode::IntLess, cf.clone(), lhs, rhs, tag)?;
             cf
         };
-        self.push(PcodeOpcode::Copy, Some(flag(0)), vec![cf_value], tag);
+        self.emitter.emit_copy(flag(0), cf_value, tag)?;
         Ok(())
     }
 
@@ -1134,7 +1113,7 @@ impl CompiledTableEmitter {
         let src_size = operand_size(&instruction.operands[1]);
         let src = self.read_operand(&instruction.operands[1], src_size, instruction.length)?;
         let out = self.tmp(dst_size);
-        self.push(opcode, Some(out.clone()), vec![src], tag);
+        self.emitter.emit_int_unop(opcode, out.clone(), src, tag)?;
         self.write_operand(
             &instruction.operands[0],
             out,
@@ -1160,67 +1139,67 @@ impl CompiledTableEmitter {
     }
 
     fn emit_accumulator_extend(&mut self, src_size: u32, dst_size: u32, tag: &str) -> Result<()> {
-        self.push(
-            PcodeOpcode::IntSExt,
-            Some(gpr(0, dst_size)),
-            vec![gpr(0, src_size)],
-            tag,
-        );
+        self.emitter
+            .emit_int_unop(PcodeOpcode::IntSExt, gpr(0, dst_size), gpr(0, src_size), tag)?;
         Ok(())
     }
 
     fn status_predicate_varnode(&mut self, condition_code: u8) -> Result<Varnode> {
-        Ok(match condition_code {
+        let value = match condition_code {
             0x0 => flag(11),
-            0x1 => self.bool_not(flag(11), "JNO_PRED"),
+            0x1 => self.bool_not(flag(11), "JNO_PRED")?,
             0x2 => flag(0),
-            0x3 => self.bool_not(flag(0), "JAE_PRED"),
+            0x3 => self.bool_not(flag(0), "JAE_PRED")?,
             0x4 => flag(6),
-            0x5 => self.bool_not(flag(6), "JNE_PRED"),
-            0x6 => self.bool_or(flag(0), flag(6), "JBE_PRED"),
+            0x5 => self.bool_not(flag(6), "JNE_PRED")?,
+            0x6 => self.bool_or(flag(0), flag(6), "JBE_PRED")?,
             0x7 => {
-                let ncf = self.bool_not(flag(0), "JA_NCF");
-                let nzf = self.bool_not(flag(6), "JA_NZF");
-                self.bool_and(ncf, nzf, "JA_PRED")
+                let ncf = self.bool_not(flag(0), "JA_NCF")?;
+                let nzf = self.bool_not(flag(6), "JA_NZF")?;
+                self.bool_and(ncf, nzf, "JA_PRED")?
             }
             0x8 => flag(7),
-            0x9 => self.bool_not(flag(7), "JNS_PRED"),
+            0x9 => self.bool_not(flag(7), "JNS_PRED")?,
             0xA => flag(2),
-            0xB => self.bool_not(flag(2), "JNP_PRED"),
-            0xC => self.bool_ne(flag(7), flag(11), "JL_PRED"),
-            0xD => self.bool_eq(flag(7), flag(11), "JGE_PRED"),
+            0xB => self.bool_not(flag(2), "JNP_PRED")?,
+            0xC => self.bool_ne(flag(7), flag(11), "JL_PRED")?,
+            0xD => self.bool_eq(flag(7), flag(11), "JGE_PRED")?,
             0xE => {
-                let lt = self.bool_ne(flag(7), flag(11), "JLE_LT_CORE");
-                self.bool_or(flag(6), lt, "JLE_PRED")
+                let lt = self.bool_ne(flag(7), flag(11), "JLE_LT_CORE")?;
+                self.bool_or(flag(6), lt, "JLE_PRED")?
             }
             0xF => {
-                let ge = self.bool_eq(flag(7), flag(11), "JG_GE_CORE");
-                let nz = self.bool_not(flag(6), "JG_NZ");
-                self.bool_and(ge, nz, "JG_PRED")
+                let ge = self.bool_eq(flag(7), flag(11), "JG_GE_CORE")?;
+                let nz = self.bool_not(flag(6), "JG_NZ")?;
+                self.bool_and(ge, nz, "JG_PRED")?
             }
             _ => bail!("unsupported condition code {condition_code}"),
-        })
+        };
+        Ok(value)
     }
 
-    fn emit_basic_result_flags(&mut self, result: Varnode, size: u32, tag: &str) {
+    fn emit_basic_result_flags(&mut self, result: Varnode, size: u32, tag: &str) -> Result<()> {
         let zf = self.tmp(1);
-        self.push(
+        self.emitter.emit_int_binop(
             PcodeOpcode::IntEqual,
-            Some(zf.clone()),
-            vec![result.clone(), const_u64(0, size)],
+            zf.clone(),
+            result.clone(),
+            const_u64(0, size),
             tag,
-        );
-        self.push(PcodeOpcode::Copy, Some(flag(6)), vec![zf], tag);
+        )?;
+        self.emitter.emit_copy(flag(6), zf, tag)?;
 
         let shift = size.saturating_mul(8).saturating_sub(1);
         let sf = self.tmp(1);
-        self.push(
+        self.emitter.emit_int_binop(
             PcodeOpcode::IntRight,
-            Some(sf.clone()),
-            vec![result, const_u64(u64::from(shift), size)],
+            sf.clone(),
+            result,
+            const_u64(u64::from(shift), size),
             tag,
-        );
-        self.push(PcodeOpcode::Copy, Some(flag(7)), vec![sf], tag);
+        )?;
+        self.emitter.emit_copy(flag(7), sf, tag)?;
+        Ok(())
     }
 
     fn read_operand(
@@ -1237,12 +1216,8 @@ impl CompiledTableEmitter {
             BoundOperand::Memory { .. } => {
                 let addr = self.effective_address(operand, instruction_len)?;
                 let out = self.tmp(expected_size);
-                self.push(
-                    PcodeOpcode::Load,
-                    Some(out.clone()),
-                    vec![const_u64(0, 8), addr],
-                    "LOAD",
-                );
+                self.emitter
+                    .emit_load(out.clone(), const_u64(0, 8), addr, "LOAD")?;
                 Ok(out)
             }
             BoundOperand::Immediate {
@@ -1271,22 +1246,13 @@ impl CompiledTableEmitter {
     ) -> Result<()> {
         match operand {
             BoundOperand::Register { index, size } => {
-                self.push(
-                    PcodeOpcode::Copy,
-                    Some(gpr(u64::from(*index), *size)),
-                    vec![value],
-                    tag,
-                );
+                self.emitter
+                    .emit_copy(gpr(u64::from(*index), *size), value, tag)?;
                 Ok(())
             }
             BoundOperand::Memory { .. } => {
                 let addr = self.effective_address(operand, instruction_len)?;
-                self.push(
-                    PcodeOpcode::Store,
-                    None,
-                    vec![const_u64(0, 8), addr, value],
-                    tag,
-                );
+                self.emitter.emit_store(const_u64(0, 8), addr, value, tag)?;
                 Ok(())
             }
             _ => bail!("unsupported write operand"),
@@ -1322,12 +1288,13 @@ impl CompiledTableEmitter {
                 let idx = gpr(u64::from(*index), 8);
                 if *scale > 1 {
                     let scaled = self.tmp(8);
-                    self.push(
+                    self.emitter.emit_int_binop(
                         PcodeOpcode::IntMult,
-                        Some(scaled.clone()),
-                        vec![idx, const_u64(u64::from(*scale), 8)],
+                        scaled.clone(),
+                        idx,
+                        const_u64(u64::from(*scale), 8),
                         "EA_SCALE",
-                    );
+                    )?;
                     terms.push(scaled);
                 } else {
                     terms.push(idx);
@@ -1339,12 +1306,13 @@ impl CompiledTableEmitter {
                     let rhs = terms.pop().unwrap();
                     let lhs = terms.pop().unwrap();
                     let tmp = self.tmp(8);
-                    self.push(
+                    self.emitter.emit_int_binop(
                         PcodeOpcode::IntSub,
-                        Some(tmp.clone()),
-                        vec![lhs, rhs],
+                        tmp.clone(),
+                        lhs,
+                        rhs,
                         "EA_DISP",
-                    );
+                    )?;
                     terms.push(tmp);
                 }
             }
@@ -1356,12 +1324,13 @@ impl CompiledTableEmitter {
         };
         for term in iter {
             let next = self.tmp(8);
-            self.push(
+            self.emitter.emit_int_binop(
                 PcodeOpcode::IntAdd,
-                Some(next.clone()),
-                vec![acc, term],
+                next.clone(),
+                acc,
+                term,
                 "EA_ADD",
-            );
+            )?;
             acc = next;
         }
         Ok(acc)
@@ -1371,54 +1340,49 @@ impl CompiledTableEmitter {
         self.emitter.tmp(UNIQUE_SPACE_ID, size)
     }
 
-    fn bool_not(&mut self, input: Varnode, tag: &str) -> Varnode {
+    fn bool_not(&mut self, input: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.push(PcodeOpcode::BoolNegate, Some(out.clone()), vec![input], tag);
-        out
+        self.emitter
+            .emit_int_unop(PcodeOpcode::BoolNegate, out.clone(), input, tag)?;
+        Ok(out)
     }
 
-    fn bool_and(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Varnode {
+    fn bool_and(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.push(PcodeOpcode::BoolAnd, Some(out.clone()), vec![lhs, rhs], tag);
-        out
+        self.emitter
+            .emit_int_binop(PcodeOpcode::BoolAnd, out.clone(), lhs, rhs, tag)?;
+        Ok(out)
     }
 
-    fn bool_or(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Varnode {
+    fn bool_or(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.push(PcodeOpcode::BoolOr, Some(out.clone()), vec![lhs, rhs], tag);
-        out
+        self.emitter
+            .emit_int_binop(PcodeOpcode::BoolOr, out.clone(), lhs, rhs, tag)?;
+        Ok(out)
     }
 
-    fn bool_eq(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Varnode {
+    fn bool_eq(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.push(
+        self.emitter.emit_int_binop(
             PcodeOpcode::IntEqual,
-            Some(out.clone()),
-            vec![lhs, rhs],
+            out.clone(),
+            lhs,
+            rhs,
             tag,
-        );
-        out
+        )?;
+        Ok(out)
     }
 
-    fn bool_ne(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Varnode {
+    fn bool_ne(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
-        self.push(
+        self.emitter.emit_int_binop(
             PcodeOpcode::IntNotEqual,
-            Some(out.clone()),
-            vec![lhs, rhs],
+            out.clone(),
+            lhs,
+            rhs,
             tag,
-        );
-        out
-    }
-
-    fn push(
-        &mut self,
-        opcode: PcodeOpcode,
-        output: Option<Varnode>,
-        inputs: Vec<Varnode>,
-        mnemonic: &str,
-    ) {
-        self.emitter.push(opcode, output, inputs, mnemonic);
+        )?;
+        Ok(out)
     }
 }
 

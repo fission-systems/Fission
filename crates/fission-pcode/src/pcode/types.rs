@@ -3,7 +3,7 @@
 //! This module provides Rust structures for Ghidra's Pcode IR,
 //! enabling direct optimization at the Pcode level before C generation.
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Serialize};
 
 /// Pcode operation code (opcode)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -450,6 +450,357 @@ pub struct PcodeOp {
     pub asm_mnemonic: Option<String>, // Assembly instruction mnemonic
 }
 
+/// Architecture-independent structural contract for a P-code opcode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PcodeShapeContract {
+    pub output: PcodeOutputContract,
+    pub inputs: PcodeInputContract,
+    pub category: PcodeOpCategory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcodeOutputContract {
+    Required,
+    Forbidden,
+    Optional,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcodeInputContract {
+    Exact(usize),
+    Range { min: usize, max: Option<usize> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcodeOpCategory {
+    DataFlow,
+    ControlFlow,
+    SideEffect,
+    Phi,
+    Metadata,
+}
+
+/// Structural P-code validation failure. Semantic parity mistakes are tracked
+/// separately; these errors mean the operation shape itself is invalid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PcodeValidationError {
+    UnknownOpcode {
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+        seq_num: u32,
+    },
+    MissingOutput {
+        opcode: PcodeOpcode,
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+        seq_num: u32,
+    },
+    UnexpectedOutput {
+        opcode: PcodeOpcode,
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+        seq_num: u32,
+    },
+    WrongInputCount {
+        opcode: PcodeOpcode,
+        expected: PcodeInputContract,
+        actual: usize,
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+        seq_num: u32,
+    },
+    InvalidVarnodeSize {
+        opcode: PcodeOpcode,
+        role: &'static str,
+        size: u32,
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+        seq_num: u32,
+    },
+}
+
+impl std::fmt::Display for PcodeValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownOpcode { seq_num, .. } => {
+                write!(f, "InvalidPcodeShape: unknown opcode at seq {seq_num}")
+            }
+            Self::MissingOutput {
+                opcode, seq_num, ..
+            } => write!(
+                f,
+                "InvalidPcodeShape: {opcode:?} at seq {seq_num} requires an output"
+            ),
+            Self::UnexpectedOutput {
+                opcode, seq_num, ..
+            } => write!(
+                f,
+                "InvalidPcodeShape: {opcode:?} at seq {seq_num} forbids an output"
+            ),
+            Self::WrongInputCount {
+                opcode,
+                expected,
+                actual,
+                seq_num,
+                ..
+            } => write!(
+                f,
+                "InvalidPcodeShape: {opcode:?} at seq {seq_num} has {actual} inputs, expected {expected:?}"
+            ),
+            Self::InvalidVarnodeSize {
+                opcode,
+                role,
+                size,
+                seq_num,
+                ..
+            } => write!(
+                f,
+                "InvalidPcodeShape: {opcode:?} at seq {seq_num} has invalid {role} varnode size {size}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PcodeValidationError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedPcodeFunction {
+    inner: PcodeFunction,
+}
+
+impl ValidatedPcodeFunction {
+    pub fn new(function: PcodeFunction) -> Result<Self, PcodeValidationError> {
+        function.validate()?;
+        Ok(Self { inner: function })
+    }
+
+    #[must_use]
+    pub fn as_raw(&self) -> &PcodeFunction {
+        &self.inner
+    }
+
+    #[must_use]
+    pub fn into_raw(self) -> PcodeFunction {
+        self.inner
+    }
+}
+
+impl PcodeInputContract {
+    #[must_use]
+    pub fn accepts(self, actual: usize) -> bool {
+        match self {
+            Self::Exact(expected) => actual == expected,
+            Self::Range { min, max } => actual >= min && max.is_none_or(|max| actual <= max),
+        }
+    }
+}
+
+impl PcodeOpcode {
+    #[must_use]
+    pub const fn shape_contract(self) -> Option<PcodeShapeContract> {
+        use PcodeInputContract::{Exact, Range};
+        use PcodeOpCategory::{ControlFlow, DataFlow, Metadata, Phi, SideEffect};
+        use PcodeOutputContract::{Forbidden, Optional, Required};
+
+        let binary_data = PcodeShapeContract {
+            output: Required,
+            inputs: Exact(2),
+            category: DataFlow,
+        };
+        let unary_data = PcodeShapeContract {
+            output: Required,
+            inputs: Exact(1),
+            category: DataFlow,
+        };
+
+        Some(match self {
+            Self::Unknown => return None,
+            Self::Copy | Self::Cast | Self::IntZExt | Self::IntSExt | Self::Int2Comp
+            | Self::IntNegate | Self::BoolNegate | Self::FloatNeg | Self::FloatAbs
+            | Self::FloatSqrt | Self::FloatInt2Float | Self::FloatFloat2Float
+            | Self::FloatTrunc | Self::FloatCeil | Self::FloatFloor | Self::FloatRound
+            | Self::PopCount => unary_data,
+            Self::IntEqual | Self::IntNotEqual | Self::IntSLess | Self::IntSLessEqual
+            | Self::IntLess | Self::IntLessEqual | Self::IntAdd | Self::IntSub
+            | Self::IntCarry | Self::IntSCarry | Self::IntSBorrow | Self::IntXor
+            | Self::IntAnd | Self::IntOr | Self::IntLeft | Self::IntRight
+            | Self::IntSRight | Self::IntMult | Self::IntDiv | Self::IntSDiv
+            | Self::IntRem | Self::IntSRem | Self::BoolXor | Self::BoolAnd
+            | Self::BoolOr | Self::FloatEqual | Self::FloatNotEqual | Self::FloatLess
+            | Self::FloatLessEqual | Self::FloatAdd | Self::FloatDiv | Self::FloatMult
+            | Self::FloatSub | Self::Piece | Self::SubPiece | Self::PtrSub => binary_data,
+            Self::Load => PcodeShapeContract {
+                output: Required,
+                inputs: Exact(2),
+                category: SideEffect,
+            },
+            Self::Store => PcodeShapeContract {
+                output: Forbidden,
+                // Fission's raw DTO historically stores the address-space either
+                // implicitly (addr, value) or explicitly (space, addr, value).
+                inputs: Range {
+                    min: 2,
+                    max: Some(3),
+                },
+                category: SideEffect,
+            },
+            Self::Branch | Self::BranchInd => PcodeShapeContract {
+                output: Forbidden,
+                inputs: Range {
+                    min: 1,
+                    max: Some(2),
+                },
+                category: ControlFlow,
+            },
+            Self::Call | Self::CallInd => PcodeShapeContract {
+                output: Forbidden,
+                // Fission carries recovered call arguments after the target in
+                // the compatibility DTO. The shape invariant is target-present
+                // and no output; arity strictness for arguments belongs above.
+                inputs: Range { min: 1, max: None },
+                category: ControlFlow,
+            },
+            // Fission historically permits RETURN without an explicit destination.
+            // The important structural invariant here is that RETURN never writes.
+            Self::Return => PcodeShapeContract {
+                output: Forbidden,
+                inputs: Range {
+                    min: 0,
+                    max: Some(2),
+                },
+                category: ControlFlow,
+            },
+            Self::CBranch => PcodeShapeContract {
+                output: Forbidden,
+                inputs: Range {
+                    min: 2,
+                    max: Some(3),
+                },
+                category: ControlFlow,
+            },
+            Self::CallOther => PcodeShapeContract {
+                output: Optional,
+                inputs: Range { min: 1, max: None },
+                category: ControlFlow,
+            },
+            Self::MultiEqual => PcodeShapeContract {
+                output: Required,
+                inputs: Range { min: 1, max: None },
+                category: Phi,
+            },
+            Self::Indirect => PcodeShapeContract {
+                output: Required,
+                inputs: Exact(2),
+                category: Metadata,
+            },
+            Self::PtrAdd => PcodeShapeContract {
+                output: Required,
+                inputs: Exact(3),
+                category: DataFlow,
+            },
+            Self::SegmentOp => PcodeShapeContract {
+                output: Required,
+                inputs: Range { min: 2, max: None },
+                category: DataFlow,
+            },
+            Self::CPoolRef | Self::New => PcodeShapeContract {
+                output: Required,
+                inputs: Range { min: 1, max: None },
+                category: DataFlow,
+            },
+            Self::Insert => PcodeShapeContract {
+                output: Required,
+                inputs: Exact(4),
+                category: DataFlow,
+            },
+            Self::Extract => PcodeShapeContract {
+                output: Required,
+                inputs: Exact(3),
+                category: DataFlow,
+            },
+            Self::FloatNan => unary_data,
+        })
+    }
+}
+
+impl PcodeOp {
+    pub fn validate_shape_at(
+        &self,
+        block_index: Option<u32>,
+        op_index: Option<usize>,
+    ) -> Result<(), PcodeValidationError> {
+        let Some(contract) = self.opcode.shape_contract() else {
+            return Err(PcodeValidationError::UnknownOpcode {
+                block_index,
+                op_index,
+                seq_num: self.seq_num,
+            });
+        };
+
+        match (contract.output, self.output.as_ref()) {
+            (PcodeOutputContract::Required, None) => {
+                return Err(PcodeValidationError::MissingOutput {
+                    opcode: self.opcode,
+                    block_index,
+                    op_index,
+                    seq_num: self.seq_num,
+                });
+            }
+            (PcodeOutputContract::Forbidden, Some(_)) => {
+                return Err(PcodeValidationError::UnexpectedOutput {
+                    opcode: self.opcode,
+                    block_index,
+                    op_index,
+                    seq_num: self.seq_num,
+                });
+            }
+            _ => {}
+        }
+
+        if !contract.inputs.accepts(self.inputs.len()) {
+            return Err(PcodeValidationError::WrongInputCount {
+                opcode: self.opcode,
+                expected: contract.inputs,
+                actual: self.inputs.len(),
+                block_index,
+                op_index,
+                seq_num: self.seq_num,
+            });
+        }
+
+        if let Some(output) = &self.output {
+            if output.size == 0 {
+                return Err(PcodeValidationError::InvalidVarnodeSize {
+                    opcode: self.opcode,
+                    role: "output",
+                    size: output.size,
+                    block_index,
+                    op_index,
+                    seq_num: self.seq_num,
+                });
+            }
+        }
+        for input in &self.inputs {
+            if input.size == 0 {
+                return Err(PcodeValidationError::InvalidVarnodeSize {
+                    opcode: self.opcode,
+                    role: "input",
+                    size: input.size,
+                    block_index,
+                    op_index,
+                    seq_num: self.seq_num,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn validate_shape(&self) -> Result<(), PcodeValidationError> {
+        self.validate_shape_at(None, None)
+    }
+}
+
 /// Basic block of Pcode operations
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcodeBasicBlock {
@@ -467,6 +818,19 @@ pub struct PcodeFunction {
 }
 
 impl PcodeFunction {
+    pub fn validate(&self) -> Result<(), PcodeValidationError> {
+        for block in &self.blocks {
+            for (op_index, op) in block.ops.iter().enumerate() {
+                op.validate_shape_at(Some(block.index), Some(op_index))?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn into_validated(self) -> Result<ValidatedPcodeFunction, PcodeValidationError> {
+        ValidatedPcodeFunction::new(self)
+    }
+
     #[must_use]
     pub fn has_indirect_control_flow(&self) -> bool {
         self.blocks
@@ -563,7 +927,11 @@ impl PcodeFunction {
             })
             .collect();
 
-        Ok(PcodeFunction { blocks })
+        let function = PcodeFunction { blocks };
+        function
+            .validate()
+            .map_err(|err| serde_json::Error::custom(err.to_string()))?;
+        Ok(function)
     }
 
     /// Parse Pcode from flat binary format (zero-copy friendly).
@@ -640,14 +1008,17 @@ impl PcodeFunction {
                     pos += VARNODE_SIZE;
                 }
 
-                ops.push(PcodeOp {
+                let op = PcodeOp {
                     seq_num,
                     opcode,
                     address,
                     output,
                     inputs,
                     asm_mnemonic: None,
-                });
+                };
+                op.validate_shape_at(Some(index), Some(ops.len()))
+                    .map_err(FlatFormatError::InvalidPcodeShape)?;
+                ops.push(op);
             }
             blocks.push(PcodeBasicBlock {
                 index,
@@ -657,7 +1028,11 @@ impl PcodeFunction {
             });
         }
 
-        Ok(PcodeFunction { blocks })
+        let function = PcodeFunction { blocks };
+        function
+            .validate()
+            .map_err(FlatFormatError::InvalidPcodeShape)?;
+        Ok(function)
     }
 
     /// Serialize to flat binary format.
@@ -728,11 +1103,12 @@ fn parse_json_const_val(value: Option<&serde_json::Value>) -> Option<i64> {
 }
 
 /// Error from flat format parsing
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum FlatFormatError {
     TooShort,
     BadMagic,
     Truncated,
+    InvalidPcodeShape(PcodeValidationError),
 }
 
 impl std::fmt::Display for FlatFormatError {
@@ -741,6 +1117,7 @@ impl std::fmt::Display for FlatFormatError {
             Self::TooShort => write!(f, "Flat buffer too short"),
             Self::BadMagic => write!(f, "Invalid flat format magic"),
             Self::Truncated => write!(f, "Truncated flat buffer"),
+            Self::InvalidPcodeShape(err) => write!(f, "{err}"),
         }
     }
 }
@@ -821,6 +1198,123 @@ mod tests {
         assert!(!one.is_zero());
     }
 
+    fn op(
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num: 0,
+            opcode,
+            address: 0x1000,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    #[test]
+    fn pcode_shape_contract_rejects_invalid_structures() {
+        let out = Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let lhs = Varnode {
+            space_id: 1,
+            offset: 0x108,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let rhs = Varnode::constant(1, 8);
+
+        assert!(matches!(
+            op(PcodeOpcode::IntAdd, Some(out.clone()), vec![lhs.clone()])
+                .validate_shape()
+                .unwrap_err(),
+            PcodeValidationError::WrongInputCount { .. }
+        ));
+        assert!(matches!(
+            op(PcodeOpcode::Copy, None, vec![lhs.clone()])
+                .validate_shape()
+                .unwrap_err(),
+            PcodeValidationError::MissingOutput { .. }
+        ));
+        assert!(matches!(
+            op(
+                PcodeOpcode::Store,
+                Some(out.clone()),
+                vec![Varnode::constant(0, 8), lhs.clone(), rhs.clone()]
+            )
+            .validate_shape()
+            .unwrap_err(),
+            PcodeValidationError::UnexpectedOutput { .. }
+        ));
+        assert!(matches!(
+            op(PcodeOpcode::CBranch, None, vec![rhs.clone()])
+                .validate_shape()
+                .unwrap_err(),
+            PcodeValidationError::WrongInputCount { .. }
+        ));
+        assert!(matches!(
+            op(PcodeOpcode::Return, Some(out), Vec::new())
+                .validate_shape()
+                .unwrap_err(),
+            PcodeValidationError::UnexpectedOutput { .. }
+        ));
+        assert!(matches!(
+            op(PcodeOpcode::Unknown, None, vec![lhs])
+                .validate_shape()
+                .unwrap_err(),
+            PcodeValidationError::UnknownOpcode { .. }
+        ));
+    }
+
+    #[test]
+    fn pcode_shape_contract_accepts_core_valid_shapes() {
+        let out = Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let lhs = Varnode {
+            space_id: 1,
+            offset: 0x108,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let rhs = Varnode::constant(1, 8);
+
+        op(PcodeOpcode::IntAdd, Some(out.clone()), vec![lhs.clone(), rhs.clone()])
+            .validate_shape()
+            .expect("valid int add shape");
+        op(PcodeOpcode::Copy, Some(out.clone()), vec![lhs.clone()])
+            .validate_shape()
+            .expect("valid copy shape");
+        op(
+            PcodeOpcode::Store,
+            None,
+            vec![Varnode::constant(0, 8), lhs.clone(), rhs.clone()],
+        )
+        .validate_shape()
+        .expect("valid store shape");
+        op(PcodeOpcode::CBranch, None, vec![rhs.clone(), lhs])
+            .validate_shape()
+            .expect("valid cbranch shape");
+        op(PcodeOpcode::Return, None, Vec::new())
+            .validate_shape()
+            .expect("valid transitional return shape");
+        op(PcodeOpcode::Return, None, vec![rhs])
+            .validate_shape()
+            .expect("valid explicit return target shape");
+    }
+
     /// Phase C regression: Flat format round-trip must produce identical PcodeFunction.
     #[test]
     fn test_flat_roundtrip_equivalence() {
@@ -889,5 +1383,12 @@ mod tests {
         let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_ADD","addr":"0x1000","output":{"space":1,"offset":"0x100","size":8},"inputs":[{"space":2,"offset":"0x20","size":8},{"space":0,"offset":"0xfffffffffffffffc","size":8,"const_val":18446744073709551612}]}]}]}"#;
         let parsed = PcodeFunction::from_json(json).expect("json parse");
         assert_eq!(parsed.blocks[0].ops[0].inputs[1].constant_val, -4);
+    }
+
+    #[test]
+    fn json_import_rejects_invalid_pcode_shape() {
+        let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_ADD","addr":"0x1000","output":{"space":1,"offset":"0x100","size":8},"inputs":[{"space":2,"offset":"0x20","size":8}]}]}]}"#;
+        let err = PcodeFunction::from_json(json).expect_err("invalid pcode must be rejected");
+        assert!(err.to_string().contains("InvalidPcodeShape"));
     }
 }

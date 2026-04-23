@@ -1377,3 +1377,86 @@ This wave does not claim complete Ghidra `ConstructTpl` execution. It removes th
   1. parse token/context field definitions into executable bit ranges
   2. evaluate decision probes from those field definitions instead of normalized compatibility fields
   3. compile constructor bodies into primitive `ConstructTpl` op sequences and remove transitional semantic classification
+
+## 2026-04-23 - Architecture-level P-code shape correctness gate
+
+### Summary
+
+- wave type:
+  - correctness / architecture invariant / fail-closed
+- primary owner:
+  - `crates/fission-pcode/src/pcode/types.rs`
+  - `crates/fission-sleigh/src/runtime/spine/emitter.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-pcode/src/nir/mod.rs`
+- goal:
+  - prevent structurally invalid P-code from crossing into canonical runtime/NIR paths
+  - demote raw `PcodeOp { opcode, output, inputs }` to compatibility DTO status
+  - make SLEIGH runtime emission use checked primitives instead of raw opcode pushes
+
+### What changed
+
+- added architecture-independent P-code shape contracts:
+  - `PcodeShapeContract`
+  - `PcodeValidationError`
+  - `ValidatedPcodeFunction`
+- rejected invalid structural shapes before canonical use:
+  - `Unknown` opcode
+  - missing required output
+  - forbidden output
+  - wrong input arity
+  - zero-sized or malformed varnodes
+- wired validation into compatibility import boundaries:
+  - JSON P-code import
+  - flat P-code import
+  - raw `PcodeFunction` to NIR preview ingress
+- changed the SLEIGH runtime emitter contract:
+  - removed production `RuntimePcodeEmitter::push`
+  - added checked primitive emission APIs for copy/load/store/control-flow/integer operations
+  - invalid emission now returns `RuntimeSleighError::InvalidPcodeShape` and does not append the op
+- added optimizer safety rails:
+  - optimizer validates input before running
+  - optimizer validates output before returning
+- added NIR telemetry fields:
+  - `invalid_pcode_shape_count`
+  - `validated_pcode_op_count`
+  - `raw_pcode_compat_import_count`
+- updated tests that previously relied on `PcodeOpcode::Unknown` as a trap-like placeholder:
+  - unknown P-code now fails before NIR build
+  - valid fallback tests now use structurally valid `Copy`
+
+### Validation
+
+- `cargo test -p fission-pcode -- --test-threads=1`
+  - result: `681 passed / 0 failed`
+- `cargo check -p fission-pcode`
+  - result: passed
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `35 passed / 0 failed`
+- `cargo check -p fission-static`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- raw emission audit:
+  - `rg -n "self\\.push\\(|emitter\\.push|RuntimePcodeEmitter::push|\\.push\\(PcodeOpcode" crates/fission-sleigh/src/runtime crates/fission-pcode/src/pcode -g '*.rs'`
+  - result: `0` matches
+- raw `PcodeOp { ... }` audit in runtime/static/CLI:
+  - remaining matches are test helpers plus `RuntimePcodeEmitter`'s private checked construction point
+
+### Result
+
+Invalid P-code shape is now a correctness failure, not a quality degradation bucket. SLEIGH runtime emission, raw compatibility import, NIR preview ingress, and optimizer output are guarded by the same architecture-independent contract.
+
+### Remaining risk / next owner
+
+- raw `PcodeOp` still exists as a compatibility DTO for serialization, fixtures, and legacy internal transforms
+- optimizer internals still construct DTO-level ops, but the entry/exit validation boundary now prevents invalid shapes from escaping
+- `Return`, `Store`, and `Call` contracts are intentionally broad enough to match current Fission DTO forms; they should tighten when DTO and canonical validated graph are split more aggressively
+- next owner:
+  1. replace optimizer-internal raw constructors with checked builder helpers
+  2. require `ValidatedPcodeFunction` in more public NIR/analysis signatures
+  3. add a CI audit test that whitelists raw DTO construction only in tests, serialization, and checked builder internals

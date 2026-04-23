@@ -9,6 +9,14 @@ impl<'a> PreviewBuilder<'a> {
             render_duration_ms: self.render_duration_ms,
             rendered_code_len: self.rendered_code_len,
             max_structuring_scc_component_size: self.max_structuring_scc_component_size,
+            invalid_pcode_shape_count: 0,
+            validated_pcode_op_count: self
+                .pcode
+                .blocks
+                .iter()
+                .map(|block| block.ops.len())
+                .sum(),
+            raw_pcode_compat_import_count: 0,
             ghidra_action_stage_count: 0,
             ghidra_action_funcdata_build_count: 0,
             ghidra_action_heritage_value_recovery_count: 0,

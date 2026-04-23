@@ -87,6 +87,9 @@ impl PcodeOptimizer {
 
     /// Optimize a Pcode function (may run multiple passes)
     pub fn optimize(&mut self, func: &mut PcodeFunction) -> usize {
+        func.validate()
+            .expect("PcodeOptimizer received structurally invalid P-code");
+
         let mut total_changes = 0;
         let max_passes = 10;
 
@@ -157,6 +160,9 @@ impl PcodeOptimizer {
 
             total_changes += 1;
         }
+
+        func.validate()
+            .expect("PcodeOptimizer produced structurally invalid P-code");
 
         total_changes
     }

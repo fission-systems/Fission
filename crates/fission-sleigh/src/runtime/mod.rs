@@ -52,6 +52,10 @@ pub enum RuntimeSleighError {
         language: String,
         reason: String,
     },
+    InvalidPcodeShape {
+        language: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for RuntimeSleighError {
@@ -67,6 +71,9 @@ impl fmt::Display for RuntimeSleighError {
             ),
             Self::UnsupportedPcodeTemplate { language, reason } => {
                 write!(f, "UnsupportedPcodeTemplate: {language}: {reason}")
+            }
+            Self::InvalidPcodeShape { language, reason } => {
+                write!(f, "InvalidPcodeShape: {language}: {reason}")
             }
         }
     }
@@ -487,10 +494,18 @@ impl RuntimeSleighFrontend {
             bail!("failed to decode any instruction at 0x{:x}", entry_address);
         }
 
+        let function = PcodeFunction {
+            blocks: build_cfg_blocks(entry_address, ops),
+        };
+        function.validate().map_err(|err| {
+            RuntimeSleighError::InvalidPcodeShape {
+                language: self.entry.entry_id.clone(),
+                reason: err.to_string(),
+            }
+        })?;
+
         Ok(DecodedPcodeFunction {
-            function: PcodeFunction {
-                blocks: build_cfg_blocks(entry_address, ops),
-            },
+            function,
             decoded_instructions: instruction_count,
             stop_reason,
         })

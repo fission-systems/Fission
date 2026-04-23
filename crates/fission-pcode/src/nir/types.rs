@@ -686,6 +686,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub rendered_code_len: usize,
     #[serde(default)]
+    pub invalid_pcode_shape_count: usize,
+    #[serde(default)]
+    pub validated_pcode_op_count: usize,
+    #[serde(default)]
+    pub raw_pcode_compat_import_count: usize,
+    #[serde(default)]
     pub max_structuring_scc_component_size: usize,
     /// Total clean-room Ghidra-concept stages observed in this function build.
     #[serde(default)]
@@ -1447,6 +1453,9 @@ impl NirBuildStats {
         self.cleanup_loopish_rewrite_count += other.cleanup_loopish_rewrite_count;
         self.cleanup_family_dead_binding_count += other.cleanup_family_dead_binding_count;
         self.interproc_signature_constraint_rounds += other.interproc_signature_constraint_rounds;
+        self.invalid_pcode_shape_count += other.invalid_pcode_shape_count;
+        self.validated_pcode_op_count += other.validated_pcode_op_count;
+        self.raw_pcode_compat_import_count += other.raw_pcode_compat_import_count;
         self.unsupported_indirect_control_count += other.unsupported_indirect_control_count;
         self.unsupported_indirect_call_count += other.unsupported_indirect_call_count;
         self.unsupported_external_target_count += other.unsupported_external_target_count;

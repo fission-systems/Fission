@@ -1,4 +1,7 @@
+use anyhow::{anyhow, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+
+use crate::runtime::RuntimeSleighError;
 
 #[derive(Debug, Clone)]
 pub struct RuntimePcodeEmitter {
@@ -34,21 +37,99 @@ impl RuntimePcodeEmitter {
         vn
     }
 
-    pub fn push(
+    fn append_checked(
         &mut self,
         opcode: PcodeOpcode,
         output: Option<Varnode>,
         inputs: Vec<Varnode>,
         mnemonic: &str,
-    ) {
-        self.ops.push(PcodeOp {
+    ) -> Result<()> {
+        let op = PcodeOp {
             seq_num: self.seq,
             opcode,
             address: self.address,
             output,
             inputs,
             asm_mnemonic: Some(mnemonic.to_string()),
-        });
+        };
+        op.validate_shape().map_err(|err| {
+            anyhow!(RuntimeSleighError::InvalidPcodeShape {
+                language: "compiled-table".to_string(),
+                reason: err.to_string(),
+            })
+        })?;
+        self.ops.push(op);
         self.seq = self.seq.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn emit_copy(&mut self, out: Varnode, input: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::Copy, Some(out), vec![input], mnemonic)
+    }
+
+    pub fn emit_load(
+        &mut self,
+        out: Varnode,
+        space: Varnode,
+        ptr: Varnode,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(PcodeOpcode::Load, Some(out), vec![space, ptr], mnemonic)
+    }
+
+    pub fn emit_store(
+        &mut self,
+        space: Varnode,
+        ptr: Varnode,
+        value: Varnode,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(PcodeOpcode::Store, None, vec![space, ptr, value], mnemonic)
+    }
+
+    pub fn emit_branch(&mut self, target: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::Branch, None, vec![target], mnemonic)
+    }
+
+    pub fn emit_cbranch(
+        &mut self,
+        target: Varnode,
+        cond: Varnode,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(PcodeOpcode::CBranch, None, vec![target, cond], mnemonic)
+    }
+
+    pub fn emit_branch_ind(&mut self, target: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::BranchInd, None, vec![target], mnemonic)
+    }
+
+    pub fn emit_call(&mut self, target: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::Call, None, vec![target], mnemonic)
+    }
+
+    pub fn emit_return(&mut self, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::Return, None, Vec::new(), mnemonic)
+    }
+
+    pub fn emit_int_unop(
+        &mut self,
+        opcode: PcodeOpcode,
+        out: Varnode,
+        input: Varnode,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(opcode, Some(out), vec![input], mnemonic)
+    }
+
+    pub fn emit_int_binop(
+        &mut self,
+        opcode: PcodeOpcode,
+        out: Varnode,
+        left: Varnode,
+        right: Varnode,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(opcode, Some(out), vec![left, right], mnemonic)
     }
 }

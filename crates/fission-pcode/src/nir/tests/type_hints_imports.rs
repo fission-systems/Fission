@@ -151,10 +151,10 @@ fn preview_type_hints_call_arg_recovery_falls_back_to_param_surface_on_unsupport
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
-                    opcode: PcodeOpcode::Unknown,
+                    opcode: PcodeOpcode::Copy,
                     address: 0x140006260,
                     output: Some(reg(0x08, 8)),
-                    inputs: vec![cst(0, 8)],
+                    inputs: vec![reg(0x08, 8)],
                     asm_mnemonic: Some("NOP".to_string()),
                 },
                 PcodeOp {

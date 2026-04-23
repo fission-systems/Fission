@@ -616,7 +616,7 @@ fn subpieces_inline_directly_into_call_arguments() {
 }
 
 #[test]
-fn trap_like_unknown_producer_can_surface_as_opaque_callind_target() {
+fn trap_like_unknown_producer_is_rejected_before_nir_build() {
     let trap_target = uniq(0x6a0, 4);
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
@@ -652,14 +652,16 @@ fn trap_like_unknown_producer_can_surface_as_opaque_callind_target() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "trap_callind", 0x6a00, &preview_options_x86())
-        .expect("preview render");
-    assert!(code.contains("((code *)swi(3))();"), "{code}");
-    assert!(code.contains("return 0;"), "{code}");
+    let err = render_mlil_preview(&func, "trap_callind", 0x6a00, &preview_options_x86())
+        .expect_err("unknown pcode must not cross the validation boundary");
+    assert!(matches!(
+        err,
+        MlilPreviewError::UnsupportedPattern("invalid pcode shape")
+    ));
 }
 
 #[test]
-fn non_trap_unknown_callind_target_preserves_opaque_surface() {
+fn non_trap_unknown_producer_is_rejected_before_nir_build() {
     let trap_target = uniq(0x6b0, 4);
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
@@ -695,7 +697,10 @@ fn non_trap_unknown_callind_target_preserves_opaque_surface() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "non_trap_callind", 0x6b00, &preview_options_x86())
-        .expect("unknown non-trap producer should preserve opaque callind surface");
-    assert!(code.contains("__fission_callind_opaque()"), "{code}");
+    let err = render_mlil_preview(&func, "non_trap_callind", 0x6b00, &preview_options_x86())
+        .expect_err("unknown pcode must not cross the validation boundary");
+    assert!(matches!(
+        err,
+        MlilPreviewError::UnsupportedPattern("invalid pcode shape")
+    ));
 }

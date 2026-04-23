@@ -120,6 +120,18 @@ pub fn render_mlil_preview_with_binary_and_context(
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 
+    if let Err(err) = pcode.validate() {
+        if diag || std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            eprintln!("[mlil-preview] invalid pcode shape fn=0x{address:x} err={err}");
+        }
+        let stats = PreviewBuildStats {
+            invalid_pcode_shape_count: 1,
+            ..PreviewBuildStats::default()
+        };
+        telemetry::store_preview_build_stats(stats);
+        return Err(MlilPreviewError::UnsupportedPattern("invalid pcode shape"));
+    }
+
     let build_start = Instant::now();
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
