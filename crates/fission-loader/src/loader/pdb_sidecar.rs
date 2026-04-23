@@ -452,6 +452,13 @@ mod tests {
     fn loads_focused_pdb_function_facts_from_repo_sample() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../samples/other/binaries-master/tests/x86_64/windows/fauxware.exe");
+        if !sample.exists() {
+            eprintln!(
+                "skipping PDB sidecar sample test; missing {}",
+                sample.display()
+            );
+            return;
+        }
         let binary = LoadedBinary::from_file(&sample).expect("load fauxware sample");
 
         assert!(

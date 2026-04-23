@@ -5,6 +5,7 @@
 pub mod callgraph;
 pub mod cfg;
 pub mod decomp;
+pub mod function_discovery;
 pub mod optimizer;
 pub mod patch;
 pub mod string_xrefs;
@@ -24,6 +25,9 @@ pub use cfg::{
     BasicBlock, BlockEdge, CfgAnalysis, CfgBuilder, CfgError, CfgMetrics, CfgResult, CfgVisualizer,
     ComplexityAnalyzer, ControlFlowGraph, DominatorTree, DotOptions, EdgeKind, Loop, LoopAnalyzer,
     LoopKind,
+};
+pub use function_discovery::{
+    FunctionDiscoveryProfile, FunctionDiscoveryReport, discover_functions_with_runtime,
 };
 pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};

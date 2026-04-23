@@ -236,23 +236,6 @@ pub struct PdbDebugInfo {
     pub has_codeview: bool,
 }
 
-/// Discovery aggressiveness profile for internal function recovery passes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FunctionDiscoveryProfile {
-    /// Favor precision and responsiveness over broad recall.
-    Conservative,
-    /// Balanced default for batch analysis with moderate recall expansion.
-    Balanced,
-    /// Maximize recall using broader heuristics; may increase false positives.
-    Aggressive,
-}
-
-impl Default for FunctionDiscoveryProfile {
-    fn default() -> Self {
-        Self::Conservative
-    }
-}
-
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]

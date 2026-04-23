@@ -4,14 +4,14 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::services::cross_image::AutoRenameKind;
 use crate::state::AppState;
-use fission_loader::loader::FunctionDiscoveryProfile;
+use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
 use tauri::State;
 
 // ============================================================================
 // Commands
 // ============================================================================
 
-/// Discover internal functions by scanning for CALL targets in executable sections.
+/// Discover internal functions from SLEIGH-decoded direct call targets.
 /// Updates the loaded binary in-place and returns the full (updated) function list.
 #[tauri::command]
 pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<FunctionDto>> {
@@ -26,7 +26,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
         .clone();
 
     let before = binary.functions.len();
-    binary.discover_internal_functions_with_profile(FunctionDiscoveryProfile::Balanced);
+    let report = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
     let found = binary.functions.len().saturating_sub(before);
 
     // Snapshot renames before we move the binary back into the Arc
@@ -36,6 +36,14 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
     inner.rebuild_fact_store();
+    tracing::debug!(
+        decoded = report.decoded_instruction_count,
+        calls = report.call_target_count,
+        jumps = report.jump_target_count,
+        accepted = report.accepted_function_count,
+        unsupported_runtime = report.unsupported_runtime,
+        "SLEIGH function discovery completed"
+    );
     let _ = found; // delta surfaced to the frontend via the returned slice length
 
     let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
@@ -43,9 +51,9 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
     Ok(functions)
 }
 
-/// Discover functions by scanning for common prologue byte patterns (push rbp / push ebp etc.).
-/// This is a deeper heuristic scan that can find obfuscated or tail-call functions missed by
-/// `analyze_functions`.  Returns the full updated function list.
+/// Discover functions from SLEIGH-decoded direct call and branch targets.
+/// This is a deeper analyzer pass than `analyze_functions`, but it does not
+/// use byte-pattern prologue heuristics.
 #[tauri::command]
 pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<FunctionDto>> {
     let mut inner = state.inner.lock().await;
@@ -57,12 +65,20 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
         .as_ref()
         .clone();
 
-    binary.discover_functions_by_prologue_with_profile(FunctionDiscoveryProfile::Aggressive);
+    let report = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Aggressive);
 
     let renames = inner.renamed_functions.clone();
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
     inner.rebuild_fact_store();
+    tracing::debug!(
+        decoded = report.decoded_instruction_count,
+        calls = report.call_target_count,
+        jumps = report.jump_target_count,
+        accepted = report.accepted_function_count,
+        unsupported_runtime = report.unsupported_runtime,
+        "SLEIGH aggressive function discovery completed"
+    );
 
     let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
 

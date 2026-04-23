@@ -5,7 +5,8 @@ use crate::error::{CmdError, CmdResult};
 use crate::services::cross_image::{apply_propagated_renames, collect_folder_propagated_renames};
 use crate::state::AppState;
 use fission_core::format_addr;
-use fission_loader::loader::{FunctionDiscoveryProfile, LoadedBinary};
+use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,10 +23,10 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     let binary = tokio::task::spawn_blocking(move || {
         let mut binary = LoadedBinary::from_file(&path)
             .map_err(|e| CmdError::other(format!("Failed to load binary: {e}")))?;
-        // Keep open_file responsive: run only the lightweight pass on initial load.
-        // The heavier prologue scan is available via `deep_scan_functions`.
-        binary.discover_internal_functions_with_profile(FunctionDiscoveryProfile::Conservative);
-        // Pass 1: CALL target scan
+        // Keep open_file responsive: run only direct call-target discovery.
+        // The aggressive branch-target analyzer is available via `deep_scan_functions`.
+        let _ =
+            discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
         Ok::<LoadedBinary, CmdError>(binary)
     })
     .await

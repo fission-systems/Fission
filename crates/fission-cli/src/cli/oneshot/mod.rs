@@ -32,7 +32,8 @@ use crate::cli::args::{
     FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, parse_oneshot_args,
 };
 use anyhow::{Context, Result};
-use fission_loader::loader::{FunctionDiscoveryProfile, LoadedBinary};
+use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 use std::fs;
 use std::io;
 
@@ -105,14 +106,16 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if let Some(profile_arg) = cli.function_discovery_profile {
         let profile = map_discovery_profile_arg(profile_arg);
-        let before = binary.functions.len();
-        binary.discover_internal_functions_with_profile(profile);
-        binary.discover_functions_by_prologue_with_profile(profile);
-        let discovered = binary.functions.len().saturating_sub(before);
+        let report = discover_functions_with_runtime(&mut binary, profile);
         if cli.verbose {
             eprintln!(
-                "[*] Function discovery profile {:?}: +{} functions",
-                profile, discovered
+                "[*] SLEIGH function discovery profile {:?}: +{} functions (decoded={}, calls={}, jumps={}, unsupported_runtime={})",
+                profile,
+                report.accepted_function_count,
+                report.decoded_instruction_count,
+                report.call_target_count,
+                report.jump_target_count,
+                report.unsupported_runtime
             );
         }
     }

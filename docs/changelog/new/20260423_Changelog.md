@@ -671,3 +671,91 @@ The next owner is to migrate those remaining analysis surfaces to the same gener
   1. data-reference precision for memory operands
   2. richer template execution for startup/control-heavy rows
   3. cycle-free FID hash reintroduction
+
+## 10. Loader Heuristic Removal and Ghidra-Style Analyzer Split
+
+### Scope
+
+- wave type:
+  - owner cleanup / behavior-preserving loader reduction
+- primary owner:
+  - `fission-loader` for authoritative binary metadata
+  - `fission-static::analysis::function_discovery` for SLEIGH-runtime function discovery
+- goal:
+  - remove x86/x64 byte-pattern function discovery from the loader
+  - keep loader free of `fission-sleigh` / `fission-static` dependencies
+  - route CLI and Tauri discovery requests through the analyzer layer
+
+### What changed
+
+- removed loader-owned function discovery heuristics:
+  - rel32 `CALL` / `JMP` byte scans
+  - x86/x64 prologue pattern tables
+  - `discover_internal_functions*`
+  - `discover_functions_by_prologue*`
+- removed PE stripped fallback linear prologue sweep.
+  - PE loader now preserves metadata-only behavior: entry point, exports/imports, COFF, PDB, pdata, DWARF/format metadata.
+- added `fission-static::analysis::function_discovery`.
+  - Uses `RuntimeSleighFrontend::decode_window`.
+  - Collects direct call targets for conservative/balanced profiles.
+  - Collects direct branch targets only for aggressive profile.
+  - Accepts only targets inside executable sections and not already present in the loader function index.
+  - Unsupported runtime returns a no-op report instead of fake function discovery.
+- added analyzer report fields:
+  - `decoded_instruction_count`
+  - `call_target_count`
+  - `jump_target_count`
+  - `accepted_function_count`
+  - `unsupported_runtime`
+- migrated consumers:
+  - `fission-cli` one-shot discovery profile handling now calls the static analyzer.
+  - Tauri `open_file`, `analyze_functions`, and `deep_scan_functions` now call the static analyzer.
+- stabilized the sample-dependent PDB sidecar unit test to skip when the optional `fauxware.exe` fixture is absent.
+
+### Validation
+
+- `cargo check -p fission-loader`
+  - result: passed
+- `cargo test -p fission-loader -- --test-threads=1`
+  - result: `25 passed / 0 failed / 2 doctests ignored`
+- `cargo check -p fission-static`
+  - result: passed
+- `cargo test -p fission-static function_discovery -- --test-threads=1`
+  - result: `3 passed / 0 failed`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo check -p fission-tauri`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- static audit:
+  - `rg -n "discover_internal_functions|discover_functions_by_prologue|FunctionDiscoveryProfile" crates/fission-loader`
+  - result: `0` matches
+- static audit:
+  - `rg -n "E8|E9|PROLOGUE|prologue|collect_rel_call_targets|collect_rel_jmp_targets|scan_prologue_functions" crates/fission-loader`
+  - result: no function-discovery heuristic matches remain; residual `E8` hits are detector signature bytes under `crates/fission-loader/src/detector/signatures.rs`
+- dependency audit:
+  - `rg -n "fission-sleigh|fission_static" crates/fission-loader/Cargo.toml crates/fission-loader/src`
+  - result: `0` matches
+- CLI smoke:
+  - `target/release/fission_cli list benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --json`
+  - result: JSON list emitted, `function_count=118`
+- CLI smoke:
+  - `target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 8 --json`
+  - result: `8` disassembly rows emitted
+- CLI smoke:
+  - `target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json`
+  - result: JSON decompilation output emitted
+
+### Result
+
+`fission-loader` is now metadata-only for function discovery ownership. Byte-pattern and prologue-based function discovery no longer lives in the loader or PE parser. The new analyzer layer preserves the existing CLI/Tauri profile surface while making the implementation SLEIGH-runtime based and fail-closed for unsupported runtimes.
+
+### Remaining risk / next owner
+
+- x86-64 direct-control-flow discovery is now runtime-driven, but recall is bounded by current generated runtime decode parity.
+- Non-x86 executable discovery remains no-op until those SLEIGH runtime consumers are promoted.
+- The next owner is still generated-runtime semantic parity:
+  1. x86-64 `DecisionNode` / `ParserWalker` parity
+  2. richer `ConstructTpl` / `PcodeEmit` execution
+  3. cycle-free SLEIGH-backed FID hashing reintroduction
