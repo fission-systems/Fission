@@ -1,5 +1,5 @@
-mod generated_x86_64;
-mod x86_64;
+mod processors;
+mod spine;
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -7,14 +7,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use serde::{Deserialize, Serialize};
 
-use crate::compiler::{compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec};
+use crate::compiler::{
+    compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
+};
+pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
 
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
 
 pub const UNIQUE_SPACE_ID: u64 = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeFrontendStatus {
     RegisteredCompileOnly,
     ExecutableCandidate,
@@ -104,6 +108,38 @@ pub struct DecodedPcodeFunction {
     pub stop_reason: DecodeStopReason,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecodedFlowKind {
+    None,
+    Jump,
+    ConditionalJump,
+    Call,
+    Return,
+    Interrupt,
+    Syscall,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecodedInstruction {
+    pub address: u64,
+    pub bytes: Vec<u8>,
+    pub length: usize,
+    pub mnemonic: String,
+    pub operands_text: String,
+    pub flow_kind: DecodedFlowKind,
+    pub direct_target: Option<u64>,
+}
+
+impl DecodedInstruction {
+    pub fn instruction_text(&self) -> String {
+        if self.operands_text.is_empty() {
+            self.mnemonic.clone()
+        } else {
+            format!("{} {}", self.mnemonic, self.operands_text)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeContract {
     pub instruction_limit: usize,
@@ -150,7 +186,8 @@ impl CompiledRuntimeRegistry {
                 language_ids: entry.language_ids,
                 compatibility_aliases: entry.compatibility_aliases,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        validate_processor_skeleton_coverage(&frontends);
         Ok(Self { frontends })
     }
 
@@ -169,12 +206,26 @@ impl CompiledRuntimeRegistry {
                     .language_ids
                     .iter()
                     .any(|id| id == language_name || id.eq_ignore_ascii_case(language_name))
-                || frontend
-                    .compatibility_aliases
-                    .iter()
-                    .any(|alias| alias == language_name || alias.eq_ignore_ascii_case(language_name))
+                || frontend.compatibility_aliases.iter().any(|alias| {
+                    alias == language_name || alias.eq_ignore_ascii_case(language_name)
+                })
         })
     }
+}
+
+fn validate_processor_skeleton_coverage(frontends: &[RuntimeFrontendDescriptor]) {
+    let manifest_processors = frontends
+        .iter()
+        .map(|frontend| frontend.processor.as_str())
+        .collect::<BTreeSet<_>>();
+    let skeleton_processors = processors::PROCESSOR_SKELETONS
+        .iter()
+        .map(|skeleton| skeleton.ghidra_processor)
+        .collect::<BTreeSet<_>>();
+    debug_assert_eq!(skeleton_processors, manifest_processors);
+    debug_assert!(processors::PROCESSOR_SKELETONS
+        .iter()
+        .all(|skeleton| !skeleton.module_name.is_empty()));
 }
 
 fn entry_matches_language_name(entry: &EntrySpec, language_name: &str) -> bool {
@@ -251,6 +302,14 @@ impl RuntimeSleighFrontend {
         self.status
     }
 
+    pub fn compile_language_runtime(&self) -> Result<LanguageRuntime> {
+        LanguageRuntime::compile(&self.entry)
+    }
+
+    pub fn runtime_attempt_report(&self) -> Result<RuntimeAttemptReport> {
+        Ok(self.compile_language_runtime()?.attempt_report())
+    }
+
     pub fn decode_and_lift(&self, bytes: &[u8], address: u64) -> Result<Vec<PcodeOp>> {
         let (ops, _) = self.decode_and_lift_with_len(bytes, address)?;
         Ok(ops)
@@ -278,18 +337,121 @@ impl RuntimeSleighFrontend {
             }
             RuntimeFrontendStatus::ExecutableCandidate => {
                 if self.entry.arch == "x86" && self.entry.entry_id == "x86-64" {
-                    if generated_x86_64_runtime_enabled() {
-                        generated_x86_64::decode_and_lift(
-                            self.compiled.as_ref().ok_or_else(|| anyhow!(
-                                "missing compiled frontend for {}",
-                                self.entry.entry_id
-                            ))?,
-                            bytes,
-                            address,
-                        )
-                    } else {
-                        x86_64::decode_and_lift(bytes, address)
+                    processors::x86::generated::decode_and_lift(
+                        self.compiled.as_ref().ok_or_else(|| {
+                            anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                        })?,
+                        bytes,
+                        address,
+                    )
+                } else {
+                    Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+                        language: self.entry.entry_id.clone(),
+                        reason: "executable candidate has no runtime consumer".to_string(),
                     }
+                    .into())
+                }
+            }
+        }
+    }
+
+    pub fn decode_window(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+    ) -> Result<Vec<DecodedInstruction>> {
+        if limit == 0 || bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut decoded = Vec::with_capacity(limit.min(64));
+        let mut offset = 0usize;
+        let mut current = address;
+        while offset < bytes.len() && decoded.len() < limit {
+            let remaining = &bytes[offset..];
+            let instruction = match self.decode_instruction_with_len(remaining, current) {
+                Ok(instruction) => instruction,
+                Err(err) if decoded.is_empty() => return Err(err),
+                Err(_) => break,
+            };
+            if instruction.length == 0 {
+                bail!("decoder returned zero length at 0x{:x}", current);
+            }
+            let step = instruction.length;
+            if step > remaining.len() {
+                bail!(
+                    "decoded length {} exceeds available bytes {} at 0x{:x}",
+                    step,
+                    remaining.len(),
+                    current
+                );
+            }
+            current = current.saturating_add(step as u64);
+            offset = offset.saturating_add(step);
+            decoded.push(instruction);
+        }
+        Ok(decoded)
+    }
+
+    pub fn discover_direct_call_targets(
+        &self,
+        bytes: &[u8],
+        base_address: u64,
+    ) -> Result<Vec<u64>> {
+        let mut targets = BTreeSet::new();
+        let mut offset = 0usize;
+        let mut current = base_address;
+        while offset < bytes.len() {
+            let remaining = &bytes[offset..];
+            let instruction = match self.decode_instruction_with_len(remaining, current) {
+                Ok(instruction) => instruction,
+                Err(err) if offset == 0 => return Err(err),
+                Err(_) => break,
+            };
+            if instruction.flow_kind == DecodedFlowKind::Call {
+                if let Some(target) = instruction.direct_target {
+                    targets.insert(target);
+                }
+            }
+            if instruction.length == 0 || instruction.length > remaining.len() {
+                break;
+            }
+            current = current.saturating_add(instruction.length as u64);
+            offset = offset.saturating_add(instruction.length);
+        }
+        Ok(targets.into_iter().collect())
+    }
+
+    fn decode_instruction_with_len(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<DecodedInstruction> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => {
+                if self.entry.arch == "x86" && self.entry.entry_id == "x86-64" {
+                    processors::x86::generated::decode_instruction(
+                        self.compiled.as_ref().ok_or_else(|| {
+                            anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                        })?,
+                        bytes,
+                        address,
+                    )
                 } else {
                     Err(RuntimeSleighError::UnsupportedPcodeTemplate {
                         language: self.entry.entry_id.clone(),
@@ -402,27 +564,6 @@ impl RuntimeSleighFrontend {
             stop_reason,
         })
     }
-}
-
-fn generated_x86_64_runtime_enabled() -> bool {
-    std::env::var("FISSION_ENABLE_GENERATED_X86_64_RUNTIME")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
-pub(crate) fn decode_and_lift_x86_64_bridge(
-    bytes: &[u8],
-    address: u64,
-) -> Result<(Vec<PcodeOp>, u64)> {
-    x86_64::decode_and_lift(bytes, address)
-}
-
-pub(crate) fn decode_and_lift_x86_64_generated(
-    compiled: &CompiledFrontend,
-    bytes: &[u8],
-    address: u64,
-) -> Result<(Vec<PcodeOp>, u64)> {
-    generated_x86_64::decode_and_lift(compiled, bytes, address)
 }
 
 fn status_for_entry(entry: &EntrySpec) -> RuntimeFrontendStatus {
@@ -647,8 +788,59 @@ mod tests {
             .lookup("AARCH64:LE:64:v8A")
             .expect("AARCH64 language id registered");
         assert_eq!(aarch64.processor, "AARCH64");
-        let arm_alias = registry.lookup("arm32").expect("legacy ARM alias registered");
+        let arm_alias = registry
+            .lookup("arm32")
+            .expect("legacy ARM alias registered");
         assert_eq!(arm_alias.processor, "ARM");
+    }
+
+    #[test]
+    fn processor_skeletons_cover_all_ghidra_processors() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+        let manifest_processors = registry
+            .frontends()
+            .iter()
+            .map(|frontend| frontend.processor.as_str())
+            .collect::<BTreeSet<_>>();
+        let skeleton_processors = processors::PROCESSOR_SKELETONS
+            .iter()
+            .map(|skeleton| skeleton.ghidra_processor)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(manifest_processors.len(), 38);
+        assert_eq!(skeleton_processors, manifest_processors);
+        assert_eq!(
+            processors::PROCESSOR_SKELETONS
+                .iter()
+                .filter(|skeleton| skeleton.executable_candidate)
+                .map(|skeleton| skeleton.ghidra_processor)
+                .collect::<Vec<_>>(),
+            vec!["x86"]
+        );
+    }
+
+    #[test]
+    fn compile_only_frontend_produces_fail_closed_runtime_report() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 runtime frontend");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::RegisteredCompileOnly
+        );
+
+        let report = frontend
+            .runtime_attempt_report()
+            .expect("compile-only runtime report");
+        assert_eq!(report.processor, "AARCH64");
+        assert_eq!(report.module_name, "aarch64");
+        assert!(report.compiled_table_available);
+        assert!(report.constructor_inventory_count > 0);
+        assert!(report.fail_closed_reason.is_some());
+
+        let err = frontend
+            .decode_and_lift_with_len(&[0x00, 0x00, 0x00, 0x00], 0x1000)
+            .expect_err("compile-only runtime must fail closed");
+        assert!(format!("{err:#}").contains("UnsupportedGeneratedSemantic"));
     }
 
     #[test]

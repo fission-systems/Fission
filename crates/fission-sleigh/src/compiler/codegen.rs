@@ -348,9 +348,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     format!("[{rows}]")
 }
 
-fn render_constructor_template(
-    template: &crate::compiler::CompiledConstructorTemplate,
-) -> String {
+fn render_constructor_template(template: &crate::compiler::CompiledConstructorTemplate) -> String {
     let handles = template
         .handles
         .iter()
@@ -393,10 +391,12 @@ fn render_constructor_template(
                 "{{\"kind\": {}, \"signed\": {signed}}}",
                 json_string(op.as_str())
             ),
-            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => format!(
-                "{{\"kind\": {}, \"src_size\": {src_size}, \"dst_size\": {dst_size}}}",
-                json_string(op.as_str())
-            ),
+            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => {
+                format!(
+                    "{{\"kind\": {}, \"src_size\": {src_size}, \"dst_size\": {dst_size}}}",
+                    json_string(op.as_str())
+                )
+            }
             _ => format!("{{\"kind\": {}}}", json_string(op.as_str())),
         })
         .collect::<Vec<_>>()

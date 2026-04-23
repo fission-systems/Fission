@@ -13,8 +13,6 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::cognitive_complexity)]
 
-// Re-export fission-disasm directly (no wrapper needed)
-pub use fission_disasm as disasm;
 pub mod arch;
 pub(crate) mod fast_hash;
 pub mod nir;

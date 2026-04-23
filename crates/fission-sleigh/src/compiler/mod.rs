@@ -5,8 +5,8 @@ mod ir;
 mod preprocessor;
 mod token;
 
-use std::fs;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -16,17 +16,16 @@ pub use ast::parse_expanded_spec;
 pub use ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
 pub use equivalence::{
-    build_x86_64_equivalence_report, default_unit_seed_samples, EquivalenceMismatchKind,
-    EquivalenceRecord, EquivalenceReport, InstructionSample,
+    build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
+    RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
 };
 pub use ir::{
     CompiledArithmeticOpcode, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode,
-    CompiledDecisionProbe, CompiledDecisionTree, CompiledExecutableConstructor,
-    CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate, CompiledMacro,
-    CompiledOpcodeMatcher, CompiledOperandDecodeStep, CompiledOperandSpec,
-    CompiledPatternNode, CompiledPcodeOp, CompiledSemanticKind, CompiledSemanticOp,
-    CompiledSemanticTemplate, CompiledSpecDefinition, ControlFlowClass,
+    CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionNode, CompiledDecisionProbe,
+    CompiledDecisionTree, CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend,
+    CompiledHandleTemplate, CompiledMacro, CompiledOpcodeMatcher, CompiledOperandDecodeStep,
+    CompiledOperandSpec, CompiledPatternNode, CompiledPcodeOp, CompiledSemanticKind,
+    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpecDefinition, ControlFlowClass,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use token::{Token, TokenKind, TokenizedLine};
@@ -427,9 +426,7 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
         aux_files.sort();
         for spec in discover_entry_specs_for_arch(processor)? {
             let ldef = metadata.get(&spec.entry_id);
-            let language_ids = ldef
-                .map(|(ids, _, _)| ids.clone())
-                .unwrap_or_default();
+            let language_ids = ldef.map(|(ids, _, _)| ids.clone()).unwrap_or_default();
             let language_id = if language_ids.len() == 1 {
                 language_ids.first().cloned()
             } else {
@@ -477,7 +474,9 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
 
 fn walk_aux_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    for entry in fs::read_dir(root).with_context(|| format!("read nested root {}", root.display()))? {
+    for entry in
+        fs::read_dir(root).with_context(|| format!("read nested root {}", root.display()))?
+    {
         let entry = entry.with_context(|| format!("read nested entry under {}", root.display()))?;
         let path = entry.path();
         if path.is_dir() {
@@ -649,10 +648,7 @@ pub fn write_all_generated_artifacts(output_root: &Path) -> Result<FrontendCompi
                 });
             }
             Err(error) => {
-                failure_messages.push(format!(
-                    "{} {}: {error:#}",
-                    entry.arch, entry.entry_spec
-                ));
+                failure_messages.push(format!("{} {}: {error:#}", entry.arch, entry.entry_spec));
                 report_entries.push(FrontendCompileReportEntry {
                     processor: entry.arch.clone(),
                     arch: entry.arch,
@@ -818,7 +814,10 @@ mod tests {
             .find(|entry| entry.processor == "x86" && entry.entry_id == "x86-64")
             .expect("x86-64 manifest entry");
         assert_eq!(x86_64.runtime_status, "executable_candidate");
-        assert!(x86_64.language_ids.iter().any(|id| id == "x86:LE:64:default"));
+        assert!(x86_64
+            .language_ids
+            .iter()
+            .any(|id| id == "x86:LE:64:default"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use fission_core::{DISASM_READ_WINDOW, PAGE_SIZE};
 use fission_loader::loader::LoadedBinary;
+use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, RuntimeSleighFrontend};
 use std::io::{self, Write};
 
 fn collect_function_instructions(
@@ -7,8 +8,6 @@ fn collect_function_instructions(
     data: &[u8],
     addr: u64,
 ) -> io::Result<(String, u64, bool, Vec<(u64, String, String)>)> {
-    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter, Mnemonic};
-
     let func = binary.function_at(addr).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -60,32 +59,23 @@ fn collect_function_instructions(
         ));
     };
 
-    let decoder_options = if binary.is_64bit { 64 } else { 32 };
-    let mut decoder = Decoder::with_ip(decoder_options, bytes, base, DecoderOptions::NONE);
-    let mut formatter = IntelFormatter::new();
-    let mut output = String::with_capacity(64);
     let mut instructions = Vec::new();
     let func_end = func_start + func_size;
+    let frontend = runtime_frontend_for_binary(binary)?;
+    let decoded = frontend
+        .decode_window(bytes, base, usize::MAX)
+        .map_err(to_io_error)?;
 
-    while decoder.can_decode() {
-        let instr = decoder.decode();
-        if instr.ip() >= func_end {
+    for instr in decoded {
+        if instr.address >= func_end {
             break;
         }
-
-        output.clear();
-        formatter.format(&instr, &mut output);
-
-        let bytes_str: String = bytes[instr.ip() as usize - base as usize
-            ..instr.ip() as usize - base as usize + instr.len()]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        instructions.push((instr.ip(), bytes_str, output.clone()));
-
-        if needs_boundary_detection && instr.mnemonic() == Mnemonic::Ret {
+        instructions.push((
+            instr.address,
+            format_instruction_bytes(&instr),
+            instr.instruction_text(),
+        ));
+        if needs_boundary_detection && instr.flow_kind == DecodedFlowKind::Return {
             break;
         }
     }
@@ -135,7 +125,6 @@ pub(super) fn disassemble(
     count: usize,
     json: bool,
 ) -> io::Result<()> {
-    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter};
     let mut stdout = io::stdout().lock();
 
     // Find the section containing this address
@@ -164,32 +153,19 @@ pub(super) fn disassemble(
         std::process::exit(1);
     };
 
-    let decoder_options = if binary.is_64bit { 64 } else { 32 };
-
-    let mut decoder = Decoder::with_ip(decoder_options, bytes, base, DecoderOptions::NONE);
-    let mut formatter = IntelFormatter::new();
-    // Pre-allocate output string buffer to reduce reallocations
-    let mut output = String::with_capacity(64);
-    // Pre-allocate results vector with requested count
-    let mut instructions = Vec::with_capacity(count);
-
-    for _ in 0..count {
-        if !decoder.can_decode() {
-            break;
-        }
-        let instr = decoder.decode();
-        output.clear();
-        formatter.format(&instr, &mut output);
-
-        let bytes_str: String = bytes[instr.ip() as usize - base as usize
-            ..instr.ip() as usize - base as usize + instr.len()]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        instructions.push((instr.ip(), bytes_str, output.clone()));
-    }
+    let frontend = runtime_frontend_for_binary(binary)?;
+    let instructions = frontend
+        .decode_window(bytes, base, count)
+        .map_err(to_io_error)?
+        .into_iter()
+        .map(|instr| {
+            (
+                instr.address,
+                format_instruction_bytes(&instr),
+                instr.instruction_text(),
+            )
+        })
+        .collect::<Vec<_>>();
 
     if json {
         let instr_json: Vec<serde_json::Value> = instructions
@@ -218,6 +194,27 @@ pub(super) fn disassemble(
         }
     }
     Ok(())
+}
+
+fn runtime_frontend_for_binary(binary: &LoadedBinary) -> io::Result<RuntimeSleighFrontend> {
+    let language = if binary.is_64bit { "x86-64" } else { "x86" };
+    RuntimeSleighFrontend::new_for_language(language).map_err(to_io_error)
+}
+
+fn to_io_error<E>(err: E) -> io::Error
+where
+    E: std::fmt::Display,
+{
+    io::Error::new(io::ErrorKind::Other, err.to_string())
+}
+
+fn format_instruction_bytes(instruction: &DecodedInstruction) -> String {
+    instruction
+        .bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Disassemble entire function at given address (function boundaries)

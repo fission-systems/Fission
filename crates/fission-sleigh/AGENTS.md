@@ -30,7 +30,9 @@ crates/fission-sleigh/
 │   │   ├── codegen.rs         # Deterministic generated artifact renderer
 │   │   └── equivalence.rs     # Compiler-only bucketed equivalence report
 │   └── runtime/
-│       └── mod.rs             # Runtime registry, decode contracts, CFG helpers
+│       ├── mod.rs             # Runtime registry, decode contracts, CFG helpers
+│       ├── spine/             # Ghidra-style common runtime owners
+│       └── processors/        # 38 Ghidra Processor adapter skeletons
 └── specs/
    └── languages/             # Local Sleigh spec set used for language resolution
        ├── AARCH64/
@@ -62,11 +64,29 @@ crates/fission-sleigh/
    - Do not emit fake p-code for generated front-ends that are not executable.
    - Unsupported generated semantics must return typed runtime errors.
    - Compiler-generated artifacts must be byte-stable for the same checked-in spec snapshot.
+   - Do not reintroduce bridge/oracle decode owners after generated runtime cutover.
 3. Fix semantics at the canonical owner.
    - Sleigh-to-pcode mapping changes belong here, not CLI output layers.
    - Compiler-only front-end changes belong under `src/compiler/`, not benchmark or CLI glue.
+   - Runtime execution ownership belongs under `src/runtime/spine/`.
+   - Processor modules may extract fields and map registers/address spaces, but they must not
+     become mnemonic-by-mnemonic semantic owners.
+   - `src/runtime/processors/` must mirror the checked-in Ghidra Processor inventory as
+     compile-only skeletons before any individual Processor is promoted to executable runtime.
 4. Use vendor implementations as references only.
    - Borrow invariants and ideas, but keep executable logic owned in this crate.
+
+## Ghidra Runtime Mapping
+
+Clean-room owner mapping is fixed as:
+
+- `SleighLanguage` -> `RuntimeSleighFrontend` and runtime registry
+- `SleighParserContext` -> `runtime::spine::RuntimeInstructionContext`
+- `DecisionNode` -> `CompiledDecisionTree` plus `runtime::spine` traversal
+- `ConstructState` -> `runtime::spine::RuntimeConstructState`
+- `ParserWalker` -> `runtime::spine::RuntimeParserWalker`
+- `ConstructTpl` -> compiler-produced templates
+- `PcodeEmit` -> `runtime::spine::RuntimePcodeEmitter`
 
 ## Anti-Patterns
 

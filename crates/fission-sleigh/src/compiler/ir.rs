@@ -104,14 +104,8 @@ pub enum CompiledDecisionProbe {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledOpcodeMatcher {
     ExactBytes(Vec<u8>),
-    RowCc {
-        prefix: Vec<u8>,
-        row: u8,
-    },
-    RowPage {
-        row: u8,
-        page: u8,
-    },
+    RowCc { prefix: Vec<u8>, row: u8 },
+    RowPage { row: u8, page: u8 },
 }
 
 impl CompiledOpcodeMatcher {
@@ -139,11 +133,23 @@ pub enum CompiledOperandSpec {
         size: u32,
         memory_only: bool,
     },
-    ModRmReg { size: u32 },
-    OpcodeReg { size: u32 },
-    Immediate { size: u32, signed: bool },
-    Relative { size: u32 },
-    FixedRegister { reg: CompiledFixedRegister, size: u32 },
+    ModRmReg {
+        size: u32,
+    },
+    OpcodeReg {
+        size: u32,
+    },
+    Immediate {
+        size: u32,
+        signed: bool,
+    },
+    Relative {
+        size: u32,
+    },
+    FixedRegister {
+        reg: CompiledFixedRegister,
+        size: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -638,18 +644,12 @@ fn stable_hash(text: &str) -> u64 {
     hash
 }
 
-fn build_decision_tree(
-    constructors: &[CompiledExecutableConstructor],
-) -> CompiledDecisionTree {
+fn build_decision_tree(constructors: &[CompiledExecutableConstructor]) -> CompiledDecisionTree {
     let constructor_indexes = (0..constructors.len()).collect::<Vec<_>>();
     let root_probes = decision_probes_for_constructors(constructors);
     let mut nodes = Vec::new();
-    let root_node_index = build_bucket_node(
-        constructors,
-        &constructor_indexes,
-        &root_probes,
-        &mut nodes,
-    );
+    let root_node_index =
+        build_bucket_node(constructors, &constructor_indexes, &root_probes, &mut nodes);
     let mut buckets = BTreeMap::<String, Vec<usize>>::new();
     for (index, constructor) in constructors.iter().enumerate() {
         buckets
@@ -660,12 +660,8 @@ fn build_decision_tree(
     let root_buckets = buckets
         .into_iter()
         .map(|(key, constructor_indexes)| {
-            let node_index = build_bucket_node(
-                constructors,
-                &constructor_indexes,
-                &root_probes,
-                &mut nodes,
-            );
+            let node_index =
+                build_bucket_node(constructors, &constructor_indexes, &root_probes, &mut nodes);
             CompiledDecisionBucket { key, node_index }
         })
         .collect::<Vec<_>>();
@@ -751,8 +747,7 @@ fn build_bucket_node(
             branch_indexes.append(&mut specific);
             branch_indexes.sort_unstable();
             branch_indexes.dedup();
-            let child_index =
-                build_bucket_node(constructors, &branch_indexes, &remaining, nodes);
+            let child_index = build_bucket_node(constructors, &branch_indexes, &remaining, nodes);
             branches.push(CompiledDecisionEdge {
                 value,
                 next_node_index: child_index,
@@ -835,7 +830,9 @@ fn decision_feature_values(
 
 fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> Vec<u8> {
     match matcher {
-        CompiledOpcodeMatcher::ExactBytes(bytes) => bytes.get(offset).copied().into_iter().collect(),
+        CompiledOpcodeMatcher::ExactBytes(bytes) => {
+            bytes.get(offset).copied().into_iter().collect()
+        }
         CompiledOpcodeMatcher::RowCc { prefix, row } => {
             if let Some(byte) = prefix.get(offset) {
                 return vec![*byte];
@@ -847,7 +844,9 @@ fn instruction_probe_values(matcher: &CompiledOpcodeMatcher, offset: usize) -> V
         }
         CompiledOpcodeMatcher::RowPage { row, page } => {
             if offset == 0 {
-                return (0u8..=7).map(|low| (row << 4) | (page << 3) | low).collect();
+                return (0u8..=7)
+                    .map(|low| (row << 4) | (page << 3) | low)
+                    .collect();
             }
             Vec::new()
         }
@@ -897,7 +896,8 @@ fn compile_executable_constructor(
     let mod_constraint = parse_single_value(signature, "mod=");
     let reg_opcode_values = parse_value_list(signature, "reg_opcode=");
     let opsize_variants = parse_opsize_variants(signature);
-    let unsupported_template_kind = unsupported_template_reason(signature, semantic_kind, &operand_specs);
+    let unsupported_template_kind =
+        unsupported_template_reason(signature, semantic_kind, &operand_specs);
     let runtime_ready = unsupported_template_kind.is_none();
     let constructor_template = build_constructor_template(&operand_specs, semantic_kind);
 
@@ -989,10 +989,7 @@ fn parse_opcode_matcher(signature: &str) -> Option<CompiledOpcodeMatcher> {
     let bytes = parse_byte_sequence(signature);
     if let Some(row) = parse_single_value(signature, "row=") {
         if signature.contains("& cc") {
-            return Some(CompiledOpcodeMatcher::RowCc {
-                prefix: bytes,
-                row,
-            });
+            return Some(CompiledOpcodeMatcher::RowCc { prefix: bytes, row });
         }
         if let Some(page) = parse_single_value(signature, "page=") {
             return Some(CompiledOpcodeMatcher::RowPage { row, page });
@@ -1045,7 +1042,9 @@ fn parse_operand_specs(
             || token.eq_ignore_ascii_case("DS")
             || token.eq_ignore_ascii_case("ES")
         {
-            return Err(anyhow::anyhow!("segment operand is not executable in first runtime wave"));
+            return Err(anyhow::anyhow!(
+                "segment operand is not executable in first runtime wave"
+            ));
         }
         if let Some(size) = fixed_accumulator_size(token) {
             specs.push(CompiledOperandSpec::FixedRegister {
@@ -1202,7 +1201,12 @@ fn unsupported_template_reason(
         | CompiledSemanticKind::Cdqe => {}
     }
 
-    if operand_specs.len() > 2 && !matches!(semantic_kind, CompiledSemanticKind::Push | CompiledSemanticKind::Pop) {
+    if operand_specs.len() > 2
+        && !matches!(
+            semantic_kind,
+            CompiledSemanticKind::Push | CompiledSemanticKind::Pop
+        )
+    {
         return Some("unsupported_operand_arity".to_string());
     }
     None
@@ -1216,7 +1220,10 @@ fn build_constructor_template(
         .iter()
         .cloned()
         .enumerate()
-        .map(|(operand_index, spec)| CompiledHandleTemplate { operand_index, spec })
+        .map(|(operand_index, spec)| CompiledHandleTemplate {
+            operand_index,
+            spec,
+        })
         .collect::<Vec<_>>();
     let mut decode_steps = Vec::new();
     if operand_specs.iter().any(|spec| {
@@ -1227,9 +1234,10 @@ fn build_constructor_template(
     }) {
         decode_steps.push(CompiledOperandDecodeStep::ConsumeModRm);
     }
-    decode_steps.extend((0..operand_specs.len()).map(|operand_index| {
-        CompiledOperandDecodeStep::DecodeOperand { operand_index }
-    }));
+    decode_steps.extend(
+        (0..operand_specs.len())
+            .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
+    );
     let semantic_ops = semantic_ops_for_kind(semantic_kind);
     CompiledConstructorTemplate {
         handles,

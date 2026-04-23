@@ -54,7 +54,23 @@ crates/fission-sleigh/
 │   │   ├── codegen.rs
 │   │   └── equivalence.rs
 │   └── runtime/
-│       └── mod.rs
+│       ├── mod.rs
+│       ├── spine/
+│       │   ├── context.rs
+│       │   ├── decision.rs
+│       │   ├── construct.rs
+│       │   ├── walker.rs
+│       │   ├── template.rs
+│       │   └── emitter.rs
+│       ├── processors/
+│       │   ├── aarch64/
+│       │   ├── arm/
+│       │   ├── mips/
+│       │   ├── powerpc/
+│       │   ├── riscv/
+│       │   ├── ...
+│       │   └── x86/
+│       │       └── generated.rs
 ├── specs/
 │   ├── ghidra_language_manifest.json
 │   └── languages/
@@ -92,10 +108,9 @@ fn main() -> anyhow::Result<()> {
     let bytes = [0x90, 0xC3]; // nop; ret
     let address = 0x401000;
 
-    // Current hard-delete wave is intentionally fail-closed until compiled
-    // pattern/action execution is implemented.
-    let err = runtime.decode_and_lift_with_len(&bytes, address).unwrap_err();
-    assert!(format!("{err:#}").contains("UnsupportedPcodeTemplate"));
+    let (ops, len) = runtime.decode_and_lift_with_len(&bytes, address)?;
+    assert_eq!(len, 2);
+    assert!(!ops.is_empty());
 
     Ok(())
 }
@@ -110,6 +125,30 @@ fn main() -> anyhow::Result<()> {
 - The checked-in spec tree is mirrored from:
   - `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
 - `RuntimeSleighFrontend::new(path)` infers language name from the file stem.
+
+## Ghidra clean-room runtime spine
+
+The generated runtime is organized around Ghidra's SLEIGH execution ownership,
+but implemented as dependency-free Rust:
+
+| Ghidra owner | Fission owner |
+|---|---|
+| `SleighLanguage` | `RuntimeSleighFrontend` plus compiled language registry |
+| `SleighParserContext` | `runtime::spine::RuntimeInstructionContext` |
+| `DecisionNode` | `CompiledDecisionTree` plus `runtime::spine::DecisionProbeEvaluator` |
+| `ConstructState` | `runtime::spine::RuntimeConstructState` |
+| `ParserWalker` | `runtime::spine::RuntimeParserWalker` |
+| `ConstructTpl` | compiler-produced constructor templates |
+| `PcodeEmit` | `runtime::spine::RuntimePcodeEmitter` |
+
+Processor-specific runtime modules may extract ISA fields such as prefixes,
+ModRM/SIB, context bits, address spaces, and register mappings. They must not
+own semantic repair or mnemonic-level p-code policy; that belongs in the shared
+spine and compiler-produced templates.
+
+Runtime processor folders are checked in for all `38` mirrored Ghidra processors.
+Only `x86` is an executable candidate today; the remaining processor modules are
+typed compile-only skeletons until their generated runtime parity gates are implemented.
 
 ## Validation
 
@@ -129,7 +168,8 @@ cargo check -p fission-cli
 
 ## Notes
 
-- This crate intentionally avoids a runtime Sleigh engine dependency.
+- This crate intentionally avoids both a runtime Sleigh engine dependency and
+  temporary decode bridges inside `fission-sleigh`.
 - Outputs are designed to be deterministic for the same input bytes/address.
 - Semantic correctness fixes should be made in this crate (not CLI/UI layers).
 - The clean-room compiler consumer now preprocesses/parses/compiles/codegens all checked-in `.slaspec` variants with one generic compiler API.

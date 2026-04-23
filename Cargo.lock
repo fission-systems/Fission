@@ -1393,7 +1393,6 @@ dependencies = [
  "fission-pcode",
  "fission-sleigh",
  "fission-static",
- "iced-x86",
  "jemallocator",
  "libc",
  "miette",
@@ -1439,15 +1438,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tracing",
-]
-
-[[package]]
-name = "fission-disasm"
-version = "0.1.0"
-dependencies = [
- "iced-x86",
- "serde",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1501,7 +1491,6 @@ dependencies = [
  "bytes",
  "cpp_demangle",
  "fission-core",
- "fission-disasm",
  "gimli 0.31.1",
  "hex",
  "log",
@@ -1528,10 +1517,8 @@ dependencies = [
  "bytecheck",
  "criterion",
  "fission-core",
- "fission-disasm",
  "fission-loader",
  "fission-signatures",
- "iced-x86",
  "indexmap 2.12.1",
  "insta",
  "log",
@@ -1579,9 +1566,7 @@ name = "fission-sleigh"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "fission-loader",
  "fission-pcode",
- "iced-x86",
  "serde",
  "serde_json",
  "tempfile",

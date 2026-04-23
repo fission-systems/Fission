@@ -1,5 +1,4 @@
 use super::{FunctionDiscoveryProfile, FunctionInfo, LoadedBinary};
-use fission_disasm::DisasmEngine;
 use std::collections::HashSet;
 
 const X64_CONSERVATIVE_PROLOGUES: &[&[u8]] = &[
@@ -103,6 +102,21 @@ fn collect_rel_jmp_targets(data: &[u8], section_base: u64, targets: &mut HashSet
     let mut i = 0usize;
     while i + 5 <= data.len() {
         if data[i] == 0xE9 {
+            let rel = i32::from_le_bytes([data[i + 1], data[i + 2], data[i + 3], data[i + 4]]);
+            let insn_addr = section_base + i as u64;
+            let target = (insn_addr.wrapping_add(5)).wrapping_add(rel as i64 as u64);
+            targets.insert(target);
+            i += 5;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn collect_rel_call_targets(data: &[u8], section_base: u64, targets: &mut HashSet<u64>) {
+    let mut i = 0usize;
+    while i + 5 <= data.len() {
+        if data[i] == 0xE8 {
             let rel = i32::from_le_bytes([data[i + 1], data[i + 2], data[i + 3], data[i + 4]]);
             let insn_addr = section_base + i as u64;
             let target = (insn_addr.wrapping_add(5)).wrapping_add(rel as i64 as u64);
@@ -237,11 +251,6 @@ impl LoadedBinary {
     /// Profile-aware internal function discovery. Higher profiles increase recall
     /// with extra branch-target harvesting heuristics.
     pub fn discover_internal_functions_with_profile(&mut self, profile: FunctionDiscoveryProfile) {
-        let engine = match DisasmEngine::new(self.is_64bit) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
         let executable_ranges = collect_executable_ranges(self);
 
         let total_code_size: u64 = executable_ranges.iter().map(|(s, e)| e - s).sum();
@@ -262,7 +271,8 @@ impl LoadedBinary {
             }
             let bytes = &self.data.as_slice()[start..start + size];
 
-            let targets = engine.discover_call_targets(bytes, section.virtual_address);
+            let mut targets = HashSet::new();
+            collect_rel_call_targets(bytes, section.virtual_address, &mut targets);
 
             for target in targets {
                 insert_discovery_candidate(

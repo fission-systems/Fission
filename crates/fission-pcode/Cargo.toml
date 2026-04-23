@@ -12,9 +12,7 @@ categories = ["development-tools"]
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
-fission-disasm = { path = "../fission-disasm" }
 fission-signatures = { path = "../fission-signatures" }
-iced-x86 = { version = "1.21", features = ["std"] }
 anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
