@@ -782,19 +782,65 @@ pub fn apply_sla_construct_templates(
             continue;
         }
         let decoded = &templates[0].constructor_template;
-        let has_unsupported_opcode = decoded.op_templates.iter().any(|op| {
-            matches!(
-                op.opcode,
-                CompiledOpTplOpcode::Unsupported
-                    | CompiledOpTplOpcode::Build
-                    | CompiledOpTplOpcode::CallOther
-            )
+        // Only reject templates containing truly unsupported opcodes.
+        // Build (subtable inlining) and CallOther (user-defined ops) are
+        // now handled at emission time in the runtime emitter.
+        let has_unsupported_opcode = decoded
+            .op_templates
+            .iter()
+            .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Unsupported));
+
+        // Build handle index remapping from SLA ordering to our ordering.
+        // Fission extracts `operand_specs` based on the display string.
+        // Ghidra emits `ELEM_OPPRINT` indices in the exact order of the display string.
+        // Therefore, `opprint_indices[fission_idx]` gives the SLA operand index.
+        //
+        // When opprint_indices is empty, this constructor has no visible operands
+        // in its display string (sub-constructors, prefix-only, etc.), so we
+        // must NOT remap — the SLA template indices are already correct.
+        let opprint = &templates[0].opprint_indices;
+        let mut remapped_templates = decoded.op_templates.clone();
+
+        if !opprint.is_empty() {
+            let mut handle_remap = vec![usize::MAX; 32];
+            for (fission_idx, sla_idx) in opprint.iter().enumerate() {
+                if *sla_idx < handle_remap.len() {
+                    handle_remap[*sla_idx] = fission_idx;
+                }
+            }
+            for op in &mut remapped_templates {
+                remap_op_tpl_handles(op, &handle_remap);
+            }
+        }
+
+        // Detect SLA templates that reference handle indices beyond what
+        // Fission's runtime can resolve (our handles vec has exactly
+        // operand_specs.len() entries). If any op_template references a
+        // handle index >= operand_specs.len(), we must mark the constructor
+        // unsupported rather than panicking at runtime.
+        let num_handles = constructor.operand_specs.len();
+        let has_unresolvable_handle = remapped_templates.iter().any(|op| {
+            let mut max_idx: Option<i64> = None;
+            if let Some(ref out) = op.output {
+                collect_max_handle_index(out, &mut max_idx);
+            }
+            for inp in &op.inputs {
+                collect_max_handle_index(inp, &mut max_idx);
+            }
+            max_idx.is_some_and(|idx| idx >= 0 && (idx as usize) >= num_handles)
         });
-        constructor.constructor_template.op_templates = decoded.op_templates.clone();
+
+        constructor.constructor_template.op_templates = remapped_templates;
         constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
-        constructor.runtime_ready = !has_unsupported_opcode;
-        constructor.unsupported_template_kind = has_unsupported_opcode
-            .then(|| "unsupported_pcode_opcode_in_sla_construct_tpl".to_string());
+        let is_unsupported = has_unsupported_opcode || has_unresolvable_handle;
+        constructor.runtime_ready = !is_unsupported;
+        constructor.unsupported_template_kind = if has_unsupported_opcode {
+            Some("unsupported_pcode_opcode_in_sla_construct_tpl".to_string())
+        } else if has_unresolvable_handle {
+            Some("sla_template_references_unresolvable_handle".to_string())
+        } else {
+            None
+        };
         updated += 1;
     }
     compiled.construct_templates = compiled
@@ -808,6 +854,118 @@ pub fn apply_sla_construct_templates(
         })
         .collect();
     updated
+}
+
+/// Remap all handle index references within a single op template.
+fn remap_op_tpl_handles(op: &mut CompiledOpTpl, remap: &[usize]) {
+    if let Some(ref mut output) = op.output {
+        remap_varnode_tpl_handles(output, remap);
+    }
+    for input in &mut op.inputs {
+        remap_varnode_tpl_handles(input, remap);
+    }
+}
+
+fn remap_varnode_tpl_handles(vn: &mut CompiledVarnodeTpl, remap: &[usize]) {
+    match vn {
+        CompiledVarnodeTpl::Varnode { space, offset, size } => {
+            remap_space_tpl_handles(space, remap);
+            remap_const_tpl_handles(offset, remap);
+            remap_const_tpl_handles(size, remap);
+        }
+        CompiledVarnodeTpl::HandleTpl(ref mut handle) => {
+            if let Some(ref mut s) = handle.space {
+                remap_space_tpl_handles(s, remap);
+            }
+            if let Some(ref mut c) = handle.size {
+                remap_const_tpl_handles(c, remap);
+            }
+            if let Some(ref mut s) = handle.ptr_space {
+                remap_space_tpl_handles(s, remap);
+            }
+            if let Some(ref mut c) = handle.ptr_offset {
+                remap_const_tpl_handles(c, remap);
+            }
+            if let Some(ref mut c) = handle.ptr_size {
+                remap_const_tpl_handles(c, remap);
+            }
+            if let Some(ref mut s) = handle.temp_space {
+                remap_space_tpl_handles(s, remap);
+            }
+            if let Some(ref mut c) = handle.temp_offset {
+                remap_const_tpl_handles(c, remap);
+            }
+        }
+        _ => {} // Other variants don't have handle references
+    }
+}
+
+fn remap_space_tpl_handles(space: &mut CompiledSpaceTpl, remap: &[usize]) {
+    match space {
+        CompiledSpaceTpl::Const(ref mut c) => remap_const_tpl_handles(c, remap),
+        _ => {}
+    }
+}
+
+fn remap_const_tpl_handles(c: &mut CompiledConstTpl, remap: &[usize]) {
+    if let CompiledConstTpl::Handle { handle_index, .. } = c {
+        let idx = *handle_index as usize;
+        if idx < remap.len() {
+            let mapped = remap[idx];
+            if mapped != usize::MAX {
+                *handle_index = mapped as i64;
+            } else {
+                *handle_index = usize::MAX as i64;
+            }
+        }
+    }
+}
+
+/// Walk a VarnodeTpl and record the maximum handle index referenced.
+fn collect_max_handle_index(vn: &CompiledVarnodeTpl, max_idx: &mut Option<i64>) {
+    match vn {
+        CompiledVarnodeTpl::Varnode { space, offset, size } => {
+            collect_max_handle_index_from_space(space, max_idx);
+            collect_max_handle_index_from_const(offset, max_idx);
+            collect_max_handle_index_from_const(size, max_idx);
+        }
+        CompiledVarnodeTpl::HandleTpl(handle) => {
+            if let Some(ref s) = handle.space {
+                collect_max_handle_index_from_space(s, max_idx);
+            }
+            if let Some(ref c) = handle.size {
+                collect_max_handle_index_from_const(c, max_idx);
+            }
+            if let Some(ref s) = handle.ptr_space {
+                collect_max_handle_index_from_space(s, max_idx);
+            }
+            if let Some(ref c) = handle.ptr_offset {
+                collect_max_handle_index_from_const(c, max_idx);
+            }
+            if let Some(ref c) = handle.ptr_size {
+                collect_max_handle_index_from_const(c, max_idx);
+            }
+            if let Some(ref s) = handle.temp_space {
+                collect_max_handle_index_from_space(s, max_idx);
+            }
+            if let Some(ref c) = handle.temp_offset {
+                collect_max_handle_index_from_const(c, max_idx);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_max_handle_index_from_const(c: &CompiledConstTpl, max_idx: &mut Option<i64>) {
+    if let CompiledConstTpl::Handle { handle_index, .. } = c {
+        *max_idx = Some(max_idx.map_or(*handle_index, |cur| cur.max(*handle_index)));
+    }
+}
+
+fn collect_max_handle_index_from_space(s: &CompiledSpaceTpl, max_idx: &mut Option<i64>) {
+    if let CompiledSpaceTpl::Const(c) = s {
+        collect_max_handle_index_from_const(c, max_idx);
+    }
 }
 
 struct Collector {

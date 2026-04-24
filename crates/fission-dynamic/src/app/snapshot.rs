@@ -72,6 +72,10 @@ mod tests {
             function_name_index: HashMap::new(),
             functions_sorted: true,
             inferred_types: vec![],
+            architecture: None,
+            load_spec: None,
+            pdb_debug_info: None,
+            string_map: HashMap::new(),
         }
     }
 

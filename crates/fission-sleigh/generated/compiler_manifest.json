@@ -2173,7 +2173,7 @@
       "runtime_ready": true,
       "decision_node_count": 14042,
       "constructor_template_count": 1187,
-      "unsupported_template_count": 1052,
+      "unsupported_template_count": 217,
       "compile_status": "ok"
     },
     {
@@ -2188,7 +2188,7 @@
       "runtime_ready": true,
       "decision_node_count": 9852,
       "constructor_template_count": 937,
-      "unsupported_template_count": 827,
+      "unsupported_template_count": 184,
       "compile_status": "ok"
     }
   ]

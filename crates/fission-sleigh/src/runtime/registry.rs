@@ -449,16 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn keeps_riscv_as_compile_only() {
+    fn resolves_riscv_as_executable_candidate() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
-        let error = registry
+        let selection = registry
             .resolve_from_language_pair("RISCV:LE:64:default", Some("gcc"))
-            .expect_err("RISCV should remain compile-only in this wave");
-        match error {
-            RuntimeEntrySelectionError::CompileOnlySelection { entry_id, .. } => {
-                assert_eq!(entry_id, "riscv.lp64d")
-            }
-            other => panic!("unexpected selection result: {other}"),
-        }
+            .expect("RISCV should now resolve as executable candidate");
+        assert_eq!(selection.entry_id, "riscv.lp64d");
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
     }
 }

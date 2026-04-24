@@ -37,6 +37,7 @@ pub struct CompiledSlaConstructorTemplate {
     pub source_key: String,
     pub source_file: String,
     pub line: u64,
+    pub opprint_indices: Vec<usize>,
     pub constructor_template: CompiledConstructTpl,
 }
 
@@ -123,6 +124,16 @@ fn decode_construct_templates(
         };
         let template = decode_construct_tpl(main_tpl, &spaces)
             .with_context(|| format!("decode construct_tpl for {source_key}"))?;
+            
+        let mut opprint_indices = Vec::new();
+        for child in &constructor.children {
+            if child.id == sla_format::ELEM_OPPRINT {
+                if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize) {
+                    opprint_indices.push(index);
+                }
+            }
+        }
+
         constructors_by_source
             .entry(source_key.clone())
             .or_default()
@@ -130,6 +141,7 @@ fn decode_construct_templates(
                 source_key,
                 source_file,
                 line,
+                opprint_indices,
                 constructor_template: template,
             });
     }
@@ -634,6 +646,7 @@ mod sla_format {
     pub const ELEM_CONST_HANDLE: u32 = 4;
     pub const ELEM_OP_TPL: u32 = 5;
     pub const ELEM_NULL: u32 = 11;
+    pub const ELEM_OPPRINT: u32 = 17;
     pub const ELEM_CONSTRUCTOR: u32 = 20;
     pub const ELEM_CONSTRUCT_TPL: u32 = 21;
     pub const ELEM_HANDLE_TPL: u32 = 30;
@@ -655,6 +668,7 @@ mod sla_format {
     pub const ELEM_CONST_FLOWDEST_SIZE: u32 = 88;
 
     pub const ATTR_VAL: u32 = 2;
+    pub const ATTR_ID: u32 = 3;
     pub const ATTR_SPACE: u32 = 4;
     pub const ATTR_S: u32 = 5;
     pub const ATTR_CODE: u32 = 7;

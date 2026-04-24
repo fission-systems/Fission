@@ -33,11 +33,11 @@ impl RuntimePcodeEmitter {
             is_constant: false,
             constant_val: 0,
         };
-        self.next_tmp = self.next_tmp.wrapping_add(8);
+        self.next_tmp = self.next_tmp.wrapping_add(0x200);
         vn
     }
 
-    fn append_checked(
+    pub fn append_checked(
         &mut self,
         opcode: PcodeOpcode,
         output: Option<Varnode>,
@@ -130,5 +130,14 @@ impl RuntimePcodeEmitter {
         mnemonic: &str,
     ) -> Result<()> {
         self.append_checked(opcode, Some(out), vec![left, right], mnemonic)
+    }
+
+    pub fn emit_callother(
+        &mut self,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+        mnemonic: &str,
+    ) -> Result<()> {
+        self.append_checked(PcodeOpcode::CallOther, output, inputs, mnemonic)
     }
 }

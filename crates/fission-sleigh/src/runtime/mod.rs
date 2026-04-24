@@ -798,32 +798,18 @@ mod tests {
                 .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
                 .map(|frontend| frontend.processor.as_str())
                 .collect::<Vec<_>>(),
-            vec!["AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "x86", "x86"]
+            vec!["AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "MIPS", "RISCV", "x86", "x86"]
         );
     }
 
     #[test]
-    fn compile_only_frontend_produces_fail_closed_runtime_report() {
+    fn riscv_now_resolves_as_executable_candidate() {
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:64:default")
             .expect("RISCV runtime frontend");
         assert_eq!(
             frontend.status(),
-            RuntimeFrontendStatus::RegisteredCompileOnly
+            RuntimeFrontendStatus::ExecutableCandidate
         );
-
-        let report = frontend
-            .runtime_attempt_report()
-            .expect("compile-only runtime report");
-        assert_eq!(report.processor, "RISCV");
-        assert_eq!(report.module_name, "riscv");
-        assert!(report.compiled_table_available);
-        assert!(report.constructor_inventory_count > 0);
-        assert!(report.fail_closed_reason.is_some());
-
-        let err = frontend
-            .decode_and_lift_with_len(&[0x00, 0x00, 0x00, 0x00], 0x1000)
-            .expect_err("compile-only runtime must fail closed");
-        assert!(format!("{err:#}").contains("UnsupportedGeneratedSemantic"));
     }
 
     #[test]

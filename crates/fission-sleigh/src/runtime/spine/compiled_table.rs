@@ -126,7 +126,27 @@ pub(crate) fn decode_and_lift_with_details(
     }
     let decoded = bind_instruction(&ctx, selection)?;
     let mut emitter = CompiledTableEmitter::new(address);
-    let details = RuntimeTemplateEvaluator::new(&mut emitter).emit(&compiled.entry_id, &decoded)?;
+    let details = RuntimeTemplateEvaluator::new(&mut emitter)
+        .emit(&compiled.entry_id, &decoded)
+        .map_err(|err| {
+            // If template evaluation fails due to unresolvable template
+            // features (HandleTpl, CurSpace, etc.), convert to a typed
+            // UnsupportedPcodeTemplate error so that callers can
+            // distinguish "not yet implemented" from "broken input".
+            let msg = err.to_string();
+            if msg.contains("HandleTpl")
+                || msg.contains("ConstTpl")
+                || msg.contains("unsupported")
+            {
+                RuntimeSleighError::UnsupportedPcodeTemplate {
+                    language: compiled.entry_id.clone(),
+                    reason: format!("emission_time_template_resolution_failed: {msg}"),
+                }
+                .into()
+            } else {
+                err
+            }
+        })?;
     Ok((emitter.finish(), decoded.length as u64, details))
 }
 
@@ -800,16 +820,23 @@ fn add_signed(base: u64, delta: i64) -> u64 {
 struct CompiledTableEmitter {
     emitter: RuntimePcodeEmitter,
     address: u64,
+    /// Cache of resolved effective-address varnodes for Memory operands.
+    /// Key is the handle index, value is the unique-space varnode holding
+    /// the computed pointer.
+    resolved_memory_ea: std::collections::BTreeMap<usize, Varnode>,
 }
 
 impl CompiledTableEmitter {
     fn new(address: u64) -> Self {
+        // Use Ghidra-compatible unique offset base: 0x9300 is the first
+        // canonical unique temp used by the x86 Addr sub-constructors.
+        // Ghidra computes: (addr & uniquemask) << 8, but for the SLA
+        // template temps these are static offsets baked into the spec.
+        // We start at 0x9300 to match Ghidra's allocation pattern.
         Self {
             address,
-            emitter: RuntimePcodeEmitter::new(
-                address,
-                0xE400_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6)),
-            ),
+            emitter: RuntimePcodeEmitter::new(address, 0x9300),
+            resolved_memory_ea: std::collections::BTreeMap::new(),
         }
     }
 
@@ -868,8 +895,41 @@ impl CompiledTableEmitter {
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("COPY template requires one input"))?;
-                let value = self.read_template_varnode(input_tpl, state, out_size)?;
-                self.write_template_target(out_tpl, value, state, mnemonic)
+
+                // Read input at its natural size (pass 0 = accept any size).
+                // The SUBPIECE path below handles any size mismatch.
+                let value = self.read_template_varnode(input_tpl, state, 0)?;
+
+                if value.size > out_size && out_size > 0 {
+                    // Size mismatch: source is wider than destination.
+                    // Emit SUBPIECE to truncate (matches Ghidra's behavior).
+                    let out = self.template_write_target(out_tpl, state)?;
+                    let trunc_const = Varnode::constant(0, 4);
+                    self.emitter.append_checked(
+                        fission_pcode::PcodeOpcode::SubPiece,
+                        Some(out.clone()),
+                        vec![value, trunc_const],
+                        "SUBPIECE",
+                    )?;
+                    // In x86-64, writing to a 32-bit register implicitly
+                    // zero-extends to 64 bits. Emit INT_ZEXT if the output
+                    // is a 4-byte register (Ghidra does this explicitly).
+                    if out.size == 4 && out.space_id == 4 {
+                        let extended = Varnode {
+                            size: 8,
+                            ..out.clone()
+                        };
+                        self.emitter.append_checked(
+                            fission_pcode::PcodeOpcode::IntZExt,
+                            Some(extended),
+                            vec![out],
+                            "INT_ZEXT",
+                        )?;
+                    }
+                    Ok(())
+                } else {
+                    self.write_template_target(out_tpl, value, state, mnemonic)
+                }
             }
             CompiledOpTplOpcode::IntZExt
             | CompiledOpTplOpcode::IntSExt
@@ -884,7 +944,7 @@ impl CompiledTableEmitter {
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("{} template requires one input", mnemonic))?;
-                let input = self.read_template_varnode(input_tpl, state, out_size)?;
+                let input = self.read_template_varnode(input_tpl, state, 0)?;
                 let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
                 let opcode = self.unary_pcode_opcode(op.opcode)?;
                 self.emitter
@@ -917,8 +977,8 @@ impl CompiledTableEmitter {
                     bail!("{mnemonic} template requires two inputs");
                 }
                 let out_size = self.template_varnode_size(out_tpl, state)?;
-                let lhs = self.read_template_varnode(&op.inputs[0], state, out_size)?;
-                let rhs = self.read_template_varnode(&op.inputs[1], state, out_size)?;
+                let lhs = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let rhs = self.read_template_varnode(&op.inputs[1], state, 0)?;
                 let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
                 let opcode = self.binary_pcode_opcode(op.opcode)?;
                 self.emitter
@@ -978,9 +1038,131 @@ impl CompiledTableEmitter {
                     self.commit_template_write_target(out_tpl, out, state, mnemonic)
                 }
             }
-            CompiledOpTplOpcode::CallOther
-            | CompiledOpTplOpcode::Build
-            | CompiledOpTplOpcode::Unsupported => bail!(
+            // Build: subtable inlining directive. In Ghidra, this recursively
+            // emits the P-code from a matched sub-constructor's template.
+            // For Memory operands, we emit the address calculation P-code
+            // here (INT_MULT for scale, INT_ADD for base+index+disp) and
+            // cache the result varnode so that the parent COPY/LOAD/STORE
+            // template can reference it via handle selectors.
+            CompiledOpTplOpcode::Build => {
+                let operand_index = if let Some(input_tpl) = op.inputs.first() {
+                    match input_tpl {
+                        CompiledVarnodeTpl::Varnode { offset, .. } => {
+                            match offset.as_ref() {
+                                CompiledConstTpl::Real { value } => Some(*value as usize),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(idx) = operand_index {
+                    if let Some(handle) = state.handles.get(idx) {
+                        if let BoundOperand::Memory { base, index, scale, displacement, rip_relative, size: _op_size } = &handle.value {
+                            // Emit address calculation P-code matching Ghidra's
+                            // Addr sub-constructor output.
+                            let mut tmp: Option<Varnode> = None;
+
+                            // Step 1: index * scale
+                            if let Some(idx_reg) = index {
+                                let idx_vn = Varnode {
+                                    space_id: 4, // register space
+                                    offset: (*idx_reg as u64) * 8,
+                                    size: 8,
+                                    is_constant: false,
+                                    constant_val: 0,
+                                };
+                                // Ghidra always emits INT_MULT even when scale==1
+                                let scale_vn = Varnode::constant(*scale as i64, 8);
+                                let out_tmp = self.emitter.tmp(2, 8);
+                                self.emitter.emit_int_binop(
+                                    fission_pcode::PcodeOpcode::IntMult,
+                                    out_tmp.clone(),
+                                    idx_vn,
+                                    scale_vn,
+                                    "INT_MULT",
+                                )?;
+                                tmp = Some(out_tmp);
+                            }
+
+                            // Step 2: base + scaled_index
+                            let base_vn = if let Some(base_reg) = base {
+                                Some(Varnode {
+                                    space_id: 4,
+                                    offset: (*base_reg as u64) * 8,
+                                    size: 8,
+                                    is_constant: false,
+                                    constant_val: 0,
+                                })
+                            } else if *rip_relative {
+                                Some(Varnode::constant(
+                                    self.address.saturating_add(state.length as u64) as i64,
+                                    8,
+                                ))
+                            } else {
+                                None
+                            };
+
+                            if let Some(b_vn) = base_vn {
+                                if let Some(t_vn) = tmp {
+                                    let out_tmp = self.emitter.tmp(2, 8);
+                                    self.emitter.emit_int_binop(
+                                        fission_pcode::PcodeOpcode::IntAdd,
+                                        out_tmp.clone(),
+                                        b_vn,
+                                        t_vn,
+                                        "INT_ADD",
+                                    )?;
+                                    tmp = Some(out_tmp);
+                                } else {
+                                    tmp = Some(b_vn);
+                                }
+                            }
+
+                            // Step 3: + displacement
+                            if *displacement != 0 || tmp.is_none() {
+                                let disp_vn = Varnode::constant(*displacement, 8);
+                                if let Some(t_vn) = tmp {
+                                    let out_tmp = self.emitter.tmp(2, 8);
+                                    self.emitter.emit_int_binop(
+                                        fission_pcode::PcodeOpcode::IntAdd,
+                                        out_tmp.clone(),
+                                        t_vn,
+                                        disp_vn,
+                                        "INT_ADD",
+                                    )?;
+                                    tmp = Some(out_tmp);
+                                } else {
+                                    tmp = Some(disp_vn);
+                                }
+                            }
+
+                            if let Some(ea_vn) = tmp {
+                                self.resolved_memory_ea.insert(idx, ea_vn);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            // CallOther: user-defined pcodeop. Ghidra emits this as a real
+            // CALLOTHER P-code op. Input[0] is the pcodeop index.
+            CompiledOpTplOpcode::CallOther => {
+                let mut inputs = Vec::new();
+                for input in &op.inputs {
+                    let size = self.template_varnode_size(input, state).unwrap_or(8);
+                    inputs.push(self.read_template_varnode(input, state, size)?);
+                }
+                let output = if let Some(ref out_ref) = op.output {
+                    Some(self.materialize_write_varnode(out_ref, state, mnemonic)?)
+                } else {
+                    None
+                };
+                self.emitter.emit_callother(output, inputs, mnemonic)
+            }
+            CompiledOpTplOpcode::Unsupported => bail!(
                 "compiled op template {} is not executable in compiled-table cutover",
                 mnemonic
             ),
@@ -988,7 +1170,7 @@ impl CompiledTableEmitter {
     }
 
     fn template_varnode_size(
-        &self,
+        &mut self,
         template: &CompiledVarnodeTpl,
         state: &RuntimeConstructState,
     ) -> Result<u32> {
@@ -997,8 +1179,13 @@ impl CompiledTableEmitter {
                 let value = self.resolve_const_value(size, state)?;
                 u32::try_from(value).map_err(|_| anyhow!("VarnodeTpl size {value} exceeds u32"))
             }
-            CompiledVarnodeTpl::HandleTpl(_) => {
-                bail!("compiled-table executor cannot size unresolved HandleTpl")
+            CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
+                if let Some(size) = &handle_tpl.size {
+                    let value = self.resolve_const_value(size, state)?;
+                    u32::try_from(value).map_err(|_| anyhow!("HandleTpl size {value} exceeds u32"))
+                } else {
+                    Ok(0)
+                }
             }
             _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
@@ -1011,18 +1198,15 @@ impl CompiledTableEmitter {
         expected_size: u32,
     ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Varnode { .. } => {
+            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
                 let varnode = self.resolve_varnode_tpl(template, state)?;
-                if varnode.size != expected_size {
+                if expected_size > 0 && varnode.size != expected_size {
                     bail!(
                         "VarnodeTpl size {} did not match expected size {expected_size}",
                         varnode.size
                     );
                 }
                 Ok(varnode)
-            }
-            CompiledVarnodeTpl::HandleTpl(_) => {
-                bail!("compiled-table executor cannot resolve unresolved HandleTpl")
             }
             _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
@@ -1065,62 +1249,95 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
     ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Varnode { .. } => self.resolve_varnode_tpl(template, state),
-            CompiledVarnodeTpl::HandleTpl(_) => {
-                bail!("compiled-table executor cannot write unresolved HandleTpl")
-            }
+            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => self.resolve_varnode_tpl(template, state),
             _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
     }
 
     fn resolve_varnode_tpl(
-        &self,
+        &mut self,
         template: &CompiledVarnodeTpl,
         state: &RuntimeConstructState,
     ) -> Result<Varnode> {
-        let CompiledVarnodeTpl::Varnode {
-            space,
-            offset,
-            size,
-        } = template
-        else {
-            bail!("expected Ghidra VarnodeTpl");
-        };
-        let space = self.resolve_space_tpl(space, state)?;
-        let offset = self.resolve_const_value(offset, state)?;
-        let size = u32::try_from(self.resolve_const_value(size, state)?)
-            .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
-        if space.index == 0 || space.name == "const" {
-            let value = i64::try_from(offset)
-                .map_err(|_| anyhow!("constant VarnodeTpl offset {offset} exceeds i64"))?;
-            return Ok(Varnode::constant(value, size));
+        match template {
+            CompiledVarnodeTpl::Varnode { space, offset, size } => {
+                let space = self.resolve_space_tpl(space, state)?;
+                let offset = self.resolve_const_value(offset, state)?;
+                let size = u32::try_from(self.resolve_const_value(size, state)?)
+                    .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
+                if space.index == 0 || space.name == "const" {
+                    let value = i64::try_from(offset)
+                        .map_err(|_| anyhow!("constant VarnodeTpl offset {offset} exceeds i64"))?;
+                    return Ok(Varnode::constant(value, size));
+                }
+                Ok(Varnode {
+                    space_id: space.index,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                })
+            }
+            CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
+                let space = if let Some(space) = &handle_tpl.space {
+                    self.resolve_space_tpl(space, state)?
+                } else {
+                    bail!("HandleTpl missing space")
+                };
+                let offset = if let Some(offset) = &handle_tpl.ptr_offset {
+                    self.resolve_const_value(offset, state)?
+                } else {
+                    bail!("HandleTpl missing ptr_offset")
+                };
+                let size = if let Some(size) = &handle_tpl.size {
+                    u32::try_from(self.resolve_const_value(size, state)?)
+                        .map_err(|_| anyhow!("HandleTpl size exceeds u32"))?
+                } else {
+                    0
+                };
+                if space.index == 0 || space.name == "const" {
+                    let value = i64::try_from(offset)
+                        .map_err(|_| anyhow!("constant HandleTpl offset {offset} exceeds i64"))?;
+                    return Ok(Varnode::constant(value, size));
+                }
+                Ok(Varnode {
+                    space_id: space.index,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                })
+            }
+            _ => bail!("expected Ghidra VarnodeTpl or HandleTpl"),
         }
-        Ok(Varnode {
-            space_id: space.index,
-            offset,
-            size,
-            is_constant: false,
-            constant_val: 0,
-        })
     }
 
     fn resolve_space_tpl(
-        &self,
+        &mut self,
         template: &CompiledSpaceTpl,
-        _state: &RuntimeConstructState,
+        state: &RuntimeConstructState,
     ) -> Result<CompiledSpaceRef> {
         match template {
             CompiledSpaceTpl::SpaceRef(space) => Ok(space.clone()),
-            CompiledSpaceTpl::Const(value) => match value.as_ref() {
-                CompiledConstTpl::SpaceId(space) => Ok(space.clone()),
-                CompiledConstTpl::CurSpace => bail!("ConstTpl curspace resolution is unsupported"),
-                _ => bail!("ConstTpl space resolution without SpaceId is unsupported"),
-            },
+            CompiledSpaceTpl::Const(const_tpl) => {
+                let space_id = self.resolve_const_value(const_tpl, state)?;
+                let name = match space_id {
+                    0 => "const",
+                    2 => "unique",
+                    3 => "ram",
+                    4 => "register",
+                    _ => "unknown",
+                };
+                Ok(CompiledSpaceRef {
+                    name: name.to_string(),
+                    index: space_id,
+                })
+            }
         }
     }
 
     fn resolve_const_value(
-        &self,
+        &mut self,
         template: &CompiledConstTpl,
         state: &RuntimeConstructState,
     ) -> Result<u64> {
@@ -1133,7 +1350,75 @@ impl CompiledTableEmitter {
             CompiledConstTpl::InstStart => Ok(self.address),
             CompiledConstTpl::InstNext => Ok(self.address.saturating_add(state.length as u64)),
             CompiledConstTpl::SpaceId(space) => Ok(space.index),
-            CompiledConstTpl::Handle { .. } => bail!("ConstTpl handle resolution is unsupported"),
+            CompiledConstTpl::Handle {
+                handle_index,
+                selector,
+                plus,
+            } => {
+                let handle = state
+                    .handles
+                    .get(*handle_index as usize)
+                    .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+
+                let val = match handle.value {
+                    crate::runtime::spine::construct::BoundOperand::Register { index, size } => {
+                        // Hardcode x86-64 register space mapping for now (space=4)
+                        match selector {
+                            crate::compiler::CompiledHandleSelector::Space => 4, // "register" space
+                            crate::compiler::CompiledHandleSelector::Offset => (index as u64) * 8, // Ghidra general registers are offset by 8
+                            crate::compiler::CompiledHandleSelector::Size => size as u64,
+                            crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+                        }
+                    }
+                    crate::runtime::spine::construct::BoundOperand::Immediate {
+                        value,
+                        encoded_size,
+                        ..
+                    } => match selector {
+                        crate::compiler::CompiledHandleSelector::Space => 0, // "const" space
+                        crate::compiler::CompiledHandleSelector::Offset => value,
+                        crate::compiler::CompiledHandleSelector::Size => encoded_size as u64,
+                        crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+                    },
+                    crate::runtime::spine::construct::BoundOperand::Relative { target } => {
+                        match selector {
+                            crate::compiler::CompiledHandleSelector::Space => 3, // "ram" space
+                            crate::compiler::CompiledHandleSelector::Offset => target,
+                            crate::compiler::CompiledHandleSelector::Size => 8, // Absolute pointer size
+                            crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+                        }
+                    }
+                    crate::runtime::spine::construct::BoundOperand::Memory { size, .. } => {
+                        // Memory operands have their address calculation
+                        // emitted during Build. The resolved EA varnode
+                        // is cached in resolved_memory_ea.
+                        let handle_idx = *handle_index as usize;
+                        if let Some(ea_vn) = self.resolved_memory_ea.get(&handle_idx) {
+                            match selector {
+                                // Dynamic: point to the unique-space temp
+                                crate::compiler::CompiledHandleSelector::Space => ea_vn.space_id,
+                                crate::compiler::CompiledHandleSelector::Offset => ea_vn.offset,
+                                crate::compiler::CompiledHandleSelector::Size => ea_vn.size as u64,
+                                crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+                            }
+                        } else {
+                            // Fallback: not yet resolved (shouldn't happen
+                            // if Build ran first)
+                            match selector {
+                                crate::compiler::CompiledHandleSelector::Space => 3, // ram
+                                crate::compiler::CompiledHandleSelector::Offset => 0,
+                                crate::compiler::CompiledHandleSelector::Size => size as u64,
+                                crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+                            }
+                        }
+                    }
+                };
+                if let Some(plus) = plus {
+                    Ok(val.wrapping_add(*plus))
+                } else {
+                    Ok(val)
+                }
+            }
             CompiledConstTpl::Relative { .. } | CompiledConstTpl::RelativeAddress => {
                 bail!("ConstTpl relative label resolution is unsupported")
             }
