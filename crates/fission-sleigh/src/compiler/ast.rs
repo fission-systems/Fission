@@ -177,18 +177,14 @@ impl<'a> ParseCursor<'a> {
             .current()
             .ok_or_else(|| anyhow!("missing with-block start"))?
             .clone();
-        let block = self.collect_braced_block()?;
+        let block_lines = self.collect_braced_block_lines()?;
+        let block = block_lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let (header, body) = split_signature_and_body(&block)?;
-        let nested_lines = body
-            .lines()
-            .enumerate()
-            .map(|(offset, text)| PreprocessedLine {
-                file: start.file.clone(),
-                line_number: start.line_number + offset + 1,
-                text: text.to_string(),
-                include_depth: 0,
-            })
-            .collect::<Vec<_>>();
+        let nested_lines = preserve_inner_block_lines(&block_lines, &body);
         let mut nested = ParseCursor {
             lines: &nested_lines,
             index: 0,
@@ -253,6 +249,15 @@ impl<'a> ParseCursor<'a> {
     }
 
     fn collect_braced_block(&mut self) -> Result<String> {
+        Ok(self
+            .collect_braced_block_lines()?
+            .into_iter()
+            .map(|line| line.text)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
+    fn collect_braced_block_lines(&mut self) -> Result<Vec<PreprocessedLine>> {
         let mut collected = Vec::new();
         let mut brace_depth = 0i64;
         let mut seen_open = false;
@@ -266,11 +271,11 @@ impl<'a> ParseCursor<'a> {
                 seen_open = true;
             }
             brace_depth -= count_structural_char(structural_text, '}') as i64;
-            collected.push(text);
+            collected.push(line.clone());
             self.index += 1;
 
             if seen_open && brace_depth == 0 {
-                return Ok(collected.join("\n"));
+                return Ok(collected);
             }
         }
 
@@ -287,6 +292,30 @@ impl<'a> ParseCursor<'a> {
     fn current(&self) -> Option<&'a PreprocessedLine> {
         self.lines.get(self.index)
     }
+}
+
+fn preserve_inner_block_lines(block_lines: &[PreprocessedLine], body: &str) -> Vec<PreprocessedLine> {
+    let mut lines = Vec::new();
+    if block_lines.len() > 2 {
+        lines.extend(block_lines[1..block_lines.len() - 1].iter().cloned());
+    } else {
+        lines.extend(body.lines().enumerate().map(|(offset, text)| PreprocessedLine {
+            file: block_lines
+                .first()
+                .map(|line| line.file.clone())
+                .unwrap_or_default(),
+            line_number: block_lines
+                .first()
+                .map(|line| line.line_number + offset + 1)
+                .unwrap_or(offset + 1),
+            text: text.to_string(),
+            include_depth: block_lines
+                .first()
+                .map(|line| line.include_depth)
+                .unwrap_or_default(),
+        }));
+    }
+    lines
 }
 
 fn strip_comments(raw: &str) -> &str {

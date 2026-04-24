@@ -2,29 +2,25 @@
 //! The canonical owner mapping remains `DecisionNode -> RuntimeInstructionContext ->
 //! RuntimeConstructState/RuntimeParserWalker -> RuntimeTemplateEvaluator -> RuntimePcodeEmitter`.
 
-use std::collections::BTreeMap;
-
 use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
-    CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe,
+    CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
     CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep, CompiledOperandSpec,
-    CompiledPatternMatcher, CompiledTokenFieldRef, CompiledVarnodeTpl,
+    CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl, CompiledTokenFieldRef,
+    CompiledVarnodeTpl,
 };
 use crate::runtime::spine::{
-    self, operand_size, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
+    self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
     RuntimeInstructionContext, RuntimePcodeEmitter, RuntimeSelection, RuntimeTemplateEvaluator,
     RuntimeTemplateExecutor,
 };
 use crate::runtime::{
     DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,
-    RuntimeExecutionDetails, RuntimeSleighError, UNIQUE_SPACE_ID,
+    RuntimeExecutionDetails, RuntimeSleighError,
 };
-
-const SYNTHETIC_REGISTER_SPACE_ROOT: u64 = 0xA860_0000;
-const SYNTHETIC_STATUS_SPACE_ROOT: u64 = 0xA86F_0000;
 
 #[derive(Debug, Clone, Copy)]
 struct InstructionExtensionState {
@@ -130,7 +126,7 @@ pub(crate) fn decode_and_lift_with_details(
     }
     let decoded = bind_instruction(&ctx, selection)?;
     let mut emitter = CompiledTableEmitter::new(address);
-    let details = RuntimeTemplateEvaluator::new(&mut emitter).emit(&decoded)?;
+    let details = RuntimeTemplateEvaluator::new(&mut emitter).emit(&compiled.entry_id, &decoded)?;
     Ok((emitter.finish(), decoded.length as u64, details))
 }
 
@@ -802,15 +798,8 @@ fn add_signed(base: u64, delta: i64) -> u64 {
 
 #[derive(Debug, Clone)]
 struct CompiledTableEmitter {
-    address: u64,
     emitter: RuntimePcodeEmitter,
-    temp_cache: BTreeMap<u32, Varnode>,
-}
-
-#[derive(Debug, Clone)]
-enum TemplateWriteTarget {
-    Operand { operand: BoundOperand, size: u32 },
-    Direct(Varnode),
+    address: u64,
 }
 
 impl CompiledTableEmitter {
@@ -821,80 +810,11 @@ impl CompiledTableEmitter {
                 address,
                 0xE400_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6)),
             ),
-            temp_cache: BTreeMap::new(),
         }
     }
 
     fn finish(self) -> Vec<PcodeOp> {
         self.emitter.finish()
-    }
-
-    fn emit_call(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let target = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
-        self.emitter.emit_call(target, "CALL")?;
-        Ok(())
-    }
-
-    fn emit_compatibility_op(
-        &mut self,
-        state: &RuntimeConstructState,
-        op: &crate::compiler::CompiledSemanticOp,
-    ) -> Result<()> {
-        match op {
-            crate::compiler::CompiledSemanticOp::Nop => Ok(()),
-            crate::compiler::CompiledSemanticOp::Return => self.emitter.emit_return("RET"),
-            crate::compiler::CompiledSemanticOp::Call => self.emit_call(state),
-            crate::compiler::CompiledSemanticOp::Jump => self.emit_jmp(state),
-            crate::compiler::CompiledSemanticOp::ConditionalJump => self.emit_jcc(state),
-            crate::compiler::CompiledSemanticOp::Copy => self.emit_mov(state),
-            crate::compiler::CompiledSemanticOp::AddressOf => self.emit_address_op(state),
-            crate::compiler::CompiledSemanticOp::StackStore => self.emit_store_stack_op(state),
-            crate::compiler::CompiledSemanticOp::StackLoad => self.emit_load_stack_op(state),
-            crate::compiler::CompiledSemanticOp::FrameTeardown => self.emit_frame_teardown_op(),
-            crate::compiler::CompiledSemanticOp::Binary { opcode } => match opcode {
-                CompiledArithmeticOpcode::Add => {
-                    self.emit_binary(state, PcodeOpcode::IntAdd, "ADD")
-                }
-                CompiledArithmeticOpcode::Sub => {
-                    self.emit_binary(state, PcodeOpcode::IntSub, "SUB")
-                }
-                CompiledArithmeticOpcode::And => {
-                    self.emit_binary(state, PcodeOpcode::IntAnd, "AND")
-                }
-                CompiledArithmeticOpcode::Or => self.emit_binary(state, PcodeOpcode::IntOr, "OR"),
-                CompiledArithmeticOpcode::Xor => {
-                    self.emit_binary(state, PcodeOpcode::IntXor, "XOR")
-                }
-                CompiledArithmeticOpcode::Mul => {
-                    self.emit_binary(state, PcodeOpcode::IntMult, "IMUL")
-                }
-                CompiledArithmeticOpcode::Shl => {
-                    self.emit_binary(state, PcodeOpcode::IntLeft, "SHL")
-                }
-                CompiledArithmeticOpcode::Shr => {
-                    self.emit_binary(state, PcodeOpcode::IntRight, "SHR")
-                }
-                CompiledArithmeticOpcode::Sar => {
-                    self.emit_binary(state, PcodeOpcode::IntSRight, "SAR")
-                }
-                CompiledArithmeticOpcode::Inc => self.emit_unary_delta(state, 1, "INC"),
-                CompiledArithmeticOpcode::Dec => self.emit_unary_delta(state, -1, "DEC"),
-            },
-            crate::compiler::CompiledSemanticOp::Compare { bitwise } => {
-                self.emit_compare(state, *bitwise, if *bitwise { "TEST" } else { "CMP" })
-            }
-            crate::compiler::CompiledSemanticOp::Extend { signed } => {
-                let opcode = if *signed {
-                    PcodeOpcode::IntSExt
-                } else {
-                    PcodeOpcode::IntZExt
-                };
-                self.emit_extend(state, opcode, if *signed { "MOVSX" } else { "MOVZX" })
-            }
-            crate::compiler::CompiledSemanticOp::SetCc => self.emit_setcc(state),
-            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => self
-                .emit_accumulator_extend(*src_size, *dst_size, state.construct_tpl_kind.as_str()),
-        }
     }
 
     fn emit_op_template(
@@ -1073,29 +993,14 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
     ) -> Result<u32> {
         match template {
-            CompiledVarnodeTpl::Handle { operand_index } => state
-                .operands
-                .get(*operand_index)
-                .map(operand_size)
-                .ok_or_else(|| anyhow!("missing operand handle {operand_index}")),
-            CompiledVarnodeTpl::EffectiveAddress { operand_index } => state
-                .operands
-                .get(*operand_index)
-                .map(|_| 8)
-                .ok_or_else(|| anyhow!("missing effective-address handle {operand_index}")),
-            CompiledVarnodeTpl::ConditionPredicate => Ok(1),
-            CompiledVarnodeTpl::Const(CompiledConstTpl::Integer { size, .. }) => Ok(*size),
-            CompiledVarnodeTpl::Const(
-                CompiledConstTpl::RelativeAddress
-                | CompiledConstTpl::InstStart
-                | CompiledConstTpl::InstNext
-                | CompiledConstTpl::InstNext2,
-            ) => Ok(8),
-            CompiledVarnodeTpl::Space(_) => Ok(8),
-            CompiledVarnodeTpl::Temp { size, .. }
-            | CompiledVarnodeTpl::Register { size, .. }
-            | CompiledVarnodeTpl::FixedRegister { size, .. } => Ok(*size),
-            CompiledVarnodeTpl::Flag { .. } => Ok(1),
+            CompiledVarnodeTpl::Varnode { size, .. } => {
+                let value = self.resolve_const_value(size, state)?;
+                u32::try_from(value).map_err(|_| anyhow!("VarnodeTpl size {value} exceeds u32"))
+            }
+            CompiledVarnodeTpl::HandleTpl(_) => {
+                bail!("compiled-table executor cannot size unresolved HandleTpl")
+            }
+            _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
     }
 
@@ -1106,56 +1011,20 @@ impl CompiledTableEmitter {
         expected_size: u32,
     ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Handle { operand_index } => {
-                let operand = state
-                    .operands
-                    .get(*operand_index)
-                    .ok_or_else(|| anyhow!("missing operand handle {operand_index}"))?;
-                self.read_operand(operand, expected_size, state.length)
+            CompiledVarnodeTpl::Varnode { .. } => {
+                let varnode = self.resolve_varnode_tpl(template, state)?;
+                if varnode.size != expected_size {
+                    bail!(
+                        "VarnodeTpl size {} did not match expected size {expected_size}",
+                        varnode.size
+                    );
+                }
+                Ok(varnode)
             }
-            CompiledVarnodeTpl::EffectiveAddress { operand_index } => {
-                let operand = state
-                    .operands
-                    .get(*operand_index)
-                    .ok_or_else(|| anyhow!("missing effective-address handle {operand_index}"))?;
-                self.effective_address(operand, state.length)
+            CompiledVarnodeTpl::HandleTpl(_) => {
+                bail!("compiled-table executor cannot resolve unresolved HandleTpl")
             }
-            CompiledVarnodeTpl::ConditionPredicate => self.status_predicate_varnode(
-                state
-                    .condition_code
-                    .ok_or_else(|| anyhow!("missing condition predicate context"))?,
-            ),
-            CompiledVarnodeTpl::Const(CompiledConstTpl::Integer { value, size }) => Ok(const_u64(
-                *value as u64,
-                (*size).max(expected_size.min(*size)),
-            )),
-            CompiledVarnodeTpl::Const(CompiledConstTpl::InstStart) => {
-                Ok(const_u64(self.address, 8))
-            }
-            CompiledVarnodeTpl::Const(CompiledConstTpl::InstNext) => {
-                Ok(const_u64(self.address.wrapping_add(state.length as u64), 8))
-            }
-            CompiledVarnodeTpl::Const(CompiledConstTpl::InstNext2) => Ok(const_u64(
-                self.address
-                    .wrapping_add((state.length as u64).saturating_mul(2)),
-                8,
-            )),
-            CompiledVarnodeTpl::Const(CompiledConstTpl::RelativeAddress) => {
-                Ok(const_u64(self.address.wrapping_add(state.length as u64), 8))
-            }
-            CompiledVarnodeTpl::Space(space) => Ok(self.space_varnode(space)),
-            CompiledVarnodeTpl::Temp { id, size } => {
-                self.temp_cache.get(id).cloned().ok_or_else(|| {
-                    anyhow!("compiled-table generic executor missing temp template {id}:{size}")
-                })
-            }
-            CompiledVarnodeTpl::Register { name, .. } => {
-                bail!("compiled-table generic executor cannot resolve register template {name}")
-            }
-            CompiledVarnodeTpl::FixedRegister { reg, size } => {
-                Ok(self.fixed_register_varnode(*reg, *size))
-            }
-            CompiledVarnodeTpl::Flag { bit } => Ok(flag(u64::from(*bit))),
+            _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
     }
 
@@ -1165,10 +1034,7 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
         _mnemonic: &str,
     ) -> Result<Varnode> {
-        match self.template_write_target(template, state)? {
-            TemplateWriteTarget::Direct(vn) => Ok(vn),
-            TemplateWriteTarget::Operand { size, .. } => Ok(self.tmp(size.max(1))),
-        }
+        self.template_write_target(template, state)
     }
 
     fn commit_template_write_target(
@@ -1178,12 +1044,8 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
         mnemonic: &str,
     ) -> Result<()> {
-        match self.template_write_target(template, state)? {
-            TemplateWriteTarget::Direct(_) => Ok(()),
-            TemplateWriteTarget::Operand { operand, size } => {
-                self.write_operand(&operand, value, size, state.length, mnemonic)
-            }
-        }
+        let _ = (value, mnemonic);
+        self.template_write_target(template, state).map(|_| ())
     }
 
     fn write_template_target(
@@ -1193,50 +1055,100 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
         mnemonic: &str,
     ) -> Result<()> {
-        match self.template_write_target(template, state)? {
-            TemplateWriteTarget::Direct(out) => self.emitter.emit_copy(out, value, mnemonic),
-            TemplateWriteTarget::Operand { operand, size } => {
-                self.write_operand(&operand, value, size, state.length, mnemonic)
-            }
-        }
+        let out = self.template_write_target(template, state)?;
+        self.emitter.emit_copy(out, value, mnemonic)
     }
 
     fn template_write_target(
         &mut self,
         template: &CompiledVarnodeTpl,
         state: &RuntimeConstructState,
-    ) -> Result<TemplateWriteTarget> {
+    ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Handle { operand_index } => {
-                let operand = state
-                    .operands
-                    .get(*operand_index)
-                    .ok_or_else(|| anyhow!("missing operand handle {operand_index}"))?
-                    .clone();
-                Ok(TemplateWriteTarget::Operand {
-                    size: operand_size(&operand),
-                    operand,
-                })
+            CompiledVarnodeTpl::Varnode { .. } => self.resolve_varnode_tpl(template, state),
+            CompiledVarnodeTpl::HandleTpl(_) => {
+                bail!("compiled-table executor cannot write unresolved HandleTpl")
             }
-            CompiledVarnodeTpl::Temp { id, size } => {
-                let entry = self
-                    .temp_cache
-                    .entry(*id)
-                    .or_insert_with(|| self.emitter.tmp(UNIQUE_SPACE_ID, *size));
-                Ok(TemplateWriteTarget::Direct(entry.clone()))
+            _ => bail!("compiled-table executor rejects compatibility varnode template"),
+        }
+    }
+
+    fn resolve_varnode_tpl(
+        &self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Varnode> {
+        let CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } = template
+        else {
+            bail!("expected Ghidra VarnodeTpl");
+        };
+        let space = self.resolve_space_tpl(space, state)?;
+        let offset = self.resolve_const_value(offset, state)?;
+        let size = u32::try_from(self.resolve_const_value(size, state)?)
+            .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
+        if space.index == 0 || space.name == "const" {
+            let value = i64::try_from(offset)
+                .map_err(|_| anyhow!("constant VarnodeTpl offset {offset} exceeds i64"))?;
+            return Ok(Varnode::constant(value, size));
+        }
+        Ok(Varnode {
+            space_id: space.index,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        })
+    }
+
+    fn resolve_space_tpl(
+        &self,
+        template: &CompiledSpaceTpl,
+        _state: &RuntimeConstructState,
+    ) -> Result<CompiledSpaceRef> {
+        match template {
+            CompiledSpaceTpl::SpaceRef(space) => Ok(space.clone()),
+            CompiledSpaceTpl::Const(value) => match value.as_ref() {
+                CompiledConstTpl::SpaceId(space) => Ok(space.clone()),
+                CompiledConstTpl::CurSpace => bail!("ConstTpl curspace resolution is unsupported"),
+                _ => bail!("ConstTpl space resolution without SpaceId is unsupported"),
+            },
+        }
+    }
+
+    fn resolve_const_value(
+        &self,
+        template: &CompiledConstTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<u64> {
+        match template {
+            CompiledConstTpl::Real { value } => Ok(*value),
+            CompiledConstTpl::Integer { value, .. } if *value >= 0 => Ok(*value as u64),
+            CompiledConstTpl::Integer { value, .. } => {
+                Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
             }
-            CompiledVarnodeTpl::FixedRegister { reg, size } => Ok(TemplateWriteTarget::Direct(
-                self.fixed_register_varnode(*reg, *size),
-            )),
-            CompiledVarnodeTpl::Flag { bit } => {
-                Ok(TemplateWriteTarget::Direct(flag(u64::from(*bit))))
+            CompiledConstTpl::InstStart => Ok(self.address),
+            CompiledConstTpl::InstNext => Ok(self.address.saturating_add(state.length as u64)),
+            CompiledConstTpl::SpaceId(space) => Ok(space.index),
+            CompiledConstTpl::Handle { .. } => bail!("ConstTpl handle resolution is unsupported"),
+            CompiledConstTpl::Relative { .. } | CompiledConstTpl::RelativeAddress => {
+                bail!("ConstTpl relative label resolution is unsupported")
             }
-            CompiledVarnodeTpl::Const(_)
-            | CompiledVarnodeTpl::Space(_)
-            | CompiledVarnodeTpl::ConditionPredicate
-            | CompiledVarnodeTpl::Register { .. }
-            | CompiledVarnodeTpl::EffectiveAddress { .. } => {
-                bail!("compiled-table generic executor cannot write template target")
+            CompiledConstTpl::InstNext2 => bail!("ConstTpl inst_next2 resolution is unsupported"),
+            CompiledConstTpl::CurSpace => bail!("ConstTpl curspace resolution is unsupported"),
+            CompiledConstTpl::CurSpaceSize => {
+                bail!("ConstTpl curspace_size resolution is unsupported")
+            }
+            CompiledConstTpl::FlowRef => bail!("ConstTpl flowref resolution is unsupported"),
+            CompiledConstTpl::FlowRefSize => {
+                bail!("ConstTpl flowref_size resolution is unsupported")
+            }
+            CompiledConstTpl::FlowDest => bail!("ConstTpl flowdest resolution is unsupported"),
+            CompiledConstTpl::FlowDestSize => {
+                bail!("ConstTpl flowdest_size resolution is unsupported")
             }
         }
     }
@@ -1276,501 +1188,6 @@ impl CompiledTableEmitter {
             _ => bail!("unsupported binary compiled opcode {}", opcode.as_str()),
         })
     }
-
-    fn space_varnode(&self, _space: &crate::compiler::CompiledSpaceRef) -> Varnode {
-        const_u64(0, 8)
-    }
-
-    fn emit_jmp(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let operand = &instruction.operands[0];
-        match operand {
-            BoundOperand::Relative { .. } => {
-                let target = self.read_operand(operand, 8, instruction.length)?;
-                self.emitter.emit_branch(target, "JMP")?;
-            }
-            _ => {
-                let target = self.read_operand(operand, 8, instruction.length)?;
-                self.emitter.emit_branch_ind(target, "JMP")?;
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_jcc(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let target = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
-        let cond = self.status_predicate_varnode(
-            instruction
-                .condition_code
-                .ok_or_else(|| anyhow!("missing jcc condition"))?,
-        )?;
-        self.emitter.emit_cbranch(target, cond, "JCC")?;
-        Ok(())
-    }
-
-    fn emit_mov(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let size = operand_size(&instruction.operands[0]);
-        let value = self.read_operand(&instruction.operands[1], size, instruction.length)?;
-        self.write_operand(
-            &instruction.operands[0],
-            value,
-            size,
-            instruction.length,
-            "MOV",
-        )
-    }
-
-    fn emit_address_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let size = operand_size(&instruction.operands[0]).max(8);
-        let BoundOperand::Memory { .. } = &instruction.operands[1] else {
-            bail!("lea source must be memory");
-        };
-        let addr = self.effective_address(&instruction.operands[1], instruction.length)?;
-        self.write_operand(
-            &instruction.operands[0],
-            addr,
-            size,
-            instruction.length,
-            "LEA",
-        )
-    }
-
-    fn emit_store_stack_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let value = self.read_operand(&instruction.operands[0], 8, instruction.length)?;
-        let rsp = gpr(4, 8);
-        let new_rsp = self.tmp(8);
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntSub,
-            new_rsp.clone(),
-            rsp.clone(),
-            const_u64(8, 8),
-            "PUSH",
-        )?;
-        self.emitter.emit_copy(rsp, new_rsp.clone(), "PUSH")?;
-        self.emitter
-            .emit_store(const_u64(0, 8), new_rsp, value, "PUSH")?;
-        Ok(())
-    }
-
-    fn emit_load_stack_op(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let rsp = gpr(4, 8);
-        let size = operand_size(&instruction.operands[0]).max(8);
-        let value = self.tmp(size);
-        self.emitter
-            .emit_load(value.clone(), const_u64(0, 8), rsp.clone(), "POP")?;
-        self.write_operand(
-            &instruction.operands[0],
-            value,
-            size,
-            instruction.length,
-            "POP",
-        )?;
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntAdd,
-            rsp.clone(),
-            rsp,
-            const_u64(8, 8),
-            "POP",
-        )?;
-        Ok(())
-    }
-
-    fn emit_frame_teardown_op(&mut self) -> Result<()> {
-        let rsp = gpr(4, 8);
-        let rbp = gpr(5, 8);
-        self.emitter.emit_copy(rsp.clone(), rbp, "LEAVE")?;
-        let value = self.tmp(8);
-        self.emitter
-            .emit_load(value.clone(), const_u64(0, 8), rsp.clone(), "LEAVE")?;
-        self.emitter.emit_copy(gpr(5, 8), value, "LEAVE")?;
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntAdd,
-            rsp.clone(),
-            rsp,
-            const_u64(8, 8),
-            "LEAVE",
-        )?;
-        Ok(())
-    }
-
-    fn emit_binary(
-        &mut self,
-        instruction: &RuntimeConstructState,
-        opcode: PcodeOpcode,
-        tag: &str,
-    ) -> Result<()> {
-        let size = operand_size(&instruction.operands[0]);
-        let lhs = self.read_operand(&instruction.operands[0], size, instruction.length)?;
-        let rhs = self.read_operand(&instruction.operands[1], size, instruction.length)?;
-        let result = self.tmp(size);
-        self.emitter
-            .emit_int_binop(opcode, result.clone(), lhs, rhs, tag)?;
-        self.write_operand(
-            &instruction.operands[0],
-            result.clone(),
-            size,
-            instruction.length,
-            tag,
-        )?;
-        self.emit_basic_result_flags(result, size, tag)?;
-        Ok(())
-    }
-
-    fn emit_unary_delta(
-        &mut self,
-        instruction: &RuntimeConstructState,
-        delta: i64,
-        tag: &str,
-    ) -> Result<()> {
-        let size = operand_size(&instruction.operands[0]);
-        let lhs = self.read_operand(&instruction.operands[0], size, instruction.length)?;
-        let result = self.tmp(size);
-        let (opcode, rhs) = if delta >= 0 {
-            (PcodeOpcode::IntAdd, const_u64(delta as u64, size))
-        } else {
-            (PcodeOpcode::IntSub, const_u64(delta.unsigned_abs(), size))
-        };
-        self.emitter
-            .emit_int_binop(opcode, result.clone(), lhs, rhs, tag)?;
-        self.write_operand(
-            &instruction.operands[0],
-            result.clone(),
-            size,
-            instruction.length,
-            tag,
-        )?;
-        self.emit_basic_result_flags(result, size, tag)?;
-        Ok(())
-    }
-
-    fn emit_compare(
-        &mut self,
-        instruction: &RuntimeConstructState,
-        bitwise: bool,
-        tag: &str,
-    ) -> Result<()> {
-        let size =
-            operand_size(&instruction.operands[0]).max(operand_size(&instruction.operands[1]));
-        let lhs = self.read_operand(&instruction.operands[0], size, instruction.length)?;
-        let rhs = self.read_operand(&instruction.operands[1], size, instruction.length)?;
-        let result = self.tmp(size);
-        self.emitter.emit_int_binop(
-            if bitwise {
-                PcodeOpcode::IntAnd
-            } else {
-                PcodeOpcode::IntSub
-            },
-            result.clone(),
-            lhs.clone(),
-            rhs.clone(),
-            tag,
-        )?;
-        self.emit_basic_result_flags(result, size, tag)?;
-        let cf_value = if bitwise {
-            const_u64(0, 1)
-        } else {
-            let cf = self.tmp(1);
-            self.emitter
-                .emit_int_binop(PcodeOpcode::IntLess, cf.clone(), lhs, rhs, tag)?;
-            cf
-        };
-        self.emitter.emit_copy(flag(0), cf_value, tag)?;
-        Ok(())
-    }
-
-    fn emit_extend(
-        &mut self,
-        instruction: &RuntimeConstructState,
-        opcode: PcodeOpcode,
-        tag: &str,
-    ) -> Result<()> {
-        let dst_size = operand_size(&instruction.operands[0]);
-        let src_size = operand_size(&instruction.operands[1]);
-        let src = self.read_operand(&instruction.operands[1], src_size, instruction.length)?;
-        let out = self.tmp(dst_size);
-        self.emitter.emit_int_unop(opcode, out.clone(), src, tag)?;
-        self.write_operand(
-            &instruction.operands[0],
-            out,
-            dst_size,
-            instruction.length,
-            tag,
-        )
-    }
-
-    fn emit_setcc(&mut self, instruction: &RuntimeConstructState) -> Result<()> {
-        let cond = self.status_predicate_varnode(
-            instruction
-                .condition_code
-                .ok_or_else(|| anyhow!("missing setcc condition"))?,
-        )?;
-        self.write_operand(
-            &instruction.operands[0],
-            cond,
-            1,
-            instruction.length,
-            "SETCC",
-        )
-    }
-
-    fn emit_accumulator_extend(&mut self, src_size: u32, dst_size: u32, tag: &str) -> Result<()> {
-        self.emitter.emit_int_unop(
-            PcodeOpcode::IntSExt,
-            gpr(0, dst_size),
-            gpr(0, src_size),
-            tag,
-        )?;
-        Ok(())
-    }
-
-    fn status_predicate_varnode(&mut self, condition_code: u8) -> Result<Varnode> {
-        let value = match condition_code {
-            0x0 => flag(11),
-            0x1 => self.bool_not(flag(11), "JNO_PRED")?,
-            0x2 => flag(0),
-            0x3 => self.bool_not(flag(0), "JAE_PRED")?,
-            0x4 => flag(6),
-            0x5 => self.bool_not(flag(6), "JNE_PRED")?,
-            0x6 => self.bool_or(flag(0), flag(6), "JBE_PRED")?,
-            0x7 => {
-                let ncf = self.bool_not(flag(0), "JA_NCF")?;
-                let nzf = self.bool_not(flag(6), "JA_NZF")?;
-                self.bool_and(ncf, nzf, "JA_PRED")?
-            }
-            0x8 => flag(7),
-            0x9 => self.bool_not(flag(7), "JNS_PRED")?,
-            0xA => flag(2),
-            0xB => self.bool_not(flag(2), "JNP_PRED")?,
-            0xC => self.bool_ne(flag(7), flag(11), "JL_PRED")?,
-            0xD => self.bool_eq(flag(7), flag(11), "JGE_PRED")?,
-            0xE => {
-                let lt = self.bool_ne(flag(7), flag(11), "JLE_LT_CORE")?;
-                self.bool_or(flag(6), lt, "JLE_PRED")?
-            }
-            0xF => {
-                let ge = self.bool_eq(flag(7), flag(11), "JG_GE_CORE")?;
-                let nz = self.bool_not(flag(6), "JG_NZ")?;
-                self.bool_and(ge, nz, "JG_PRED")?
-            }
-            _ => bail!("unsupported condition code {condition_code}"),
-        };
-        Ok(value)
-    }
-
-    fn emit_basic_result_flags(&mut self, result: Varnode, size: u32, tag: &str) -> Result<()> {
-        let zf = self.tmp(1);
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntEqual,
-            zf.clone(),
-            result.clone(),
-            const_u64(0, size),
-            tag,
-        )?;
-        self.emitter.emit_copy(flag(6), zf, tag)?;
-
-        let shift = size.saturating_mul(8).saturating_sub(1);
-        let sf = self.tmp(1);
-        self.emitter.emit_int_binop(
-            PcodeOpcode::IntRight,
-            sf.clone(),
-            result,
-            const_u64(u64::from(shift), size),
-            tag,
-        )?;
-        self.emitter.emit_copy(flag(7), sf, tag)?;
-        Ok(())
-    }
-
-    fn read_operand(
-        &mut self,
-        operand: &BoundOperand,
-        expected_size: u32,
-        instruction_len: usize,
-    ) -> Result<Varnode> {
-        match operand {
-            BoundOperand::Register { index, size } => Ok(gpr(
-                u64::from(*index),
-                (*size).max(expected_size.min(*size)),
-            )),
-            BoundOperand::Memory { .. } => {
-                let addr = self.effective_address(operand, instruction_len)?;
-                let out = self.tmp(expected_size);
-                self.emitter
-                    .emit_load(out.clone(), const_u64(0, 8), addr, "LOAD")?;
-                Ok(out)
-            }
-            BoundOperand::Immediate {
-                value,
-                encoded_size,
-                signed,
-            } => {
-                let effective = if *signed && expected_size > *encoded_size {
-                    sign_extend(*value, *encoded_size, expected_size)
-                } else {
-                    *value
-                };
-                Ok(const_u64(effective, expected_size))
-            }
-            BoundOperand::Relative { target } => Ok(const_u64(*target, 8)),
-        }
-    }
-
-    fn write_operand(
-        &mut self,
-        operand: &BoundOperand,
-        value: Varnode,
-        _size: u32,
-        instruction_len: usize,
-        tag: &str,
-    ) -> Result<()> {
-        match operand {
-            BoundOperand::Register { index, size } => {
-                let destination = gpr(u64::from(*index), *size);
-                self.emitter.emit_copy(destination, value.clone(), tag)?;
-                if *size == 4 {
-                    let canonical = if value.size == 8 {
-                        value
-                    } else {
-                        let extended = self.tmp(8);
-                        self.emitter.emit_int_unop(
-                            PcodeOpcode::IntZExt,
-                            extended.clone(),
-                            value,
-                            tag,
-                        )?;
-                        extended
-                    };
-                    self.emitter
-                        .emit_copy(gpr(u64::from(*index), 8), canonical, tag)?;
-                }
-                Ok(())
-            }
-            BoundOperand::Memory { .. } => {
-                let addr = self.effective_address(operand, instruction_len)?;
-                self.emitter.emit_store(const_u64(0, 8), addr, value, tag)?;
-                Ok(())
-            }
-            _ => bail!("unsupported write operand"),
-        }
-    }
-
-    fn effective_address(
-        &mut self,
-        operand: &BoundOperand,
-        instruction_len: usize,
-    ) -> Result<Varnode> {
-        let BoundOperand::Memory {
-            base,
-            index,
-            scale,
-            displacement,
-            rip_relative,
-            ..
-        } = operand
-        else {
-            bail!("effective_address requires memory operand");
-        };
-
-        let mut terms = Vec::new();
-        if *rip_relative {
-            let next_ip = self.address.wrapping_add(instruction_len as u64);
-            terms.push(const_u64(next_ip.wrapping_add_signed(*displacement), 8));
-        } else {
-            if let Some(base) = base {
-                terms.push(gpr(u64::from(*base), 8));
-            }
-            if let Some(index) = index {
-                let idx = gpr(u64::from(*index), 8);
-                if *scale > 1 {
-                    let scaled = self.tmp(8);
-                    self.emitter.emit_int_binop(
-                        PcodeOpcode::IntMult,
-                        scaled.clone(),
-                        idx,
-                        const_u64(u64::from(*scale), 8),
-                        "EA_SCALE",
-                    )?;
-                    terms.push(scaled);
-                } else {
-                    terms.push(idx);
-                }
-            }
-            if *displacement != 0 || terms.is_empty() {
-                terms.push(const_u64(displacement.unsigned_abs(), 8));
-                if *displacement < 0 && terms.len() >= 2 {
-                    let rhs = terms.pop().unwrap();
-                    let lhs = terms.pop().unwrap();
-                    let tmp = self.tmp(8);
-                    self.emitter.emit_int_binop(
-                        PcodeOpcode::IntSub,
-                        tmp.clone(),
-                        lhs,
-                        rhs,
-                        "EA_DISP",
-                    )?;
-                    terms.push(tmp);
-                }
-            }
-        }
-
-        let mut iter = terms.into_iter();
-        let Some(mut acc) = iter.next() else {
-            return Ok(const_u64(0, 8));
-        };
-        for term in iter {
-            let next = self.tmp(8);
-            self.emitter
-                .emit_int_binop(PcodeOpcode::IntAdd, next.clone(), acc, term, "EA_ADD")?;
-            acc = next;
-        }
-        Ok(acc)
-    }
-
-    fn tmp(&mut self, size: u32) -> Varnode {
-        self.emitter.tmp(UNIQUE_SPACE_ID, size)
-    }
-
-    fn fixed_register_varnode(&self, reg: CompiledFixedRegister, size: u32) -> Varnode {
-        match reg {
-            CompiledFixedRegister::Accumulator => gpr(0, size),
-            CompiledFixedRegister::StackPointer => gpr(4, size),
-            CompiledFixedRegister::FramePointer => gpr(5, size),
-        }
-    }
-
-    fn bool_not(&mut self, input: Varnode, tag: &str) -> Result<Varnode> {
-        let out = self.tmp(1);
-        self.emitter
-            .emit_int_unop(PcodeOpcode::BoolNegate, out.clone(), input, tag)?;
-        Ok(out)
-    }
-
-    fn bool_and(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
-        let out = self.tmp(1);
-        self.emitter
-            .emit_int_binop(PcodeOpcode::BoolAnd, out.clone(), lhs, rhs, tag)?;
-        Ok(out)
-    }
-
-    fn bool_or(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
-        let out = self.tmp(1);
-        self.emitter
-            .emit_int_binop(PcodeOpcode::BoolOr, out.clone(), lhs, rhs, tag)?;
-        Ok(out)
-    }
-
-    fn bool_eq(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
-        let out = self.tmp(1);
-        self.emitter
-            .emit_int_binop(PcodeOpcode::IntEqual, out.clone(), lhs, rhs, tag)?;
-        Ok(out)
-    }
-
-    fn bool_ne(&mut self, lhs: Varnode, rhs: Varnode, tag: &str) -> Result<Varnode> {
-        let out = self.tmp(1);
-        self.emitter
-            .emit_int_binop(PcodeOpcode::IntNotEqual, out.clone(), lhs, rhs, tag)?;
-        Ok(out)
-    }
 }
 
 impl RuntimeTemplateExecutor for CompiledTableEmitter {
@@ -1781,145 +1198,119 @@ impl RuntimeTemplateExecutor for CompiledTableEmitter {
     ) -> Result<()> {
         CompiledTableEmitter::emit_op_template(self, state, op)
     }
-
-    fn emit_compatibility_op(
-        &mut self,
-        state: &RuntimeConstructState,
-        op: &crate::compiler::CompiledSemanticOp,
-    ) -> Result<()> {
-        CompiledTableEmitter::emit_compatibility_op(self, state, op)
-    }
-}
-
-fn sign_extend(value: u64, from_size: u32, to_size: u32) -> u64 {
-    let bits = from_size * 8;
-    let shift = 64 - bits;
-    let signed = ((value << shift) as i64) >> shift;
-    const_u64(signed as u64, to_size).constant_val as u64
-}
-
-fn const_u64(val: u64, size: u32) -> Varnode {
-    let masked = if size >= 8 {
-        val
-    } else {
-        let bits = size.saturating_mul(8);
-        if bits == 0 {
-            0
-        } else {
-            val & ((1u64 << bits) - 1)
-        }
-    };
-    Varnode::constant(i64::from_ne_bytes(masked.to_ne_bytes()), size)
-}
-
-fn gpr(index: u64, size: u32) -> Varnode {
-    Varnode {
-        space_id: UNIQUE_SPACE_ID,
-        offset: SYNTHETIC_REGISTER_SPACE_ROOT + index * 8,
-        size,
-        is_constant: false,
-        constant_val: 0,
-    }
-}
-
-fn flag(bit: u64) -> Varnode {
-    Varnode {
-        space_id: UNIQUE_SPACE_ID,
-        offset: SYNTHETIC_STATUS_SPACE_ROOT + bit,
-        size: 1,
-        is_constant: false,
-        constant_val: 0,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::compile_x86_64_frontend;
+    use crate::compiler::{compile_x86_64_frontend, CompiledTemplateSource};
 
-    fn decode_and_lift(
+    fn assert_spec_derived_lift_or_typed_unsupported(
         compiled: &CompiledFrontend,
         bytes: &[u8],
         address: u64,
-    ) -> Result<(Vec<PcodeOp>, u64)> {
-        let (ops, len, _) = decode_and_lift_with_details(compiled, bytes, address)?;
-        Ok((ops, len))
+    ) {
+        match decode_and_lift_with_details(compiled, bytes, address) {
+            Ok((ops, length, details)) => {
+                assert_eq!(length as usize, bytes.len());
+                assert!(
+                    !details.compat_emitter_used,
+                    "raw p-code path must not use compatibility emitter"
+                );
+                assert_eq!(
+                    details.template_source,
+                    Some(CompiledTemplateSource::SpecDerived)
+                );
+                assert!(!ops.is_empty(), "spec-derived template emitted no p-code");
+            }
+            Err(err) => {
+                let rendered = err.to_string();
+                assert!(
+                    rendered.contains("UnsupportedPcodeTemplate"),
+                    "unsupported raw p-code must be typed: {rendered}"
+                );
+                assert!(
+                    !rendered.contains("compatibility_lowered_template_not_canonical"),
+                    "x86-64 generated rows should now resolve to .sla templates: {rendered}"
+                );
+            }
+        }
     }
 
     #[test]
-    fn generated_runtime_decodes_ret() {
+    fn generated_runtime_decodes_ret_with_spec_derived_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
-        let (ops, len) = decode_and_lift(&compiled, &[0xC3], 0x1000).expect("generated ret");
-        assert_eq!(len, 1);
-        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::Return));
+        let decoded = decode_instruction(&compiled, &[0xC3], 0x1000).expect("generated ret");
+        assert_eq!(decoded.length, 1);
+        assert!(matches!(decoded.flow_kind, DecodedFlowKind::Return));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0xC3], 0x1000);
     }
 
     #[test]
-    fn generated_runtime_decodes_mov_imm64() {
+    fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1000).expect("generated mov");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Copy));
+        let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "mov");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
     }
 
     #[test]
-    fn generated_runtime_decodes_jcc_rel8() {
+    fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
-        let (ops, len) = decode_and_lift(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
-        assert_eq!(len, 2);
-        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::CBranch));
+        let decoded = decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
+        assert_eq!(decoded.length, 2);
+        assert!(matches!(
+            decoded.flow_kind,
+            DecodedFlowKind::ConditionalJump
+        ));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0x75, 0x05], 0x1000);
     }
 
     #[test]
-    fn generated_runtime_decodes_startup_store_mov_mem32_imm32() {
+    fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xC7, 0x00, 0x01, 0x00, 0x00, 0x00];
-        let (ops, len) =
-            decode_and_lift(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "mov");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
     }
 
     #[test]
-    fn generated_runtime_decodes_startup_sub_rsp_imm8() {
+    fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x83, 0xEC, 0x28];
-        let (ops, len) =
-            decode_and_lift(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Copy));
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "sub");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
     }
 
     #[test]
-    fn generated_runtime_decodes_startup_rip_relative_load() {
+    fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x8B, 0x05, 0x15, 0x30, 0x00, 0x00];
         let address = 0x1400_013e4;
-        let (ops, len) =
-            decode_and_lift(&compiled, &bytes, address).expect("generated rip-relative mov");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Load));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Copy));
-        let expected_target = address + bytes.len() as u64 + 0x3015;
-        assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Load
-                && op
-                    .inputs
-                    .iter()
-                    .any(|vn| vn.is_constant && vn.constant_val as u64 == expected_target)
-        }));
+        let decoded =
+            decode_instruction(&compiled, &bytes, address).expect("generated rip-relative mov");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "mov");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, address);
     }
 
     #[test]
-    fn generated_runtime_decodes_startup_call_rel32() {
+    fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xE8, 0x1A, 0xFC, 0xFF, 0xFF];
-        let (ops, len) =
-            decode_and_lift(&compiled, &bytes, 0x1400_013ef).expect("generated call rel32");
-        assert_eq!(len, bytes.len() as u64);
-        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::Call));
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1400_013ef).expect("generated call rel32");
+        assert_eq!(decoded.length, bytes.len());
+        assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_013ef);
     }
 
     #[test]
@@ -1939,14 +1330,13 @@ mod tests {
     }
 
     #[test]
-    fn generated_runtime_decodes_reg32_lea_without_decode_no_match() {
+    fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x8d, 0x04, 0x11];
-        let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1400_1450).expect("generated lea");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::SubPiece));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntZExt));
+        let decoded = decode_instruction(&compiled, &bytes, 0x1400_1450).expect("generated lea");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "lea");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
     }
 
     #[test]
@@ -1964,30 +1354,24 @@ mod tests {
     }
 
     #[test]
-    fn generated_runtime_decodes_movsxd_without_decode_no_match() {
+    fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x63, 0x41, 0x3c];
-        let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt));
-        assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
-        }));
+        let decoded = decode_instruction(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "movsxd");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_2600);
     }
 
     #[test]
-    fn generated_runtime_zero_extends_reg32_writes_to_full_register() {
+    fn generated_runtime_zero_extends_reg32_decode_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x31, 0xc0];
-        let (ops, len) =
-            decode_and_lift(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::IntZExt && op.output.as_ref().is_some_and(|out| out.size == 8)
-        }));
-        assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
-        }));
+        let decoded =
+            decode_instruction(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
+        assert_eq!(decoded.length, bytes.len());
+        assert_eq!(decoded.mnemonic, "xor");
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_19e0);
     }
 
     #[test]
@@ -2002,50 +1386,30 @@ mod tests {
     }
 
     #[test]
-    fn generated_runtime_reports_unsupported_template_for_fninit() {
+    fn generated_runtime_lifts_fninit_without_compatibility_emitter() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xdb, 0xe3];
-        let err =
-            decode_and_lift(&compiled, &bytes, 0x1400_25c0).expect_err("fninit must fail closed");
-        let rendered = err.to_string();
-        assert!(rendered.contains("UnsupportedPcodeTemplate"));
-        assert!(rendered.contains("unsupported_template_kind"));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_25c0);
     }
 
     #[test]
-    fn generated_runtime_cuts_over_cmp_templates() {
+    fn generated_runtime_rejects_or_lifts_cmp_templates_without_compatibility() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x83, 0xf9, 0x01];
-        let (ops, len, details) =
-            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1485).expect("generated cmp");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(!details.compat_emitter_used);
-        assert_eq!(ops.first().map(|op| op.opcode), Some(PcodeOpcode::Copy));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSBorrow));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::PopCount));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1485);
     }
 
     #[test]
-    fn generated_runtime_cuts_over_push_templates() {
+    fn generated_runtime_rejects_or_lifts_push_templates_without_compatibility() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x41, 0x57];
-        let (ops, len, details) =
-            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1470).expect("generated push");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(!details.compat_emitter_used);
-        assert_eq!(ops.first().map(|op| op.opcode), Some(PcodeOpcode::Copy));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1470);
     }
 
     #[test]
-    fn generated_runtime_cuts_over_lea_templates() {
+    fn generated_runtime_rejects_or_lifts_lea_templates_without_compatibility() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x8d, 0x04, 0x11];
-        let (ops, len, details) =
-            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1450).expect("generated lea");
-        assert_eq!(len, bytes.len() as u64);
-        assert!(!details.compat_emitter_used);
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::SubPiece));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
     }
 }

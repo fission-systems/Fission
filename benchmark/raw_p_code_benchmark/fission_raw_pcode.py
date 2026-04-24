@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -39,7 +40,9 @@ def main() -> int:
         "--window-bytes",
         str(args.window_bytes),
     ]
+    started_at = time.perf_counter()
     proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    elapsed_sec = time.perf_counter() - started_at
     if proc.returncode != 0:
         raise SystemExit(
             f"fission raw p-code probe failed with exit={proc.returncode}\n"
@@ -48,6 +51,16 @@ def main() -> int:
 
     # Cargo warnings go to stderr. stdout should be the JSON report.
     report = json.loads(proc.stdout)
+    instructions = report.get("instructions", [])
+    instruction_count = sum(1 for instruction in instructions if instruction.get("status") == "ok")
+    pcode_op_count = sum(len(instruction.get("pcode", [])) for instruction in instructions)
+    report["timing"] = {
+        "wall_clock_sec": elapsed_sec,
+        "instruction_count": instruction_count,
+        "pcode_op_count": pcode_op_count,
+        "instructions_per_sec": instruction_count / elapsed_sec if elapsed_sec > 0 else None,
+        "pcode_ops_per_sec": pcode_op_count / elapsed_sec if elapsed_sec > 0 else None,
+    }
     report["tool"] = "fission"
     text = json.dumps(report, indent=2, sort_keys=True)
     if args.output:

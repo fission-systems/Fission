@@ -183,35 +183,35 @@ entry_id: CP1600
 - SWAP [branch] CP1600.slaspec:502
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3bbb7b08fa34450e op_count=0
-- RLC [branch] CP1600.slaspec:511
+- RLC [branch] CP1600.slaspec:512
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6b34412d73cdbb98 op_count=0
   with_stack: with : operation_size=1
-- RRC [branch] CP1600.slaspec:522
+- RRC [branch] CP1600.slaspec:524
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=77439e500e5951ba op_count=0
   with_stack: with : operation_size=1
-- SAR [branch] CP1600.slaspec:533
+- SAR [branch] CP1600.slaspec:536
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0389da159f788f7e op_count=0
   with_stack: with : operation_size=1
-- SARC [branch] CP1600.slaspec:540
+- SARC [branch] CP1600.slaspec:544
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=780ff35fb7250e2b op_count=0
   with_stack: with : operation_size=1
-- SLL [branch] CP1600.slaspec:551
+- SLL [branch] CP1600.slaspec:556
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=429aca0165332933 op_count=0
   with_stack: with : operation_size=1
-- SLLC [branch] CP1600.slaspec:558
+- SLLC [branch] CP1600.slaspec:564
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9740be7928297a5d op_count=0
   with_stack: with : operation_size=1
-- SLR [branch] CP1600.slaspec:569
+- SLR [branch] CP1600.slaspec:576
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=41caff5367fca3e7 op_count=0
   with_stack: with : operation_size=1
-- SWAP [branch] CP1600.slaspec:576
+- SWAP [branch] CP1600.slaspec:584
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ee19571e3872be0f op_count=0
   with_stack: with : operation_size=1
@@ -233,27 +233,27 @@ entry_id: CP1600
 - XORI [branch] CP1600.slaspec:618
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d5e68646dd0f6ebe op_count=0
-- ADDI [branch] CP1600.slaspec:625
+- ADDI [branch] CP1600.slaspec:626
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c909bce01328e464 op_count=0
   with_stack: with : doublebyte=1
-- ANDI [branch] CP1600.slaspec:629
+- ANDI [branch] CP1600.slaspec:631
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d38a5f6030a95890 op_count=0
   with_stack: with : doublebyte=1
-- CMPI [none] CP1600.slaspec:634
+- CMPI [none] CP1600.slaspec:637
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6a632ca13ce990f1 op_count=0
   with_stack: with : doublebyte=1
-- MVII [branch] CP1600.slaspec:637
+- MVII [branch] CP1600.slaspec:641
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2e60a9e99c58b102 op_count=0
   with_stack: with : doublebyte=1
-- SUBI [branch] CP1600.slaspec:641
+- SUBI [branch] CP1600.slaspec:646
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=288dfee5c62f1a7c op_count=0
   with_stack: with : doublebyte=1
-- XORI [branch] CP1600.slaspec:645
+- XORI [branch] CP1600.slaspec:651
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0016f29e88be1298 op_count=0
   with_stack: with : doublebyte=1

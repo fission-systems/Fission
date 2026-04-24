@@ -9,10 +9,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any
 
 import pyghidra
+
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_GHIDRA_DIRS = (
+    ROOT / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT / "ghidra-Ghidra_12.0.4_build",
+)
 
 
 def parse_int(value: str) -> int:
@@ -65,6 +74,49 @@ def instruction_to_json(instr: Any) -> dict[str, Any]:
     }
 
 
+def normalize_ghidra_install_dir(path: Path) -> Path:
+    candidate = path.expanduser().resolve()
+    if (candidate / "Ghidra" / "application.properties").exists():
+        return candidate
+    if candidate.name == "Ghidra" and (candidate / "application.properties").exists():
+        return candidate.parent
+    return candidate
+
+
+def is_launchable_ghidra_install_dir(path: Path) -> bool:
+    install_dir = normalize_ghidra_install_dir(path)
+    return (
+        (install_dir / "Ghidra" / "application.properties").exists()
+        and (install_dir / "Ghidra" / "Features" / "PyGhidra" / "lib" / "PyGhidra.jar").exists()
+        and (install_dir / "Ghidra" / "Framework" / "Utility" / "lib" / "Utility.jar").exists()
+        and (install_dir / "support").exists()
+    )
+
+
+def resolve_ghidra_dir(cli_value: Path | None) -> Path:
+    candidates: list[Path] = []
+    if cli_value is not None:
+        candidates.append(cli_value)
+
+    env_dir = os.environ.get("GHIDRA_INSTALL_DIR")
+    if env_dir:
+        candidates.append(Path(env_dir))
+
+    candidates.extend(DEFAULT_GHIDRA_DIRS)
+
+    for candidate in candidates:
+        normalized = normalize_ghidra_install_dir(candidate)
+        if is_launchable_ghidra_install_dir(normalized):
+            return normalized
+
+    checked = ", ".join(str(normalize_ghidra_install_dir(path)) for path in candidates if path)
+    raise FileNotFoundError(
+        "Launchable Ghidra installation directory not found for raw p-code benchmark. "
+        "Pass --ghidra-dir or set GHIDRA_INSTALL_DIR to a packaged Ghidra install root. "
+        f"Checked: {checked if checked else '(none)'}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
@@ -72,11 +124,16 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=8)
     parser.add_argument("--language", default=None)
     parser.add_argument("--compiler", default=None)
+    parser.add_argument("--ghidra-dir", type=Path, default=None)
     parser.add_argument("--project-location", type=Path, default=None)
     parser.add_argument("--project-name", default=None)
     parser.add_argument("--no-analyze", action="store_true")
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
+
+    ghidra_dir = resolve_ghidra_dir(args.ghidra_dir)
+    started_at = time.perf_counter()
+    pyghidra.start(install_dir=ghidra_dir)
 
     with pyghidra.open_program(
         args.binary,
@@ -112,12 +169,24 @@ def main() -> int:
         report = {
             "tool": "ghidra",
             "binary": str(args.binary),
+            "ghidra_dir": str(ghidra_dir),
             "language_id": str(language.getLanguageID()),
             "compiler_spec_id": str(compiler.getCompilerSpecID()),
             "start_address": args.addr,
             "requested_count": args.count,
             "instructions": instructions,
         }
+
+    elapsed_sec = time.perf_counter() - started_at
+    instruction_count = sum(1 for instruction in instructions if instruction.get("status") == "ok")
+    pcode_op_count = sum(len(instruction.get("pcode", [])) for instruction in instructions)
+    report["timing"] = {
+        "wall_clock_sec": elapsed_sec,
+        "instruction_count": instruction_count,
+        "pcode_op_count": pcode_op_count,
+        "instructions_per_sec": instruction_count / elapsed_sec if elapsed_sec > 0 else None,
+        "pcode_ops_per_sec": pcode_op_count / elapsed_sec if elapsed_sec > 0 else None,
+    }
 
     text = json.dumps(report, indent=2, sort_keys=True)
     if args.output:

@@ -1,0 +1,32 @@
+{
+  "name": "llvm-runtime-raw-pcode-smoke",
+  "notes": "Architecture-scoped raw p-code smoke rows for LLVM baremetal objects. Rows may be runtime-ready, typed unsupported, or compile-only depending on current Fission runtime coverage.",
+  "rows": [
+    {
+      "name": "llvm-x86-64-baremetal",
+      "entry_id": "x86-64",
+      "binary": "benchmark/binary/x86-64/baremetal/small/binary/c/llvm_smoke.o",
+      "addr": "0x0",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "feature_group": "architecture",
+      "feature": "llvm_baremetal_smoke",
+      "owner": "raw_pcode_architecture_lane",
+      "notes": "LLVM baremetal object smoke for x86-64. Expected to run through current runtime lane."
+    },
+    {
+      "name": "llvm-x86-baremetal",
+      "entry_id": "x86",
+      "binary": "benchmark/binary/x86/baremetal/small/binary/c/llvm_smoke.o",
+      "addr": "0x0",
+      "count": 8,
+      "language": "x86:LE:32:default",
+      "compiler": "gcc",
+      "feature_group": "architecture",
+      "feature": "llvm_baremetal_smoke",
+      "owner": "raw_pcode_architecture_lane",
+      "notes": "LLVM baremetal object smoke for x86. Currently resolves to compile-only runtime selection and should stay fail-closed until runtime coverage exists."
+    }
+  ]
+}

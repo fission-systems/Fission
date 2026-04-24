@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use super::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 use super::preprocessor::ExpandedSpec;
+use super::sla::CompiledSlaTemplateLibrary;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledFrontend {
@@ -316,6 +317,20 @@ pub enum CompiledOpTplOpcode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledVarnodeTpl {
+    /// Ghidra-shaped `VarnodeTpl`: `(space, offset, size)` are all `ConstTpl`
+    /// descendants. This is the only canonical varnode shape for
+    /// `SpecDerived` raw p-code emission.
+    Varnode {
+        space: CompiledSpaceTpl,
+        offset: Box<CompiledConstTpl>,
+        size: Box<CompiledConstTpl>,
+    },
+    /// Ghidra-shaped `HandleTpl`. This carries operand/exported-handle
+    /// indirection without lowering it through a mnemonic-specific helper.
+    HandleTpl(Box<CompiledHandleTpl>),
+    // Compatibility-only conveniences below this line. These may remain in
+    // generated inventory/debug output, but they are not valid for
+    // `SpecDerived` raw p-code emission.
     Handle {
         operand_index: usize,
     },
@@ -343,22 +358,85 @@ pub enum CompiledVarnodeTpl {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledHandleTpl {
+    pub space: Option<CompiledSpaceTpl>,
+    pub size: Option<CompiledConstTpl>,
+    pub ptr_space: Option<CompiledSpaceTpl>,
+    pub ptr_offset: Option<CompiledConstTpl>,
+    pub ptr_size: Option<CompiledConstTpl>,
+    pub temp_space: Option<CompiledSpaceTpl>,
+    pub temp_offset: Option<CompiledConstTpl>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompiledSpaceTpl {
+    SpaceRef(CompiledSpaceRef),
+    Const(Box<CompiledConstTpl>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompiledConstTpl {
+    Real {
+        value: u64,
+    },
+    Handle {
+        handle_index: i64,
+        selector: CompiledHandleSelector,
+        plus: Option<u64>,
+    },
     Integer { value: i64, size: u32 },
     RelativeAddress,
+    Relative {
+        value: u64,
+    },
     InstStart,
     InstNext,
     InstNext2,
+    CurSpace,
+    CurSpaceSize,
+    SpaceId(CompiledSpaceRef),
+    FlowRef,
+    FlowRefSize,
+    FlowDest,
+    FlowDestSize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledSpaceRef {
     pub name: String,
+    pub index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledLabelRef {
     pub name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompiledHandleSelector {
+    Space,
+    Offset,
+    Size,
+    OffsetPlus,
+}
+
+impl CompiledOpTpl {
+    pub fn uses_only_ghidra_template_shapes(&self) -> bool {
+        self.output
+            .as_ref()
+            .map(CompiledVarnodeTpl::is_ghidra_template_shape)
+            .unwrap_or(true)
+            && self
+                .inputs
+                .iter()
+                .all(CompiledVarnodeTpl::is_ghidra_template_shape)
+    }
+}
+
+impl CompiledVarnodeTpl {
+    pub fn is_ghidra_template_shape(&self) -> bool {
+        matches!(self, Self::Varnode { .. } | Self::HandleTpl(_))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -686,6 +764,50 @@ pub fn compile_frontend(
         pcode_ops,
         pattern_nodes: collector.pattern_nodes,
     })
+}
+
+pub fn apply_sla_construct_templates(
+    compiled: &mut CompiledFrontend,
+    library: &CompiledSlaTemplateLibrary,
+) -> usize {
+    let mut updated = 0usize;
+    for constructor in &mut compiled.executable_constructors {
+        let Some(templates) = library.constructors_by_source.get(&constructor.source) else {
+            continue;
+        };
+        if templates.len() != 1 {
+            constructor.runtime_ready = false;
+            constructor.unsupported_template_kind =
+                Some("sla_constructor_mapping_mismatch".to_string());
+            continue;
+        }
+        let decoded = &templates[0].constructor_template;
+        let has_unsupported_opcode = decoded.op_templates.iter().any(|op| {
+            matches!(
+                op.opcode,
+                CompiledOpTplOpcode::Unsupported
+                    | CompiledOpTplOpcode::Build
+                    | CompiledOpTplOpcode::CallOther
+            )
+        });
+        constructor.constructor_template.op_templates = decoded.op_templates.clone();
+        constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
+        constructor.runtime_ready = !has_unsupported_opcode;
+        constructor.unsupported_template_kind = has_unsupported_opcode
+            .then(|| "unsupported_pcode_opcode_in_sla_construct_tpl".to_string());
+        updated += 1;
+    }
+    compiled.construct_templates = compiled
+        .executable_constructors
+        .iter()
+        .map(|constructor| CompiledConstructTpl {
+            constructor_hash: constructor.signature_hash,
+            ops: constructor.constructor_template.semantic_ops.clone(),
+            op_templates: constructor.constructor_template.op_templates.clone(),
+            template_source: constructor.constructor_template.template_source,
+        })
+        .collect();
+    updated
 }
 
 struct Collector {
@@ -1430,12 +1552,27 @@ fn parse_byte_sequence(signature: &str) -> Vec<u8> {
 }
 
 fn parse_single_value(signature: &str, key: &str) -> Option<u8> {
-    let start = signature.find(key)? + key.len();
-    let digits = signature[start..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    digits.parse().ok()
+    let mut search_start = 0usize;
+    while let Some(pos) = signature[search_start..].find(key) {
+        let absolute = search_start + pos;
+        let has_token_boundary = absolute == 0
+            || signature[..absolute]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
+        let value_start = absolute + key.len();
+        if has_token_boundary {
+            let digits = signature[value_start..]
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect::<String>();
+            if let Ok(value) = digits.parse() {
+                return Some(value);
+            }
+        }
+        search_start = value_start;
+    }
+    None
 }
 
 fn parse_value_list(signature: &str, key: &str) -> Vec<u8> {

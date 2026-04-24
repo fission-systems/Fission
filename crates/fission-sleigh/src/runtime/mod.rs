@@ -823,14 +823,25 @@ mod tests {
     }
 
     #[test]
-    fn runtime_frontend_executes_x86_64_ret() {
+    fn runtime_frontend_lifts_x86_64_ret_from_spec_template() {
         let frontend =
             RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
-        let (ops, len) = frontend
+        let decoded = frontend
+            .decode_window(&[0xC3], 0x1000, 1)
+            .expect("x86-64 ret decode");
+        assert_eq!(
+            decoded.first().map(|instruction| instruction.length),
+            Some(1)
+        );
+
+        let (ops, length) = frontend
             .decode_and_lift_with_len(&[0xC3], 0x1000)
-            .expect("compiled x86-64 ret runtime");
-        assert_eq!(len, 1);
-        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::Return));
+            .expect("ret should lift from .sla ConstructTpl");
+        assert_eq!(length, 1);
+        assert_eq!(
+            ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
+            vec![PcodeOpcode::Load, PcodeOpcode::IntAdd, PcodeOpcode::Return]
+        );
     }
 
     #[test]
@@ -870,10 +881,10 @@ mod tests {
 
         let (load_spec_ops, load_spec_len) = from_load_spec
             .decode_and_lift_with_len(&[0xC3], 0x1000)
-            .expect("load-spec ret decode");
+            .expect("load-spec ret lift");
         let (entry_ops, entry_len) = from_entry_id
             .decode_and_lift_with_len(&[0xC3], 0x1000)
-            .expect("entry-id ret decode");
+            .expect("entry-id ret lift");
 
         assert_eq!(from_load_spec.language(), "x86-64");
         assert_eq!(load_spec_len, entry_len);

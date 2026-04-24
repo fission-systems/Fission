@@ -2171,9 +2171,9 @@
       "pcodeop_count": 1756,
       "include_count": 24,
       "runtime_ready": true,
-      "decision_node_count": 14608,
+      "decision_node_count": 14042,
       "constructor_template_count": 1187,
-      "unsupported_template_count": 872,
+      "unsupported_template_count": 1052,
       "compile_status": "ok"
     },
     {
@@ -2186,9 +2186,9 @@
       "pcodeop_count": 1630,
       "include_count": 21,
       "runtime_ready": true,
-      "decision_node_count": 10399,
+      "decision_node_count": 9852,
       "constructor_template_count": 937,
-      "unsupported_template_count": 722,
+      "unsupported_template_count": 827,
       "compile_status": "ok"
     }
   ]

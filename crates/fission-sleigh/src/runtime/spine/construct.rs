@@ -56,11 +56,3 @@ pub enum BoundOperand {
         target: u64,
     },
 }
-
-pub fn operand_size(operand: &BoundOperand) -> u32 {
-    match operand {
-        BoundOperand::Register { size, .. } | BoundOperand::Memory { size, .. } => *size,
-        BoundOperand::Immediate { encoded_size, .. } => *encoded_size,
-        BoundOperand::Relative { .. } => 8,
-    }
-}

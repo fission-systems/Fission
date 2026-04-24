@@ -522,6 +522,54 @@ fn render_op_template(template: &crate::compiler::CompiledOpTpl) -> String {
 
 fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> String {
     match template {
+        crate::compiler::CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } => format!(
+            "{{\"kind\": \"varnode_tpl\", \"space\": {}, \"offset\": {}, \"size\": {}}}",
+            render_space_template(space),
+            render_const_template(offset),
+            render_const_template(size)
+        ),
+        crate::compiler::CompiledVarnodeTpl::HandleTpl(handle) => format!(
+            "{{\"kind\": \"handle_tpl\", \"space\": {}, \"size\": {}, \"ptr_space\": {}, \"ptr_offset\": {}, \"ptr_size\": {}, \"temp_space\": {}, \"temp_offset\": {}}}",
+            handle
+                .space
+                .as_ref()
+                .map(render_space_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .size
+                .as_ref()
+                .map(render_const_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .ptr_space
+                .as_ref()
+                .map(render_space_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .ptr_offset
+                .as_ref()
+                .map(render_const_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .ptr_size
+                .as_ref()
+                .map(render_const_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .temp_space
+                .as_ref()
+                .map(render_space_template)
+                .unwrap_or_else(|| "null".to_string()),
+            handle
+                .temp_offset
+                .as_ref()
+                .map(render_const_template)
+                .unwrap_or_else(|| "null".to_string())
+        ),
         crate::compiler::CompiledVarnodeTpl::Handle { operand_index } => {
             format!("{{\"kind\": \"handle\", \"operand_index\": {operand_index}}}")
         }
@@ -531,24 +579,11 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
         crate::compiler::CompiledVarnodeTpl::ConditionPredicate => {
             "{\"kind\": \"condition_predicate\"}".to_string()
         }
-        crate::compiler::CompiledVarnodeTpl::Const(value) => match value {
-            crate::compiler::CompiledConstTpl::Integer { value, size } => {
-                format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")
-            }
-            crate::compiler::CompiledConstTpl::RelativeAddress => {
-                "{\"kind\": \"relative_address\"}".to_string()
-            }
-            crate::compiler::CompiledConstTpl::InstStart => {
-                "{\"kind\": \"inst_start\"}".to_string()
-            }
-            crate::compiler::CompiledConstTpl::InstNext => "{\"kind\": \"inst_next\"}".to_string(),
-            crate::compiler::CompiledConstTpl::InstNext2 => {
-                "{\"kind\": \"inst_next2\"}".to_string()
-            }
-        },
+        crate::compiler::CompiledVarnodeTpl::Const(value) => render_const_template(value),
         crate::compiler::CompiledVarnodeTpl::Space(space) => format!(
-            "{{\"kind\": \"space\", \"name\": {}}}",
-            json_string(&space.name)
+            "{{\"kind\": \"space\", \"name\": {}, \"index\": {}}}",
+            json_string(&space.name),
+            space.index
         ),
         crate::compiler::CompiledVarnodeTpl::Temp { id, size } => {
             format!("{{\"kind\": \"temp\", \"id\": {id}, \"size\": {size}}}")
@@ -567,6 +602,71 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
         ),
         crate::compiler::CompiledVarnodeTpl::Flag { bit } => {
             format!("{{\"kind\": \"flag\", \"bit\": {bit}}}")
+        }
+    }
+}
+
+fn render_space_template(template: &crate::compiler::CompiledSpaceTpl) -> String {
+    match template {
+        crate::compiler::CompiledSpaceTpl::SpaceRef(space) => format!(
+            "{{\"kind\": \"space_ref\", \"name\": {}, \"index\": {}}}",
+            json_string(&space.name),
+            space.index
+        ),
+        crate::compiler::CompiledSpaceTpl::Const(value) => format!(
+            "{{\"kind\": \"space_const_tpl\", \"const\": {}}}",
+            render_const_template(value)
+        ),
+    }
+}
+
+fn render_const_template(template: &crate::compiler::CompiledConstTpl) -> String {
+    match template {
+        crate::compiler::CompiledConstTpl::Real { value } => {
+            format!("{{\"kind\": \"const_real\", \"value\": {value}}}")
+        }
+        crate::compiler::CompiledConstTpl::Handle {
+            handle_index,
+            selector,
+            plus,
+        } => format!(
+            "{{\"kind\": \"const_handle\", \"handle_index\": {handle_index}, \"selector\": {}, \"plus\": {}}}",
+            json_string(match selector {
+                crate::compiler::CompiledHandleSelector::Space => "space",
+                crate::compiler::CompiledHandleSelector::Offset => "offset",
+                crate::compiler::CompiledHandleSelector::Size => "size",
+                crate::compiler::CompiledHandleSelector::OffsetPlus => "offset_plus",
+            }),
+            plus.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string())
+        ),
+        crate::compiler::CompiledConstTpl::Integer { value, size } => {
+            format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")
+        }
+        crate::compiler::CompiledConstTpl::RelativeAddress => {
+            "{\"kind\": \"relative_address\"}".to_string()
+        }
+        crate::compiler::CompiledConstTpl::Relative { value } => {
+            format!("{{\"kind\": \"const_relative\", \"value\": {value}}}")
+        }
+        crate::compiler::CompiledConstTpl::InstStart => "{\"kind\": \"inst_start\"}".to_string(),
+        crate::compiler::CompiledConstTpl::InstNext => "{\"kind\": \"inst_next\"}".to_string(),
+        crate::compiler::CompiledConstTpl::InstNext2 => "{\"kind\": \"inst_next2\"}".to_string(),
+        crate::compiler::CompiledConstTpl::CurSpace => "{\"kind\": \"curspace\"}".to_string(),
+        crate::compiler::CompiledConstTpl::CurSpaceSize => {
+            "{\"kind\": \"curspace_size\"}".to_string()
+        }
+        crate::compiler::CompiledConstTpl::SpaceId(space) => format!(
+            "{{\"kind\": \"const_spaceid\", \"name\": {}, \"index\": {}}}",
+            json_string(&space.name),
+            space.index
+        ),
+        crate::compiler::CompiledConstTpl::FlowRef => "{\"kind\": \"flowref\"}".to_string(),
+        crate::compiler::CompiledConstTpl::FlowRefSize => {
+            "{\"kind\": \"flowref_size\"}".to_string()
+        }
+        crate::compiler::CompiledConstTpl::FlowDest => "{\"kind\": \"flowdest\"}".to_string(),
+        crate::compiler::CompiledConstTpl::FlowDestSize => {
+            "{\"kind\": \"flowdest_size\"}".to_string()
         }
     }
 }

@@ -8,9 +8,9 @@ use crate::constants::binary_format::{
     MACHO_CPU_TYPE_ARM, MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_X86, MACHO_CPU_TYPE_X86_64,
 };
 use crate::core_constants::{
-    ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_386, EM_AARCH64, EM_ARM, EM_X86_64,
-    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARM64,
-    IMAGE_FILE_MACHINE_I386,
+    ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_386, EM_AARCH64, EM_ARM, EM_BPF,
+    EM_LOONGARCH, EM_MIPS, EM_PPC, EM_PPC64, EM_RISCV, EM_SPARCV9, EM_X86_64,
+    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
@@ -299,6 +299,222 @@ pub fn select_elf_load_spec(
             "gcc",
             format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
         )),
+        (EM_RISCV, 32, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "RISCV",
+            "little",
+            32,
+            "default",
+            Some("gcc".to_string()),
+            "RISCV:LE:32:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_RISCV, 64, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "RISCV",
+            "little",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "RISCV:LE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 32, "little") if (flags & 0x8000_0000) != 0 => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "little",
+            32,
+            "R6",
+            Some("gcc".to_string()),
+            "MIPS:LE:32:R6",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 32, "big") if (flags & 0x8000_0000) != 0 => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "big",
+            32,
+            "R6",
+            Some("gcc".to_string()),
+            "MIPS:BE:32:R6",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 32, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "little",
+            32,
+            "default",
+            Some("gcc".to_string()),
+            "MIPS:LE:32:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 32, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "big",
+            32,
+            "default",
+            Some("gcc".to_string()),
+            "MIPS:BE:32:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 64, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "little",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "MIPS:LE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_MIPS, 64, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "MIPS",
+            "big",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "MIPS:BE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_PPC, 32, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "PowerPC",
+            "little",
+            32,
+            "default",
+            Some("gcc".to_string()),
+            "PowerPC:LE:32:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_PPC, 32, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "PowerPC",
+            "big",
+            32,
+            "default",
+            Some("gcc".to_string()),
+            "PowerPC:BE:32:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_PPC64, 64, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "PowerPC",
+            "little",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "PowerPC:LE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_PPC64, 64, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "PowerPC",
+            "big",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "PowerPC:BE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_SPARCV9, 64, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "sparc",
+            "big",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "sparc:BE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_BPF, 64, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "eBPF",
+            "little",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "eBPF:LE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_BPF, 64, "big") => Ok(selection(
+            "ELF",
+            image_base,
+            "eBPF",
+            "big",
+            64,
+            "default",
+            Some("gcc".to_string()),
+            "eBPF:BE:64:default",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_LOONGARCH, 32, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "Loongarch",
+            "little",
+            32,
+            "ilp32d",
+            Some("gcc".to_string()),
+            "Loongarch:LE:32:ilp32d",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_LOONGARCH, 64, "little") if flags == 0x42 => Ok(selection(
+            "ELF",
+            image_base,
+            "Loongarch",
+            "little",
+            64,
+            "lp64f",
+            Some("gcc".to_string()),
+            "Loongarch:LE:64:lp64f",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
+        (EM_LOONGARCH, 64, "little") => Ok(selection(
+            "ELF",
+            image_base,
+            "Loongarch",
+            "little",
+            64,
+            "lp64d",
+            Some("gcc".to_string()),
+            "Loongarch:LE:64:lp64d",
+            "gcc",
+            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
+        )),
         _ => Err(ArchitectureSelectionError::UnsupportedMachine {
             format: "ELF".to_string(),
             machine: format!(
@@ -427,6 +643,34 @@ mod tests {
         let (_, spec) =
             select_elf_load_spec(EM_AARCH64, ELFCLASS64, ELFDATA2LSB, 0, 0).expect("select ELF");
         assert_eq!(spec.pair.language_id.as_str(), "AARCH64:LE:64:v8A");
+    }
+
+    #[test]
+    fn selects_elf_riscv64_little_endian() {
+        let (_, spec) =
+            select_elf_load_spec(EM_RISCV, ELFCLASS64, ELFDATA2LSB, 0x5, 0).expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "RISCV:LE:64:default");
+    }
+
+    #[test]
+    fn selects_elf_mips32_r6_little_endian() {
+        let (_, spec) = select_elf_load_spec(EM_MIPS, ELFCLASS32, ELFDATA2LSB, 0x9000_1405, 0)
+            .expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "MIPS:LE:32:R6");
+    }
+
+    #[test]
+    fn selects_elf_ppc64_little_endian() {
+        let (_, spec) =
+            select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2LSB, 0x2, 0).expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "PowerPC:LE:64:default");
+    }
+
+    #[test]
+    fn selects_elf_loongarch64_lp64d() {
+        let (_, spec) = select_elf_load_spec(EM_LOONGARCH, ELFCLASS64, ELFDATA2LSB, 0x43, 0)
+            .expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "Loongarch:LE:64:lp64d");
     }
 
     #[test]

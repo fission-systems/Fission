@@ -15,1155 +15,1155 @@ entry_id: PIC24E
 - ^instruction [none] PIC24.sinc:1517
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
-- add.w [none] PIC24.sinc:1524
+- add.w [none] PIC24.sinc:1525
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=14ba996afd702023 op_count=0
   with_stack: with : phase = 2
-- add.b [none] PIC24.sinc:1533
+- add.b [none] PIC24.sinc:1539
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=59ff120288500df9 op_count=0
   with_stack: with : phase = 2
-- add.w [none] PIC24.sinc:1542
+- add.w [none] PIC24.sinc:1553
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2b710f59bb2f7d97 op_count=0
   with_stack: with : phase = 2
-- add.b [none] PIC24.sinc:1551
+- add.b [none] PIC24.sinc:1567
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=24fde12e47fd23c1 op_count=0
   with_stack: with : phase = 2
-- add.w [none] PIC24.sinc:1560
+- add.w [none] PIC24.sinc:1581
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6873eec93b9c0cc0 op_count=0
   with_stack: with : phase = 2
-- add.b [none] PIC24.sinc:1569
+- add.b [none] PIC24.sinc:1595
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=533ba9ed925a3c5a op_count=0
   with_stack: with : phase = 2
-- add.w [none] PIC24.sinc:1579
+- add.w [none] PIC24.sinc:1610
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f08ea7804fcc2840 op_count=0
   with_stack: with : phase = 2
-- add.b [none] PIC24.sinc:1589
+- add.b [none] PIC24.sinc:1624
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=67973196ad4810ee op_count=0
   with_stack: with : phase = 2
-- addc.w [none] PIC24.sinc:1599
+- addc.w [none] PIC24.sinc:1673
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b4bfa992326aed5f op_count=0
   with_stack: with : phase = 2
-- addc.b [none] PIC24.sinc:1609
+- addc.b [none] PIC24.sinc:1687
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9200ff9d9a671f37 op_count=0
   with_stack: with : phase = 2
-- addc.w [none] PIC24.sinc:1619
+- addc.w [none] PIC24.sinc:1702
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c8a539487003d359 op_count=0
   with_stack: with : phase = 2
-- addc.b [none] PIC24.sinc:1627
+- addc.b [none] PIC24.sinc:1715
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5aedd6334da445b5 op_count=0
   with_stack: with : phase = 2
-- addc.w [none] PIC24.sinc:1635
+- addc.w [none] PIC24.sinc:1728
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3702f86d604a3c92 op_count=0
   with_stack: with : phase = 2
-- addc.b [none] PIC24.sinc:1645
+- addc.b [none] PIC24.sinc:1743
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=40e8e224f12f50fe op_count=0
   with_stack: with : phase = 2
-- addc.w [none] PIC24.sinc:1656
+- addc.w [none] PIC24.sinc:1759
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f402e149f372badc op_count=0
   with_stack: with : phase = 2
-- addc.b [none] PIC24.sinc:1667
+- addc.b [none] PIC24.sinc:1775
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=818e73086d8ebda6 op_count=0
   with_stack: with : phase = 2
-- and.w [none] PIC24.sinc:1678
+- and.w [none] PIC24.sinc:1791
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=22f04964eb9108e3 op_count=0
   with_stack: with : phase = 2
-- and.b [none] PIC24.sinc:1683
+- and.b [none] PIC24.sinc:1800
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fa4e4ed403c6b6a1 op_count=0
   with_stack: with : phase = 2
-- and.w [none] PIC24.sinc:1688
+- and.w [none] PIC24.sinc:1809
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6cb43c70a8f00a0a op_count=0
   with_stack: with : phase = 2
-- and.b [none] PIC24.sinc:1693
+- and.b [none] PIC24.sinc:1818
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=54f72f4fdf5582c8 op_count=0
   with_stack: with : phase = 2
-- and.w [none] PIC24.sinc:1698
+- and.w [none] PIC24.sinc:1827
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4d4041f95ad50dd3 op_count=0
   with_stack: with : phase = 2
-- and.b [none] PIC24.sinc:1704
+- and.b [none] PIC24.sinc:1837
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fdb5d7abea8a6b2d op_count=0
   with_stack: with : phase = 2
-- and.w [none] PIC24.sinc:1711
+- and.w [none] PIC24.sinc:1848
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=306cebed014980ce op_count=0
   with_stack: with : phase = 2
-- and.b [none] PIC24.sinc:1718
+- and.b [none] PIC24.sinc:1859
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b3b34e3929f0a41e op_count=0
   with_stack: with : phase = 2
-- asr.w [none] PIC24.sinc:1725
+- asr.w [none] PIC24.sinc:1870
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=85f0e40243346832 op_count=0
   with_stack: with : phase = 2
-- asr.b [none] PIC24.sinc:1732
+- asr.b [none] PIC24.sinc:1881
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b468a256413e09b2 op_count=0
   with_stack: with : phase = 2
-- asr.w [none] PIC24.sinc:1739
+- asr.w [none] PIC24.sinc:1892
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8c28fd116b6ab954 op_count=0
   with_stack: with : phase = 2
-- asr.b [none] PIC24.sinc:1748
+- asr.b [none] PIC24.sinc:1906
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a6d6725763e536fe op_count=0
   with_stack: with : phase = 2
-- asr.w [none] PIC24.sinc:1757
+- asr.w [none] PIC24.sinc:1920
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0dff3c02741a3868 op_count=0
   with_stack: with : phase = 2
-- asr.w [none] PIC24.sinc:1762
+- asr.w [none] PIC24.sinc:1929
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f2a977df4018a007 op_count=0
   with_stack: with : phase = 2
-- bclr.w [none] PIC24.sinc:1767
+- bclr.w [none] PIC24.sinc:1941
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=353a4384ff9e90a2 op_count=0
   with_stack: with : phase = 2
-- bclr.w [none] PIC24.sinc:1771
+- bclr.w [none] PIC24.sinc:1949
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=387492ccce514eb4 op_count=0
   with_stack: with : phase = 2
-- bclr.b [none] PIC24.sinc:1776
+- bclr.b [none] PIC24.sinc:1957
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=dfbbe296b362b99b op_count=0
   with_stack: with : phase = 2
-- bra [branch] PIC24.sinc:1781
+- bra [branch] PIC24.sinc:2019
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=089be5aec0ffb5f9 op_count=0
   with_stack: with : phase = 2
-- bra [branch] PIC24.sinc:1784
+- bra [branch] PIC24.sinc:2036
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=28b056f6171496e7 op_count=0
   with_stack: with : phase = 2
-- bra [conditional_branch] PIC24.sinc:1808
+- bra [conditional_branch] PIC24.sinc:2078
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b8e9977838c93688 op_count=0
   with_stack: with : phase = 2
-- bra [conditional_branch] PIC24.sinc:1811
+- bra [conditional_branch] PIC24.sinc:2091
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=84c59dadc5aea899 op_count=0
   with_stack: with : phase = 2
-- bset.w [none] PIC24.sinc:1814
+- bset.w [none] PIC24.sinc:2097
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=629a7922651fd6f3 op_count=0
   with_stack: with : phase = 2
-- bset.w [none] PIC24.sinc:1818
+- bset.w [none] PIC24.sinc:2104
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=35b860660e397ccd op_count=0
   with_stack: with : phase = 2
-- bset.b [none] PIC24.sinc:1823
+- bset.b [none] PIC24.sinc:2112
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4797266e47aa1cb0 op_count=0
   with_stack: with : phase = 2
-- bsw.c [none] PIC24.sinc:1828
+- bsw.c [none] PIC24.sinc:2120
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2895b55880eed8c0 op_count=0
   with_stack: with : phase = 2
-- bsw.z [none] PIC24.sinc:1832
+- bsw.z [none] PIC24.sinc:2128
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=afc5435bfbf7a127 op_count=0
   with_stack: with : phase = 2
-- btg^bit4byte_t [none] PIC24.sinc:1836
+- btg^bit4byte_t [none] PIC24.sinc:2136
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e0134624203086d9 op_count=0
   with_stack: with : phase = 2
-- btg.w [none] PIC24.sinc:1840
+- btg.w [none] PIC24.sinc:2144
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5529b54bca931b57 op_count=0
   with_stack: with : phase = 2
-- btg.b [none] PIC24.sinc:1845
+- btg.b [none] PIC24.sinc:2152
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9dce35e2740fb90e op_count=0
   with_stack: with : phase = 2
-- btsc^bit4byte_t [none] PIC24.sinc:1850
+- btsc^bit4byte_t [none] PIC24.sinc:2160
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=177a4c06d406e3d1 op_count=0
   with_stack: with : phase = 2
-- btsc.w [none] PIC24.sinc:1855
+- btsc.w [none] PIC24.sinc:2168
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6673a6e406226eb4 op_count=0
   with_stack: with : phase = 2
-- btss^bit4byte_t [none] PIC24.sinc:1860
+- btss^bit4byte_t [none] PIC24.sinc:2176
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=aa34aefe5915f175 op_count=0
   with_stack: with : phase = 2
-- btss.w [none] PIC24.sinc:1865
+- btss.w [none] PIC24.sinc:2184
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a6508a7ac46aa7b0 op_count=0
   with_stack: with : phase = 2
-- btst.w [none] PIC24.sinc:1870
+- btst.w [none] PIC24.sinc:2192
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=77c1e5c1dac42e41 op_count=0
   with_stack: with : phase = 2
-- btst.c [none] PIC24.sinc:1874
+- btst.c [none] PIC24.sinc:2200
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=41dcbe6facbb5acc op_count=0
   with_stack: with : phase = 2
-- btst.z [none] PIC24.sinc:1880
+- btst.z [none] PIC24.sinc:2212
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=272bd0b3a3f2fbad op_count=0
   with_stack: with : phase = 2
-- btst.c [none] PIC24.sinc:1885
+- btst.c [none] PIC24.sinc:2223
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d63286a0698a1b25 op_count=0
   with_stack: with : phase = 2
-- btst.z [none] PIC24.sinc:1888
+- btst.z [none] PIC24.sinc:2230
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c313e05e7e309566 op_count=0
   with_stack: with : phase = 2
-- btsts^bit4byte_t [none] PIC24.sinc:1891
+- btsts^bit4byte_t [none] PIC24.sinc:2237
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8e3dfacb45b07605 op_count=0
   with_stack: with : phase = 2
-- btsts.c [none] PIC24.sinc:1896
+- btsts.c [none] PIC24.sinc:2250
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9dadf8c17dbc09c6 op_count=0
   with_stack: with : phase = 2
-- btsts.z [none] PIC24.sinc:1902
+- btsts.z [none] PIC24.sinc:2263
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=327db4d171473baf op_count=0
   with_stack: with : phase = 2
-- call [call] PIC24.sinc:1908
+- call [call] PIC24.sinc:2289
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=beb345b6d7b39b86 op_count=0
   with_stack: with : phase = 2
-- call [call] PIC24.sinc:1914
+- call [call] PIC24.sinc:2312
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0200a2903263374e op_count=0
   with_stack: with : phase = 2
-- call.l [call] PIC24.sinc:1919
+- call.l [call] PIC24.sinc:2323
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=16a37de6cac381a4 op_count=0
   with_stack: with : phase = 2
-- clr.w [none] PIC24.sinc:1924
+- clr.w [none] PIC24.sinc:2333
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c070e72be2d54e46 op_count=0
   with_stack: with : phase = 2
-- clr.w [none] PIC24.sinc:1927
+- clr.w [none] PIC24.sinc:2339
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=357da3c5657963eb op_count=0
   with_stack: with : phase = 2
-- clr.b [none] PIC24.sinc:1930
+- clr.b [none] PIC24.sinc:2345
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=aa857826d84394ec op_count=0
   with_stack: with : phase = 2
-- clr.b [none] PIC24.sinc:1933
+- clr.b [none] PIC24.sinc:2351
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6ee4f711e3dae325 op_count=0
   with_stack: with : phase = 2
-- clr.w [none] PIC24.sinc:1936
+- clr.w [none] PIC24.sinc:2357
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=508b88372a3ceb7f op_count=0
   with_stack: with : phase = 2
-- clr.b [none] PIC24.sinc:1939
+- clr.b [none] PIC24.sinc:2363
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3bc2de596bf18589 op_count=0
   with_stack: with : phase = 2
-- clrwdt [none] PIC24.sinc:1942
+- clrwdt [none] PIC24.sinc:2781
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fcae5cac5f67d073 op_count=0
   with_stack: with : phase = 2
-- com.w [none] PIC24.sinc:1947
+- com.w [none] PIC24.sinc:2789
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6b7d439c8cc1d798 op_count=0
   with_stack: with : phase = 2
-- com.b [none] PIC24.sinc:1952
+- com.b [none] PIC24.sinc:2797
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ec6108ad9945f134 op_count=0
   with_stack: with : phase = 2
-- com.w [none] PIC24.sinc:1957
+- com.w [none] PIC24.sinc:2806
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f2a80880d619626e op_count=0
   with_stack: with : phase = 2
-- com.b [none] PIC24.sinc:1964
+- com.b [none] PIC24.sinc:2817
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a263de8135cfcda4 op_count=0
   with_stack: with : phase = 2
-- cp.w [none] PIC24.sinc:1971
+- cp.w [none] PIC24.sinc:2828
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1a1fdc7432d37439 op_count=0
   with_stack: with : phase = 2
-- cp.b [none] PIC24.sinc:1979
+- cp.b [none] PIC24.sinc:2841
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=79726ef3ad03769e op_count=0
   with_stack: with : phase = 2
-- cp.w [none] PIC24.sinc:1987
+- cp.w [none] PIC24.sinc:2882
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=771def7e9e213034 op_count=0
   with_stack: with : phase = 2
-- cp.b [none] PIC24.sinc:1994
+- cp.b [none] PIC24.sinc:2894
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6a5cb7f2028cfe87 op_count=0
   with_stack: with : phase = 2
-- cp.w [none] PIC24.sinc:2001
+- cp.w [none] PIC24.sinc:2907
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e079a9af831fa120 op_count=0
   with_stack: with : phase = 2
-- cp.b [none] PIC24.sinc:2009
+- cp.b [none] PIC24.sinc:2920
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9b12f2e6bc55b1d7 op_count=0
   with_stack: with : phase = 2
-- cp0.w [none] PIC24.sinc:2018
+- cp0.w [none] PIC24.sinc:2934
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7af65c58e3bfbfd6 op_count=0
   with_stack: with : phase = 2
-- cp0.b [none] PIC24.sinc:2026
+- cp0.b [none] PIC24.sinc:2946
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=663e44fc306e3501 op_count=0
   with_stack: with : phase = 2
-- cp0.w [none] PIC24.sinc:2034
+- cp0.w [none] PIC24.sinc:2958
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f4ba542d57330380 op_count=0
   with_stack: with : phase = 2
-- cp0.b [none] PIC24.sinc:2042
+- cp0.b [none] PIC24.sinc:2970
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7acc6351eb93b54b op_count=0
   with_stack: with : phase = 2
-- cpb.w [none] PIC24.sinc:2050
+- cpb.w [none] PIC24.sinc:2982
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=00c2f179f8334342 op_count=0
   with_stack: with : phase = 2
-- cpb.b [none] PIC24.sinc:2059
+- cpb.b [none] PIC24.sinc:2996
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=93550c3506316ae1 op_count=0
   with_stack: with : phase = 2
-- cpb.w [none] PIC24.sinc:2068
+- cpb.w [none] PIC24.sinc:3040
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2eae4330d4c785d8 op_count=0
   with_stack: with : phase = 2
-- cpb.b [none] PIC24.sinc:2076
+- cpb.b [none] PIC24.sinc:3053
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=dce31ac3e08314f7 op_count=0
   with_stack: with : phase = 2
-- cpb.w [none] PIC24.sinc:2084
+- cpb.w [none] PIC24.sinc:3067
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=402a800da6e3758e op_count=0
   with_stack: with : phase = 2
-- cpb.b [none] PIC24.sinc:2093
+- cpb.b [none] PIC24.sinc:3081
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2d17181bb5c4ef35 op_count=0
   with_stack: with : phase = 2
-- cpbeq.w [conditional_branch] PIC24.sinc:2103
+- cpbeq.w [conditional_branch] PIC24.sinc:3097
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7c31259ddf553a50 op_count=0
   with_stack: with : phase = 2
-- cpbeq.b [conditional_branch] PIC24.sinc:2106
+- cpbeq.b [conditional_branch] PIC24.sinc:3103
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9ac8465a5205b2d2 op_count=0
   with_stack: with : phase = 2
-- cpbgt.w [conditional_branch] PIC24.sinc:2110
+- cpbgt.w [conditional_branch] PIC24.sinc:3112
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d5f92d87bd48e52f op_count=0
   with_stack: with : phase = 2
-- cpbgt.b [conditional_branch] PIC24.sinc:2113
+- cpbgt.b [conditional_branch] PIC24.sinc:3118
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a86459eb0f14cd89 op_count=0
   with_stack: with : phase = 2
-- cpblt.w [conditional_branch] PIC24.sinc:2117
+- cpblt.w [conditional_branch] PIC24.sinc:3127
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1bf9aaa619657ff5 op_count=0
   with_stack: with : phase = 2
-- cpblt.b [conditional_branch] PIC24.sinc:2120
+- cpblt.b [conditional_branch] PIC24.sinc:3133
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1d94f344ce247627 op_count=0
   with_stack: with : phase = 2
-- cpbne.w [conditional_branch] PIC24.sinc:2124
+- cpbne.w [conditional_branch] PIC24.sinc:3142
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e8105cfae13397b4 op_count=0
   with_stack: with : phase = 2
-- cpbne.b [conditional_branch] PIC24.sinc:2127
+- cpbne.b [conditional_branch] PIC24.sinc:3148
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=670e682854f025a6 op_count=0
   with_stack: with : phase = 2
-- cpseq.w [none] PIC24.sinc:2130
+- cpseq.w [none] PIC24.sinc:3174
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=47d9710dac02999e op_count=0
   with_stack: with : phase = 2
-- cpseq.b [none] PIC24.sinc:2135
+- cpseq.b [none] PIC24.sinc:3182
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4f9dd41b443f0190 op_count=0
   with_stack: with : phase = 2
-- cpsgt.w [none] PIC24.sinc:2140
+- cpsgt.w [none] PIC24.sinc:3210
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e6c8fcff8b177899 op_count=0
   with_stack: with : phase = 2
-- cpsgt.b [none] PIC24.sinc:2145
+- cpsgt.b [none] PIC24.sinc:3218
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=043daf7bb150c32b op_count=0
   with_stack: with : phase = 2
-- cpslt.w [none] PIC24.sinc:2150
+- cpslt.w [none] PIC24.sinc:3246
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fb64b1abe67a682f op_count=0
   with_stack: with : phase = 2
-- cpslt.b [none] PIC24.sinc:2155
+- cpslt.b [none] PIC24.sinc:3254
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a1436327b3df3a71 op_count=0
   with_stack: with : phase = 2
-- cpsne.w [none] PIC24.sinc:2160
+- cpsne.w [none] PIC24.sinc:3282
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=cc6f17bee7dd6e0a op_count=0
   with_stack: with : phase = 2
-- cpsne.b [none] PIC24.sinc:2165
+- cpsne.b [none] PIC24.sinc:3290
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c6efdf3480597dac op_count=0
   with_stack: with : phase = 2
-- daw.b [conditional_branch] PIC24.sinc:2170
+- daw.b [conditional_branch] PIC24.sinc:3310
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1d268b73f52d56e5 op_count=0
   with_stack: with : phase = 2
-- dec.w [none] PIC24.sinc:2179
+- dec.w [none] PIC24.sinc:3323
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=834556fdcf34a3ea op_count=0
   with_stack: with : phase = 2
-- dec.b [none] PIC24.sinc:2188
+- dec.b [none] PIC24.sinc:3337
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=70b8df94935f80f1 op_count=0
   with_stack: with : phase = 2
-- dec.w [none] PIC24.sinc:2197
+- dec.w [none] PIC24.sinc:3351
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e7a7e1f8f17783e3 op_count=0
   with_stack: with : phase = 2
-- dec.b [none] PIC24.sinc:2208
+- dec.b [none] PIC24.sinc:3367
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3e2c6c2b3e3053d6 op_count=0
   with_stack: with : phase = 2
-- dec2.w [none] PIC24.sinc:2219
+- dec2.w [none] PIC24.sinc:3383
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4de9a83199c42b05 op_count=0
   with_stack: with : phase = 2
-- dec2.b [none] PIC24.sinc:2228
+- dec2.b [none] PIC24.sinc:3397
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b03c88c7cfad32bc op_count=0
   with_stack: with : phase = 2
-- dec2.w [none] PIC24.sinc:2237
+- dec2.w [none] PIC24.sinc:3411
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=919e6cf54b53c468 op_count=0
   with_stack: with : phase = 2
-- dec2.b [none] PIC24.sinc:2248
+- dec2.b [none] PIC24.sinc:3427
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d8f8e20ee369f245 op_count=0
   with_stack: with : phase = 2
-- disi [none] PIC24.sinc:2259
+- disi [none] PIC24.sinc:3443
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=000e90e23a13f367 op_count=0
   with_stack: with : phase = 2
-- repeat" [none] PIC24.sinc:2263
+- repeat" [none] PIC24.sinc:3450
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8f6acf2f0b120761 op_count=0
   with_stack: with : phase = 2
-- div.sw [none] PIC24.sinc:2277
+- div.sw [none] PIC24.sinc:3476
   semantic_ops: pic30_div, pic30_rem
   semantic_template: status=unsupported_template action_hash=b334862a5cf61130 op_count=2
   with_stack: with : phase = 2
-- repeat" [none] PIC24.sinc:2289
+- repeat" [none] PIC24.sinc:3495
   semantic_ops: isDivideOverflow
   semantic_template: status=unsupported_template action_hash=78313955b0ebb09f op_count=1
   with_stack: with : phase = 2
-- div.sd [none] PIC24.sinc:2302
+- div.sd [none] PIC24.sinc:3517
   semantic_ops: isDivideOverflow, pic30_div, pic30_rem
   semantic_template: status=unsupported_template action_hash=581de92bfe3b0bae op_count=3
   with_stack: with : phase = 2
-- repeat" [none] PIC24.sinc:2314
+- repeat" [none] PIC24.sinc:3538
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e2e1fefccb3461cc op_count=0
   with_stack: with : phase = 2
-- div.uw [none] PIC24.sinc:2327
+- div.uw [none] PIC24.sinc:3562
   semantic_ops: pic30_div, pic30_rem
   semantic_template: status=unsupported_template action_hash=64b3fc0e682d99d9 op_count=2
   with_stack: with : phase = 2
-- repeat" [none] PIC24.sinc:2339
+- repeat" [none] PIC24.sinc:3582
   semantic_ops: isDivideOverflow
   semantic_template: status=unsupported_template action_hash=b171e3afba184e11 op_count=1
   with_stack: with : phase = 2
-- div.ud [none] PIC24.sinc:2352
+- div.ud [none] PIC24.sinc:3604
   semantic_ops: isDivideOverflow, pic30_div, pic30_rem
   semantic_template: status=unsupported_template action_hash=581de92bfe3b0bae op_count=3
   with_stack: with : phase = 2
-- exch [none] PIC24.sinc:2364
+- exch [none] PIC24.sinc:3898
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2263d7545920b1d7 op_count=0
   with_stack: with : phase = 2
-- fbcl [conditional_branch] PIC24.sinc:2370
+- fbcl [conditional_branch] PIC24.sinc:3908
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=29df2450cbbd8b58 op_count=0
   with_stack: with : phase = 2
-- ff1l [conditional_branch] PIC24.sinc:2384
+- ff1l [conditional_branch] PIC24.sinc:3931
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=87602ea949417ff1 op_count=0
   with_stack: with : phase = 2
-- ff1r [conditional_branch] PIC24.sinc:2396
+- ff1r [conditional_branch] PIC24.sinc:3956
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=347c560ea651dc2a op_count=0
   with_stack: with : phase = 2
-- goto [branch] PIC24.sinc:2408
+- goto [branch] PIC24.sinc:3994
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fce7221ec40fca74 op_count=0
   with_stack: with : phase = 2
-- goto [branch] PIC24.sinc:2412
+- goto [branch] PIC24.sinc:4010
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=44be5ed7f7857561 op_count=0
   with_stack: with : phase = 2
-- goto.l [branch] PIC24.sinc:2415
+- goto.l [branch] PIC24.sinc:4018
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2131f6d341c41aad op_count=0
   with_stack: with : phase = 2
-- inc.w [none] PIC24.sinc:2418
+- inc.w [none] PIC24.sinc:4025
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fbcb66d01384aabd op_count=0
   with_stack: with : phase = 2
-- inc.b [none] PIC24.sinc:2427
+- inc.b [none] PIC24.sinc:4039
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=329adec646b2c4ba op_count=0
   with_stack: with : phase = 2
-- inc.w [none] PIC24.sinc:2436
+- inc.w [none] PIC24.sinc:4053
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ab2506b679cbab92 op_count=0
   with_stack: with : phase = 2
-- inc.b [none] PIC24.sinc:2447
+- inc.b [none] PIC24.sinc:4068
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8ad45cb19dbea113 op_count=0
   with_stack: with : phase = 2
-- inc2.w [none] PIC24.sinc:2458
+- inc2.w [none] PIC24.sinc:4084
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2521b3f44d76e728 op_count=0
   with_stack: with : phase = 2
-- inc2.b [none] PIC24.sinc:2467
+- inc2.b [none] PIC24.sinc:4098
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7f7d049db1b16d95 op_count=0
   with_stack: with : phase = 2
-- inc2.w [none] PIC24.sinc:2476
+- inc2.w [none] PIC24.sinc:4112
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e27d9405898cf929 op_count=0
   with_stack: with : phase = 2
-- inc2.b [none] PIC24.sinc:2487
+- inc2.b [none] PIC24.sinc:4127
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=17b6516c37b710e8 op_count=0
   with_stack: with : phase = 2
-- ior.w [none] PIC24.sinc:2498
+- ior.w [none] PIC24.sinc:4143
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0276ad5c239c26b1 op_count=0
   with_stack: with : phase = 2
-- ior.b [none] PIC24.sinc:2503
+- ior.b [none] PIC24.sinc:4152
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=da4671bdcaae7513 op_count=0
   with_stack: with : phase = 2
-- ior.w [none] PIC24.sinc:2508
+- ior.w [none] PIC24.sinc:4161
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=122dc120809f7ef4 op_count=0
   with_stack: with : phase = 2
-- ior.b [none] PIC24.sinc:2513
+- ior.b [none] PIC24.sinc:4170
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c9da69bce35323e6 op_count=0
   with_stack: with : phase = 2
-- ior.w [none] PIC24.sinc:2518
+- ior.w [none] PIC24.sinc:4179
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=92536b4350f7f8ac op_count=0
   with_stack: with : phase = 2
-- ior.b [none] PIC24.sinc:2525
+- ior.b [none] PIC24.sinc:4190
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a198fa92211f7aa4 op_count=0
   with_stack: with : phase = 2
-- ior.w [none] PIC24.sinc:2533
+- ior.w [none] PIC24.sinc:4202
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a8849d8924cd9580 op_count=0
   with_stack: with : phase = 2
-- ior.b [none] PIC24.sinc:2540
+- ior.b [none] PIC24.sinc:4212
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1da3d223379b6430 op_count=0
   with_stack: with : phase = 2
-- lnk [none] PIC24.sinc:2547
+- lnk [none] PIC24.sinc:4288
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c2067d1fa909d5b2 op_count=0
   with_stack: with : phase = 2
-- lsr.w [none] PIC24.sinc:2554
+- lsr.w [none] PIC24.sinc:4300
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5523df633a8c5751 op_count=0
   with_stack: with : phase = 2
-- lsr.b [none] PIC24.sinc:2561
+- lsr.b [none] PIC24.sinc:4312
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3901407c936ff6dd op_count=0
   with_stack: with : phase = 2
-- lsr.w [none] PIC24.sinc:2568
+- lsr.w [none] PIC24.sinc:4324
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0ef7d4f82d742d89 op_count=0
   with_stack: with : phase = 2
-- lsr.b [none] PIC24.sinc:2577
+- lsr.b [none] PIC24.sinc:4337
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6ae6d1ef1b7c425f op_count=0
   with_stack: with : phase = 2
-- lsr.w [none] PIC24.sinc:2586
+- lsr.w [none] PIC24.sinc:4351
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2febcb6dbb0926d5 op_count=0
   with_stack: with : phase = 2
-- lsr.w [none] PIC24.sinc:2591
+- lsr.w [none] PIC24.sinc:4360
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=89e22610786cbe3a op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2596
+- mov.w [none] PIC24.sinc:5086
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6f18bb7e02066216 op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2601
+- mov.b [none] PIC24.sinc:5095
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=78be50c7ab8ab036 op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2606
+- mov.w [none] PIC24.sinc:5104
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a4bc4b7e1b008b34 op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2609
+- mov.b [none] PIC24.sinc:5110
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=66f4df5f462438dc op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2612
+- mov.w [none] PIC24.sinc:5116
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2ec15278883dfc50 op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2615
+- mov.w [none] PIC24.sinc:5122
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ec170971bf99b87f op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2618
+- mov.b [none] PIC24.sinc:5128
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=938b0ffdb01baf98 op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2621
+- mov.w [none] PIC24.sinc:5134
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8d72894df56f0a04 op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2624
+- mov.w [none] PIC24.sinc:5140
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ca906b8bf754f268 op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2627
+- mov.b [none] PIC24.sinc:5145
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1baa3527c4d564d0 op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2630
+- mov.w [none] PIC24.sinc:5151
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d5d11a16b6d13a86 op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2633
+- mov.b [none] PIC24.sinc:5156
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=63ba3fcb50ccfa7a op_count=0
   with_stack: with : phase = 2
-- mov.w [none] PIC24.sinc:2636
+- mov.w [none] PIC24.sinc:5162
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e5cea09ce4e39ceb op_count=0
   with_stack: with : phase = 2
-- mov.b [none] PIC24.sinc:2641
+- mov.b [none] PIC24.sinc:5170
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2df5369a6d4f0015 op_count=0
   with_stack: with : phase = 2
-- mov.d [none] PIC24.sinc:2646
+- mov.d [none] PIC24.sinc:5178
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=23f35f28fb8e8af2 op_count=0
   with_stack: with : phase = 2
-- mov.d [none] PIC24.sinc:2650
+- mov.d [none] PIC24.sinc:5185
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e55f66464ad4db55 op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2657
+- movpag [none] PIC24.sinc:5197
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9db14ec49915c74c op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2660
+- movpag [none] PIC24.sinc:5201
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fd40bf77a26f7f9f op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2663
+- movpag [none] PIC24.sinc:5205
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d89a21499790ff2c op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2666
+- movpag [none] PIC24.sinc:5209
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=01194a658b45933f op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2669
+- movpag [none] PIC24.sinc:5212
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0240d1f85836d4d2 op_count=0
   with_stack: with : phase = 2
-- movpag [none] PIC24.sinc:2672
+- movpag [none] PIC24.sinc:5215
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=018d10ccb7a79a2d op_count=0
   with_stack: with : phase = 2
-- mul.w [none] PIC24.sinc:2675
+- mul.w [none] PIC24.sinc:6507
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=04e466e675104d58 op_count=0
   with_stack: with : phase = 2
-- mul.b [none] PIC24.sinc:2678
+- mul.b [none] PIC24.sinc:6511
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d4e155d28e9c83da op_count=0
   with_stack: with : phase = 2
-- mul.ss [none] PIC24.sinc:2681
+- mul.ss [none] PIC24.sinc:6517
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2e1254ab0af72ef4 op_count=0
   with_stack: with : phase = 2
-- mul.su [none] PIC24.sinc:2685
+- mul.su [none] PIC24.sinc:6538
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ffc9386675397f32 op_count=0
   with_stack: with : phase = 2
-- mul.su [none] PIC24.sinc:2688
+- mul.su [none] PIC24.sinc:6543
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=87e02477e873093d op_count=0
   with_stack: with : phase = 2
-- mul.us [none] PIC24.sinc:2691
+- mul.us [none] PIC24.sinc:6565
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=baa7c574827f6c11 op_count=0
   with_stack: with : phase = 2
-- mul.uu [none] PIC24.sinc:2695
+- mul.uu [none] PIC24.sinc:6581
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=afee10298c792131 op_count=0
   with_stack: with : phase = 2
-- mul.uu [none] PIC24.sinc:2699
+- mul.uu [none] PIC24.sinc:6587
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5719d010d7d154b8 op_count=0
   with_stack: with : phase = 2
-- mulw.ss [none] PIC24.sinc:2702
+- mulw.ss [none] PIC24.sinc:6610
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2e1254ab0af72ef4 op_count=0
   with_stack: with : phase = 2
-- mulw.su [none] PIC24.sinc:2706
+- mulw.su [none] PIC24.sinc:6619
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=87e02477e873093d op_count=0
   with_stack: with : phase = 2
-- mulw.su [none] PIC24.sinc:2710
+- mulw.su [none] PIC24.sinc:6626
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=db596e168dfeed45 op_count=0
   with_stack: with : phase = 2
-- mulw.us [none] PIC24.sinc:2714
+- mulw.us [none] PIC24.sinc:6635
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=baa7c574827f6c11 op_count=0
   with_stack: with : phase = 2
-- mulw.uu [none] PIC24.sinc:2718
+- mulw.uu [none] PIC24.sinc:6644
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5719d010d7d154b8 op_count=0
   with_stack: with : phase = 2
-- mulw.uu [none] PIC24.sinc:2722
+- mulw.uu [none] PIC24.sinc:6651
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8eb409f5fe62e84e op_count=0
   with_stack: with : phase = 2
-- neg.w [none] PIC24.sinc:2726
+- neg.w [none] PIC24.sinc:6659
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8939b37e7699e022 op_count=0
   with_stack: with : phase = 2
-- neg.b [none] PIC24.sinc:2734
+- neg.b [none] PIC24.sinc:6670
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e6a40147318a2c6a op_count=0
   with_stack: with : phase = 2
-- neg.w [none] PIC24.sinc:2742
+- neg.w [none] PIC24.sinc:6682
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b5e766732109d358 op_count=0
   with_stack: with : phase = 2
-- neg.b [none] PIC24.sinc:2752
+- neg.b [none] PIC24.sinc:6695
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d95763733ec5d4e6 op_count=0
   with_stack: with : phase = 2
-- nop [none] PIC24.sinc:2762
+- nop [none] PIC24.sinc:6728
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : phase = 2
-- nopr [none] PIC24.sinc:2764
+- nopr [none] PIC24.sinc:6734
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : phase = 2
-- pop [none] PIC24.sinc:2766
+- pop [none] PIC24.sinc:6739
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2958bae7d1ebe847 op_count=0
   with_stack: with : phase = 2
-- pop [none] PIC24.sinc:2770
+- pop [none] PIC24.sinc:6746
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=634eef1a89c5d540 op_count=0
   with_stack: with : phase = 2
-- pop.d [none] PIC24.sinc:2776
+- pop.d [none] PIC24.sinc:6755
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3d90e8b943208171 op_count=0
   with_stack: with : phase = 2
-- pop.s [none] PIC24.sinc:2780
+- pop.s [none] PIC24.sinc:6762
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=be015b9ada70042a op_count=0
   with_stack: with : phase = 2
-- push [none] PIC24.sinc:2791
+- push [none] PIC24.sinc:6777
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9e2b2508b8e9448b op_count=0
   with_stack: with : phase = 2
-- push [none] PIC24.sinc:2795
+- push [none] PIC24.sinc:6784
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=41c34c0dc05bca38 op_count=0
   with_stack: with : phase = 2
-- push.d [none] PIC24.sinc:2799
+- push.d [none] PIC24.sinc:6791
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=206be551ae5b8724 op_count=0
   with_stack: with : phase = 2
-- push.s [none] PIC24.sinc:2803
+- push.s [none] PIC24.sinc:6798
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=15684ac01326e7d4 op_count=0
   with_stack: with : phase = 2
-- pwrsav [none] PIC24.sinc:2815
+- pwrsav [none] PIC24.sinc:6815
   semantic_ops: pwrsavOp
   semantic_template: status=unsupported_template action_hash=08cd6ab9f04dce11 op_count=1
   with_stack: with : phase = 2
-- rcall [call] PIC24.sinc:2818
+- rcall [call] PIC24.sinc:6831
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6e36bc6d2dfb993f op_count=0
   with_stack: with : phase = 2
-- rcall [call] PIC24.sinc:2824
+- rcall [call] PIC24.sinc:6852
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=acc51c07a9a893b5 op_count=0
   with_stack: with : phase = 2
-- repeat [none] PIC24.sinc:2830
+- repeat [none] PIC24.sinc:6872
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=273f30e13e900e4e op_count=0
   with_stack: with : phase = 2
-- repeat [none] PIC24.sinc:2835
+- repeat [none] PIC24.sinc:6890
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f2ee169d0680df51 op_count=0
   with_stack: with : phase = 2
-- reset [branch] PIC24.sinc:2840
+- reset [branch] PIC24.sinc:6898
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=06162de07f783393 op_count=0
   with_stack: with : phase = 2
-- retfie [return] PIC24.sinc:2861
+- retfie [return] PIC24.sinc:6934
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b847be66e25bb05d op_count=0
   with_stack: with : phase = 2
-- retlw.w [return] PIC24.sinc:2870
+- retlw.w [return] PIC24.sinc:6971
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a633f745d65164b6 op_count=0
   with_stack: with : phase = 2
-- retlw.b [return] PIC24.sinc:2880
+- retlw.b [return] PIC24.sinc:6983
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ef8a6f93017f6bc7 op_count=0
   with_stack: with : phase = 2
-- return [return] PIC24.sinc:2890
+- return [return] PIC24.sinc:7006
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4c7aceb97472cdb1 op_count=0
   with_stack: with : phase = 2
-- rlc.w [none] PIC24.sinc:2897
+- rlc.w [none] PIC24.sinc:7016
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1f5a081a9baec780 op_count=0
   with_stack: with : phase = 2
-- rlc.b [none] PIC24.sinc:2904
+- rlc.b [none] PIC24.sinc:7025
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=925e0a7f1a1d5916 op_count=0
   with_stack: with : phase = 2
-- rlc.w [none] PIC24.sinc:2911
+- rlc.w [none] PIC24.sinc:7035
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e430bae6be175b7e op_count=0
   with_stack: with : phase = 2
-- rlc.b [none] PIC24.sinc:2920
+- rlc.b [none] PIC24.sinc:7048
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b77669ad16373686 op_count=0
   with_stack: with : phase = 2
-- rlnc.w [none] PIC24.sinc:2929
+- rlnc.w [none] PIC24.sinc:7061
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f81b0ef7d87ad7b3 op_count=0
   with_stack: with : phase = 2
-- rlnc.b [none] PIC24.sinc:2935
+- rlnc.b [none] PIC24.sinc:7068
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=87428e8c56371d1a op_count=0
   with_stack: with : phase = 2
-- rlnc.w [none] PIC24.sinc:2941
+- rlnc.w [none] PIC24.sinc:7077
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=590d953736499659 op_count=0
   with_stack: with : phase = 2
-- rlnc.b [none] PIC24.sinc:2949
+- rlnc.b [none] PIC24.sinc:7088
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3ce8eaab2f77e558 op_count=0
   with_stack: with : phase = 2
-- rrc.w [none] PIC24.sinc:2957
+- rrc.w [none] PIC24.sinc:7100
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=caa925817c6d113d op_count=0
   with_stack: with : phase = 2
-- rrc.b [none] PIC24.sinc:2964
+- rrc.b [none] PIC24.sinc:7110
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7567aacd56c0fb32 op_count=0
   with_stack: with : phase = 2
-- rrc.w [none] PIC24.sinc:2971
+- rrc.w [none] PIC24.sinc:7120
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=10bbf22c81bc4b95 op_count=0
   with_stack: with : phase = 2
-- rrc.b [none] PIC24.sinc:2980
+- rrc.b [none] PIC24.sinc:7133
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bfec09d6afffccda op_count=0
   with_stack: with : phase = 2
-- rrnc.w [none] PIC24.sinc:2989
+- rrnc.w [none] PIC24.sinc:7146
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8ff0283f0858cb7a op_count=0
   with_stack: with : phase = 2
-- rrnc.b [none] PIC24.sinc:2995
+- rrnc.b [none] PIC24.sinc:7155
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8b4d84c1a2bcfef2 op_count=0
   with_stack: with : phase = 2
-- rrnc.w [none] PIC24.sinc:3001
+- rrnc.w [none] PIC24.sinc:7164
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=91bf599024bbd1b8 op_count=0
   with_stack: with : phase = 2
-- rrnc.b [none] PIC24.sinc:3009
+- rrnc.b [none] PIC24.sinc:7176
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4708dcb024b8dc18 op_count=0
   with_stack: with : phase = 2
-- se [none] PIC24.sinc:3017
+- se [none] PIC24.sinc:7233
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8da72e06ecac1764 op_count=0
   with_stack: with : phase = 2
-- setm.w [none] PIC24.sinc:3023
+- setm.w [none] PIC24.sinc:7242
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=554b7a676d2bf4d1 op_count=0
   with_stack: with : phase = 2
-- setm.b [none] PIC24.sinc:3026
+- setm.b [none] PIC24.sinc:7247
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=49eef75e92d9af07 op_count=0
   with_stack: with : phase = 2
-- setm.w [none] PIC24.sinc:3029
+- setm.w [none] PIC24.sinc:7253
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=84ac67f132e97713 op_count=0
   with_stack: with : phase = 2
-- setm.b [none] PIC24.sinc:3032
+- setm.b [none] PIC24.sinc:7259
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=475e51ad278f42f5 op_count=0
   with_stack: with : phase = 2
-- sl.w [none] PIC24.sinc:3035
+- sl.w [none] PIC24.sinc:7307
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c561e4782355cc63 op_count=0
   with_stack: with : phase = 2
-- sl.b [none] PIC24.sinc:3042
+- sl.b [none] PIC24.sinc:7317
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f7da549050798ad1 op_count=0
   with_stack: with : phase = 2
-- sl.w [none] PIC24.sinc:3049
+- sl.w [none] PIC24.sinc:7327
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=356e3daf2f66c148 op_count=0
   with_stack: with : phase = 2
-- sl.b [none] PIC24.sinc:3058
+- sl.b [none] PIC24.sinc:7339
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=19bc3634b3b11bbb op_count=0
   with_stack: with : phase = 2
-- sl [none] PIC24.sinc:3067
+- sl [none] PIC24.sinc:7352
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a5e4c16d2c861291 op_count=0
   with_stack: with : phase = 2
-- sl [none] PIC24.sinc:3072
+- sl [none] PIC24.sinc:7360
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ebf92bce8ed56f62 op_count=0
   with_stack: with : phase = 2
-- sub.w [none] PIC24.sinc:3077
+- sub.w [none] PIC24.sinc:7374
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=18273852ba03b678 op_count=0
   with_stack: with : phase = 2
-- sub.b [none] PIC24.sinc:3085
+- sub.b [none] PIC24.sinc:7387
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ed67f64b7df95e34 op_count=0
   with_stack: with : phase = 2
-- sub.w [none] PIC24.sinc:3093
+- sub.w [none] PIC24.sinc:7400
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a8c5ae4062e14a7e op_count=0
   with_stack: with : phase = 2
-- sub.b [none] PIC24.sinc:3100
+- sub.b [none] PIC24.sinc:7412
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=217f5fd500d4f6e8 op_count=0
   with_stack: with : phase = 2
-- sub.w [none] PIC24.sinc:3107
+- sub.w [none] PIC24.sinc:7424
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a6a28778a78731e7 op_count=0
   with_stack: with : phase = 2
-- sub.b [none] PIC24.sinc:3116
+- sub.b [none] PIC24.sinc:7438
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=58206e5eeefa5c59 op_count=0
   with_stack: with : phase = 2
-- sub.w [none] PIC24.sinc:3126
+- sub.w [none] PIC24.sinc:7453
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=357565731f8bc035 op_count=0
   with_stack: with : phase = 2
-- sub.b [none] PIC24.sinc:3136
+- sub.b [none] PIC24.sinc:7468
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=75fb3c89a43c0791 op_count=0
   with_stack: with : phase = 2
-- subb.w [none] PIC24.sinc:3146
+- subb.w [none] PIC24.sinc:7502
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c532f8c06180dcc0 op_count=0
   with_stack: with : phase = 2
-- subb.b [none] PIC24.sinc:3154
+- subb.b [none] PIC24.sinc:7514
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=424ce344dd16b574 op_count=0
   with_stack: with : phase = 2
-- subb.w [none] PIC24.sinc:3162
+- subb.w [none] PIC24.sinc:7527
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=46a890cd07f6fa82 op_count=0
   with_stack: with : phase = 2
-- subb.b [none] PIC24.sinc:3170
+- subb.b [none] PIC24.sinc:7540
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bf3702f6ad3b7074 op_count=0
   with_stack: with : phase = 2
-- subb.w [none] PIC24.sinc:3178
+- subb.w [none] PIC24.sinc:7553
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7eea24673bebd31b op_count=0
   with_stack: with : phase = 2
-- subb.b [none] PIC24.sinc:3188
+- subb.b [none] PIC24.sinc:7567
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a3e59b5e42af2ded op_count=0
   with_stack: with : phase = 2
-- subb.w [none] PIC24.sinc:3199
+- subb.w [none] PIC24.sinc:7583
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=95e74c2b178ac28f op_count=0
   with_stack: with : phase = 2
-- subb.b [none] PIC24.sinc:3210
+- subb.b [none] PIC24.sinc:7599
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=911d52894a59b9dd op_count=0
   with_stack: with : phase = 2
-- subbr.w [none] PIC24.sinc:3221
+- subbr.w [none] PIC24.sinc:7615
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5dbb91eae5dd3b30 op_count=0
   with_stack: with : phase = 2
-- subbr.b [none] PIC24.sinc:3230
+- subbr.b [none] PIC24.sinc:7628
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4e94cbac67f6fb68 op_count=0
   with_stack: with : phase = 2
-- subbr.w [none] PIC24.sinc:3239
+- subbr.w [none] PIC24.sinc:7642
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d8e7cb5a2d9058fd op_count=0
   with_stack: with : phase = 2
-- subbr.b [none] PIC24.sinc:3249
+- subbr.b [none] PIC24.sinc:7657
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=64745530ac3cc115 op_count=0
   with_stack: with : phase = 2
-- subbr.w [none] PIC24.sinc:3260
+- subbr.w [none] PIC24.sinc:7673
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=94aa5d88590593a7 op_count=0
   with_stack: with : phase = 2
-- subbr.b [none] PIC24.sinc:3271
+- subbr.b [none] PIC24.sinc:7689
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=903bf6e95f4bd3a3 op_count=0
   with_stack: with : phase = 2
-- subr.w [none] PIC24.sinc:3282
+- subr.w [none] PIC24.sinc:7705
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=50891c65e522e562 op_count=0
   with_stack: with : phase = 2
-- subr.b [none] PIC24.sinc:3290
+- subr.b [none] PIC24.sinc:7718
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=cdcaa431293e750a op_count=0
   with_stack: with : phase = 2
-- subr.w [none] PIC24.sinc:3298
+- subr.w [none] PIC24.sinc:7731
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=798545df28175f9f op_count=0
   with_stack: with : phase = 2
-- subr.b [none] PIC24.sinc:3307
+- subr.b [none] PIC24.sinc:7745
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3607019e11f0ec39 op_count=0
   with_stack: with : phase = 2
-- subr.w [none] PIC24.sinc:3317
+- subr.w [none] PIC24.sinc:7760
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=816afc30d94b79ff op_count=0
   with_stack: with : phase = 2
-- subr.b [none] PIC24.sinc:3327
+- subr.b [none] PIC24.sinc:7775
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=759eb4f4b2c61ed7 op_count=0
   with_stack: with : phase = 2
-- swap.w [none] PIC24.sinc:3337
+- swap.w [none] PIC24.sinc:7790
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c555f6aa9e506411 op_count=0
   with_stack: with : phase = 2
-- swap.b [none] PIC24.sinc:3340
+- swap.b [none] PIC24.sinc:7796
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3b8459de7fccce2b op_count=0
   with_stack: with : phase = 2
-- tblrdh.w [none] PIC24.sinc:3343
+- tblrdh.w [none] PIC24.sinc:7803
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bd8c4e4c81d852bf op_count=0
   with_stack: with : phase = 2
-- tblrdh.b [conditional_branch] PIC24.sinc:3349
+- tblrdh.b [conditional_branch] PIC24.sinc:7811
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bd5bb2d134cde07a op_count=0
   with_stack: with : phase = 2
-- tblrdl.w [none] PIC24.sinc:3358
+- tblrdl.w [none] PIC24.sinc:7826
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a95dc92dc737f666 op_count=0
   with_stack: with : phase = 2
-- tblrdl.b [conditional_branch] PIC24.sinc:3364
+- tblrdl.b [conditional_branch] PIC24.sinc:7833
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ab7f659283331345 op_count=0
   with_stack: with : phase = 2
-- tblwth.w [none] PIC24.sinc:3375
+- tblwth.w [none] PIC24.sinc:7846
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=03a89fa2f9c9494b op_count=0
   with_stack: with : phase = 2
-- tblwth.b [conditional_branch] PIC24.sinc:3380
+- tblwth.b [conditional_branch] PIC24.sinc:7854
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e1c74d9db6fbfcb7 op_count=0
   with_stack: with : phase = 2
-- tblwtl.w [none] PIC24.sinc:3389
+- tblwtl.w [none] PIC24.sinc:7868
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=15e400f81c35b345 op_count=0
   with_stack: with : phase = 2
-- tblwtl.b [conditional_branch] PIC24.sinc:3394
+- tblwtl.b [conditional_branch] PIC24.sinc:7875
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=35c6e5db1f82f197 op_count=0
   with_stack: with : phase = 2
-- ulnk [none] PIC24.sinc:3406
+- ulnk [none] PIC24.sinc:7927
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fd2fc729ee27a996 op_count=0
   with_stack: with : phase = 2
-- urun [none] PIC24.sinc:3413
+- urun [none] PIC24.sinc:7939
   semantic_ops: urun
   semantic_template: status=unsupported_template action_hash=5a6e2e90576dfb30 op_count=1
   with_stack: with : phase = 2
-- xor.w [none] PIC24.sinc:3416
+- xor.w [none] PIC24.sinc:7943
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c9fb78a8f4c8374f op_count=0
   with_stack: with : phase = 2
-- xor.b [none] PIC24.sinc:3421
+- xor.b [none] PIC24.sinc:7950
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=517f3e539a488a87 op_count=0
   with_stack: with : phase = 2
-- xor.w [none] PIC24.sinc:3426
+- xor.w [none] PIC24.sinc:7958
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c1e1b487e3d555f0 op_count=0
   with_stack: with : phase = 2
-- xor.b [none] PIC24.sinc:3431
+- xor.b [none] PIC24.sinc:7965
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ce7754ff1e3b804e op_count=0
   with_stack: with : phase = 2
-- xor.w [none] PIC24.sinc:3436
+- xor.w [none] PIC24.sinc:7973
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=439de8116d0098da op_count=0
   with_stack: with : phase = 2
-- xor.b [none] PIC24.sinc:3441
+- xor.b [none] PIC24.sinc:7980
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4585a749b473fcec op_count=0
   with_stack: with : phase = 2
-- xor.w [none] PIC24.sinc:3446
+- xor.w [none] PIC24.sinc:7988
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a760828abec95c90 op_count=0
   with_stack: with : phase = 2
-- xor.b [none] PIC24.sinc:3453
+- xor.b [none] PIC24.sinc:7998
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7bae7fa025feabe0 op_count=0
   with_stack: with : phase = 2
-- ze [none] PIC24.sinc:3460
+- ze [none] PIC24.sinc:8009
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9d0578c1c2eb05ee op_count=0
   with_stack: with : phase = 2
-- break [none] PIC24.sinc:3469
+- break [none] PIC24.sinc:8025
   semantic_ops: break
   semantic_template: status=unsupported_template action_hash=ffd6626fed17b7c0 op_count=1
   with_stack: with : phase = 2

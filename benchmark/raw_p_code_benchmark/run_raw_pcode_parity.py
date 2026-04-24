@@ -168,6 +168,8 @@ def run_manifest(args: argparse.Namespace) -> int:
 
     aggregate_totals: dict[str, int] = {}
     owner_hint_totals: dict[str, int] = {}
+    template_source_totals: dict[str, int] = {}
+    compat_emitter_used_total = 0
     feature_totals: dict[str, dict[str, int]] = {}
     group_totals: dict[str, dict[str, int]] = {}
     performance_totals: dict[str, float] = {}
@@ -202,6 +204,14 @@ def run_manifest(args: argparse.Namespace) -> int:
             group_bucket_totals[bucket] = group_bucket_totals.get(bucket, 0) + int(count)
         for hint, count in report.get("owner_hint_totals", {}).items():
             owner_hint_totals[hint] = owner_hint_totals.get(hint, 0) + int(count)
+        for entry in report.get("rows", []):
+            if entry.get("compat_emitter_used"):
+                compat_emitter_used_total += 1
+            template_source = entry.get("template_source")
+            if template_source:
+                template_source_totals[template_source] = (
+                    template_source_totals.get(template_source, 0) + 1
+                )
         performance = report.get("performance", {})
         add_performance_totals(performance_totals, performance.get("ghidra", {}), prefix="ghidra")
         add_performance_totals(performance_totals, performance.get("fission", {}), prefix="fission")
@@ -230,7 +240,14 @@ def run_manifest(args: argparse.Namespace) -> int:
         "manifest": str(manifest_path),
         "row_count": len(row_reports),
         "bucket_totals": dict(sorted(aggregate_totals.items())),
+        "compat_emitter_used_total": compat_emitter_used_total,
+        "invariant_totals": {
+            "compat_emitter_used": compat_emitter_used_total,
+            "fake_placeholder_op": int(aggregate_totals.get("fake_placeholder_op", 0)),
+            "invalid_pcode_shape": int(aggregate_totals.get("invalid_pcode_shape", 0)),
+        },
         "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
+        "template_source_totals": dict(sorted(template_source_totals.items())),
         "feature_totals": {
             feature: dict(sorted(buckets.items()))
             for feature, buckets in sorted(feature_totals.items())
@@ -249,6 +266,9 @@ def run_manifest(args: argparse.Namespace) -> int:
         "report": str(aggregate_path),
         "row_count": aggregate["row_count"],
         "bucket_totals": aggregate["bucket_totals"],
+        "compat_emitter_used_total": aggregate["compat_emitter_used_total"],
+        "invariant_totals": aggregate["invariant_totals"],
+        "template_source_totals": aggregate["template_source_totals"],
         "performance_summary": aggregate["performance_summary"],
         "feature_count": len(aggregate["feature_totals"]),
         "group_count": len(aggregate["group_totals"]),

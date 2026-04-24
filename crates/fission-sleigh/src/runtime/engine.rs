@@ -4,8 +4,7 @@ use fission_pcode::PcodeOp;
 use crate::compiler::{CompiledFrontend, EntrySpec};
 use crate::runtime::spine::compiled_table;
 use crate::runtime::{
-    registry, DecodedInstruction, ExecutionEngineKey, RuntimeExecutionDetails,
-    RuntimeSleighError,
+    registry, DecodedInstruction, ExecutionEngineKey, RuntimeExecutionDetails, RuntimeSleighError,
 };
 
 pub(crate) fn decode_and_lift_with_details(

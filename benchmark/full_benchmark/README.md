@@ -31,7 +31,7 @@ The runner now supports both:
 
 - `pyghidra`
 - optional `psutil` for RSS / CPU metrics
-- `GHIDRA_INSTALL_DIR` configured, or `vendor/ghidra/ghidra_11.4.2_PUBLIC`
+- `GHIDRA_INSTALL_DIR` configured, or `vendor/ghidra/ghidra-Ghidra_12.0.4_build`
 - a `fission_cli` binary
 - benchmark-local Python dependencies:
   - `python3 -m pip install -r benchmark/full_benchmark/requirements-benchmark.txt`
@@ -52,7 +52,7 @@ python3 benchmark/full_benchmark/compare_legacy_preview.py \
 python3 benchmark/full_benchmark/full_decomp_benchmark.py \
   samples/windows/x64/putty.exe \
   --fission-bin target/release/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build \
   --output-dir benchmark/artifacts/full_benchmark/putty-balanced-latest
 
 # Faster validation: first N canonical seed functions
@@ -65,14 +65,14 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py \
 python3 benchmark/full_benchmark/full_decomp_benchmark.py \
   --corpus-manifest benchmark/config/benchmark_corpus/smoke_corpus.json \
   --fission-bin target/release/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build \
   --output-dir benchmark/artifacts/full_benchmark/fission-smoke-windows-samples-balanced-latest
 
 # Parity corpus benchmark for Ghidra-reference work
 python3 benchmark/full_benchmark/full_decomp_benchmark.py \
   --corpus-manifest benchmark/config/benchmark_corpus/parity_corpus.json \
   --fission-bin target/release/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build \
   --output-dir benchmark/artifacts/full_benchmark/fission-ghidra-parity-windows-workbench-balanced-latest \
   --baseline-dir benchmark/artifacts/full_benchmark/fission-ghidra-parity-windows-workbench-balanced-baseline
 
@@ -80,7 +80,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py \
 python3 benchmark/full_benchmark/full_decomp_benchmark.py \
   --corpus-manifest benchmark/config/benchmark_corpus/release_corpus.json \
   --fission-bin target/release/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build \
   --output-dir benchmark/artifacts/full_benchmark/fission-release-windows-samples-balanced-latest \
   --baseline-dir benchmark/artifacts/full_benchmark/fission-release-windows-samples-balanced-baseline
 ```
@@ -131,7 +131,7 @@ then validate:
 python3 benchmark/full_benchmark/validate_limit_regression.py \
   samples/windows/x64/test_control_flow_x64_O0.exe \
   --fission-bin target/debug/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build
 ```
 
 ## Corpus Manifest

@@ -92,8 +92,8 @@ def find_repo_root() -> Path:
 ROOT_DIR = find_repo_root()
 DEFAULT_RESULTS_DIR = ROOT_DIR / "benchmark" / "artifacts" / "full_benchmark"
 DEFAULT_GHIDRA_DIRS = (
-    ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC",
-    ROOT_DIR / "ghidra_11.4.2_PUBLIC",
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
 )
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
 
@@ -1369,7 +1369,7 @@ def _binary_sha256_prefix(binary_path: Path, n: int = 8) -> str:
 
 def _ghidra_version_tag(ghidra_dir: Path) -> str:
     """Extract a short version string from the Ghidra installation directory name."""
-    name = ghidra_dir.name  # e.g. "ghidra_11.4.2_PUBLIC"
+    name = ghidra_dir.name  # e.g. "ghidra-Ghidra_12.0.4_build"
     # Keep only alphanumeric/dot/underscore segments
     return re.sub(r"[^A-Za-z0-9._]", "_", name)[:24]
 

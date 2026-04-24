@@ -1567,6 +1567,7 @@ dependencies = [
  "fission-core",
  "fission-loader",
  "fission-pcode",
+ "flate2",
  "serde",
  "serde_json",
  "tempfile",

@@ -18,6 +18,14 @@ Decompiler similarity mixes too many layers:
 
 This benchmark isolates the SLEIGH runtime layer.
 
+It now also records end-to-end wall-clock and throughput metrics for the raw
+P-code extraction path on both sides:
+
+- Ghidra oracle invocation
+- Fission raw probe invocation
+
+These are benchmark harness timings, not isolated decode-only microbenchmarks.
+
 ## One-window run
 
 ```bash
@@ -58,12 +66,53 @@ The aggregate manifest report now also includes:
 
 - `feature_totals`
 - `group_totals`
+- `performance_summary`
 
 Outputs:
 
 - `ghidra_raw_pcode.json`
 - `fission_raw_pcode.json`
 - `raw_pcode_parity_report.json`
+
+Each source JSON includes:
+
+- `timing.wall_clock_sec`
+- `timing.instruction_count`
+- `timing.pcode_op_count`
+- `timing.instructions_per_sec`
+- `timing.pcode_ops_per_sec`
+
+Each parity report also includes:
+
+- `performance.ghidra`
+- `performance.fission`
+- `performance.delta`
+
+## Ghidra version pinning
+
+The Ghidra oracle path is now pinned explicitly instead of relying on whichever
+installation `pyghidra` happens to discover first.
+
+Resolution order:
+
+1. `--ghidra-dir`
+2. `GHIDRA_INSTALL_DIR`
+3. repo defaults:
+   - `vendor/ghidra/ghidra-Ghidra_12.0.4_build`
+   - `ghidra-Ghidra_12.0.4_build`
+
+Only launchable packaged installs are accepted. A source/build checkout that
+does not contain `support/`, `Utility.jar`, and `PyGhidra.jar` is rejected
+instead of being used implicitly as an ambiguous oracle.
+
+Example:
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical-12_0_4
+```
 
 ## Buckets
 
@@ -110,3 +159,23 @@ The expected workflow is no longer just “run all rows.” It is:
 
 The goal is breadth with separation, not one giant startup row that mixes every
 problem family together.
+
+## Architecture-parallel smoke
+
+There is also an architecture-scoped parallel smoke runner for LLVM baremetal
+objects:
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py \
+  --manifest benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json \
+  --ghidra-dir /Users/sjkim1127/Downloads/ghidra_12.0.4_PUBLIC \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/architecture_parallel_latest \
+  --fission-release
+```
+
+This runner is intentionally separate from the canonical x86-64 parity manifest.
+It is meant to answer:
+
+- which architecture rows execute today
+- which rows fail closed as compile-only or unsupported
+- what the per-architecture raw p-code speed looks like

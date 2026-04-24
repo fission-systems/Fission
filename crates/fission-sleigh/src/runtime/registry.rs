@@ -417,3 +417,48 @@ pub fn module_name_for_processor(processor: &str) -> String {
         normalized
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_arm_and_aarch64_variants_as_executable_candidates() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+
+        for (language_id, compiler_spec_id, expected_entry_id) in [
+            ("AARCH64:LE:64:v8A", Some("gcc"), "AARCH64"),
+            ("AARCH64:BE:64:v8A", Some("gcc"), "AARCH64BE"),
+            (
+                "AARCH64:LE:64:AppleSilicon",
+                Some("default"),
+                "AARCH64_AppleSilicon",
+            ),
+            ("ARM:LE:32:v7", Some("gcc"), "ARM7_le"),
+            ("ARM:BE:32:v7", Some("gcc"), "ARM7_be"),
+        ] {
+            let selection = registry
+                .resolve_from_language_pair(language_id, compiler_spec_id)
+                .unwrap_or_else(|error| panic!("resolve {language_id:?} failed: {error}"));
+            assert_eq!(selection.entry_id, expected_entry_id);
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_riscv_as_compile_only() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+        let error = registry
+            .resolve_from_language_pair("RISCV:LE:64:default", Some("gcc"))
+            .expect_err("RISCV should remain compile-only in this wave");
+        match error {
+            RuntimeEntrySelectionError::CompileOnlySelection { entry_id, .. } => {
+                assert_eq!(entry_id, "riscv.lp64d")
+            }
+            other => panic!("unexpected selection result: {other}"),
+        }
+    }
+}

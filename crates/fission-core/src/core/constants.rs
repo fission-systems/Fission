@@ -67,6 +67,20 @@ pub const EM_X86_64: u16 = 62;
 pub const EM_ARM: u16 = 40;
 /// AArch64
 pub const EM_AARCH64: u16 = 183;
+/// MIPS
+pub const EM_MIPS: u16 = 8;
+/// PowerPC
+pub const EM_PPC: u16 = 20;
+/// PowerPC64
+pub const EM_PPC64: u16 = 21;
+/// SPARC V9
+pub const EM_SPARCV9: u16 = 43;
+/// BPF / eBPF
+pub const EM_BPF: u16 = 247;
+/// RISC-V
+pub const EM_RISCV: u16 = 243;
+/// LoongArch
+pub const EM_LOONGARCH: u16 = 258;
 
 // ============================================================================
 // Mach-O Constants

@@ -239,6 +239,127 @@ shape drift and the remaining `_fpreset` decode hole at the raw SLEIGH layer.
 
 - `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
 
+## 7. Ghidra `.sla` ConstructTpl Payload Decoder
+
+### Scope
+
+- canonical owner:
+  - `crates/fission-sleigh/src/compiler/sla.rs`
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/runtime/spine/template.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+- reference structure:
+  - Ghidra 12.0.4 `PackedDecode`
+  - Ghidra 12.0.4 `ConstructTpl`
+  - Ghidra 12.0.4 `ConstTpl`
+  - Ghidra 12.0.4 `VarnodeTpl`
+  - Ghidra 12.0.4 `HandleTpl`
+  - Ghidra 12.0.4 `OpTpl`
+  - Ghidra 12.0.4 `PcodeEmit`
+
+### What changed
+
+- Added a real packaged `.sla` decoder for the Ghidra packed zlib payload.
+- Decoded source files, spaces, constructors, `ConstructTpl`, `OpTpl`, `VarnodeTpl`, `HandleTpl`, and `ConstTpl`.
+- Promoted Fission executable template IR toward Ghidra-shaped owners:
+  - `CompiledConstTpl`
+  - `CompiledSpaceTpl`
+  - `CompiledVarnodeTpl::Varnode`
+  - `CompiledHandleTpl`
+  - `CompiledOpTpl`
+- Overlaid decoded `.sla` templates onto Fission constructors by exact source-file basename and line.
+- Preserved original source line numbers inside `with` blocks so `.sla` constructor line mapping does not drift.
+- Kept raw P-code execution fail-closed:
+  - `RuntimeTemplateEvaluator` only executes `SpecDerived`.
+  - `CompatibilityLowered` cannot produce raw P-code success.
+  - compatibility varnodes inside `SpecDerived` are rejected.
+  - unsupported userops, `BUILD`, dynamic handles, unresolved labels, and unsupported spaces stop the whole instruction.
+- Fixed an existing pattern parser bug where `row=` matched inside `frow=`, causing x87 rows to collide with unrelated `0xC7` rows.
+
+### Raw P-code gate
+
+New report:
+
+- `benchmark/artifacts/raw_p_code_benchmark/construct_tpl_payload_decoder/aggregate_raw_pcode_parity_report.json`
+
+Current totals:
+
+- `row_count = 17`
+- `compat_emitter_used_total = 0`
+- `invalid_pcode_shape = 0`
+- `fake_placeholder_op = 0`
+- `template_source_totals.SpecDerived = 4`
+- `unsupported_template = 15`
+- `missing_fission_instruction = 27`
+- `varnode_space_mismatch = 4`
+- `input_varnode_mismatch = 3`
+- `ghidra_decode_error = 1`
+
+Performance readout:
+
+- Fission wall clock: `16.305884669010993s`
+- Ghidra wall clock: `40.82362453988753s`
+- Fission over Ghidra wall-clock speedup: `2.503612981972822x`
+- Fission emitted `4` instructions and `19` raw P-code ops in this strict gate.
+- Ghidra emitted `44` instructions and `162` raw P-code ops.
+
+Interpretation:
+
+- The raw P-code success path is now strict: no approximate compatibility P-code is counted as success.
+- The first real successes are `SpecDerived` rows, including `RET` and `FNINIT`-adjacent rows.
+- Remaining failures are now honest owner buckets:
+  - unsupported `.sla` template primitives
+  - missing Fission instruction after fail-closed unsupported
+  - varnode identity/space naming drift
+
+### Architecture readiness regression guard
+
+New report:
+
+- `benchmark/artifacts/full_benchmark/architecture_readiness_construct_tpl_payload_decoder/architecture_readiness_aggregate.json`
+
+Result:
+
+- `row_count = 53`
+- `disasm_ready = 2`
+- `inventory_ready = 51`
+- `load_failed = 0`
+- `selection_compile_only = 12`
+- `disasm_runtime_failure = 39`
+
+Compared to `architecture_readiness_next_wave`, there were no readiness regressions.
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `54 passed / 0 failed`
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: `38 processors / 146 variants`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+  - result: passed
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir /Users/sjkim1127/Fission/vendor/ghidra/ghidra_12.0.4_PUBLIC --output-dir benchmark/artifacts/raw_p_code_benchmark/construct_tpl_payload_decoder --fission-release`
+  - result: passed, strict no-approx invariants preserved
+- `python3 benchmark/full_benchmark/run_architecture_readiness_parallel.py --manifest benchmark/config/benchmark_corpus/llvm_baremetal_smoke_corpus.json --baseline-report benchmark/artifacts/full_benchmark/architecture_readiness_next_wave/architecture_readiness_aggregate.json --output-dir benchmark/artifacts/full_benchmark/architecture_readiness_construct_tpl_payload_decoder`
+  - result: passed, no readiness regression
+
+### Next owner
+
+The next direct owner is still not display text or decompiler postprocess. It is the remaining `ConstructTpl` execution support:
+
+- `HandleTpl` resolution through `RuntimeParserWalker`
+- userop and `CALLOTHER` identity
+- `BUILD`/subconstructor execution
+- label and relative const resolution
+- Ghidra space-name preservation in raw P-code comparison
+
+Until those are implemented, unsupported rows must remain typed `UnsupportedPcodeTemplate`.
+
 ## 8. Raw P-code Performance Metrics
 
 The raw P-code parity harness now records speed metrics in addition to

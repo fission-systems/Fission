@@ -41,7 +41,7 @@ DEFAULT_OUTPUT_DIR = (
     / "full_benchmark"
     / "compare_legacy_preview"
 )
-DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC"
+DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
 DEFAULT_CORPUS_FILE = SCRIPT_DIR / "corpora" / "preview_quality_corpus.json"

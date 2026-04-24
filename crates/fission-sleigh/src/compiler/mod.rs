@@ -3,6 +3,7 @@ mod codegen;
 mod equivalence;
 mod ir;
 mod preprocessor;
+mod sla;
 mod token;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,13 +26,18 @@ pub use ir::{
     CompiledContextField, CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge,
     CompiledDecisionNode, CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
-    CompiledLabelRef, CompiledLanguageLayout, CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode,
-    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternMatcher, CompiledPatternNode,
-    CompiledPcodeOp, CompiledRegister, CompiledSemanticOp, CompiledSemanticTemplate,
-    CompiledSpaceRef, CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource,
+    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
+    CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
+    CompiledOperandSpec, CompiledPatternMatcher, CompiledPatternNode, CompiledPcodeOp,
+    CompiledRegister, CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpaceRef,
+    CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource,
     CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
+pub use sla::{
+    load_compiled_sla, load_construct_templates_from_sla, CompiledSlaArtifact,
+    CompiledSlaConstructorTemplate, CompiledSlaTemplateLibrary, GHIDRA_SLA_MAGIC,
+};
 pub use token::{Token, TokenKind, TokenizedLine};
 
 const X86_ARCH_DIR: &str = "x86";
@@ -585,8 +591,61 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
     let ast = ast::parse_expanded_spec(&expanded)
         .with_context(|| format!("parse expanded spec {}", entry_spec.display()))?;
-    ir::compile_frontend(&arch, &expanded, &ast)
-        .with_context(|| format!("compile frontend {}", entry_spec.display()))
+    let mut compiled = ir::compile_frontend(&arch, &expanded, &ast)
+        .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
+    if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
+        let library = sla::load_construct_templates_from_sla(&sla_path)
+            .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
+        ir::apply_sla_construct_templates(&mut compiled, &library);
+    }
+    Ok(compiled)
+}
+
+fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
+    let stem = entry_spec
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| anyhow!("entry spec {} has no UTF-8 stem", entry_spec.display()))?;
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .ok_or_else(|| anyhow!("cannot infer repository root from CARGO_MANIFEST_DIR"))?
+        .to_path_buf();
+    let processors_root =
+        repo_root.join("vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors");
+    if !processors_root.exists() {
+        return Ok(None);
+    }
+    let wanted_name = format!("{stem}.sla");
+    let mut matches = Vec::new();
+    find_named_file(&processors_root, &wanted_name, &mut matches)?;
+    matches.sort();
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => Err(anyhow!(
+            "multiple packaged SLEIGH artifacts named {wanted_name}: {:?}",
+            matches
+        )),
+    }
+}
+
+fn find_named_file(root: &Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in
+        fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))?
+    {
+        let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("read file type for {}", path.display()))?;
+        if file_type.is_dir() {
+            find_named_file(&path, name, out)?;
+        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 pub fn compile_frontends_for_arch(arch: &str) -> Result<Vec<CompiledFrontend>> {

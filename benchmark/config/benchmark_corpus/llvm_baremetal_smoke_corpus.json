@@ -1,0 +1,857 @@
+{
+  "name": "fission-llvm-baremetal-smoke",
+  "suite_tier": "smoke",
+  "gate_mode": "advisory",
+  "dynamic_watchlist_limit": 3,
+  "notes": "LLVM-built freestanding object smoke corpus for supported non-host architectures under benchmark/binary.",
+  "entries": [
+    {
+      "id": "llvm-aarch64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/AARCH64/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_AARCH64",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "AARCH64",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-aarch64be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/AARCH64BE/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_AARCH64BE",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "AARCH64BE",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-aarch64-applesilicon",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_AARCH64_AppleSilicon",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "AARCH64_AppleSilicon",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm4-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM4_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM4_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM4_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm4-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM4_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM4_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM4_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm4t-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM4t_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM4t_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM4t_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm4t-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM4t_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM4t_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM4t_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm5-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM5_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM5_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM5_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm5-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM5_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM5_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM5_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm5t-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM5t_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM5t_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM5t_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm5t-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM5t_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM5t_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM5t_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm6-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM6_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM6_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM6_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm6-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM6_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM6_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM6_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm7-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM7_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM7_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM7_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm7-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM7_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM7_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM7_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm8-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM8_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM8_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM8_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm8-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM8_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM8_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM8_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm8m-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM8m_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM8m_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM8m_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-arm8m-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ARM8m_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ARM8m_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ARM8m_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-bpf-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/BPF_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_BPF_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "BPF_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-sparcv9-64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/SparcV9_64/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_SparcV9_64",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "SparcV9_64",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ebpf-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/eBPF_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_eBPF_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "eBPF_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ebpf-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/eBPF_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_eBPF_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "eBPF_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-loongarch32-f32",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/loongarch32_f32/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_loongarch32_f32",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "loongarch32_f32",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-loongarch32-f64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/loongarch32_f64/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_loongarch32_f64",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "loongarch32_f64",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-loongarch64-f32",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/loongarch64_f32/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_loongarch64_f32",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "loongarch64_f32",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-loongarch64-f64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/loongarch64_f64/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_loongarch64_f64",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "loongarch64_f64",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips32r6be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips32R6be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips32R6be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips32R6be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips32r6le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips32R6le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips32R6le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips32R6le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips32be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips32be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips32be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips32be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips32le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips32le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips32le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips32le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips64be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips64be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips64be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips64be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-mips64le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/mips64le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_mips64le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "mips64le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-4xx-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_4xx_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_4xx_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-4xx-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_4xx_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_4xx_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-e500-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_e500_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_e500_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-e500-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_e500_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_e500_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-e500mc-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_e500mc_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_e500mc_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-e500mc-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_e500mc_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_e500mc_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-quicciii-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_quicciii_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_quicciii_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-32-quicciii-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_32_quicciii_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_32_quicciii_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-isa-altivec-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_isa_altivec_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_isa_altivec_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-isa-altivec-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_isa_altivec_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_isa_altivec_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-isa-be",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_isa_be",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_isa_be",
+        "big-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-isa-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_isa_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_isa_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-ppc-64-le",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/ppc_64_le/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_ppc_64_le",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "ppc_64_le",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-riscv-ilp32d",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_riscv_ilp32d",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "riscv.ilp32d",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-riscv-lp64d",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/riscv.lp64d/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_riscv_lp64d",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "riscv.lp64d",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-x86",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_x86",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "x86",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    },
+    {
+      "id": "llvm-x86-64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/baremetal/small/binary/c/llvm_smoke.o",
+      "ghidra_project_key": "llvm_x86-64",
+      "tags": [
+        "baremetal",
+        "llvm",
+        "object",
+        "smoke",
+        "freestanding",
+        "x86-64",
+        "little-endian"
+      ],
+      "seed_limit": 1,
+      "role": "smoke_sentinel"
+    }
+  ]
+}

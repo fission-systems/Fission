@@ -85,7 +85,8 @@ where
                         }
                     }
                 }
-                return unsupported_fallback.map(|constructor| RuntimeSelection { constructor, trace });
+                return unsupported_fallback
+                    .map(|constructor| RuntimeSelection { constructor, trace });
             }
             probe => {
                 let value = evaluator.probe_value(probe).ok()?;
