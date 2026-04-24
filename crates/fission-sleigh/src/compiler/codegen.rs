@@ -415,6 +415,8 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 "{{\"kind\": \"fixed_register\", \"reg\": {}, \"size\": {size}}}",
                 json_string(match reg {
                     crate::compiler::CompiledFixedRegister::Accumulator => "accumulator",
+                    crate::compiler::CompiledFixedRegister::StackPointer => "stack_pointer",
+                    crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
                 })
             ),
         })
@@ -523,6 +525,12 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
         crate::compiler::CompiledVarnodeTpl::Handle { operand_index } => {
             format!("{{\"kind\": \"handle\", \"operand_index\": {operand_index}}}")
         }
+        crate::compiler::CompiledVarnodeTpl::EffectiveAddress { operand_index } => {
+            format!("{{\"kind\": \"effective_address\", \"operand_index\": {operand_index}}}")
+        }
+        crate::compiler::CompiledVarnodeTpl::ConditionPredicate => {
+            "{\"kind\": \"condition_predicate\"}".to_string()
+        }
         crate::compiler::CompiledVarnodeTpl::Const(value) => match value {
             crate::compiler::CompiledConstTpl::Integer { value, size } => {
                 format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")
@@ -542,13 +550,24 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
             "{{\"kind\": \"space\", \"name\": {}}}",
             json_string(&space.name)
         ),
-        crate::compiler::CompiledVarnodeTpl::Temp { size } => {
-            format!("{{\"kind\": \"temp\", \"size\": {size}}}")
+        crate::compiler::CompiledVarnodeTpl::Temp { id, size } => {
+            format!("{{\"kind\": \"temp\", \"id\": {id}, \"size\": {size}}}")
         }
         crate::compiler::CompiledVarnodeTpl::Register { name, size } => format!(
             "{{\"kind\": \"register\", \"name\": {}, \"size\": {size}}}",
             json_string(name)
         ),
+        crate::compiler::CompiledVarnodeTpl::FixedRegister { reg, size } => format!(
+            "{{\"kind\": \"fixed_register\", \"reg\": {}, \"size\": {size}}}",
+            json_string(match reg {
+                crate::compiler::CompiledFixedRegister::Accumulator => "accumulator",
+                crate::compiler::CompiledFixedRegister::StackPointer => "stack_pointer",
+                crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
+            })
+        ),
+        crate::compiler::CompiledVarnodeTpl::Flag { bit } => {
+            format!("{{\"kind\": \"flag\", \"bit\": {bit}}}")
+        }
     }
 }
 

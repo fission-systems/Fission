@@ -28,6 +28,7 @@ struct InstructionReport {
     decoded: Option<DecodedInstruction>,
     length: Option<u64>,
     compat_emitter_used: bool,
+    template_source: Option<String>,
     pcode: Vec<SerializablePcodeOp>,
 }
 
@@ -80,6 +81,7 @@ fn main() -> Result<()> {
                 decoded: None,
                 length: None,
                 compat_emitter_used: false,
+                template_source: None,
                 pcode: Vec::new(),
             });
             break;
@@ -95,6 +97,9 @@ fn main() -> Result<()> {
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: Some(len),
                     compat_emitter_used: details.compat_emitter_used,
+                    template_source: details
+                        .template_source
+                        .map(|source| format!("{:?}", source)),
                     pcode: ops.iter().map(SerializablePcodeOp::from).collect(),
                 });
                 if len == 0 {
@@ -110,6 +115,7 @@ fn main() -> Result<()> {
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: None,
                     compat_emitter_used: false,
+                    template_source: None,
                     pcode: Vec::new(),
                 });
                 break;

@@ -6,7 +6,8 @@ use crate::runtime::RuntimeExecutionDetails;
 use super::RuntimeConstructState;
 
 pub trait RuntimeTemplateExecutor {
-    fn emit_op_template(&mut self, state: &RuntimeConstructState, op: &CompiledOpTpl) -> Result<()>;
+    fn emit_op_template(&mut self, state: &RuntimeConstructState, op: &CompiledOpTpl)
+        -> Result<()>;
     fn emit_compatibility_op(
         &mut self,
         state: &RuntimeConstructState,
@@ -33,6 +34,7 @@ where
             }
             return Ok(RuntimeExecutionDetails {
                 compat_emitter_used: false,
+                template_source: Some(state.constructor_template.template_source),
             });
         }
 
@@ -44,6 +46,7 @@ where
         }
         Ok(RuntimeExecutionDetails {
             compat_emitter_used: true,
+            template_source: Some(state.constructor_template.template_source),
         })
     }
 }

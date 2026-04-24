@@ -2,6 +2,8 @@
 //! The canonical owner mapping remains `DecisionNode -> RuntimeInstructionContext ->
 //! RuntimeConstructState/RuntimeParserWalker -> RuntimeTemplateEvaluator -> RuntimePcodeEmitter`.
 
+use std::collections::BTreeMap;
+
 use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
@@ -658,6 +660,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledOperandSpec::FixedRegister { reg, size } => {
                 let index = match reg {
                     CompiledFixedRegister::Accumulator => 0,
+                    CompiledFixedRegister::StackPointer => 4,
+                    CompiledFixedRegister::FramePointer => 5,
                 };
                 Ok(BoundOperand::Register { index, size: *size })
             }
@@ -800,6 +804,7 @@ fn add_signed(base: u64, delta: i64) -> u64 {
 struct CompiledTableEmitter {
     address: u64,
     emitter: RuntimePcodeEmitter,
+    temp_cache: BTreeMap<u32, Varnode>,
 }
 
 #[derive(Debug, Clone)]
@@ -816,6 +821,7 @@ impl CompiledTableEmitter {
                 address,
                 0xE400_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6)),
             ),
+            temp_cache: BTreeMap::new(),
         }
     }
 
@@ -846,43 +852,48 @@ impl CompiledTableEmitter {
             crate::compiler::CompiledSemanticOp::StackLoad => self.emit_load_stack_op(state),
             crate::compiler::CompiledSemanticOp::FrameTeardown => self.emit_frame_teardown_op(),
             crate::compiler::CompiledSemanticOp::Binary { opcode } => match opcode {
-                CompiledArithmeticOpcode::Add => self.emit_binary(state, PcodeOpcode::IntAdd, "ADD"),
-                CompiledArithmeticOpcode::Sub => self.emit_binary(state, PcodeOpcode::IntSub, "SUB"),
-                CompiledArithmeticOpcode::And => self.emit_binary(state, PcodeOpcode::IntAnd, "AND"),
+                CompiledArithmeticOpcode::Add => {
+                    self.emit_binary(state, PcodeOpcode::IntAdd, "ADD")
+                }
+                CompiledArithmeticOpcode::Sub => {
+                    self.emit_binary(state, PcodeOpcode::IntSub, "SUB")
+                }
+                CompiledArithmeticOpcode::And => {
+                    self.emit_binary(state, PcodeOpcode::IntAnd, "AND")
+                }
                 CompiledArithmeticOpcode::Or => self.emit_binary(state, PcodeOpcode::IntOr, "OR"),
-                CompiledArithmeticOpcode::Xor => self.emit_binary(state, PcodeOpcode::IntXor, "XOR"),
-                CompiledArithmeticOpcode::Mul => self.emit_binary(state, PcodeOpcode::IntMult, "IMUL"),
-                CompiledArithmeticOpcode::Shl => self.emit_binary(state, PcodeOpcode::IntLeft, "SHL"),
-                CompiledArithmeticOpcode::Shr => self.emit_binary(state, PcodeOpcode::IntRight, "SHR"),
-                CompiledArithmeticOpcode::Sar => self.emit_binary(state, PcodeOpcode::IntSRight, "SAR"),
+                CompiledArithmeticOpcode::Xor => {
+                    self.emit_binary(state, PcodeOpcode::IntXor, "XOR")
+                }
+                CompiledArithmeticOpcode::Mul => {
+                    self.emit_binary(state, PcodeOpcode::IntMult, "IMUL")
+                }
+                CompiledArithmeticOpcode::Shl => {
+                    self.emit_binary(state, PcodeOpcode::IntLeft, "SHL")
+                }
+                CompiledArithmeticOpcode::Shr => {
+                    self.emit_binary(state, PcodeOpcode::IntRight, "SHR")
+                }
+                CompiledArithmeticOpcode::Sar => {
+                    self.emit_binary(state, PcodeOpcode::IntSRight, "SAR")
+                }
                 CompiledArithmeticOpcode::Inc => self.emit_unary_delta(state, 1, "INC"),
                 CompiledArithmeticOpcode::Dec => self.emit_unary_delta(state, -1, "DEC"),
             },
-            crate::compiler::CompiledSemanticOp::Compare { bitwise } => self.emit_compare(
-                state,
-                *bitwise,
-                if *bitwise { "TEST" } else { "CMP" },
-            ),
+            crate::compiler::CompiledSemanticOp::Compare { bitwise } => {
+                self.emit_compare(state, *bitwise, if *bitwise { "TEST" } else { "CMP" })
+            }
             crate::compiler::CompiledSemanticOp::Extend { signed } => {
                 let opcode = if *signed {
                     PcodeOpcode::IntSExt
                 } else {
                     PcodeOpcode::IntZExt
                 };
-                self.emit_extend(
-                    state,
-                    opcode,
-                    if *signed { "MOVSX" } else { "MOVZX" },
-                )
+                self.emit_extend(state, opcode, if *signed { "MOVSX" } else { "MOVZX" })
             }
             crate::compiler::CompiledSemanticOp::SetCc => self.emit_setcc(state),
-            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => {
-                self.emit_accumulator_extend(
-                    *src_size,
-                    *dst_size,
-                    state.construct_tpl_kind.as_str(),
-                )
-            }
+            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => self
+                .emit_accumulator_extend(*src_size, *dst_size, state.construct_tpl_kind.as_str()),
         }
     }
 
@@ -895,10 +906,15 @@ impl CompiledTableEmitter {
         match op.opcode {
             CompiledOpTplOpcode::Label => Ok(()),
             CompiledOpTplOpcode::Return => {
-                if !op.inputs.is_empty() || op.output.is_some() {
+                if op.output.is_some() || op.inputs.len() > 1 {
                     bail!("RETURN template shape is unsupported");
                 }
-                self.emitter.emit_return(mnemonic)
+                if let Some(target_tpl) = op.inputs.first() {
+                    let target = self.read_template_varnode(target_tpl, state, 8)?;
+                    self.emitter.emit_return_target(target, mnemonic)
+                } else {
+                    self.emitter.emit_return(mnemonic)
+                }
             }
             CompiledOpTplOpcode::Call => {
                 let target_tpl = op
@@ -937,7 +953,8 @@ impl CompiledTableEmitter {
             }
             CompiledOpTplOpcode::IntZExt
             | CompiledOpTplOpcode::IntSExt
-            | CompiledOpTplOpcode::BoolNegate => {
+            | CompiledOpTplOpcode::BoolNegate
+            | CompiledOpTplOpcode::PopCount => {
                 let out_tpl = op
                     .output
                     .as_ref()
@@ -956,6 +973,9 @@ impl CompiledTableEmitter {
             }
             CompiledOpTplOpcode::IntAdd
             | CompiledOpTplOpcode::IntSub
+            | CompiledOpTplOpcode::IntCarry
+            | CompiledOpTplOpcode::IntSCarry
+            | CompiledOpTplOpcode::IntSBorrow
             | CompiledOpTplOpcode::IntAnd
             | CompiledOpTplOpcode::IntOr
             | CompiledOpTplOpcode::IntXor
@@ -985,12 +1005,60 @@ impl CompiledTableEmitter {
                     .emit_int_binop(opcode, out.clone(), lhs, rhs, mnemonic)?;
                 self.commit_template_write_target(out_tpl, out, state, mnemonic)
             }
-            CompiledOpTplOpcode::Load
-            | CompiledOpTplOpcode::Store
-            | CompiledOpTplOpcode::Piece
+            CompiledOpTplOpcode::Load => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("LOAD template requires output"))?;
+                if op.inputs.len() != 2 {
+                    bail!("LOAD template requires two inputs");
+                }
+                let _out_size = self.template_varnode_size(out_tpl, state)?;
+                let space = self.read_template_varnode(&op.inputs[0], state, 8)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 8)?;
+                let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                self.emitter.emit_load(out.clone(), space, ptr, mnemonic)?;
+                self.commit_template_write_target(out_tpl, out, state, mnemonic)
+            }
+            CompiledOpTplOpcode::Store => {
+                if op.output.is_some() || op.inputs.len() != 3 {
+                    bail!("STORE template requires three inputs and no output");
+                }
+                let space = self.read_template_varnode(&op.inputs[0], state, 8)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 8)?;
+                let value_size = self.template_varnode_size(&op.inputs[2], state)?;
+                let value = self.read_template_varnode(&op.inputs[2], state, value_size)?;
+                self.emitter.emit_store(space, ptr, value, mnemonic)
+            }
+            CompiledOpTplOpcode::Piece
             | CompiledOpTplOpcode::Subpiece
-            | CompiledOpTplOpcode::CBranch
-            | CompiledOpTplOpcode::CallOther
+            | CompiledOpTplOpcode::CBranch => {
+                let out_tpl = op.output.as_ref();
+                if matches!(op.opcode, CompiledOpTplOpcode::CBranch) {
+                    if out_tpl.is_some() || op.inputs.len() != 2 {
+                        bail!("CBRANCH template requires two inputs and no output");
+                    }
+                    let target = self.read_template_varnode(&op.inputs[0], state, 8)?;
+                    let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
+                    self.emitter.emit_cbranch(target, cond, mnemonic)
+                } else {
+                    let out_tpl =
+                        out_tpl.ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
+                    if op.inputs.len() != 2 {
+                        bail!("{mnemonic} template requires two inputs");
+                    }
+                    let out_size = self.template_varnode_size(out_tpl, state)?;
+                    let lhs = self.read_template_varnode(&op.inputs[0], state, out_size)?;
+                    let rhs_size = self.template_varnode_size(&op.inputs[1], state)?;
+                    let rhs = self.read_template_varnode(&op.inputs[1], state, rhs_size)?;
+                    let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                    let opcode = self.binary_pcode_opcode(op.opcode)?;
+                    self.emitter
+                        .emit_int_binop(opcode, out.clone(), lhs, rhs, mnemonic)?;
+                    self.commit_template_write_target(out_tpl, out, state, mnemonic)
+                }
+            }
+            CompiledOpTplOpcode::CallOther
             | CompiledOpTplOpcode::Build
             | CompiledOpTplOpcode::Unsupported => bail!(
                 "compiled op template {} is not executable in compiled-table cutover",
@@ -1010,6 +1078,12 @@ impl CompiledTableEmitter {
                 .get(*operand_index)
                 .map(operand_size)
                 .ok_or_else(|| anyhow!("missing operand handle {operand_index}")),
+            CompiledVarnodeTpl::EffectiveAddress { operand_index } => state
+                .operands
+                .get(*operand_index)
+                .map(|_| 8)
+                .ok_or_else(|| anyhow!("missing effective-address handle {operand_index}")),
+            CompiledVarnodeTpl::ConditionPredicate => Ok(1),
             CompiledVarnodeTpl::Const(CompiledConstTpl::Integer { size, .. }) => Ok(*size),
             CompiledVarnodeTpl::Const(
                 CompiledConstTpl::RelativeAddress
@@ -1018,9 +1092,10 @@ impl CompiledTableEmitter {
                 | CompiledConstTpl::InstNext2,
             ) => Ok(8),
             CompiledVarnodeTpl::Space(_) => Ok(8),
-            CompiledVarnodeTpl::Temp { size } | CompiledVarnodeTpl::Register { size, .. } => {
-                Ok(*size)
-            }
+            CompiledVarnodeTpl::Temp { size, .. }
+            | CompiledVarnodeTpl::Register { size, .. }
+            | CompiledVarnodeTpl::FixedRegister { size, .. } => Ok(*size),
+            CompiledVarnodeTpl::Flag { .. } => Ok(1),
         }
     }
 
@@ -1038,10 +1113,25 @@ impl CompiledTableEmitter {
                     .ok_or_else(|| anyhow!("missing operand handle {operand_index}"))?;
                 self.read_operand(operand, expected_size, state.length)
             }
-            CompiledVarnodeTpl::Const(CompiledConstTpl::Integer { value, size }) => {
-                Ok(const_u64(*value as u64, (*size).max(expected_size.min(*size))))
+            CompiledVarnodeTpl::EffectiveAddress { operand_index } => {
+                let operand = state
+                    .operands
+                    .get(*operand_index)
+                    .ok_or_else(|| anyhow!("missing effective-address handle {operand_index}"))?;
+                self.effective_address(operand, state.length)
             }
-            CompiledVarnodeTpl::Const(CompiledConstTpl::InstStart) => Ok(const_u64(self.address, 8)),
+            CompiledVarnodeTpl::ConditionPredicate => self.status_predicate_varnode(
+                state
+                    .condition_code
+                    .ok_or_else(|| anyhow!("missing condition predicate context"))?,
+            ),
+            CompiledVarnodeTpl::Const(CompiledConstTpl::Integer { value, size }) => Ok(const_u64(
+                *value as u64,
+                (*size).max(expected_size.min(*size)),
+            )),
+            CompiledVarnodeTpl::Const(CompiledConstTpl::InstStart) => {
+                Ok(const_u64(self.address, 8))
+            }
             CompiledVarnodeTpl::Const(CompiledConstTpl::InstNext) => {
                 Ok(const_u64(self.address.wrapping_add(state.length as u64), 8))
             }
@@ -1050,17 +1140,22 @@ impl CompiledTableEmitter {
                     .wrapping_add((state.length as u64).saturating_mul(2)),
                 8,
             )),
-            CompiledVarnodeTpl::Const(CompiledConstTpl::RelativeAddress) => Ok(const_u64(
-                self.address.wrapping_add(state.length as u64),
-                8,
-            )),
+            CompiledVarnodeTpl::Const(CompiledConstTpl::RelativeAddress) => {
+                Ok(const_u64(self.address.wrapping_add(state.length as u64), 8))
+            }
             CompiledVarnodeTpl::Space(space) => Ok(self.space_varnode(space)),
-            CompiledVarnodeTpl::Temp { .. } => {
-                bail!("compiled-table generic executor does not support temp template reuse")
+            CompiledVarnodeTpl::Temp { id, size } => {
+                self.temp_cache.get(id).cloned().ok_or_else(|| {
+                    anyhow!("compiled-table generic executor missing temp template {id}:{size}")
+                })
             }
             CompiledVarnodeTpl::Register { name, .. } => {
                 bail!("compiled-table generic executor cannot resolve register template {name}")
             }
+            CompiledVarnodeTpl::FixedRegister { reg, size } => {
+                Ok(self.fixed_register_varnode(*reg, *size))
+            }
+            CompiledVarnodeTpl::Flag { bit } => Ok(flag(u64::from(*bit))),
         }
     }
 
@@ -1123,14 +1218,26 @@ impl CompiledTableEmitter {
                     operand,
                 })
             }
-            CompiledVarnodeTpl::Temp { size } => Ok(TemplateWriteTarget::Direct(self
-                .emitter
-                .tmp(UNIQUE_SPACE_ID, *size))),
+            CompiledVarnodeTpl::Temp { id, size } => {
+                let entry = self
+                    .temp_cache
+                    .entry(*id)
+                    .or_insert_with(|| self.emitter.tmp(UNIQUE_SPACE_ID, *size));
+                Ok(TemplateWriteTarget::Direct(entry.clone()))
+            }
+            CompiledVarnodeTpl::FixedRegister { reg, size } => Ok(TemplateWriteTarget::Direct(
+                self.fixed_register_varnode(*reg, *size),
+            )),
+            CompiledVarnodeTpl::Flag { bit } => {
+                Ok(TemplateWriteTarget::Direct(flag(u64::from(*bit))))
+            }
             CompiledVarnodeTpl::Const(_)
             | CompiledVarnodeTpl::Space(_)
-            | CompiledVarnodeTpl::Register { .. } => bail!(
-                "compiled-table generic executor cannot write template target"
-            ),
+            | CompiledVarnodeTpl::ConditionPredicate
+            | CompiledVarnodeTpl::Register { .. }
+            | CompiledVarnodeTpl::EffectiveAddress { .. } => {
+                bail!("compiled-table generic executor cannot write template target")
+            }
         }
     }
 
@@ -1139,6 +1246,7 @@ impl CompiledTableEmitter {
             CompiledOpTplOpcode::IntZExt => PcodeOpcode::IntZExt,
             CompiledOpTplOpcode::IntSExt => PcodeOpcode::IntSExt,
             CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
+            CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
             _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
         })
     }
@@ -1147,6 +1255,9 @@ impl CompiledTableEmitter {
         Ok(match opcode {
             CompiledOpTplOpcode::IntAdd => PcodeOpcode::IntAdd,
             CompiledOpTplOpcode::IntSub => PcodeOpcode::IntSub,
+            CompiledOpTplOpcode::IntCarry => PcodeOpcode::IntCarry,
+            CompiledOpTplOpcode::IntSCarry => PcodeOpcode::IntSCarry,
+            CompiledOpTplOpcode::IntSBorrow => PcodeOpcode::IntSBorrow,
             CompiledOpTplOpcode::IntAnd => PcodeOpcode::IntAnd,
             CompiledOpTplOpcode::IntOr => PcodeOpcode::IntOr,
             CompiledOpTplOpcode::IntXor => PcodeOpcode::IntXor,
@@ -1160,6 +1271,8 @@ impl CompiledTableEmitter {
             CompiledOpTplOpcode::IntSLess => PcodeOpcode::IntSLess,
             CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
             CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
+            CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,
+            CompiledOpTplOpcode::Subpiece => PcodeOpcode::SubPiece,
             _ => bail!("unsupported binary compiled opcode {}", opcode.as_str()),
         })
     }
@@ -1616,6 +1729,14 @@ impl CompiledTableEmitter {
         self.emitter.tmp(UNIQUE_SPACE_ID, size)
     }
 
+    fn fixed_register_varnode(&self, reg: CompiledFixedRegister, size: u32) -> Varnode {
+        match reg {
+            CompiledFixedRegister::Accumulator => gpr(0, size),
+            CompiledFixedRegister::StackPointer => gpr(4, size),
+            CompiledFixedRegister::FramePointer => gpr(5, size),
+        }
+    }
+
     fn bool_not(&mut self, input: Varnode, tag: &str) -> Result<Varnode> {
         let out = self.tmp(1);
         self.emitter
@@ -1653,7 +1774,11 @@ impl CompiledTableEmitter {
 }
 
 impl RuntimeTemplateExecutor for CompiledTableEmitter {
-    fn emit_op_template(&mut self, state: &RuntimeConstructState, op: &CompiledOpTpl) -> Result<()> {
+    fn emit_op_template(
+        &mut self,
+        state: &RuntimeConstructState,
+        op: &CompiledOpTpl,
+    ) -> Result<()> {
         CompiledTableEmitter::emit_op_template(self, state, op)
     }
 
@@ -1711,6 +1836,15 @@ fn flag(bit: u64) -> Varnode {
 mod tests {
     use super::*;
     use crate::compiler::compile_x86_64_frontend;
+
+    fn decode_and_lift(
+        compiled: &CompiledFrontend,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64)> {
+        let (ops, len, _) = decode_and_lift_with_details(compiled, bytes, address)?;
+        Ok((ops, len))
+    }
 
     #[test]
     fn generated_runtime_decodes_ret() {
@@ -1811,9 +1945,8 @@ mod tests {
         let (ops, len) = decode_and_lift(&compiled, &bytes, 0x1400_1450).expect("generated lea");
         assert_eq!(len, bytes.len() as u64);
         assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
-        assert!(ops.iter().any(|op| {
-            op.opcode == PcodeOpcode::Copy && op.output.as_ref().is_some_and(|out| out.size == 8)
-        }));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::SubPiece));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntZExt));
     }
 
     #[test]
@@ -1877,5 +2010,42 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("UnsupportedPcodeTemplate"));
         assert!(rendered.contains("unsupported_template_kind"));
+    }
+
+    #[test]
+    fn generated_runtime_cuts_over_cmp_templates() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x83, 0xf9, 0x01];
+        let (ops, len, details) =
+            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1485).expect("generated cmp");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(!details.compat_emitter_used);
+        assert_eq!(ops.first().map(|op| op.opcode), Some(PcodeOpcode::Copy));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSBorrow));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::PopCount));
+    }
+
+    #[test]
+    fn generated_runtime_cuts_over_push_templates() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x41, 0x57];
+        let (ops, len, details) =
+            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1470).expect("generated push");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(!details.compat_emitter_used);
+        assert_eq!(ops.first().map(|op| op.opcode), Some(PcodeOpcode::Copy));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
+    }
+
+    #[test]
+    fn generated_runtime_cuts_over_lea_templates() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let bytes = [0x8d, 0x04, 0x11];
+        let (ops, len, details) =
+            decode_and_lift_with_details(&compiled, &bytes, 0x1400_1450).expect("generated lea");
+        assert_eq!(len, bytes.len() as u64);
+        assert!(!details.compat_emitter_used);
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::SubPiece));
     }
 }

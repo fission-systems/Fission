@@ -86,6 +86,7 @@ impl std::error::Error for RuntimeSleighError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeExecutionDetails {
     pub compat_emitter_used: bool,
+    pub template_source: Option<crate::compiler::CompiledTemplateSource>,
 }
 
 #[derive(Debug, Clone)]
@@ -793,14 +794,14 @@ mod tests {
                 .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
                 .map(|frontend| frontend.processor.as_str())
                 .collect::<Vec<_>>(),
-            vec!["x86"]
+            vec!["AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "x86", "x86"]
         );
     }
 
     #[test]
     fn compile_only_frontend_produces_fail_closed_runtime_report() {
-        let frontend =
-            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 runtime frontend");
+        let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:64:default")
+            .expect("RISCV runtime frontend");
         assert_eq!(
             frontend.status(),
             RuntimeFrontendStatus::RegisteredCompileOnly
@@ -809,8 +810,8 @@ mod tests {
         let report = frontend
             .runtime_attempt_report()
             .expect("compile-only runtime report");
-        assert_eq!(report.processor, "AARCH64");
-        assert_eq!(report.module_name, "aarch64");
+        assert_eq!(report.processor, "RISCV");
+        assert_eq!(report.module_name, "riscv");
         assert!(report.compiled_table_available);
         assert!(report.constructor_inventory_count > 0);
         assert!(report.fail_closed_reason.is_some());

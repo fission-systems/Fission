@@ -22,6 +22,64 @@ def run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def add_performance_totals(
+    totals: dict[str, float],
+    performance: dict[str, Any],
+    *,
+    prefix: str,
+) -> None:
+    wall_clock_sec = performance.get("wall_clock_sec")
+    instruction_count = performance.get("instruction_count")
+    pcode_op_count = performance.get("pcode_op_count")
+    if wall_clock_sec is not None:
+        totals[f"{prefix}_wall_clock_sec"] = totals.get(f"{prefix}_wall_clock_sec", 0.0) + float(wall_clock_sec)
+    if instruction_count is not None:
+        totals[f"{prefix}_instruction_count"] = totals.get(f"{prefix}_instruction_count", 0.0) + float(instruction_count)
+    if pcode_op_count is not None:
+        totals[f"{prefix}_pcode_op_count"] = totals.get(f"{prefix}_pcode_op_count", 0.0) + float(pcode_op_count)
+
+
+def finalize_performance_summary(totals: dict[str, float]) -> dict[str, Any]:
+    ghidra_wall = totals.get("ghidra_wall_clock_sec", 0.0)
+    fission_wall = totals.get("fission_wall_clock_sec", 0.0)
+    ghidra_instructions = totals.get("ghidra_instruction_count", 0.0)
+    fission_instructions = totals.get("fission_instruction_count", 0.0)
+    ghidra_ops = totals.get("ghidra_pcode_op_count", 0.0)
+    fission_ops = totals.get("fission_pcode_op_count", 0.0)
+
+    summary = {
+        "ghidra": {
+            "wall_clock_sec": ghidra_wall,
+            "instruction_count": int(ghidra_instructions),
+            "pcode_op_count": int(ghidra_ops),
+            "instructions_per_sec": ghidra_instructions / ghidra_wall if ghidra_wall > 0 else None,
+            "pcode_ops_per_sec": ghidra_ops / ghidra_wall if ghidra_wall > 0 else None,
+        },
+        "fission": {
+            "wall_clock_sec": fission_wall,
+            "instruction_count": int(fission_instructions),
+            "pcode_op_count": int(fission_ops),
+            "instructions_per_sec": fission_instructions / fission_wall if fission_wall > 0 else None,
+            "pcode_ops_per_sec": fission_ops / fission_wall if fission_wall > 0 else None,
+        },
+        "delta": {
+            "wall_clock_delta_sec": fission_wall - ghidra_wall,
+            "wall_clock_speedup_fission_over_ghidra": ghidra_wall / fission_wall if fission_wall > 0 else None,
+            "instruction_throughput_ratio_fission_over_ghidra": (
+                (fission_instructions / fission_wall) / (ghidra_instructions / ghidra_wall)
+                if ghidra_wall > 0 and fission_wall > 0 and ghidra_instructions > 0
+                else None
+            ),
+            "pcode_throughput_ratio_fission_over_ghidra": (
+                (fission_ops / fission_wall) / (ghidra_ops / ghidra_wall)
+                if ghidra_wall > 0 and fission_wall > 0 and ghidra_ops > 0
+                else None
+            ),
+        },
+    }
+    return summary
+
+
 def run_one(
     *,
     binary: Path,
@@ -29,6 +87,7 @@ def run_one(
     count: int,
     language: str,
     compiler: str,
+    ghidra_dir: Path | None,
     output_dir: Path,
     no_analyze: bool,
     fission_release: bool,
@@ -52,6 +111,7 @@ def run_one(
             language,
             "--compiler",
             compiler,
+            *(["--ghidra-dir", str(ghidra_dir)] if ghidra_dir is not None else []),
             "--output",
             str(ghidra_json),
             *(["--no-analyze"] if no_analyze else []),
@@ -107,8 +167,10 @@ def run_manifest(args: argparse.Namespace) -> int:
             raise SystemExit(f"no row with feature_group {args.group!r} in {manifest_path}")
 
     aggregate_totals: dict[str, int] = {}
+    owner_hint_totals: dict[str, int] = {}
     feature_totals: dict[str, dict[str, int]] = {}
     group_totals: dict[str, dict[str, int]] = {}
+    performance_totals: dict[str, float] = {}
     row_reports = []
     for row in rows:
         binary = Path(row.get("binary", args.binary or ""))
@@ -125,6 +187,9 @@ def run_manifest(args: argparse.Namespace) -> int:
             count=int(row.get("count", args.count)),
             language=row.get("language", args.language),
             compiler=row.get("compiler", args.compiler),
+            ghidra_dir=row.get("ghidra_dir")
+            and Path(row["ghidra_dir"])
+            or args.ghidra_dir,
             output_dir=output_dir,
             no_analyze=bool(row.get("no_analyze", args.no_analyze)),
             fission_release=args.fission_release,
@@ -135,6 +200,11 @@ def run_manifest(args: argparse.Namespace) -> int:
             feature_bucket_totals[bucket] = feature_bucket_totals.get(bucket, 0) + int(count)
             group_bucket_totals = group_totals.setdefault(feature_group, {})
             group_bucket_totals[bucket] = group_bucket_totals.get(bucket, 0) + int(count)
+        for hint, count in report.get("owner_hint_totals", {}).items():
+            owner_hint_totals[hint] = owner_hint_totals.get(hint, 0) + int(count)
+        performance = report.get("performance", {})
+        add_performance_totals(performance_totals, performance.get("ghidra", {}), prefix="ghidra")
+        add_performance_totals(performance_totals, performance.get("fission", {}), prefix="fission")
         first_mismatch = next(
             (entry for entry in report["rows"] if entry.get("buckets") != ["full_match"]),
             None,
@@ -151,6 +221,7 @@ def run_manifest(args: argparse.Namespace) -> int:
                 "report": report["report"],
                 "total_instructions": report["total_instructions"],
                 "bucket_totals": report["bucket_totals"],
+                "performance": performance,
                 "first_mismatch": first_mismatch,
             }
         )
@@ -159,6 +230,7 @@ def run_manifest(args: argparse.Namespace) -> int:
         "manifest": str(manifest_path),
         "row_count": len(row_reports),
         "bucket_totals": dict(sorted(aggregate_totals.items())),
+        "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
         "feature_totals": {
             feature: dict(sorted(buckets.items()))
             for feature, buckets in sorted(feature_totals.items())
@@ -167,6 +239,7 @@ def run_manifest(args: argparse.Namespace) -> int:
             group: dict(sorted(buckets.items()))
             for group, buckets in sorted(group_totals.items())
         },
+        "performance_summary": finalize_performance_summary(performance_totals),
         "rows": row_reports,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +249,7 @@ def run_manifest(args: argparse.Namespace) -> int:
         "report": str(aggregate_path),
         "row_count": aggregate["row_count"],
         "bucket_totals": aggregate["bucket_totals"],
+        "performance_summary": aggregate["performance_summary"],
         "feature_count": len(aggregate["feature_totals"]),
         "group_count": len(aggregate["group_totals"]),
     }, indent=2, sort_keys=True))
@@ -189,6 +263,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=8)
     parser.add_argument("--language", default="x86:LE:64:default")
     parser.add_argument("--compiler", default="windows")
+    parser.add_argument("--ghidra-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "benchmark/artifacts/raw_p_code_benchmark/latest")
     parser.add_argument("--manifest", type=Path, help="Run every row from a raw p-code parity manifest")
     parser.add_argument("--row", help="Run one named manifest row")
@@ -210,6 +285,7 @@ def main() -> int:
         count=args.count,
         language=args.language,
         compiler=args.compiler,
+        ghidra_dir=args.ghidra_dir,
         output_dir=args.output_dir,
         no_analyze=args.no_analyze,
         fission_release=args.fission_release,
@@ -218,6 +294,7 @@ def main() -> int:
         "report": report["report"],
         "total_instructions": report["total_instructions"],
         "bucket_totals": report["bucket_totals"],
+        "performance": report["performance"],
     }, indent=2, sort_keys=True))
     return 0
 

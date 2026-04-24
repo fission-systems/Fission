@@ -239,6 +239,191 @@ shape drift and the remaining `_fpreset` decode hole at the raw SLEIGH layer.
 
 - `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
 
+## 8. Raw P-code Performance Metrics
+
+The raw P-code parity harness now records speed metrics in addition to
+correctness buckets.
+
+### What changed
+
+- `benchmark/raw_p_code_benchmark/ghidra_raw_pcode.py`
+  - records end-to-end oracle wall-clock time
+  - records instruction count and raw p-code op count
+- `benchmark/raw_p_code_benchmark/fission_raw_pcode.py`
+  - records end-to-end probe wall-clock time
+  - records instruction count and raw p-code op count
+- `benchmark/raw_p_code_benchmark/compare_raw_pcode.py`
+  - adds a `performance` section with:
+    - `ghidra`
+    - `fission`
+    - `delta`
+- `benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py`
+  - adds manifest-level `performance_summary`
+
+### Metric semantics
+
+These are harness-level timings, not isolated decode-only microbenchmarks.
+
+Tracked fields:
+
+- `wall_clock_sec`
+- `instruction_count`
+- `pcode_op_count`
+- `instructions_per_sec`
+- `pcode_ops_per_sec`
+- `wall_clock_speedup_fission_over_ghidra`
+
+### Smoke
+
+- command:
+  - `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --binary benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001453 --count 1 --language x86:LE:64:default --compiler windows --ghidra-dir /Users/sjkim1127/Downloads/ghidra_12.0.4_PUBLIC --output-dir benchmark/artifacts/raw_p_code_benchmark/raw_speed_smoke --fission-release`
+- result:
+  - correctness buckets still report the expected mismatch on this row
+  - performance section is emitted successfully for both tools
+
+## 9. Architecture Readiness Parallel Lane
+
+Added a parallel architecture-readiness runner over the LLVM baremetal smoke corpus.
+
+### Added files
+
+- `benchmark/full_benchmark/run_architecture_readiness_parallel.py`
+- `benchmark/binary/LLVM_SMOKE_README.md` updated with runner usage
+
+### Lane semantics
+
+This lane is intentionally lower-bar than raw P-code parity.
+
+It checks, per binary:
+
+- `info --json`
+- `list --json`
+- `disasm --addr <first_function_or_entry> --count 4 --json`
+
+and classifies each row into:
+
+- `disasm_ready`
+- `inventory_ready`
+- `metadata_ready`
+- `load_failed`
+
+### LLVM baremetal corpus run
+
+- manifest:
+  - `benchmark/config/benchmark_corpus/llvm_baremetal_smoke_corpus.json`
+- row count:
+  - `53`
+- aggregate report:
+  - `benchmark/artifacts/full_benchmark/architecture_readiness_llvm53/architecture_readiness_aggregate.json`
+
+### Current totals
+
+- `info_ok = 21`
+- `list_ok = 21`
+- `disasm_ok = 1`
+
+Readiness classes:
+
+- `disasm_ready = 1`
+- `inventory_ready = 20`
+- `load_failed = 32`
+
+### Interpretation
+
+This separates "broad architecture loading/inventory coverage" from
+"raw-pcode/runtime parity coverage".
+
+Current signal:
+
+- broad loader/inventory readiness exists beyond x86-64
+- many architectures still stop at compile-only runtime selection or loader gaps
+- only `x86-64` currently clears the full readiness lane through disasm in this smoke corpus
+
+## 10. LLVM 53 Architecture Readiness Promotion
+
+This wave raised the architecture-readiness lane from a coarse "load failed"
+report into a layered owner breakdown over the checked-in LLVM baremetal smoke
+corpus.
+
+### Direct owners
+
+- `crates/fission-core/src/architecture.rs`
+- `crates/fission-sleigh/src/compiler/mod.rs`
+- `benchmark/full_benchmark/run_architecture_readiness_parallel.py`
+
+### What changed
+
+- ELF load-spec selection now includes additional machine families seen in the
+  current LLVM smoke corpus:
+  - RISC-V
+  - MIPS / MIPS R6
+  - PowerPC / PowerPC64
+  - SPARC V9
+  - eBPF
+  - LoongArch
+- x86 32-bit was promoted from `registered_compile_only` to
+  `executable_candidate` in the checked-in Ghidra language manifest generation.
+- readiness aggregate output now records:
+  - `failure_bucket`
+  - `failure_owner`
+  - `seed_source`
+  - `failure_bucket_totals`
+  - `failure_owner_totals`
+- disasm seed order is now fixed as:
+  - first listed function
+  - entry point
+  - first executable section start
+
+### LLVM 53 lane result after this wave
+
+- aggregate:
+  - `benchmark/artifacts/full_benchmark/architecture_readiness_llvm53_after_release/architecture_readiness_aggregate.json`
+- row count:
+  - `53`
+- stage totals:
+  - `info_ok = 53`
+  - `list_ok = 53`
+  - `disasm_ok = 2`
+- readiness totals:
+  - `disasm_ready = 2`
+  - `inventory_ready = 51`
+
+### Failure buckets after promotion
+
+- `selection_compile_only = 19`
+- `disasm_runtime_failure = 32`
+
+Notable row movement:
+
+- `llvm-x86`
+  - before: `selection_compile_only`
+  - after: `disasm_ready`
+- `llvm-riscv-lp64d`
+  - before: `loader_unsupported_machine`
+  - after: `disasm_runtime_failure`
+- `llvm-mips64le`
+  - before: `loader_unsupported_machine`
+  - after: `disasm_runtime_failure`
+- `llvm-ppc-64-le`
+  - before: `loader_unsupported_machine`
+  - after: `disasm_runtime_failure`
+- `llvm-sparcv9-64`
+  - before: `loader_unsupported_machine`
+  - after: `disasm_runtime_failure`
+
+### Interpretation
+
+This wave did not solve broad runtime execution coverage. It did make the next
+owner layers explicit:
+
+- loader machine support is no longer the dominant blocker in the current LLVM
+  smoke corpus
+- compile-only runtime selection remains for 19 rows
+- the remaining 32 rows now fail inside disasm/runtime execution rather than at
+  loader admission
+
+That is the intended ownership move for the next wave.
+
 ## 7. Semantic Emitter Cutover
 
 This wave moved the first executable slice of `compiled_table.rs` away from the
@@ -564,3 +749,392 @@ runtime path.
 - current execution is still visibly `compatibility_lowered`
 - the next direct owner remains `compiled_table.rs` constructor/template
   execution, especially `_fpreset` and startup flag semantics
+
+## 10. Flag / Branch / Addressing Semantic Holdout Cutover
+
+This wave moved another set of handwritten semantic families into the common
+`CompiledOpTpl` execution path.
+
+### Scope
+
+- canonical owner:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/compiler/codegen.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+- reference owner:
+  - `ConstructTpl`
+  - `PcodeEmit`
+  - `ParserWalker`
+  - `ConstructState`
+  - `SleighParserContext`
+
+### What changed
+
+- compiler-side executable IR now emits primitive op templates for:
+  - `lea` / address-of constructors
+  - stack store / stack load constructors
+  - frame teardown
+  - compare / test style flag materialization
+  - accumulator-width sign extension
+- new template-side varnode forms were added:
+  - `effective_address`
+  - persistent `temp{id,size}`
+  - `fixed_register`
+  - `flag`
+- runtime generic template execution in `compiled_table.rs` now executes:
+  - `LOAD`
+  - `STORE`
+  - `PIECE`
+  - `SUBPIECE`
+  - `INT_CARRY`
+  - `INT_SCARRY`
+  - `INT_SBORROW`
+  - `POPCOUNT`
+- generic template writes now support persistent temp reuse plus fixed-register
+  and flag targets without dropping back to handwritten emission
+- targeted runtime regression tests were added for:
+  - compare template cutover
+  - push template cutover
+  - `lea` template cutover
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `47 passed / 0 failed`
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: `38 processors / 146 variants`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+
+### Raw P-code Gate
+
+Canonical aggregate:
+
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --output-dir benchmark/artifacts/raw_p_code_benchmark/20260424_holdout_cutover`
+  - result:
+    - `compat_emitter_used = 8`
+    - `pcode_opcode_mismatch = 24`
+    - `pcode_op_count_mismatch = 24`
+    - `unsupported_template = 1`
+
+Delta against the previous full aggregate:
+
+- `compat_emitter_used`
+  - before: `26`
+  - after: `8`
+- `pcode_opcode_mismatch`
+  - before: `36`
+  - after: `24`
+- `pcode_op_count_mismatch`
+  - before: `23`
+  - after: `24`
+
+Group readout from the new aggregate:
+
+- `addressing`
+  - `pcode_opcode_mismatch = 2`
+  - `pcode_op_count_mismatch = 2`
+- `flags`
+  - `pcode_opcode_mismatch = 1`
+  - `pcode_op_count_mismatch = 1`
+  - `temp_space_mismatch = 1`
+  - `varnode_space_mismatch = 1`
+- `stack`
+  - `pcode_opcode_mismatch = 1`
+  - `pcode_op_count_mismatch = 1`
+  - `input_varnode_mismatch = 4`
+  - `varnode_space_mismatch = 4`
+- `control_flow`
+  - `compat_emitter_used = 1`
+  - `pcode_opcode_mismatch = 4`
+  - `pcode_op_count_mismatch = 4`
+  - `varnode_space_mismatch = 3`
+- `unsupported`
+  - `_fpreset` remains typed `unsupported_template`
+  - no regression back to `DecodeNoMatch`
+
+### Interpretation
+
+This wave succeeded at moving compare / stack / addressing constructors out of
+the handwritten emitter path. The canonical signal is the `compat_emitter_used`
+drop from `26` to `8`.
+
+What improved:
+
+- compare / test style rows now execute through `CompiledOpTpl`
+- push / stack-shaping rows no longer rely on the handwritten stack helper
+- `lea` rows now go through template evaluation rather than the handwritten
+  address helper
+- `_fpreset` stays fail-closed as typed unsupported
+
+What is now exposed more clearly:
+
+- the next remaining control-flow owner is `emit_jcc`
+- stack rows now show real operand/space mismatches instead of being hidden
+  behind compatibility emission
+- compare / branch rows still diverge on predicate varnode identity and temp
+  space usage
+- startup rows still contain control-flow and startup-sequence ordering drift
+
+### Next Owner
+
+The next direct owner remains `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`.
+
+Priority order:
+
+1. cut over `emit_jcc` and remove the remaining control-flow compatibility path
+2. replace synthetic flag/predicate varnode shaping with template-owned identity
+3. close stack/input varnode mismatches now that stack helpers are no longer the
+   primary owner
+
+## 11. Raw P-code Benchmark Ghidra Pinning
+
+The raw p-code benchmark previously depended on whichever Ghidra installation
+`pyghidra` discovered at runtime. That made the oracle version ambiguous even
+though the current clean-room migration target is Ghidra 12.0.4.
+
+### What changed
+
+- `benchmark/raw_p_code_benchmark/ghidra_raw_pcode.py` now resolves the Ghidra
+  install directory explicitly in this order:
+  1. `--ghidra-dir`
+  2. `GHIDRA_INSTALL_DIR`
+  3. repo defaults:
+     - `vendor/ghidra/ghidra-Ghidra_12.0.4_build`
+     - `ghidra-Ghidra_12.0.4_build`
+- the script now starts `pyghidra` with `install_dir=...`
+- the emitted oracle JSON now records the resolved `ghidra_dir`
+- `run_raw_pcode_parity.py` now forwards `--ghidra-dir` to the oracle script
+- raw benchmark README examples were updated to show the explicit 12.0.4 pin
+
+### Validation
+
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+  - result: passed
+- `python3 benchmark/raw_p_code_benchmark/ghidra_raw_pcode.py --help`
+  - result: shows `--ghidra-dir`
+- `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --help`
+  - result: shows `--ghidra-dir`
+
+## 12. Architecture Readiness Truthful Bucketing + ARM/AARCH64 Promotion
+
+The architecture readiness lane was previously mixing two different failure
+owners:
+
+- rows that were still compile-only in runtime registry selection
+- rows that had actually entered the runtime path and then failed during decode
+
+Because the `compile-only` message was split across wrapped stderr lines, the
+runner misbucketed many rows as `disasm_runtime_failure`. That made the next
+owner ambiguous.
+
+### What changed
+
+- `benchmark/full_benchmark/run_architecture_readiness_parallel.py`
+  - added whitespace-normalized error classification
+  - added row-level `normalized_disasm_error`
+  - added row-level `classification_reason`
+  - `compile-only entry` detection now survives wrapped/newline formatted stderr
+- `crates/fission-sleigh/src/compiler/mod.rs`
+  - replaced the x86-only runtime-status special case with a small explicit
+    executable allowlist
+  - current allowlist:
+    - `x86`
+    - `x86-64`
+    - `AARCH64`
+    - `AARCH64BE`
+    - `AARCH64_AppleSilicon`
+    - `ARM7_le`
+    - `ARM7_be`
+- `crates/fission-sleigh/src/runtime/registry.rs`
+  - added tests that pin `AARCH64*` and `ARM7*` selection as
+    `ExecutableCandidate`
+  - kept `RISCV` pinned as compile-only in this wave
+
+### Validation
+
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: `38 processors / 146 variants`
+- `cargo build -p fission-cli --release`
+  - result: passed
+- `cargo test -p fission-sleigh resolves_arm_and_aarch64_variants_as_executable_candidates -- --nocapture`
+  - result: passed
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo check -p fission-core`
+  - result: passed
+- architecture readiness rerun:
+  - output:
+    `benchmark/artifacts/full_benchmark/architecture_readiness_next_wave/architecture_readiness_aggregate.json`
+
+### Benchmark result
+
+Compared to
+`benchmark/artifacts/full_benchmark/architecture_readiness_llvm53_after_release/architecture_readiness_aggregate.json`:
+
+- `selection_compile_only: 19 -> 12`
+- `disasm_runtime_failure: 32 -> 39`
+- `disasm_ready: 2 -> 2`
+- `inventory_ready: 51 -> 51`
+
+The important change is not the top-level readiness class. The important change
+is that the targeted ARM/AARCH64 rows now leave `selection_compile_only` and
+enter the actual runtime decode path:
+
+- `llvm-aarch64` -> `disasm_runtime_failure`
+- `llvm-aarch64be` -> `disasm_runtime_failure`
+- `llvm-aarch64-applesilicon` -> `disasm_runtime_failure`
+- `llvm-arm7-le` -> `disasm_runtime_failure`
+- `llvm-arm7-be` -> `disasm_runtime_failure`
+
+Current normalized errors for those rows are real runtime failures:
+
+- `DecodeNoMatch: AARCH64 has no match at 0x0`
+- `DecodeNoMatch: AARCH64BE has no match at 0x0`
+- `DecodeNoMatch: AARCH64_AppleSilicon has no match at 0xa0`
+- `DecodeNoMatch: ARM7_le has no match at 0x0`
+- `DecodeNoMatch: ARM7_be has no match at 0x0`
+
+This means the next owner is now correctly exposed as the runtime decode spine,
+not manifest selection.
+
+## 13. Raw P-code Template Parity Cutover
+
+This wave moved the remaining control-flow compatibility holdout for conditional
+branches into the compiled op-template path, then corrected `CALL` / `RET` raw
+p-code shape so stack side effects are no longer hidden behind one-op shorthand.
+
+### Scope
+
+- compiler owners:
+  - `crates/fission-sleigh/src/compiler/ir.rs`
+  - `crates/fission-sleigh/src/compiler/codegen.rs`
+- runtime owners:
+  - `crates/fission-sleigh/src/runtime/spine/template.rs`
+  - `crates/fission-sleigh/src/runtime/spine/compiled_table.rs`
+  - `crates/fission-sleigh/src/runtime/spine/emitter.rs`
+- benchmark owners:
+  - `benchmark/raw_p_code_benchmark/compare_raw_pcode.py`
+  - `benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py`
+  - `crates/fission-sleigh/examples/raw_pcode_probe.rs`
+
+### What changed
+
+- added `ConditionPredicate` as an explicit template varnode so `Jcc` / `Setcc`
+  constructors can execute through `CompiledOpTpl` instead of using
+  `emit_jcc` / `emit_setcc` as the primary path
+- changed `CALL` templates from one raw `CALL` op to:
+  - `INT_SUB` stack pointer update
+  - `STORE` return address
+  - `CALL` target
+- changed `RET` templates from one raw `RETURN` op to:
+  - `LOAD` return target from stack
+  - `INT_ADD` stack pointer update
+  - `RETURN` target
+- added `template_source` to runtime execution telemetry and raw p-code probe
+  output
+- expanded row-level raw p-code mismatch reporting with:
+  - Ghidra opcode sequence
+  - Fission opcode sequence
+  - first differing op index
+  - normalized varnode payloads
+  - template source
+  - owner hints
+- added aggregate `owner_hint_totals`
+
+### Raw P-code Gate
+
+Baseline report:
+
+- `benchmark/artifacts/raw_p_code_benchmark/20260424_canonical_speed/aggregate_raw_pcode_parity_report.json`
+
+New report:
+
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_full/aggregate_raw_pcode_parity_report.json`
+
+Bucket deltas:
+
+- `compat_emitter_used: 8 -> 7`
+- `pcode_opcode_mismatch: 24 -> 16`
+- `pcode_op_count_mismatch: 24 -> 16`
+- `unsupported_template: 1 -> 1`
+- `full_match: 4 -> 4`
+- `input_varnode_mismatch: 12 -> 20`
+- `varnode_space_mismatch: 16 -> 24`
+
+Group deltas:
+
+- `control_flow`
+  - `compat_emitter_used: 1 -> 0`
+  - `pcode_opcode_mismatch: 4 -> 1`
+  - `pcode_op_count_mismatch: 4 -> 1`
+- `compound`
+  - `pcode_opcode_mismatch: 14 -> 9`
+  - `pcode_op_count_mismatch: 14 -> 9`
+- `flags`, `stack`, `memory`, `addressing`
+  - opcode/count mismatch did not regress
+
+The varnode mismatch increase is expected for this wave: `CALL` / `RET` now emit
+Ghidra-shaped stack side-effect opcodes, which exposes the next space/register
+identity owner instead of hiding it behind one-op shorthand.
+
+Feature slice reports:
+
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_control_flow/aggregate_raw_pcode_parity_report.json`
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_flags/aggregate_raw_pcode_parity_report.json`
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_stack/aggregate_raw_pcode_parity_report.json`
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_addressing/aggregate_raw_pcode_parity_report.json`
+- `benchmark/artifacts/raw_p_code_benchmark/template_cutover_unsupported/aggregate_raw_pcode_parity_report.json`
+
+Note: the checked-in vendor tree is the Ghidra 12.0.4 clean-room reference source,
+but the raw p-code runner requires a packaged launchable install root. The
+benchmark execution used `/Users/sjkim1127/Downloads/ghidra_12.0.4_PUBLIC`, which
+is the packaged 12.0.4 oracle.
+
+### Architecture Readiness Guard
+
+Report:
+
+- `benchmark/artifacts/full_benchmark/architecture_readiness_after_template_cutover/architecture_readiness_aggregate.json`
+
+Compared with
+`benchmark/artifacts/full_benchmark/architecture_readiness_next_wave/architecture_readiness_aggregate.json`:
+
+- `disasm_ready: 2 -> 2`
+- `inventory_ready: 51 -> 51`
+- `selection_compile_only: 12 -> 12`
+- `disasm_runtime_failure: 39 -> 39`
+
+ARM/AARCH64 rows stayed in the runtime decode path and did not regress back to
+`selection_compile_only`.
+
+### Validation
+
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+  - result: passed
+- `cargo check -p fission-sleigh`
+  - result: passed
+- `cargo test -p fission-sleigh -- --test-threads=1`
+  - result: `49 passed / 0 failed`
+- `cargo run -p fission-sleigh --example generate_sleigh_frontends`
+  - result: `38 processors / 146 variants`
+- `cargo check -p fission-cli`
+  - result: passed
+- `cargo build -p fission-cli --release`
+  - result: passed
+
+### Remaining Owner
+
+The next direct owner is no longer `emit_jcc`; it is varnode identity and
+language-space mapping inside the shared runtime template evaluator:
+
+1. replace synthetic `const_u64(0, 8)` RAM-space placeholders with language
+   metadata-derived space IDs
+2. align stack/register varnode identity for `CALL`, `RET`, `PUSH`, and memory
+   access templates
+3. replace synthetic flag predicate temporaries with template-owned condition
+   varnode identity

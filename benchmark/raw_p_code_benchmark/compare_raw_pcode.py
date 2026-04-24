@@ -53,6 +53,56 @@ def normalize_ops(instruction: dict[str, Any]) -> list[dict[str, Any]]:
     return ops
 
 
+def op_delta_payload(
+    *,
+    kind: str,
+    index: int,
+    ghidra: dict[str, Any] | None,
+    fission: dict[str, Any] | None,
+    input_index: int | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "kind": kind,
+        "index": index,
+        "ghidra_op": ghidra,
+        "fission_op": fission,
+    }
+    if input_index is not None:
+        payload["input_index"] = input_index
+    return payload
+
+
+def owner_hints_for(buckets: list[str], detail: dict[str, Any]) -> list[str]:
+    hints: set[str] = set()
+    bucket_set = set(buckets)
+    if detail.get("compat_emitter_used"):
+        hints.add("compat_emitter")
+    if bucket_set & {"pcode_opcode_mismatch", "pcode_op_count_mismatch", "pcode_arity_mismatch"}:
+        hints.add("template_opcode_sequence")
+    if bucket_set & {
+        "input_varnode_mismatch",
+        "output_varnode_mismatch",
+        "varnode_space_mismatch",
+        "varnode_size_mismatch",
+        "label_target_mismatch",
+    }:
+        hints.add("varnode_identity")
+    if "temp_space_mismatch" in bucket_set:
+        hints.add("temp_allocation")
+    if bucket_set & {
+        "length_mismatch",
+        "missing_ghidra_instruction",
+        "missing_fission_instruction",
+        "decode_no_match",
+        "ghidra_decode_error",
+        "fission_decode_error",
+    }:
+        hints.add("decode_length")
+    if bucket_set & {"unsupported_template", "invalid_pcode_shape"}:
+        hints.add("unsupported_template")
+    return sorted(hints)
+
+
 BRANCH_LIKE_OPCODES = {
     "BRANCH",
     "CBRANCH",
@@ -61,6 +111,50 @@ BRANCH_LIKE_OPCODES = {
     "CALLIND",
     "RETURN",
 }
+
+
+def performance_from_report(report: dict[str, Any]) -> dict[str, Any]:
+    timing = report.get("timing") or {}
+    wall_clock_sec = timing.get("wall_clock_sec")
+    instruction_count = int(timing.get("instruction_count", 0))
+    pcode_op_count = int(timing.get("pcode_op_count", 0))
+    return {
+        "wall_clock_sec": wall_clock_sec,
+        "instruction_count": instruction_count,
+        "pcode_op_count": pcode_op_count,
+        "instructions_per_sec": timing.get("instructions_per_sec"),
+        "pcode_ops_per_sec": timing.get("pcode_ops_per_sec"),
+    }
+
+
+def performance_delta(ghidra: dict[str, Any], fission: dict[str, Any]) -> dict[str, Any]:
+    ghidra_wall = ghidra.get("wall_clock_sec")
+    fission_wall = fission.get("wall_clock_sec")
+    wall_clock_delta_sec = None
+    wall_clock_speedup_fission_over_ghidra = None
+    if ghidra_wall is not None and fission_wall is not None:
+        wall_clock_delta_sec = fission_wall - ghidra_wall
+        if fission_wall > 0:
+            wall_clock_speedup_fission_over_ghidra = ghidra_wall / fission_wall
+
+    ghidra_ips = ghidra.get("instructions_per_sec")
+    fission_ips = fission.get("instructions_per_sec")
+    instruction_throughput_ratio = None
+    if ghidra_ips not in (None, 0) and fission_ips is not None:
+        instruction_throughput_ratio = fission_ips / ghidra_ips
+
+    ghidra_ops = ghidra.get("pcode_ops_per_sec")
+    fission_ops = fission.get("pcode_ops_per_sec")
+    pcode_throughput_ratio = None
+    if ghidra_ops not in (None, 0) and fission_ops is not None:
+        pcode_throughput_ratio = fission_ops / ghidra_ops
+
+    return {
+        "wall_clock_delta_sec": wall_clock_delta_sec,
+        "wall_clock_speedup_fission_over_ghidra": wall_clock_speedup_fission_over_ghidra,
+        "instruction_throughput_ratio_fission_over_ghidra": instruction_throughput_ratio,
+        "pcode_throughput_ratio_fission_over_ghidra": pcode_throughput_ratio,
+    }
 
 
 def classify_varnode_delta(
@@ -114,6 +208,7 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     detail["ghidra_status"] = ghidra.get("status")
     detail["fission_status"] = fission.get("status")
     detail["compat_emitter_used"] = bool(fission.get("compat_emitter_used"))
+    detail["template_source"] = fission.get("template_source")
 
     if ghidra.get("status") != "ok":
         buckets.append("ghidra_decode_error")
@@ -153,15 +248,32 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
         buckets.append("pcode_op_count_mismatch")
         detail["ghidra_pcode_count"] = len(gops)
         detail["fission_pcode_count"] = len(fops)
+        detail.setdefault(
+            "first_mismatch",
+            op_delta_payload(
+                kind="op_count",
+                index=min(len(gops), len(fops)),
+                ghidra=gops[min(len(gops), len(fops))] if len(gops) > len(fops) else None,
+                fission=fops[min(len(gops), len(fops))] if len(fops) > len(gops) else None,
+            ),
+        )
 
     for idx, (gop, fop) in enumerate(zip(gops, fops)):
         if gop["opcode"] != fop["opcode"]:
             buckets.append("pcode_opcode_mismatch")
             detail.setdefault("first_opcode_mismatch", {"index": idx, "ghidra": gop["opcode"], "fission": fop["opcode"]})
+            detail.setdefault(
+                "first_mismatch",
+                op_delta_payload(kind="opcode", index=idx, ghidra=gop, fission=fop),
+            )
             break
         if len(gop["inputs"]) != len(fop["inputs"]) or bool(gop["output"]) != bool(fop["output"]):
             buckets.append("pcode_arity_mismatch")
             detail.setdefault("first_arity_mismatch", {"index": idx, "ghidra": gop, "fission": fop})
+            detail.setdefault(
+                "first_mismatch",
+                op_delta_payload(kind="arity", index=idx, ghidra=gop, fission=fop),
+            )
             break
         for input_index, (g_in, f_in) in enumerate(zip(gop["inputs"], fop["inputs"])):
             if g_in != f_in:
@@ -177,6 +289,16 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
                     f"first_{mismatch_kind}_mismatch",
                     {"index": idx, "operand_index": input_index, "ghidra": gop, "fission": fop},
                 )
+                detail.setdefault(
+                    "first_mismatch",
+                    op_delta_payload(
+                        kind="input_varnode",
+                        index=idx,
+                        input_index=input_index,
+                        ghidra=gop,
+                        fission=fop,
+                    ),
+                )
                 break
         else:
             if gop["output"] != fop["output"]:
@@ -191,6 +313,10 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
                 detail.setdefault(
                     f"first_{mismatch_kind}_mismatch",
                     {"index": idx, "ghidra": gop, "fission": fop},
+                )
+                detail.setdefault(
+                    "first_mismatch",
+                    op_delta_payload(kind="output_varnode", index=idx, ghidra=gop, fission=fop),
                 )
                 break
 
@@ -212,6 +338,7 @@ def main() -> int:
     f_instrs = fission.get("instructions", [])
 
     totals: Counter[str] = Counter()
+    owner_hint_totals: Counter[str] = Counter()
     rows = []
     for idx in range(max(len(g_instrs), len(f_instrs))):
         fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
@@ -223,8 +350,12 @@ def main() -> int:
             totals[bucket] += 1
         if fission_instruction and fission_instruction.get("compat_emitter_used"):
             totals["compat_emitter_used"] += 1
+        hints = owner_hints_for(buckets, detail)
+        for hint in hints:
+            owner_hint_totals[hint] += 1
         detail["index"] = idx
         detail["buckets"] = buckets
+        detail["owner_hints"] = hints
         rows.append(detail)
 
     report = {
@@ -237,6 +368,15 @@ def main() -> int:
         "fission_execution_mode": fission.get("execution_mode"),
         "total_instructions": len(rows),
         "bucket_totals": dict(sorted(totals.items())),
+        "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
+        "performance": {
+            "ghidra": performance_from_report(ghidra),
+            "fission": performance_from_report(fission),
+            "delta": performance_delta(
+                performance_from_report(ghidra),
+                performance_from_report(fission),
+            ),
+        },
         "rows": rows,
     }
     text = json.dumps(report, indent=2, sort_keys=True)

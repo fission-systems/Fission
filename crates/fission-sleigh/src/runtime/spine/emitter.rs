@@ -107,6 +107,10 @@ impl RuntimePcodeEmitter {
         self.append_checked(PcodeOpcode::Return, None, Vec::new(), mnemonic)
     }
 
+    pub fn emit_return_target(&mut self, target: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::Return, None, vec![target], mnemonic)
+    }
+
     pub fn emit_int_unop(
         &mut self,
         opcode: PcodeOpcode,

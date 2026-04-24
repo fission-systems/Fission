@@ -72,6 +72,13 @@ pub struct GhidraLanguageManifest {
     pub entries: Vec<GhidraLanguageManifestEntry>,
 }
 
+fn is_executable_candidate_entry(entry_id: &str) -> bool {
+    matches!(
+        entry_id,
+        "x86" | "x86-64" | "AARCH64" | "AARCH64BE" | "AARCH64_AppleSilicon" | "ARM7_le" | "ARM7_be"
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrontendCompileReportEntry {
     pub arch: String,
@@ -460,7 +467,7 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
                 endian,
                 variant_class,
                 imported_aux_files: aux_files.clone(),
-                runtime_status: if spec.arch == "x86" && spec.entry_id == "x86-64" {
+                runtime_status: if is_executable_candidate_entry(&spec.entry_id) {
                     "executable_candidate".to_string()
                 } else {
                     "registered_compile_only".to_string()
@@ -822,6 +829,24 @@ mod tests {
             .language_ids
             .iter()
             .any(|id| id == "x86:LE:64:default"));
+        let aarch64 = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.entry_id == "AARCH64")
+            .expect("AARCH64 manifest entry");
+        assert_eq!(aarch64.runtime_status, "executable_candidate");
+        let arm7_le = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.entry_id == "ARM7_le")
+            .expect("ARM7_le manifest entry");
+        assert_eq!(arm7_le.runtime_status, "executable_candidate");
+        let riscv = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.processor == "RISCV")
+            .expect("RISCV manifest entry");
+        assert_eq!(riscv.runtime_status, "registered_compile_only");
     }
 
     #[test]
