@@ -1,5 +1,5 @@
 {
-  "attempted": 56,
+  "attempted": 336,
   "builder": "clang",
   "failed": [
     {
@@ -10,7 +10,63 @@
       "returncode": 1,
       "stderr": "clang: error: unsupported option '-march=' for target 'sparc-none-elf'",
       "stdout": "",
-      "target": "sparc-none-elf"
+      "target": "sparc-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "SparcV9_32",
+      "flags": [
+        "-march=v9"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unsupported option '-march=' for target 'sparc-none-elf'",
+      "stdout": "",
+      "target": "sparc-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "SparcV9_32",
+      "flags": [
+        "-march=v9"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unsupported option '-march=' for target 'sparc-none-elf'",
+      "stdout": "",
+      "target": "sparc-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "SparcV9_32",
+      "flags": [
+        "-march=v9"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unsupported option '-march=' for target 'sparc-none-elf'",
+      "stdout": "",
+      "target": "sparc-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "SparcV9_32",
+      "flags": [
+        "-march=v9"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unsupported option '-march=' for target 'sparc-none-elf'",
+      "stdout": "",
+      "target": "sparc-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "SparcV9_32",
+      "flags": [
+        "-march=v9"
+      ],
+      "returncode": 1,
+      "stderr": "clang++: error: unsupported option '-march=' for target 'sparc-none-elf'",
+      "stdout": "",
+      "target": "sparc-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_altivec_vle_be",
@@ -21,7 +77,68 @@
       "returncode": 1,
       "stderr": "clang: error: unknown argument: '-mvle'",
       "stdout": "",
-      "target": "powerpc64-none-elf"
+      "target": "powerpc64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_vle_be",
+      "flags": [
+        "-maltivec",
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_vle_be",
+      "flags": [
+        "-maltivec",
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_vle_be",
+      "flags": [
+        "-maltivec",
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_vle_be",
+      "flags": [
+        "-maltivec",
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_vle_be",
+      "flags": [
+        "-maltivec",
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang++: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_vle_be",
@@ -31,7 +148,63 @@
       "returncode": 1,
       "stderr": "clang: error: unknown argument: '-mvle'",
       "stdout": "",
-      "target": "powerpc64-none-elf"
+      "target": "powerpc64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_vle_be",
+      "flags": [
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_vle_be",
+      "flags": [
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_vle_be",
+      "flags": [
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_vle_be",
+      "flags": [
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_vle_be",
+      "flags": [
+        "-mvle"
+      ],
+      "returncode": 1,
+      "stderr": "clang++: error: unknown argument: '-mvle'",
+      "stdout": "",
+      "target": "powerpc64-none-elf",
+      "template": "cpp_smoke.cpp"
     }
   ],
   "succeeded": [
@@ -42,7 +215,58 @@
       ],
       "output": "benchmark/binary/AARCH64/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1168,
-      "target": "aarch64-none-elf"
+      "target": "aarch64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "AARCH64",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64/baremetal/small/binary/c/data_structures.o",
+      "size": 1640,
+      "target": "aarch64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "AARCH64",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64/baremetal/small/binary/c/function_calls.o",
+      "size": 1472,
+      "target": "aarch64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "AARCH64",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64/baremetal/small/binary/c/mathematics.o",
+      "size": 1104,
+      "target": "aarch64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "AARCH64",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "size": 2040,
+      "target": "aarch64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "AARCH64",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1208,
+      "target": "aarch64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "AARCH64BE",
@@ -51,14 +275,106 @@
       ],
       "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1168,
-      "target": "aarch64_be-none-elf"
+      "target": "aarch64_be-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "AARCH64BE",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/c/data_structures.o",
+      "size": 1568,
+      "target": "aarch64_be-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "AARCH64BE",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/c/function_calls.o",
+      "size": 1472,
+      "target": "aarch64_be-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "AARCH64BE",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/c/mathematics.o",
+      "size": 1104,
+      "target": "aarch64_be-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "AARCH64BE",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/c/control_flow.o",
+      "size": 2040,
+      "target": "aarch64_be-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "AARCH64BE",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/AARCH64BE/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1208,
+      "target": "aarch64_be-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "AARCH64_AppleSilicon",
       "flags": [],
       "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/llvm_smoke.o",
       "size": 680,
-      "target": "arm64-apple-macos11"
+      "target": "arm64-apple-macos11",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "AARCH64_AppleSilicon",
+      "flags": [],
+      "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/data_structures.o",
+      "size": 1048,
+      "target": "arm64-apple-macos11",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "AARCH64_AppleSilicon",
+      "flags": [],
+      "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/function_calls.o",
+      "size": 896,
+      "target": "arm64-apple-macos11",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "AARCH64_AppleSilicon",
+      "flags": [],
+      "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/mathematics.o",
+      "size": 616,
+      "target": "arm64-apple-macos11",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "AARCH64_AppleSilicon",
+      "flags": [],
+      "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/control_flow.o",
+      "size": 1512,
+      "target": "arm64-apple-macos11",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "AARCH64_AppleSilicon",
+      "flags": [],
+      "output": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 664,
+      "target": "arm64-apple-macos11",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM4_be",
@@ -68,7 +384,63 @@
       ],
       "output": "benchmark/binary/ARM4_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1652,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM4_be",
+      "flags": [
+        "-march=armv4",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1204,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM4_be",
+      "flags": [
+        "-march=armv4",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1344,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM4_be",
+      "flags": [
+        "-march=armv4",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM4_be",
+      "flags": [
+        "-march=armv4",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM4_be",
+      "flags": [
+        "-march=armv4",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1120,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM4_le",
@@ -77,7 +449,58 @@
       ],
       "output": "benchmark/binary/ARM4_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1652,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM4_le",
+      "flags": [
+        "-march=armv4"
+      ],
+      "output": "benchmark/binary/ARM4_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1200,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM4_le",
+      "flags": [
+        "-march=armv4"
+      ],
+      "output": "benchmark/binary/ARM4_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1344,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM4_le",
+      "flags": [
+        "-march=armv4"
+      ],
+      "output": "benchmark/binary/ARM4_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM4_le",
+      "flags": [
+        "-march=armv4"
+      ],
+      "output": "benchmark/binary/ARM4_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM4_le",
+      "flags": [
+        "-march=armv4"
+      ],
+      "output": "benchmark/binary/ARM4_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1120,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM4t_be",
@@ -87,7 +510,63 @@
       ],
       "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1656,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM4t_be",
+      "flags": [
+        "-march=armv4t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1208,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM4t_be",
+      "flags": [
+        "-march=armv4t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1348,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM4t_be",
+      "flags": [
+        "-march=armv4t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM4t_be",
+      "flags": [
+        "-march=armv4t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2408,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM4t_be",
+      "flags": [
+        "-march=armv4t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM4t_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM4t_le",
@@ -96,7 +575,58 @@
       ],
       "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1656,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM4t_le",
+      "flags": [
+        "-march=armv4t"
+      ],
+      "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1204,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM4t_le",
+      "flags": [
+        "-march=armv4t"
+      ],
+      "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1348,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM4t_le",
+      "flags": [
+        "-march=armv4t"
+      ],
+      "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM4t_le",
+      "flags": [
+        "-march=armv4t"
+      ],
+      "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2408,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM4t_le",
+      "flags": [
+        "-march=armv4t"
+      ],
+      "output": "benchmark/binary/ARM4t_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM5_be",
@@ -106,7 +636,63 @@
       ],
       "output": "benchmark/binary/ARM5_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1648,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM5_be",
+      "flags": [
+        "-march=armv5te",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1204,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM5_be",
+      "flags": [
+        "-march=armv5te",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM5_be",
+      "flags": [
+        "-march=armv5te",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM5_be",
+      "flags": [
+        "-march=armv5te",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM5_be",
+      "flags": [
+        "-march=armv5te",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM5_le",
@@ -115,7 +701,58 @@
       ],
       "output": "benchmark/binary/ARM5_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1648,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM5_le",
+      "flags": [
+        "-march=armv5te"
+      ],
+      "output": "benchmark/binary/ARM5_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1200,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM5_le",
+      "flags": [
+        "-march=armv5te"
+      ],
+      "output": "benchmark/binary/ARM5_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM5_le",
+      "flags": [
+        "-march=armv5te"
+      ],
+      "output": "benchmark/binary/ARM5_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM5_le",
+      "flags": [
+        "-march=armv5te"
+      ],
+      "output": "benchmark/binary/ARM5_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM5_le",
+      "flags": [
+        "-march=armv5te"
+      ],
+      "output": "benchmark/binary/ARM5_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM5t_be",
@@ -125,7 +762,63 @@
       ],
       "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1648,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM5t_be",
+      "flags": [
+        "-march=armv5t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1204,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM5t_be",
+      "flags": [
+        "-march=armv5t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM5t_be",
+      "flags": [
+        "-march=armv5t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM5t_be",
+      "flags": [
+        "-march=armv5t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM5t_be",
+      "flags": [
+        "-march=armv5t",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM5t_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM5t_le",
@@ -134,7 +827,58 @@
       ],
       "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1648,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM5t_le",
+      "flags": [
+        "-march=armv5t"
+      ],
+      "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1200,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM5t_le",
+      "flags": [
+        "-march=armv5t"
+      ],
+      "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM5t_le",
+      "flags": [
+        "-march=armv5t"
+      ],
+      "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1064,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM5t_le",
+      "flags": [
+        "-march=armv5t"
+      ],
+      "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2404,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM5t_le",
+      "flags": [
+        "-march=armv5t"
+      ],
+      "output": "benchmark/binary/ARM5t_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1124,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM6_be",
@@ -144,7 +888,63 @@
       ],
       "output": "benchmark/binary/ARM6_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1652,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM6_be",
+      "flags": [
+        "-march=armv6",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM6_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1156,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM6_be",
+      "flags": [
+        "-march=armv6",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM6_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM6_be",
+      "flags": [
+        "-march=armv6",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM6_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM6_be",
+      "flags": [
+        "-march=armv6",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM6_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2416,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM6_be",
+      "flags": [
+        "-march=armv6",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM6_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1128,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM6_le",
@@ -153,7 +953,58 @@
       ],
       "output": "benchmark/binary/ARM6_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1652,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM6_le",
+      "flags": [
+        "-march=armv6"
+      ],
+      "output": "benchmark/binary/ARM6_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1156,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM6_le",
+      "flags": [
+        "-march=armv6"
+      ],
+      "output": "benchmark/binary/ARM6_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1340,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM6_le",
+      "flags": [
+        "-march=armv6"
+      ],
+      "output": "benchmark/binary/ARM6_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM6_le",
+      "flags": [
+        "-march=armv6"
+      ],
+      "output": "benchmark/binary/ARM6_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2416,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM6_le",
+      "flags": [
+        "-march=armv6"
+      ],
+      "output": "benchmark/binary/ARM6_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1128,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM7_be",
@@ -163,7 +1014,63 @@
       ],
       "output": "benchmark/binary/ARM7_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1096,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM7_be",
+      "flags": [
+        "-march=armv7-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM7_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1140,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM7_be",
+      "flags": [
+        "-march=armv7-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM7_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1320,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM7_be",
+      "flags": [
+        "-march=armv7-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM7_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1044,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM7_be",
+      "flags": [
+        "-march=armv7-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM7_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2328,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM7_be",
+      "flags": [
+        "-march=armv7-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM7_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1084,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM7_le",
@@ -172,7 +1079,58 @@
       ],
       "output": "benchmark/binary/ARM7_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1096,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM7_le",
+      "flags": [
+        "-march=armv7-a"
+      ],
+      "output": "benchmark/binary/ARM7_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1136,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM7_le",
+      "flags": [
+        "-march=armv7-a"
+      ],
+      "output": "benchmark/binary/ARM7_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1320,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM7_le",
+      "flags": [
+        "-march=armv7-a"
+      ],
+      "output": "benchmark/binary/ARM7_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1044,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM7_le",
+      "flags": [
+        "-march=armv7-a"
+      ],
+      "output": "benchmark/binary/ARM7_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2328,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM7_le",
+      "flags": [
+        "-march=armv7-a"
+      ],
+      "output": "benchmark/binary/ARM7_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1084,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM8_be",
@@ -182,7 +1140,63 @@
       ],
       "output": "benchmark/binary/ARM8_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1100,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM8_be",
+      "flags": [
+        "-march=armv8-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1144,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM8_be",
+      "flags": [
+        "-march=armv8-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1324,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM8_be",
+      "flags": [
+        "-march=armv8-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1000,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM8_be",
+      "flags": [
+        "-march=armv8-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2332,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM8_be",
+      "flags": [
+        "-march=armv8-a",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1088,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM8_le",
@@ -191,7 +1205,58 @@
       ],
       "output": "benchmark/binary/ARM8_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1100,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM8_le",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/ARM8_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1140,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM8_le",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/ARM8_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1324,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM8_le",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/ARM8_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1000,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM8_le",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/ARM8_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2332,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM8_le",
+      "flags": [
+        "-march=armv8-a"
+      ],
+      "output": "benchmark/binary/ARM8_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1088,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM8m_be",
@@ -201,7 +1266,63 @@
       ],
       "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1520,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM8m_be",
+      "flags": [
+        "-march=armv8-m.main",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1096,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM8m_be",
+      "flags": [
+        "-march=armv8-m.main",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1252,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM8m_be",
+      "flags": [
+        "-march=armv8-m.main",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/c/mathematics.o",
+      "size": 980,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM8m_be",
+      "flags": [
+        "-march=armv8-m.main",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1800,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM8m_be",
+      "flags": [
+        "-march=armv8-m.main",
+        "-mbig-endian"
+      ],
+      "output": "benchmark/binary/ARM8m_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ARM8m_le",
@@ -210,35 +1331,250 @@
       ],
       "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1520,
-      "target": "arm-none-eabi"
+      "target": "arm-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ARM8m_le",
+      "flags": [
+        "-march=armv8-m.main"
+      ],
+      "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1092,
+      "target": "arm-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ARM8m_le",
+      "flags": [
+        "-march=armv8-m.main"
+      ],
+      "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1252,
+      "target": "arm-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ARM8m_le",
+      "flags": [
+        "-march=armv8-m.main"
+      ],
+      "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/mathematics.o",
+      "size": 980,
+      "target": "arm-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ARM8m_le",
+      "flags": [
+        "-march=armv8-m.main"
+      ],
+      "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1800,
+      "target": "arm-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ARM8m_le",
+      "flags": [
+        "-march=armv8-m.main"
+      ],
+      "output": "benchmark/binary/ARM8m_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1068,
+      "target": "arm-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "BPF_le",
       "flags": [],
       "output": "benchmark/binary/BPF_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1184,
-      "target": "bpfel"
+      "target": "bpfel",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "BPF_le",
+      "flags": [],
+      "output": "benchmark/binary/BPF_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1368,
+      "target": "bpfel",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "BPF_le",
+      "flags": [],
+      "output": "benchmark/binary/BPF_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1440,
+      "target": "bpfel",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "BPF_le",
+      "flags": [],
+      "output": "benchmark/binary/BPF_le/baremetal/small/binary/c/mathematics.o",
+      "size": 944,
+      "target": "bpfel",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "BPF_le",
+      "flags": [],
+      "output": "benchmark/binary/BPF_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2872,
+      "target": "bpfel",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "BPF_le",
+      "flags": [],
+      "output": "benchmark/binary/BPF_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 968,
+      "target": "bpfel",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "SparcV9_64",
       "flags": [],
       "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1176,
-      "target": "sparcv9-none-elf"
+      "target": "sparcv9-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "SparcV9_64",
+      "flags": [],
+      "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/c/data_structures.o",
+      "size": 1256,
+      "target": "sparcv9-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "SparcV9_64",
+      "flags": [],
+      "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/c/function_calls.o",
+      "size": 1440,
+      "target": "sparcv9-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "SparcV9_64",
+      "flags": [],
+      "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/c/mathematics.o",
+      "size": 1080,
+      "target": "sparcv9-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "SparcV9_64",
+      "flags": [],
+      "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/c/control_flow.o",
+      "size": 2272,
+      "target": "sparcv9-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "SparcV9_64",
+      "flags": [],
+      "output": "benchmark/binary/SparcV9_64/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1200,
+      "target": "sparcv9-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "eBPF_be",
       "flags": [],
       "output": "benchmark/binary/eBPF_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1184,
-      "target": "bpfeb"
+      "target": "bpfeb",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "eBPF_be",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1368,
+      "target": "bpfeb",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "eBPF_be",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1440,
+      "target": "bpfeb",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "eBPF_be",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_be/baremetal/small/binary/c/mathematics.o",
+      "size": 944,
+      "target": "bpfeb",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "eBPF_be",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2872,
+      "target": "bpfeb",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "eBPF_be",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 968,
+      "target": "bpfeb",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "eBPF_le",
       "flags": [],
       "output": "benchmark/binary/eBPF_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1184,
-      "target": "bpfel"
+      "target": "bpfel",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "eBPF_le",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1368,
+      "target": "bpfel",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "eBPF_le",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1440,
+      "target": "bpfel",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "eBPF_le",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_le/baremetal/small/binary/c/mathematics.o",
+      "size": 944,
+      "target": "bpfel",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "eBPF_le",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2872,
+      "target": "bpfel",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "eBPF_le",
+      "flags": [],
+      "output": "benchmark/binary/eBPF_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 968,
+      "target": "bpfel",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "loongarch32_f32",
@@ -248,7 +1584,63 @@
       ],
       "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/c/llvm_smoke.o",
       "size": 944,
-      "target": "loongarch32-none-elf"
+      "target": "loongarch32-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "loongarch32_f32",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32f"
+      ],
+      "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/c/data_structures.o",
+      "size": 980,
+      "target": "loongarch32-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "loongarch32_f32",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32f"
+      ],
+      "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/c/function_calls.o",
+      "size": 1216,
+      "target": "loongarch32-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "loongarch32_f32",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32f"
+      ],
+      "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/c/mathematics.o",
+      "size": 812,
+      "target": "loongarch32-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "loongarch32_f32",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32f"
+      ],
+      "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/c/control_flow.o",
+      "size": 3112,
+      "target": "loongarch32-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "loongarch32_f32",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32f"
+      ],
+      "output": "benchmark/binary/loongarch32_f32/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 904,
+      "target": "loongarch32-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "loongarch32_f64",
@@ -258,7 +1650,63 @@
       ],
       "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/c/llvm_smoke.o",
       "size": 944,
-      "target": "loongarch32-none-elf"
+      "target": "loongarch32-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "loongarch32_f64",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/c/data_structures.o",
+      "size": 980,
+      "target": "loongarch32-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "loongarch32_f64",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o",
+      "size": 1216,
+      "target": "loongarch32-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "loongarch32_f64",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/c/mathematics.o",
+      "size": 812,
+      "target": "loongarch32-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "loongarch32_f64",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/c/control_flow.o",
+      "size": 3112,
+      "target": "loongarch32-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "loongarch32_f64",
+      "flags": [
+        "-march=loongarch32",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/loongarch32_f64/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 904,
+      "target": "loongarch32-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "loongarch64_f32",
@@ -268,7 +1716,63 @@
       ],
       "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1152,
-      "target": "loongarch64-none-elf"
+      "target": "loongarch64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "loongarch64_f32",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64f"
+      ],
+      "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/c/data_structures.o",
+      "size": 1208,
+      "target": "loongarch64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "loongarch64_f32",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64f"
+      ],
+      "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/c/function_calls.o",
+      "size": 1880,
+      "target": "loongarch64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "loongarch64_f32",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64f"
+      ],
+      "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/c/mathematics.o",
+      "size": 1056,
+      "target": "loongarch64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "loongarch64_f32",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64f"
+      ],
+      "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/c/control_flow.o",
+      "size": 5024,
+      "target": "loongarch64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "loongarch64_f32",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64f"
+      ],
+      "output": "benchmark/binary/loongarch64_f32/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1160,
+      "target": "loongarch64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "loongarch64_f64",
@@ -278,7 +1782,63 @@
       ],
       "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1152,
-      "target": "loongarch64-none-elf"
+      "target": "loongarch64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "loongarch64_f64",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/c/data_structures.o",
+      "size": 1208,
+      "target": "loongarch64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "loongarch64_f64",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o",
+      "size": 1880,
+      "target": "loongarch64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "loongarch64_f64",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/c/mathematics.o",
+      "size": 1056,
+      "target": "loongarch64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "loongarch64_f64",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/c/control_flow.o",
+      "size": 5024,
+      "target": "loongarch64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "loongarch64_f64",
+      "flags": [
+        "-march=loongarch64",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/loongarch64_f64/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1160,
+      "target": "loongarch64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips32R6be",
@@ -287,7 +1847,58 @@
       ],
       "output": "benchmark/binary/mips32R6be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1328,
-      "target": "mips-none-elf"
+      "target": "mips-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips32R6be",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6be/baremetal/small/binary/c/data_structures.o",
+      "size": 1428,
+      "target": "mips-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips32R6be",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6be/baremetal/small/binary/c/function_calls.o",
+      "size": 1856,
+      "target": "mips-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips32R6be",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6be/baremetal/small/binary/c/mathematics.o",
+      "size": 1192,
+      "target": "mips-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips32R6be",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6be/baremetal/small/binary/c/control_flow.o",
+      "size": 2944,
+      "target": "mips-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips32R6be",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1364,
+      "target": "mips-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips32R6le",
@@ -296,7 +1907,58 @@
       ],
       "output": "benchmark/binary/mips32R6le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1328,
-      "target": "mipsel-none-elf"
+      "target": "mipsel-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips32R6le",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6le/baremetal/small/binary/c/data_structures.o",
+      "size": 1428,
+      "target": "mipsel-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips32R6le",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6le/baremetal/small/binary/c/function_calls.o",
+      "size": 1856,
+      "target": "mipsel-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips32R6le",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6le/baremetal/small/binary/c/mathematics.o",
+      "size": 1192,
+      "target": "mipsel-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips32R6le",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6le/baremetal/small/binary/c/control_flow.o",
+      "size": 2944,
+      "target": "mipsel-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips32R6le",
+      "flags": [
+        "-march=mips32r6"
+      ],
+      "output": "benchmark/binary/mips32R6le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1364,
+      "target": "mipsel-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips32be",
@@ -305,7 +1967,58 @@
       ],
       "output": "benchmark/binary/mips32be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1328,
-      "target": "mips-none-elf"
+      "target": "mips-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips32be",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32be/baremetal/small/binary/c/data_structures.o",
+      "size": 1460,
+      "target": "mips-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips32be",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32be/baremetal/small/binary/c/function_calls.o",
+      "size": 1840,
+      "target": "mips-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips32be",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32be/baremetal/small/binary/c/mathematics.o",
+      "size": 1208,
+      "target": "mips-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips32be",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32be/baremetal/small/binary/c/control_flow.o",
+      "size": 3056,
+      "target": "mips-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips32be",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1380,
+      "target": "mips-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips32le",
@@ -314,7 +2027,58 @@
       ],
       "output": "benchmark/binary/mips32le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1328,
-      "target": "mipsel-none-elf"
+      "target": "mipsel-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips32le",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32le/baremetal/small/binary/c/data_structures.o",
+      "size": 1460,
+      "target": "mipsel-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips32le",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32le/baremetal/small/binary/c/function_calls.o",
+      "size": 1840,
+      "target": "mipsel-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips32le",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32le/baremetal/small/binary/c/mathematics.o",
+      "size": 1208,
+      "target": "mipsel-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips32le",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32le/baremetal/small/binary/c/control_flow.o",
+      "size": 3056,
+      "target": "mipsel-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips32le",
+      "flags": [
+        "-march=mips32"
+      ],
+      "output": "benchmark/binary/mips32le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1380,
+      "target": "mipsel-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips64be",
@@ -323,7 +2087,58 @@
       ],
       "output": "benchmark/binary/mips64be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1808,
-      "target": "mips64-none-elf"
+      "target": "mips64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips64be",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64be/baremetal/small/binary/c/data_structures.o",
+      "size": 1984,
+      "target": "mips64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips64be",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64be/baremetal/small/binary/c/function_calls.o",
+      "size": 2640,
+      "target": "mips64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips64be",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64be/baremetal/small/binary/c/mathematics.o",
+      "size": 1728,
+      "target": "mips64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips64be",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64be/baremetal/small/binary/c/control_flow.o",
+      "size": 4344,
+      "target": "mips64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips64be",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 2000,
+      "target": "mips64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "mips64le",
@@ -332,7 +2147,58 @@
       ],
       "output": "benchmark/binary/mips64le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1808,
-      "target": "mips64el-none-elf"
+      "target": "mips64el-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "mips64le",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64le/baremetal/small/binary/c/data_structures.o",
+      "size": 1984,
+      "target": "mips64el-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "mips64le",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64le/baremetal/small/binary/c/function_calls.o",
+      "size": 2640,
+      "target": "mips64el-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "mips64le",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64le/baremetal/small/binary/c/mathematics.o",
+      "size": 1728,
+      "target": "mips64el-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "mips64le",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64le/baremetal/small/binary/c/control_flow.o",
+      "size": 4344,
+      "target": "mips64el-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "mips64le",
+      "flags": [
+        "-march=mips64"
+      ],
+      "output": "benchmark/binary/mips64le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 2000,
+      "target": "mips64el-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_4xx_be",
@@ -341,7 +2207,58 @@
       ],
       "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpc-none-eabi"
+      "target": "powerpc-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_be",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpc-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_be",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpc-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_be",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpc-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_be",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpc-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_be",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpc-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_4xx_le",
@@ -350,14 +2267,106 @@
       ],
       "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpcle-none-eabi"
+      "target": "powerpcle-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_le",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpcle-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_le",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpcle-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_le",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpcle-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_le",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpcle-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_4xx_le",
+      "flags": [
+        "-mcpu=405"
+      ],
+      "output": "benchmark/binary/ppc_32_4xx_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpcle-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_be",
       "flags": [],
       "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpc-none-eabi"
+      "target": "powerpc-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpc-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpc-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpc-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpc-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpc-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_e500_be",
@@ -366,7 +2375,58 @@
       ],
       "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 900,
-      "target": "powerpc-none-eabi"
+      "target": "powerpc-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_be",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/data_structures.o",
+      "size": 924,
+      "target": "powerpc-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_be",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1188,
+      "target": "powerpc-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_be",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/mathematics.o",
+      "size": 748,
+      "target": "powerpc-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_be",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1780,
+      "target": "powerpc-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_be",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 860,
+      "target": "powerpc-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_e500_le",
@@ -375,7 +2435,58 @@
       ],
       "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 900,
-      "target": "powerpcle-none-eabi"
+      "target": "powerpcle-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_le",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/data_structures.o",
+      "size": 924,
+      "target": "powerpcle-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_le",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1188,
+      "target": "powerpcle-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_le",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/mathematics.o",
+      "size": 748,
+      "target": "powerpcle-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_le",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1780,
+      "target": "powerpcle-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_e500_le",
+      "flags": [
+        "-mcpu=e500"
+      ],
+      "output": "benchmark/binary/ppc_32_e500_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 860,
+      "target": "powerpcle-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_e500mc_be",
@@ -384,7 +2495,58 @@
       ],
       "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 900,
-      "target": "powerpc-none-eabi"
+      "target": "powerpc-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_be",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/data_structures.o",
+      "size": 924,
+      "target": "powerpc-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_be",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1188,
+      "target": "powerpc-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_be",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/mathematics.o",
+      "size": 748,
+      "target": "powerpc-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_be",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1780,
+      "target": "powerpc-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_be",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 860,
+      "target": "powerpc-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_e500mc_le",
@@ -393,14 +2555,106 @@
       ],
       "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 900,
-      "target": "powerpcle-none-eabi"
+      "target": "powerpcle-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_le",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/data_structures.o",
+      "size": 924,
+      "target": "powerpcle-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_le",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1188,
+      "target": "powerpcle-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_le",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/mathematics.o",
+      "size": 748,
+      "target": "powerpcle-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_le",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1780,
+      "target": "powerpcle-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_e500mc_le",
+      "flags": [
+        "-mcpu=e500mc"
+      ],
+      "output": "benchmark/binary/ppc_32_e500mc_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 860,
+      "target": "powerpcle-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_le",
       "flags": [],
       "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpcle-none-eabi"
+      "target": "powerpcle-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpcle-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpcle-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpcle-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpcle-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_32_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpcle-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_quicciii_be",
@@ -409,7 +2663,58 @@
       ],
       "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpc-none-eabi"
+      "target": "powerpc-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_be",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpc-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_be",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpc-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_be",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpc-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_be",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpc-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_be",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpc-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_32_quicciii_le",
@@ -418,14 +2723,106 @@
       ],
       "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 876,
-      "target": "powerpcle-none-eabi"
+      "target": "powerpcle-none-eabi",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_le",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "powerpcle-none-eabi",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_le",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1140,
+      "target": "powerpcle-none-eabi",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_le",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/mathematics.o",
+      "size": 736,
+      "target": "powerpcle-none-eabi",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_le",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/c/control_flow.o",
+      "size": 1704,
+      "target": "powerpcle-none-eabi",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_32_quicciii_le",
+      "flags": [
+        "-mcpu=603e"
+      ],
+      "output": "benchmark/binary/ppc_32_quicciii_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 832,
+      "target": "powerpcle-none-eabi",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_be",
       "flags": [],
       "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1408,
-      "target": "powerpc64-none-elf"
+      "target": "powerpc64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1560,
+      "target": "powerpc64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/c/function_calls.o",
+      "size": 2240,
+      "target": "powerpc64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1304,
+      "target": "powerpc64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2464,
+      "target": "powerpc64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1632,
+      "target": "powerpc64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_altivec_be",
@@ -434,7 +2831,58 @@
       ],
       "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1408,
-      "target": "powerpc64-none-elf"
+      "target": "powerpc64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_be",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1560,
+      "target": "powerpc64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_be",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/function_calls.o",
+      "size": 2240,
+      "target": "powerpc64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_be",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1304,
+      "target": "powerpc64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_be",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2464,
+      "target": "powerpc64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_be",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1632,
+      "target": "powerpc64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_altivec_le",
@@ -443,28 +2891,202 @@
       ],
       "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1240,
-      "target": "powerpc64le-none-elf"
+      "target": "powerpc64le-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_le",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1288,
+      "target": "powerpc64le-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_le",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1824,
+      "target": "powerpc64le-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_le",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1120,
+      "target": "powerpc64le-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_le",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2472,
+      "target": "powerpc64le-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_altivec_le",
+      "flags": [
+        "-maltivec"
+      ],
+      "output": "benchmark/binary/ppc_64_isa_altivec_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1424,
+      "target": "powerpc64le-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_be",
       "flags": [],
       "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1408,
-      "target": "powerpc64-none-elf"
+      "target": "powerpc64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/data_structures.o",
+      "size": 1560,
+      "target": "powerpc64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/function_calls.o",
+      "size": 2240,
+      "target": "powerpc64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/mathematics.o",
+      "size": 1304,
+      "target": "powerpc64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/c/control_flow.o",
+      "size": 2464,
+      "target": "powerpc64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_be",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1632,
+      "target": "powerpc64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_isa_le",
       "flags": [],
       "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1240,
-      "target": "powerpc64le-none-elf"
+      "target": "powerpc64le-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1288,
+      "target": "powerpc64le-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1824,
+      "target": "powerpc64le-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1120,
+      "target": "powerpc64le-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2472,
+      "target": "powerpc64le-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_isa_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_isa_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1424,
+      "target": "powerpc64le-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "ppc_64_le",
       "flags": [],
       "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1240,
-      "target": "powerpc64le-none-elf"
+      "target": "powerpc64le-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "ppc_64_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/c/data_structures.o",
+      "size": 1288,
+      "target": "powerpc64le-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "ppc_64_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/c/function_calls.o",
+      "size": 1824,
+      "target": "powerpc64le-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "ppc_64_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/c/mathematics.o",
+      "size": 1120,
+      "target": "powerpc64le-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "ppc_64_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/c/control_flow.o",
+      "size": 2472,
+      "target": "powerpc64le-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "ppc_64_le",
+      "flags": [],
+      "output": "benchmark/binary/ppc_64_le/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1424,
+      "target": "powerpc64le-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "riscv.ilp32d",
@@ -474,7 +3096,63 @@
       ],
       "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1256,
-      "target": "riscv32-none-elf"
+      "target": "riscv32-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "riscv.ilp32d",
+      "flags": [
+        "-march=rv32imafdc",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/data_structures.o",
+      "size": 1340,
+      "target": "riscv32-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "riscv.ilp32d",
+      "flags": [
+        "-march=rv32imafdc",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/function_calls.o",
+      "size": 1488,
+      "target": "riscv32-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "riscv.ilp32d",
+      "flags": [
+        "-march=rv32imafdc",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/mathematics.o",
+      "size": 1000,
+      "target": "riscv32-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "riscv.ilp32d",
+      "flags": [
+        "-march=rv32imafdc",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/c/control_flow.o",
+      "size": 3220,
+      "target": "riscv32-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "riscv.ilp32d",
+      "flags": [
+        "-march=rv32imafdc",
+        "-mabi=ilp32d"
+      ],
+      "output": "benchmark/binary/riscv.ilp32d/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1084,
+      "target": "riscv32-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "riscv.lp64d",
@@ -484,7 +3162,63 @@
       ],
       "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1656,
-      "target": "riscv64-none-elf"
+      "target": "riscv64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "riscv.lp64d",
+      "flags": [
+        "-march=rv64imafdc",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/c/data_structures.o",
+      "size": 1856,
+      "target": "riscv64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "riscv.lp64d",
+      "flags": [
+        "-march=rv64imafdc",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/c/function_calls.o",
+      "size": 1944,
+      "target": "riscv64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "riscv.lp64d",
+      "flags": [
+        "-march=rv64imafdc",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/c/mathematics.o",
+      "size": 1368,
+      "target": "riscv64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "riscv.lp64d",
+      "flags": [
+        "-march=rv64imafdc",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/c/control_flow.o",
+      "size": 4856,
+      "target": "riscv64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "riscv.lp64d",
+      "flags": [
+        "-march=rv64imafdc",
+        "-mabi=lp64d"
+      ],
+      "output": "benchmark/binary/riscv.lp64d/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1504,
+      "target": "riscv64-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "x86",
@@ -493,15 +3227,107 @@
       ],
       "output": "benchmark/binary/x86/baremetal/small/binary/c/llvm_smoke.o",
       "size": 880,
-      "target": "i686-none-elf"
+      "target": "i686-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "x86",
+      "flags": [
+        "-march=pentiumpro"
+      ],
+      "output": "benchmark/binary/x86/baremetal/small/binary/c/data_structures.o",
+      "size": 900,
+      "target": "i686-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "x86",
+      "flags": [
+        "-march=pentiumpro"
+      ],
+      "output": "benchmark/binary/x86/baremetal/small/binary/c/function_calls.o",
+      "size": 1040,
+      "target": "i686-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "x86",
+      "flags": [
+        "-march=pentiumpro"
+      ],
+      "output": "benchmark/binary/x86/baremetal/small/binary/c/mathematics.o",
+      "size": 732,
+      "target": "i686-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "x86",
+      "flags": [
+        "-march=pentiumpro"
+      ],
+      "output": "benchmark/binary/x86/baremetal/small/binary/c/control_flow.o",
+      "size": 1832,
+      "target": "i686-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "x86",
+      "flags": [
+        "-march=pentiumpro"
+      ],
+      "output": "benchmark/binary/x86/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 792,
+      "target": "i686-none-elf",
+      "template": "cpp_smoke.cpp"
     },
     {
       "entry_id": "x86-64",
       "flags": [],
       "output": "benchmark/binary/x86-64/baremetal/small/binary/c/llvm_smoke.o",
       "size": 1104,
-      "target": "x86_64-none-elf"
+      "target": "x86_64-none-elf",
+      "template": "llvm_smoke.c"
+    },
+    {
+      "entry_id": "x86-64",
+      "flags": [],
+      "output": "benchmark/binary/x86-64/baremetal/small/binary/c/data_structures.o",
+      "size": 1192,
+      "target": "x86_64-none-elf",
+      "template": "data_structures.c"
+    },
+    {
+      "entry_id": "x86-64",
+      "flags": [],
+      "output": "benchmark/binary/x86-64/baremetal/small/binary/c/function_calls.o",
+      "size": 1352,
+      "target": "x86_64-none-elf",
+      "template": "function_calls.c"
+    },
+    {
+      "entry_id": "x86-64",
+      "flags": [],
+      "output": "benchmark/binary/x86-64/baremetal/small/binary/c/mathematics.o",
+      "size": 1000,
+      "target": "x86_64-none-elf",
+      "template": "mathematics.c"
+    },
+    {
+      "entry_id": "x86-64",
+      "flags": [],
+      "output": "benchmark/binary/x86-64/baremetal/small/binary/c/control_flow.o",
+      "size": 2776,
+      "target": "x86_64-none-elf",
+      "template": "control_flow.c"
+    },
+    {
+      "entry_id": "x86-64",
+      "flags": [],
+      "output": "benchmark/binary/x86-64/baremetal/small/binary/cpp/cpp_smoke.o",
+      "size": 1096,
+      "target": "x86_64-none-elf",
+      "template": "cpp_smoke.cpp"
     }
   ],
-  "template": "/Users/sjkim1127/Fission/benchmark/binary/templates/llvm_smoke.c"
+  "templates_dir": "/Users/sjkim1127/Fission/benchmark/binary/templates"
 }

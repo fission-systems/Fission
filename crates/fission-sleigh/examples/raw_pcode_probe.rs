@@ -1,11 +1,75 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{PcodeOp, Varnode};
+use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+use fission_sleigh::compiler::{
+    load_construct_templates_from_sla, CompiledSpaceRef,
+};
 use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use serde::Serialize;
+
+/// Maps Fission's internal dense `space_id` → Ghidra-native `CompiledSpaceRef`.
+/// Built from the SLA template library's canonical space definitions so the
+/// probe output matches Ghidra's own raw P-code dump exactly.
+#[derive(Debug, Clone)]
+struct SpaceMap {
+    /// space_id (SLA native index) → CompiledSpaceRef {name, index}
+    by_id: BTreeMap<u64, CompiledSpaceRef>,
+}
+
+impl SpaceMap {
+    fn from_sla_spaces(spaces: &BTreeMap<u64, CompiledSpaceRef>) -> Self {
+        Self {
+            by_id: spaces.clone(),
+        }
+    }
+
+    fn empty() -> Self {
+        let mut by_id = BTreeMap::new();
+        by_id.insert(
+            0,
+            CompiledSpaceRef {
+                name: "const".to_string(),
+                index: 0,
+            },
+        );
+        Self { by_id }
+    }
+
+    fn resolve_name(&self, space_id: u64) -> String {
+        self.by_id
+            .get(&space_id)
+            .map(|space| space.name.clone())
+            .unwrap_or_else(|| format!("space_{space_id}"))
+    }
+
+    /// For LOAD/STORE, the first input is a constant whose value is the space
+    /// being accessed. Fission stores its internal dense index; Ghidra stores
+    /// the native SLA index. This translates from the internal value to the
+    /// native Ghidra `spaceId` integer that the oracle comparison expects.
+    ///
+    /// In practice, the SLA parser sets `CompiledSpaceRef.index` to the native
+    /// SLA index, and the emitter stores that same value in `Varnode.space_id`.
+    /// For `LOAD`/`STORE` constant inputs, the value IS the space index, so we
+    /// must map it back to the SLA-native `spaceId` that Ghidra uses — which
+    /// is actually the "unique space ID" as Ghidra's `AddrSpace.getSpaceID()`
+    /// encodes it (typically `(type << 8) | index`).
+    fn translate_load_store_space_constant(&self, constant_val: i64) -> i64 {
+        let internal_id = constant_val as u64;
+        if let Some(space) = self.by_id.get(&internal_id) {
+            // The SLA native index IS the Ghidra spaceId for raw p-code.
+            // Ghidra's getSpaceID() returns a packed value, but for raw p-code
+            // comparison the oracle just uses the native index from the SLA.
+            // The space.index from the SLA decode_spaces is exactly this.
+            space.index as i64
+        } else {
+            constant_val
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct ProbeReport {
@@ -17,6 +81,7 @@ struct ProbeReport {
     compat_emitter_used: bool,
     start_address: u64,
     requested_count: usize,
+    space_map: BTreeMap<String, u64>,
     instructions: Vec<InstructionReport>,
 }
 
@@ -37,18 +102,79 @@ struct SerializablePcodeOp {
     seq_num: u32,
     opcode: String,
     address: u64,
-    output: Option<Varnode>,
-    inputs: Vec<Varnode>,
+    output: Option<SerializableVarnode>,
+    inputs: Vec<SerializableVarnode>,
 }
 
-impl From<&PcodeOp> for SerializablePcodeOp {
-    fn from(op: &PcodeOp) -> Self {
+#[derive(Debug, Serialize)]
+struct SerializableVarnode {
+    space: String,
+    space_id: u64,
+    offset: u64,
+    size: u32,
+    is_constant: bool,
+    constant_val: i64,
+}
+
+impl SerializableVarnode {
+    fn from_varnode(vn: &Varnode, space_map: &SpaceMap) -> Self {
+        Self {
+            space: if vn.is_constant {
+                "const".to_string()
+            } else {
+                space_map.resolve_name(vn.space_id)
+            },
+            space_id: vn.space_id,
+            offset: vn.offset,
+            size: vn.size,
+            is_constant: vn.is_constant,
+            constant_val: vn.constant_val,
+        }
+    }
+
+    fn from_varnode_load_store_space(vn: &Varnode, space_map: &SpaceMap) -> Self {
+        // For LOAD/STORE input[0], translate the constant space reference
+        if vn.is_constant {
+            let translated = space_map.translate_load_store_space_constant(vn.constant_val);
+            Self {
+                space: "const".to_string(),
+                space_id: 0,
+                offset: translated as u64,
+                size: vn.size,
+                is_constant: true,
+                constant_val: translated,
+            }
+        } else {
+            Self::from_varnode(vn, space_map)
+        }
+    }
+}
+
+impl SerializablePcodeOp {
+    fn from_op(op: &PcodeOp, space_map: &SpaceMap) -> Self {
+        let is_load_store = matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store);
+        let inputs: Vec<SerializableVarnode> = op
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(idx, vn)| {
+                if is_load_store && idx == 0 {
+                    SerializableVarnode::from_varnode_load_store_space(vn, space_map)
+                } else {
+                    SerializableVarnode::from_varnode(vn, space_map)
+                }
+            })
+            .collect();
+
         Self {
             seq_num: op.seq_num,
             opcode: format!("{:?}", op.opcode),
             address: op.address,
-            output: op.output.clone(),
-            inputs: op.inputs.clone(),
+            output: op
+                .output
+                .as_ref()
+                .map(|vn| SerializableVarnode::from_varnode(vn, space_map)),
+            inputs,
         }
     }
 }
@@ -61,6 +187,56 @@ struct Args {
     window_bytes: usize,
 }
 
+fn load_space_map(frontend: &RuntimeSleighFrontend) -> SpaceMap {
+    // Try to load the SLA template library to get authoritative space definitions
+    let entry = frontend.entry();
+    let sla_path = find_packaged_sla(&entry.entry_id);
+    match sla_path {
+        Some(path) => {
+            match load_construct_templates_from_sla(&path) {
+                Ok(library) => SpaceMap::from_sla_spaces(&library.spaces),
+                Err(_) => SpaceMap::empty(),
+            }
+        }
+        None => SpaceMap::empty(),
+    }
+}
+
+fn find_packaged_sla(entry_id: &str) -> Option<PathBuf> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)?
+        .to_path_buf();
+    let processors_root =
+        repo_root.join("vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors");
+    if !processors_root.exists() {
+        return None;
+    }
+    let wanted_name = format!("{entry_id}.sla");
+    let mut matches = Vec::new();
+    find_named_file(&processors_root, &wanted_name, &mut matches).ok()?;
+    matches.sort();
+    matches.into_iter().next()
+}
+
+fn find_named_file(root: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(root)
+        .with_context(|| format!("read directory {}", root.display()))?
+    {
+        let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("read file type for {}", path.display()))?;
+        if file_type.is_dir() {
+            find_named_file(&path, name, out)?;
+        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = parse_args()?;
     let binary = LoadedBinary::from_file(&args.binary)
@@ -69,6 +245,7 @@ fn main() -> Result<()> {
         .load_spec()
         .ok_or_else(|| anyhow!("loader did not select a load spec"))?;
     let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec)?;
+    let space_map = load_space_map(&frontend);
 
     let mut instructions = Vec::new();
     let mut current = args.address;
@@ -100,7 +277,10 @@ fn main() -> Result<()> {
                     template_source: details
                         .template_source
                         .map(|source| format!("{:?}", source)),
-                    pcode: ops.iter().map(SerializablePcodeOp::from).collect(),
+                    pcode: ops
+                        .iter()
+                        .map(|op| SerializablePcodeOp::from_op(op, &space_map))
+                        .collect(),
                 });
                 if len == 0 {
                     break;
@@ -123,6 +303,13 @@ fn main() -> Result<()> {
         }
     }
 
+    // Export space_map for diagnostic visibility
+    let space_map_json: BTreeMap<String, u64> = space_map
+        .by_id
+        .iter()
+        .map(|(id, space)| (space.name.clone(), *id))
+        .collect();
+
     let report = ProbeReport {
         binary: args.binary.display().to_string(),
         language_id: Some(load_spec.pair.language_id.as_str().to_string()),
@@ -134,6 +321,7 @@ fn main() -> Result<()> {
             .any(|instruction| instruction.compat_emitter_used),
         start_address: args.address,
         requested_count: args.count,
+        space_map: space_map_json,
         instructions,
     };
     println!("{}", serde_json::to_string_pretty(&report)?);

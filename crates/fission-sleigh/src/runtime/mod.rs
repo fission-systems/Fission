@@ -284,6 +284,10 @@ impl RuntimeSleighFrontend {
         self.status
     }
 
+    pub fn compiled_frontend(&self) -> Option<&CompiledFrontend> {
+        self.compiled.as_ref()
+    }
+
     pub fn compile_language_runtime(&self) -> Result<LanguageRuntime> {
         LanguageRuntime::compile(&self.entry)
     }

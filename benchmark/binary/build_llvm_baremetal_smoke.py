@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BINARY_ROOT = ROOT / "benchmark" / "binary"
-SOURCE_TEMPLATE = BINARY_ROOT / "templates" / "llvm_smoke.c"
+TEMPLATES_DIR = BINARY_ROOT / "templates"
 SUMMARY_PATH = BINARY_ROOT / "llvm_baremetal_build_summary.json"
 
 
@@ -78,14 +78,18 @@ TARGET_SPECS: dict[str, dict[str, object]] = {
 
 
 def main() -> int:
-    clang = shutil.which("clang")
-    if clang is None:
-        raise SystemExit("clang not found in PATH")
+    clang_c = shutil.which("clang")
+    clang_cpp = shutil.which("clang++")
+    if not clang_c or not clang_cpp:
+        raise SystemExit("clang or clang++ not found in PATH")
 
-    template_text = SOURCE_TEMPLATE.read_text()
+    templates = list(TEMPLATES_DIR.glob("*.c")) + list(TEMPLATES_DIR.glob("*.cpp"))
+    if not templates:
+        raise SystemExit(f"No templates found in {TEMPLATES_DIR}")
+
     summary: dict[str, object] = {
         "builder": "clang",
-        "template": str(SOURCE_TEMPLATE),
+        "templates_dir": str(TEMPLATES_DIR),
         "attempted": 0,
         "succeeded": [],
         "failed": [],
@@ -103,47 +107,53 @@ def main() -> int:
     for entry_id in sorted(TARGET_SPECS):
         target = str(TARGET_SPECS[entry_id]["target"])
         extra_flags = list(TARGET_SPECS[entry_id]["flags"])
-        source_dir = BINARY_ROOT / entry_id / "baremetal" / "small" / "source" / "c"
-        binary_dir = BINARY_ROOT / entry_id / "baremetal" / "small" / "binary" / "c"
-        source_dir.mkdir(parents=True, exist_ok=True)
-        binary_dir.mkdir(parents=True, exist_ok=True)
+        for template in templates:
+            lang = template.suffix[1:]
+            source_dir = BINARY_ROOT / entry_id / "baremetal" / "small" / "source" / lang
+            binary_dir = BINARY_ROOT / entry_id / "baremetal" / "small" / "binary" / lang
+            source_dir.mkdir(parents=True, exist_ok=True)
+            binary_dir.mkdir(parents=True, exist_ok=True)
 
-        source_path = source_dir / "llvm_smoke.c"
-        source_path.write_text(template_text)
-        output_path = binary_dir / "llvm_smoke.o"
+            source_path = source_dir / template.name
+            source_path.write_text(template.read_text())
+            output_path = binary_dir / template.with_suffix(".o").name
 
-        cmd = [clang, f"--target={target}", *common_flags, *extra_flags, str(source_path), "-o", str(output_path)]
-        summary["attempted"] = int(summary["attempted"]) + 1
-        result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
-        if result.returncode == 0 and output_path.exists():
-            size = output_path.stat().st_size
-            cast = summary["succeeded"]
-            assert isinstance(cast, list)
-            cast.append(
+            compiler = clang_cpp if lang == "cpp" else clang_c
+            lang_flags = ["-fno-exceptions", "-fno-rtti"] if lang == "cpp" else []
+            cmd = [compiler, f"--target={target}", *common_flags, *lang_flags, *extra_flags, str(source_path), "-o", str(output_path)]
+            summary["attempted"] = int(summary["attempted"]) + 1
+            result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+            if result.returncode == 0 and output_path.exists():
+                size = output_path.stat().st_size
+                cast = summary["succeeded"]
+                assert isinstance(cast, list)
+                cast.append(
+                    {
+                        "entry_id": entry_id,
+                        "template": template.name,
+                        "target": target,
+                        "flags": extra_flags,
+                        "output": str(output_path.relative_to(ROOT)),
+                        "size": size,
+                    }
+                )
+                continue
+
+            if output_path.exists():
+                output_path.unlink()
+            failed = summary["failed"]
+            assert isinstance(failed, list)
+            failed.append(
                 {
                     "entry_id": entry_id,
+                    "template": template.name,
                     "target": target,
                     "flags": extra_flags,
-                    "output": str(output_path.relative_to(ROOT)),
-                    "size": size,
+                    "stderr": result.stderr.strip(),
+                    "stdout": result.stdout.strip(),
+                    "returncode": result.returncode,
                 }
             )
-            continue
-
-        if output_path.exists():
-            output_path.unlink()
-        failed = summary["failed"]
-        assert isinstance(failed, list)
-        failed.append(
-            {
-                "entry_id": entry_id,
-                "target": target,
-                "flags": extra_flags,
-                "stderr": result.stderr.strip(),
-                "stdout": result.stdout.strip(),
-                "returncode": result.returncode,
-            }
-        )
 
     SUMMARY_PATH.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     print(

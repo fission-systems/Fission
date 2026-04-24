@@ -9,6 +9,62 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+# Opcodes where input[0] is a constant encoding an address space reference.
+# The raw integer value differs between Ghidra (packed spaceID) and Fission
+# (SLA index). We normalize by resolving to the semantic space name.
+LOAD_STORE_OPCODES = {"LOAD", "STORE"}
+
+
+def build_space_resolver(report: dict[str, Any]) -> dict[int, str]:
+    """Build a resolver from opaque space-id integer → semantic space name.
+
+    Both Ghidra and Fission identify address spaces with integers, but they
+    use different encoding schemes:
+
+    - **Ghidra**: packed spaceID = ``(sla_index << 7) | (logsize << 4) | type``
+    - **Fission**: raw SLA index (the ``unique`` field in Ghidra parlance)
+
+    The resolver maps BOTH encodings to the space name so that LOAD/STORE
+    constant inputs compare equal regardless of which encoding is used.
+
+    For Ghidra reports: scan non-constant varnodes for ``(space_id → name)``
+    pairs. Also extract the SLA index via ``packed >> 7`` and register that.
+
+    For Fission reports: use the explicit ``space_map`` (name → SLA index).
+    """
+    resolver: dict[int, str] = {}
+
+    # Ghidra packed-spaceID shift constant (from AddressSpace.java)
+    ID_UNIQUE_SHIFT = 7
+
+    # Fission includes an explicit space_map {name: index}.
+    space_map = report.get("space_map", {})
+    for name, index in space_map.items():
+        resolver[int(index)] = str(name).lower()
+
+    # Scan all instruction varnodes to harvest (space_id → space name).
+    for instruction in report.get("instructions", []):
+        for op in instruction.get("pcode", []):
+            for vn in [op.get("output")] + op.get("inputs", []):
+                if vn is None:
+                    continue
+                if bool(vn.get("is_constant")):
+                    continue
+                space = vn.get("space")
+                space_id = vn.get("space_id", vn.get("spaceId"))
+                if space is not None and space_id is not None:
+                    sid = int(space_id)
+                    name = str(space).lower()
+                    # Register the packed spaceID itself.
+                    resolver[sid] = name
+                    # Also register the SLA index extracted from the packed
+                    # spaceID, so that Fission's raw SLA index values also
+                    # resolve. (No-op when sid < 128, i.e. already an index.)
+                    sla_index = sid >> ID_UNIQUE_SHIFT
+                    if sla_index not in resolver:
+                        resolver[sla_index] = name
+    return resolver
+
 
 def normalize_opcode(opcode: str | None) -> str:
     if not opcode:
@@ -16,14 +72,32 @@ def normalize_opcode(opcode: str | None) -> str:
     return "".join(ch for ch in opcode.upper() if ch.isalnum())
 
 
-def normalize_varnode(raw: dict[str, Any] | None, unique_map: dict[tuple[Any, Any], int]) -> dict[str, Any] | None:
+def normalize_varnode(
+    raw: dict[str, Any] | None,
+    unique_map: dict[tuple[Any, Any], int],
+    *,
+    is_load_store_space: bool = False,
+    space_resolver: dict[int, str] | None = None,
+) -> dict[str, Any] | None:
     if raw is None:
         return None
     is_constant = bool(raw.get("is_constant"))
     size = int(raw.get("size", 0))
     if is_constant:
         value = raw.get("constant_val", raw.get("offset", 0))
-        return {"space": "const", "value": int(value), "size": size}
+        int_value = int(value)
+        # For LOAD/STORE input[0], the constant encodes an address space.
+        # Ghidra uses a packed spaceID; Fission uses the SLA index.
+        # Normalize to the semantic space name so both sides compare equal.
+        if is_load_store_space and space_resolver:
+            space_name = space_resolver.get(int_value)
+            if space_name is None:
+                # Ghidra packed spaceID: extract the SLA index and retry.
+                sla_index = int_value >> 7  # ID_UNIQUE_SHIFT
+                space_name = space_resolver.get(sla_index)
+            if space_name is not None:
+                return {"space": "const", "value": space_name, "size": size}
+        return {"space": "const", "value": int_value, "size": size}
 
     space = raw.get("space")
     if space is None:
@@ -39,15 +113,30 @@ def normalize_varnode(raw: dict[str, Any] | None, unique_map: dict[tuple[Any, An
     return {"space": normalized_space, "offset": offset, "size": size}
 
 
-def normalize_ops(instruction: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize_ops(
+    instruction: dict[str, Any],
+    space_resolver: dict[int, str] | None = None,
+) -> list[dict[str, Any]]:
     unique_map: dict[tuple[Any, Any], int] = {}
     ops = []
     for op in instruction.get("pcode", []):
+        opcode = normalize_opcode(op.get("opcode"))
+        is_load_store = opcode in LOAD_STORE_OPCODES
+        inputs = []
+        for idx, v in enumerate(op.get("inputs", [])):
+            inputs.append(
+                normalize_varnode(
+                    v,
+                    unique_map,
+                    is_load_store_space=(is_load_store and idx == 0),
+                    space_resolver=space_resolver,
+                )
+            )
         ops.append(
             {
-                "opcode": normalize_opcode(op.get("opcode")),
+                "opcode": opcode,
                 "output": normalize_varnode(op.get("output"), unique_map),
-                "inputs": [normalize_varnode(v, unique_map) for v in op.get("inputs", [])],
+                "inputs": inputs,
             }
         )
     return ops
@@ -239,8 +328,8 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
         detail["ghidra_mnemonic"] = ghidra_mnemonic
         detail["fission_mnemonic"] = fission_mnemonic
 
-    gops = normalize_ops(ghidra)
-    fops = normalize_ops(fission)
+    gops = normalize_ops(ghidra, space_resolver=ghidra.get("_space_resolver"))
+    fops = normalize_ops(fission, space_resolver=fission.get("_space_resolver"))
     detail["ghidra_opcodes"] = [op["opcode"] for op in gops]
     detail["fission_opcodes"] = [op["opcode"] for op in fops]
 
@@ -337,15 +426,26 @@ def main() -> int:
     g_instrs = ghidra.get("instructions", [])
     f_instrs = fission.get("instructions", [])
 
+    # Build a merged space resolver from both reports. Both describe the same
+    # binary and thus the same address spaces, so merging is safe. Fission's
+    # space_map gives SLA indices and Ghidra gives packed spaceIDs; the merged
+    # resolver covers both encoding schemes.
+    merged_resolver = build_space_resolver(ghidra)
+    merged_resolver.update(build_space_resolver(fission))
+
     totals: Counter[str] = Counter()
     owner_hint_totals: Counter[str] = Counter()
     rows = []
     for idx in range(max(len(g_instrs), len(f_instrs))):
         fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
-        buckets, detail = bucket_instruction(
-            g_instrs[idx] if idx < len(g_instrs) else None,
-            fission_instruction,
-        )
+        # Inject the merged resolver into both instructions.
+        g_instr = g_instrs[idx] if idx < len(g_instrs) else None
+        if g_instr is not None:
+            g_instr = {**g_instr, "_space_resolver": merged_resolver}
+        f_instr = fission_instruction
+        if f_instr is not None:
+            f_instr = {**f_instr, "_space_resolver": merged_resolver}
+        buckets, detail = bucket_instruction(g_instr, f_instr)
         for bucket in set(buckets):
             totals[bucket] += 1
         if fission_instruction and fission_instruction.get("compat_emitter_used"):

@@ -81,7 +81,7 @@ pub struct GhidraLanguageManifest {
 fn is_executable_candidate_entry(entry_id: &str) -> bool {
     matches!(
         entry_id,
-        "x86" | "x86-64" | "AARCH64" | "AARCH64BE" | "AARCH64_AppleSilicon" | "ARM7_le" | "ARM7_be"
+        "x86" | "x86-64" | "AARCH64" | "AARCH64BE" | "AARCH64_AppleSilicon" | "ARM7_le" | "ARM7_be" | "mips32le" | "riscv.lp64d"
     )
 }
 

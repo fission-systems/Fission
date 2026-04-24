@@ -2414,7 +2414,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -4334,7 +4334,7 @@
         "riscv64-fp.cspec",
         "riscv64.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "riscv"
       ]
