@@ -15,7 +15,9 @@ pub mod language;
 pub mod template;
 pub mod walker;
 
-pub use construct::{BoundOperand, RuntimeConstructNode, RuntimeConstructState, RuntimeHandle};
+pub use construct::{
+    BoundOperand, RuntimeConstructNode, RuntimeConstructState, RuntimeFixedHandle, RuntimeHandle,
+};
 pub use context::RuntimeInstructionContext;
 pub use decision::{
     select_constructor, DecisionProbeEvaluator, RuntimeMatchTrace, RuntimeSelection,

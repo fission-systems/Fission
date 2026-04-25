@@ -308,6 +308,8 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
             buckets.append("decode_no_match")
         elif "UnsupportedPcodeTemplate" in err:
             buckets.append("unsupported_template")
+            if ghidra.get("status") != "ok" and "spec_derived_construct_tpl_has_no_ops" in err:
+                buckets.append("both_decode_error_or_padding")
         elif "InvalidPcodeShape" in err:
             buckets.append("invalid_pcode_shape")
         else:

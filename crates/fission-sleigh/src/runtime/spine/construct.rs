@@ -1,4 +1,6 @@
-use crate::compiler::{CompiledConstructTplKind, CompiledConstructorTemplate, CompiledOperandSpec};
+use crate::compiler::{
+    CompiledConstructTplKind, CompiledConstructorTemplate, CompiledOperandSpec, CompiledSpaceRef,
+};
 
 use super::RuntimeMatchTrace;
 
@@ -31,6 +33,20 @@ pub struct RuntimeHandle {
     pub operand_index: usize,
     pub spec: CompiledOperandSpec,
     pub value: BoundOperand,
+    pub fixed: RuntimeFixedHandle,
+}
+
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct RuntimeFixedHandle {
+    pub space: Option<CompiledSpaceRef>,
+    pub size: u32,
+    pub offset_space: Option<CompiledSpaceRef>,
+    pub offset_offset: u64,
+    pub offset_size: u32,
+    pub temp_space: Option<CompiledSpaceRef>,
+    pub temp_offset: u64,
+    pub fixable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +61,7 @@ pub enum BoundOperand {
         scale: u8,
         displacement: i64,
         rip_relative: bool,
+        absolute: Option<u64>,
         size: u32,
     },
     Immediate {

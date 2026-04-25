@@ -389,7 +389,10 @@ pub enum CompiledConstTpl {
         selector: CompiledHandleSelector,
         plus: Option<u64>,
     },
-    Integer { value: i64, size: u32 },
+    Integer {
+        value: i64,
+        size: u32,
+    },
     RelativeAddress,
     Relative {
         value: u64,
@@ -807,15 +810,51 @@ pub fn apply_sla_construct_templates(
         let opprint = &templates[0].opprint_indices;
         let mut remapped_templates = decoded.op_templates.clone();
 
+        let mut handle_remap = Vec::new();
         if !opprint.is_empty() {
-            let mut handle_remap = vec![usize::MAX; 32];
+            handle_remap = vec![usize::MAX; 32];
             for (fission_idx, sla_idx) in opprint.iter().enumerate() {
                 if *sla_idx < handle_remap.len() {
                     handle_remap[*sla_idx] = fission_idx;
                 }
             }
+        } else if let Some(hidden_prefix_count) = infer_leading_hidden_build_handle_count(
+            &remapped_templates,
+            constructor.operand_specs.len(),
+        ) {
+            handle_remap = vec![usize::MAX; hidden_prefix_count + constructor.operand_specs.len()];
+            for fission_idx in 0..constructor.operand_specs.len() {
+                handle_remap[hidden_prefix_count + fission_idx] = fission_idx;
+            }
+        }
+
+        if !handle_remap.is_empty() {
             for op in &mut remapped_templates {
                 remap_op_tpl_handles(op, &handle_remap);
+            }
+            remap_build_operand_indices(&mut remapped_templates, &handle_remap);
+        }
+
+        let num_handles = constructor.operand_specs.len();
+        if templates_reference_unresolvable_handles(&remapped_templates, num_handles) {
+            if let Some(hidden_prefix_count) =
+                infer_leading_hidden_build_handle_count(&decoded.op_templates, num_handles)
+            {
+                let mut hidden_remap = vec![usize::MAX; hidden_prefix_count + num_handles];
+                for fission_idx in 0..num_handles {
+                    hidden_remap[hidden_prefix_count + fission_idx] = fission_idx;
+                }
+                let mut hidden_remapped_templates = decoded.op_templates.clone();
+                for op in &mut hidden_remapped_templates {
+                    remap_op_tpl_handles(op, &hidden_remap);
+                }
+                remap_build_operand_indices(&mut hidden_remapped_templates, &hidden_remap);
+                if !templates_reference_unresolvable_handles(
+                    &hidden_remapped_templates,
+                    num_handles,
+                ) {
+                    remapped_templates = hidden_remapped_templates;
+                }
             }
         }
 
@@ -824,17 +863,8 @@ pub fn apply_sla_construct_templates(
         // operand_specs.len() entries). If any op_template references a
         // handle index >= operand_specs.len(), we must mark the constructor
         // unsupported rather than panicking at runtime.
-        let num_handles = constructor.operand_specs.len();
-        let has_unresolvable_handle = remapped_templates.iter().any(|op| {
-            let mut max_idx: Option<i64> = None;
-            if let Some(ref out) = op.output {
-                collect_max_handle_index(out, &mut max_idx);
-            }
-            for inp in &op.inputs {
-                collect_max_handle_index(inp, &mut max_idx);
-            }
-            max_idx.is_some_and(|idx| idx >= 0 && (idx as usize) >= num_handles)
-        });
+        let has_unresolvable_handle =
+            templates_reference_unresolvable_handles(&remapped_templates, num_handles);
 
         if has_unresolvable_handle && !has_unsupported_opcode {
             // The SLA template references handles that Fission's runtime can't
@@ -843,10 +873,7 @@ pub fn apply_sla_construct_templates(
             // etc.), keep those instead of overwriting with broken SLA templates.
             // This allows Jcc/Setcc/etc. to remain runtime_ready using their
             // native Fission templates.
-            let has_native_semantics = !constructor
-                .constructor_template
-                .semantic_ops
-                .is_empty();
+            let has_native_semantics = !constructor.constructor_template.semantic_ops.is_empty();
             if has_native_semantics {
                 // Keep the original Fission-generated op_templates; don't
                 // overwrite with the SLA templates that have unresolvable handles.
@@ -899,9 +926,99 @@ fn remap_op_tpl_handles(op: &mut CompiledOpTpl, remap: &[usize]) {
     }
 }
 
+fn infer_leading_hidden_build_handle_count(
+    ops: &[CompiledOpTpl],
+    visible_handle_count: usize,
+) -> Option<usize> {
+    if visible_handle_count == 0 {
+        return None;
+    }
+    let max_ref = max_referenced_handle_index(ops)?;
+    let total_ref_count = usize::try_from(max_ref).ok()?.checked_add(1)?;
+    let hidden_count = total_ref_count.checked_sub(visible_handle_count)?;
+    if hidden_count == 0 {
+        return None;
+    }
+    let leading_builds = ops
+        .iter()
+        .take_while(|op| matches!(op.opcode, CompiledOpTplOpcode::Build))
+        .count();
+    (leading_builds >= hidden_count).then_some(hidden_count)
+}
+
+fn max_referenced_handle_index(ops: &[CompiledOpTpl]) -> Option<i64> {
+    let mut max_idx = None;
+    for op in ops {
+        if let Some(ref out) = op.output {
+            collect_max_handle_index(out, &mut max_idx);
+        }
+        for input in &op.inputs {
+            collect_max_handle_index(input, &mut max_idx);
+        }
+        if matches!(op.opcode, CompiledOpTplOpcode::Build) {
+            if let Some(index) = build_operand_index(op) {
+                max_idx = Some(max_idx.map_or(index as i64, |cur| cur.max(index as i64)));
+            }
+        }
+    }
+    max_idx
+}
+
+fn templates_reference_unresolvable_handles(ops: &[CompiledOpTpl], num_handles: usize) -> bool {
+    ops.iter().any(|op| {
+        let mut max_idx: Option<i64> = None;
+        if let Some(ref out) = op.output {
+            collect_max_handle_index(out, &mut max_idx);
+        }
+        for inp in &op.inputs {
+            collect_max_handle_index(inp, &mut max_idx);
+        }
+        max_idx.is_some_and(|idx| idx >= 0 && (idx as usize) >= num_handles)
+    })
+}
+
+fn build_operand_index(op: &CompiledOpTpl) -> Option<usize> {
+    let Some(CompiledVarnodeTpl::Varnode { offset, .. }) = op.inputs.first() else {
+        return None;
+    };
+    let CompiledConstTpl::Real { value } = offset.as_ref() else {
+        return None;
+    };
+    usize::try_from(*value).ok()
+}
+
+fn remap_build_operand_indices(ops: &mut Vec<CompiledOpTpl>, remap: &[usize]) {
+    let mut remapped = Vec::with_capacity(ops.len());
+    for mut op in ops.drain(..) {
+        if matches!(op.opcode, CompiledOpTplOpcode::Build) {
+            if let Some(old_index) = build_operand_index(&op) {
+                match remap.get(old_index).copied() {
+                    Some(usize::MAX) => continue,
+                    Some(new_index) => {
+                        if let Some(CompiledVarnodeTpl::Varnode { offset, .. }) =
+                            op.inputs.first_mut()
+                        {
+                            *offset = Box::new(CompiledConstTpl::Real {
+                                value: new_index as u64,
+                            });
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        remapped.push(op);
+    }
+    *ops = remapped;
+}
+
 fn remap_varnode_tpl_handles(vn: &mut CompiledVarnodeTpl, remap: &[usize]) {
     match vn {
-        CompiledVarnodeTpl::Varnode { space, offset, size } => {
+        CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } => {
             remap_space_tpl_handles(space, remap);
             remap_const_tpl_handles(offset, remap);
             remap_const_tpl_handles(size, remap);
@@ -957,7 +1074,11 @@ fn remap_const_tpl_handles(c: &mut CompiledConstTpl, remap: &[usize]) {
 /// Walk a VarnodeTpl and record the maximum handle index referenced.
 fn collect_max_handle_index(vn: &CompiledVarnodeTpl, max_idx: &mut Option<i64>) {
     match vn {
-        CompiledVarnodeTpl::Varnode { space, offset, size } => {
+        CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } => {
             collect_max_handle_index_from_space(space, max_idx);
             collect_max_handle_index_from_const(offset, max_idx);
             collect_max_handle_index_from_const(size, max_idx);

@@ -7,15 +7,15 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
     CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe,
-    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
-    CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep, CompiledOperandSpec,
-    CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl, CompiledTokenFieldRef,
-    CompiledVarnodeTpl,
+    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
+    CompiledHandleTemplate, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
+    CompiledOperandSpec, CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl,
+    CompiledTokenFieldRef, CompiledVarnodeTpl,
 };
 use crate::runtime::spine::{
-    self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeHandle,
-    RuntimeInstructionContext, RuntimePcodeEmitter, RuntimeSelection, RuntimeTemplateEvaluator,
-    RuntimeTemplateExecutor,
+    self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeFixedHandle,
+    RuntimeHandle, RuntimeInstructionContext, RuntimePcodeEmitter, RuntimeSelection,
+    RuntimeTemplateEvaluator, RuntimeTemplateExecutor,
 };
 use crate::runtime::{
     DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,
@@ -137,6 +137,7 @@ pub(crate) fn decode_and_lift_with_details(
             if msg.contains("HandleTpl")
                 || msg.contains("ConstTpl")
                 || msg.contains("unsupported")
+                || msg.contains("compatibility varnode template")
             {
                 RuntimeSleighError::UnsupportedPcodeTemplate {
                     language: compiled.entry_id.clone(),
@@ -598,6 +599,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         self.handles[operand_index] = Some(RuntimeHandle {
             operand_index,
             spec: template.spec,
+            fixed: fixed_handle_for_bound_operand(&value),
             value,
         });
         Ok(())
@@ -632,6 +634,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         scale: token_fields.scale,
                         displacement: token_fields.displacement,
                         rip_relative: token_fields.rip_relative,
+                        absolute: token_fields.rip_relative.then(|| {
+                            self.ctx
+                                .address
+                                .wrapping_add(self.cursor as u64)
+                                .wrapping_add_signed(token_fields.displacement)
+                        }),
                         size: *size,
                     })
                 }
@@ -706,12 +714,45 @@ fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
 
 fn disasm_mnemonic(
     constructor: &CompiledExecutableConstructor,
-    _state: &RuntimeConstructState,
+    state: &RuntimeConstructState,
 ) -> String {
     // Final rendering must come from SLEIGH display templates. Until that
-    // template IR is executable, keep this generic and avoid ISA-specific
-    // condition/register naming tables in the runtime surface.
+    // template IR is executable, keep condition-code rendering isolated to
+    // the display-only Jcc NativeFission holdout. This must not affect p-code
+    // template execution.
+    if matches!(
+        constructor.construct_tpl_kind,
+        CompiledConstructTplKind::Jcc
+    ) {
+        if let Some(cc) = state.condition_code {
+            if let Some(mnemonic) = jcc_mnemonic(cc) {
+                return mnemonic.to_string();
+            }
+        }
+    }
     constructor.mnemonic.replace('^', "").to_ascii_lowercase()
+}
+
+fn jcc_mnemonic(cc: u8) -> Option<&'static str> {
+    Some(match cc {
+        0 => "jo",
+        1 => "jno",
+        2 => "jb",
+        3 => "jnb",
+        4 => "jz",
+        5 => "jnz",
+        6 => "jbe",
+        7 => "ja",
+        8 => "js",
+        9 => "jns",
+        10 => "jp",
+        11 => "jnp",
+        12 => "jl",
+        13 => "jge",
+        14 => "jle",
+        15 => "jg",
+        _ => return None,
+    })
 }
 
 fn format_operand(operand: &BoundOperand) -> String {
@@ -816,6 +857,180 @@ fn add_signed(base: u64, delta: i64) -> u64 {
     }
 }
 
+fn compiled_space(name: &str, index: u64) -> CompiledSpaceRef {
+    CompiledSpaceRef {
+        name: name.to_string(),
+        index,
+    }
+}
+
+fn register_offset(index: u8) -> u64 {
+    if index < 8 {
+        (index as u64) * 8
+    } else {
+        128 + ((index as u64) - 8) * 8
+    }
+}
+
+fn fixed_handle_for_bound_operand(value: &BoundOperand) -> RuntimeFixedHandle {
+    match value {
+        BoundOperand::Register { index, size } => RuntimeFixedHandle {
+            space: Some(compiled_space("register", 4)),
+            size: *size,
+            offset_space: None,
+            offset_offset: register_offset(*index),
+            offset_size: *size,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: true,
+        },
+        BoundOperand::Immediate {
+            value,
+            encoded_size,
+            ..
+        } => RuntimeFixedHandle {
+            space: Some(compiled_space("const", 0)),
+            size: *encoded_size,
+            offset_space: None,
+            offset_offset: *value,
+            offset_size: *encoded_size,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: true,
+        },
+        BoundOperand::Relative { target } => RuntimeFixedHandle {
+            space: Some(compiled_space("ram", 3)),
+            size: 8,
+            offset_space: None,
+            offset_offset: *target,
+            offset_size: 8,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: true,
+        },
+        BoundOperand::Memory {
+            base,
+            index,
+            displacement,
+            rip_relative,
+            size,
+            ..
+        } if base.is_some() && index.is_none() && *displacement == 0 && !*rip_relative => {
+            RuntimeFixedHandle {
+                // SpaceId constants in STORE/LOAD use Ghidra's address-space
+                // id, while actual pointer varnodes stay in the register space.
+                space: Some(compiled_space("ram", 0x1b1)),
+                size: *size,
+                offset_space: Some(compiled_space("register", 4)),
+                offset_offset: register_offset(base.expect("checked above")),
+                offset_size: 8,
+                temp_space: Some(compiled_space("unique", 2)),
+                temp_offset: 0xd400,
+                fixable: true,
+            }
+        }
+        BoundOperand::Memory {
+            rip_relative: true,
+            absolute: Some(absolute),
+            size,
+            ..
+        } => RuntimeFixedHandle {
+            space: Some(compiled_space("ram", 3)),
+            size: *size,
+            offset_space: None,
+            offset_offset: *absolute,
+            offset_size: *size,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: true,
+        },
+        BoundOperand::Memory { size, .. } => RuntimeFixedHandle {
+            space: Some(compiled_space("ram", 0x1b1)),
+            size: *size,
+            offset_space: None,
+            offset_offset: 0,
+            offset_size: 0,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: false,
+        },
+    }
+}
+
+fn handle_selector_index_in_space(
+    space: &CompiledSpaceTpl,
+    selector: CompiledHandleSelector,
+) -> Option<usize> {
+    let CompiledSpaceTpl::Const(const_tpl) = space else {
+        return None;
+    };
+    handle_selector_index(const_tpl, selector)
+}
+
+fn negative_handle_selector_index_in_space(
+    space: &CompiledSpaceTpl,
+    selector: CompiledHandleSelector,
+) -> Option<i64> {
+    let CompiledSpaceTpl::Const(const_tpl) = space else {
+        return None;
+    };
+    let CompiledConstTpl::Handle {
+        handle_index,
+        selector: actual_selector,
+        plus,
+    } = const_tpl.as_ref()
+    else {
+        return None;
+    };
+    if *actual_selector == selector && plus.is_none() && *handle_index < 0 {
+        Some(*handle_index)
+    } else {
+        None
+    }
+}
+
+fn matches_handle_selector(
+    const_tpl: &CompiledConstTpl,
+    handle_index: usize,
+    selector: CompiledHandleSelector,
+) -> bool {
+    handle_selector_index(const_tpl, selector).is_some_and(|idx| idx == handle_index)
+}
+
+fn handle_selector_index(
+    const_tpl: &CompiledConstTpl,
+    expected_selector: CompiledHandleSelector,
+) -> Option<usize> {
+    let CompiledConstTpl::Handle {
+        handle_index,
+        selector,
+        plus,
+    } = const_tpl
+    else {
+        return None;
+    };
+    if *selector != expected_selector || plus.is_some() || *handle_index < 0 {
+        return None;
+    }
+    Some(*handle_index as usize)
+}
+
+fn matches_negative_handle_selector(
+    const_tpl: &CompiledConstTpl,
+    handle_index: i64,
+    expected_selector: CompiledHandleSelector,
+) -> bool {
+    let CompiledConstTpl::Handle {
+        handle_index: actual_handle_index,
+        selector,
+        plus,
+    } = const_tpl
+    else {
+        return false;
+    };
+    *actual_handle_index == handle_index && *selector == expected_selector && plus.is_none()
+}
+
 #[derive(Debug, Clone)]
 struct CompiledTableEmitter {
     emitter: RuntimePcodeEmitter,
@@ -824,6 +1039,17 @@ struct CompiledTableEmitter {
     /// Key is the handle index, value is the unique-space varnode holding
     /// the computed pointer.
     resolved_memory_ea: std::collections::BTreeMap<usize, Varnode>,
+    /// Exported varnodes produced by BUILD subconstructors. Ghidra templates
+    /// reference these through negative handle indices in parent templates.
+    exported_build_varnodes: std::collections::BTreeMap<i64, Varnode>,
+}
+
+#[derive(Debug, Clone)]
+struct DynamicMemoryTarget {
+    space: Varnode,
+    ptr: Varnode,
+    temp: Varnode,
+    size: u32,
 }
 
 impl CompiledTableEmitter {
@@ -837,6 +1063,7 @@ impl CompiledTableEmitter {
             address,
             emitter: RuntimePcodeEmitter::new(address, 0x9300),
             resolved_memory_ea: std::collections::BTreeMap::new(),
+            exported_build_varnodes: std::collections::BTreeMap::new(),
         }
     }
 
@@ -900,7 +1127,24 @@ impl CompiledTableEmitter {
                 // The SUBPIECE path below handles any size mismatch.
                 let value = self.read_template_varnode(input_tpl, state, 0)?;
 
-                if value.size > out_size && out_size > 0 {
+                if let Some(target) = self.dynamic_memory_target(out_tpl, state)? {
+                    let store_value = if value.is_constant {
+                        self.emitter
+                            .emit_copy(target.temp.clone(), value, mnemonic)?;
+                        target.temp
+                    } else {
+                        value
+                    };
+                    if store_value.size != target.size {
+                        bail!(
+                            "dynamic memory STORE value size {} did not match target size {}",
+                            store_value.size,
+                            target.size
+                        );
+                    }
+                    self.emitter
+                        .emit_store(target.space, target.ptr, store_value, mnemonic)
+                } else if value.size > out_size && out_size > 0 {
                     // Size mismatch: source is wider than destination.
                     // Emit SUBPIECE to truncate (matches Ghidra's behavior).
                     let out = self.template_write_target(out_tpl, state)?;
@@ -939,7 +1183,6 @@ impl CompiledTableEmitter {
                     .output
                     .as_ref()
                     .ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
-                let out_size = self.template_varnode_size(out_tpl, state)?;
                 let input_tpl = op
                     .inputs
                     .first()
@@ -976,7 +1219,6 @@ impl CompiledTableEmitter {
                 if op.inputs.len() != 2 {
                     bail!("{mnemonic} template requires two inputs");
                 }
-                let out_size = self.template_varnode_size(out_tpl, state)?;
                 let mut lhs = self.read_template_varnode(&op.inputs[0], state, 0)?;
                 let mut rhs = self.read_template_varnode(&op.inputs[1], state, 0)?;
 
@@ -1057,20 +1299,37 @@ impl CompiledTableEmitter {
             CompiledOpTplOpcode::Build => {
                 let operand_index = if let Some(input_tpl) = op.inputs.first() {
                     match input_tpl {
-                        CompiledVarnodeTpl::Varnode { offset, .. } => {
-                            match offset.as_ref() {
-                                CompiledConstTpl::Real { value } => Some(*value as usize),
-                                _ => None,
-                            }
-                        }
+                        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+                            CompiledConstTpl::Real { value } => Some(*value as usize),
+                            _ => None,
+                        },
                         _ => None,
                     }
                 } else {
                     None
                 };
                 if let Some(idx) = operand_index {
+                    if idx == 0
+                        && state.condition_code.is_some()
+                        && matches!(state.construct_tpl_kind, CompiledConstructTplKind::Jcc)
+                    {
+                        let predicate = self.emit_condition_predicate(
+                            state.condition_code.expect("checked above"),
+                            "cc",
+                        )?;
+                        self.exported_build_varnodes.insert(-1, predicate);
+                    }
                     if let Some(handle) = state.handles.get(idx) {
-                        if let BoundOperand::Memory { base, index, scale, displacement, rip_relative, size: _op_size } = &handle.value {
+                        if let BoundOperand::Memory {
+                            base,
+                            index,
+                            scale,
+                            displacement,
+                            rip_relative,
+                            size: _op_size,
+                            ..
+                        } = &handle.value
+                        {
                             // Emit address calculation P-code matching Ghidra's
                             // Addr sub-constructor output.
                             // Helper for Ghidra x86-64 register mapping
@@ -1245,17 +1504,34 @@ impl CompiledTableEmitter {
                 }
             }
             CompiledVarnodeTpl::Handle { operand_index } => {
-                let op = state.operands.get(*operand_index).ok_or_else(|| anyhow!("missing operand index {}", operand_index))?;
+                let op = state
+                    .operands
+                    .get(*operand_index)
+                    .ok_or_else(|| anyhow!("missing operand index {}", operand_index))?;
                 match op {
                     crate::runtime::spine::construct::BoundOperand::Register { index, size } => {
-                        let offset = if *index < 8 { (*index as u64) * 8 } else { 128 + ((*index as u64) - 8) * 8 };
-                        let varnode = Varnode { space_id: 4, offset, size: *size, is_constant: false, constant_val: 0 };
+                        let offset = if *index < 8 {
+                            (*index as u64) * 8
+                        } else {
+                            128 + ((*index as u64) - 8) * 8
+                        };
+                        let varnode = Varnode {
+                            space_id: 4,
+                            offset,
+                            size: *size,
+                            is_constant: false,
+                            constant_val: 0,
+                        };
                         if expected_size > 0 && varnode.size != expected_size {
                             bail!("Handle size mismatch");
                         }
                         Ok(varnode)
                     }
-                    crate::runtime::spine::construct::BoundOperand::Immediate { value, encoded_size, .. } => {
+                    crate::runtime::spine::construct::BoundOperand::Immediate {
+                        value,
+                        encoded_size,
+                        ..
+                    } => {
                         let varnode = Varnode::constant(*value as i64, *encoded_size);
                         if expected_size > 0 && varnode.size != expected_size {
                             bail!("Handle size mismatch");
@@ -1263,7 +1539,13 @@ impl CompiledTableEmitter {
                         Ok(varnode)
                     }
                     crate::runtime::spine::construct::BoundOperand::Relative { target } => {
-                        let varnode = Varnode { space_id: 3, offset: *target, size: 8, is_constant: false, constant_val: 0 };
+                        let varnode = Varnode {
+                            space_id: 3,
+                            offset: *target,
+                            size: 8,
+                            is_constant: false,
+                            constant_val: 0,
+                        };
                         if expected_size > 0 && varnode.size != expected_size {
                             // Target size mismatch is acceptable for branch targets.
                         }
@@ -1274,84 +1556,203 @@ impl CompiledTableEmitter {
                     }
                 }
             }
-            _ => bail!("compiled-table executor rejects compatibility varnode template: {:?}", template),
+            _ => bail!(
+                "compiled-table executor rejects compatibility varnode template: {:?}",
+                template
+            ),
         }
     }
 
     fn emit_condition_predicate(&mut self, cc: u8, mnemonic: &str) -> Result<Varnode> {
-        let cf = Varnode { space_id: 4, offset: 0x1200, size: 1, is_constant: false, constant_val: 0 };
-        let pf = Varnode { space_id: 4, offset: 0x1202, size: 1, is_constant: false, constant_val: 0 };
-        let zf = Varnode { space_id: 4, offset: 0x1206, size: 1, is_constant: false, constant_val: 0 };
-        let sf = Varnode { space_id: 4, offset: 0x1207, size: 1, is_constant: false, constant_val: 0 };
-        let of = Varnode { space_id: 4, offset: 0x120B, size: 1, is_constant: false, constant_val: 0 };
+        let cf = Varnode {
+            space_id: 4,
+            offset: 0x0200,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let pf = Varnode {
+            space_id: 4,
+            offset: 0x0202,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let zf = Varnode {
+            space_id: 4,
+            offset: 0x0206,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let sf = Varnode {
+            space_id: 4,
+            offset: 0x0207,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let of = Varnode {
+            space_id: 4,
+            offset: 0x020B,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
 
         match cc {
             0 => Ok(of), // O
-            1 => { // NO
+            1 => {
+                // NO
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![of], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![of],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
             2 => Ok(cf), // B/C/NAE
-            3 => { // NB/NC/AE
+            3 => {
+                // NB/NC/AE
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![cf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![cf],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
             4 => Ok(zf), // Z/E
-            5 => { // NZ/NE
+            5 => {
+                // NZ/NE
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![zf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![zf],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            6 => { // BE/NA (CF || ZF)
+            6 => {
+                // BE/NA (CF || ZF)
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolOr, Some(out.clone()), vec![cf, zf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolOr,
+                    Some(out.clone()),
+                    vec![cf, zf],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            7 => { // NBE/A !(CF || ZF)
+            7 => {
+                // NBE/A !(CF || ZF)
                 let tmp = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolOr, Some(tmp.clone()), vec![cf, zf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolOr,
+                    Some(tmp.clone()),
+                    vec![cf, zf],
+                    mnemonic,
+                )?;
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![tmp], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![tmp],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
             8 => Ok(sf), // S
-            9 => { // NS
+            9 => {
+                // NS
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![sf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![sf],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
             10 => Ok(pf), // P/PE
-            11 => { // NP/PO
+            11 => {
+                // NP/PO
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(out.clone()), vec![pf], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(out.clone()),
+                    vec![pf],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            12 => { // L/NGE (SF != OF)
+            12 => {
+                // L/NGE (SF != OF)
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::IntNotEqual, Some(out.clone()), vec![sf, of], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::IntNotEqual,
+                    Some(out.clone()),
+                    vec![of.clone(), sf.clone()],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            13 => { // NL/GE (SF == OF)
+            13 => {
+                // NL/GE (SF == OF)
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::IntEqual, Some(out.clone()), vec![sf, of], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::IntEqual,
+                    Some(out.clone()),
+                    vec![of.clone(), sf.clone()],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            14 => { // LE/NG (ZF || (SF != OF))
+            14 => {
+                // LE/NG (ZF || (SF != OF))
                 let tmp = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::IntNotEqual, Some(tmp.clone()), vec![sf, of], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::IntNotEqual,
+                    Some(tmp.clone()),
+                    vec![of.clone(), sf.clone()],
+                    mnemonic,
+                )?;
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolOr, Some(out.clone()), vec![zf, tmp], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolOr,
+                    Some(out.clone()),
+                    vec![zf.clone(), tmp],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
-            15 => { // NLE/G (!ZF && (SF == OF))
+            15 => {
+                // NLE/G (!ZF && (SF == OF))
                 let tmp = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::IntEqual, Some(tmp.clone()), vec![sf, of], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::IntEqual,
+                    Some(tmp.clone()),
+                    vec![of, sf],
+                    mnemonic,
+                )?;
                 let zf_not = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolNegate, Some(zf_not.clone()), vec![zf.clone()], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolNegate,
+                    Some(zf_not.clone()),
+                    vec![zf.clone()],
+                    mnemonic,
+                )?;
                 let out = self.emitter.tmp(2, 1);
-                self.emitter.append_checked(fission_pcode::PcodeOpcode::BoolAnd, Some(out.clone()), vec![zf_not, tmp], mnemonic)?;
+                self.emitter.append_checked(
+                    fission_pcode::PcodeOpcode::BoolAnd,
+                    Some(out.clone()),
+                    vec![zf_not, tmp],
+                    mnemonic,
+                )?;
                 Ok(out)
             }
             _ => bail!("invalid condition code {}", cc),
@@ -1395,9 +1796,82 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
     ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => self.resolve_varnode_tpl(template, state),
+            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
+                self.resolve_varnode_tpl(template, state)
+            }
             _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
+    }
+
+    fn dynamic_memory_target(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<DynamicMemoryTarget>> {
+        let CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } = template
+        else {
+            return Ok(None);
+        };
+        let Some(handle_index) =
+            handle_selector_index_in_space(space, CompiledHandleSelector::Space)
+        else {
+            return Ok(None);
+        };
+        if !matches_handle_selector(offset, handle_index, CompiledHandleSelector::Offset) {
+            return Ok(None);
+        }
+        let handle = state
+            .handles
+            .get(handle_index)
+            .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+        if !matches!(handle.value, BoundOperand::Memory { .. }) {
+            return Ok(None);
+        }
+        if !handle.fixed.fixable {
+            bail!("dynamic memory handle {handle_index} is not fixable");
+        }
+        let space = handle
+            .fixed
+            .space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic memory handle {handle_index} missing space"))?;
+        let offset_space =
+            handle.fixed.offset_space.as_ref().ok_or_else(|| {
+                anyhow!("dynamic memory handle {handle_index} missing offset space")
+            })?;
+        let temp_space =
+            handle.fixed.temp_space.as_ref().ok_or_else(|| {
+                anyhow!("dynamic memory handle {handle_index} missing temp space")
+            })?;
+        let target_size = u32::try_from(self.resolve_const_value(size, state)?)
+            .map_err(|_| anyhow!("dynamic memory target size exceeds u32"))?;
+        let ptr = self
+            .resolved_memory_ea
+            .get(&handle_index)
+            .cloned()
+            .unwrap_or(Varnode {
+                space_id: offset_space.index,
+                offset: handle.fixed.offset_offset,
+                size: handle.fixed.offset_size,
+                is_constant: false,
+                constant_val: 0,
+            });
+        Ok(Some(DynamicMemoryTarget {
+            space: Varnode::constant(space.index as i64, 4),
+            ptr,
+            temp: Varnode {
+                space_id: temp_space.index,
+                offset: handle.fixed.temp_offset,
+                size: target_size,
+                is_constant: false,
+                constant_val: 0,
+            },
+            size: target_size,
+        }))
     }
 
     fn resolve_varnode_tpl(
@@ -1406,7 +1880,19 @@ impl CompiledTableEmitter {
         state: &RuntimeConstructState,
     ) -> Result<Varnode> {
         match template {
-            CompiledVarnodeTpl::Varnode { space, offset, size } => {
+            CompiledVarnodeTpl::Varnode {
+                space,
+                offset,
+                size,
+            } => {
+                if let Some(exported_vn) =
+                    self.exported_build_varnode(space, offset, size, state)?
+                {
+                    return Ok(exported_vn);
+                }
+                if let Some(ea_vn) = self.resolved_memory_ea_varnode(space, offset) {
+                    return Ok(ea_vn);
+                }
                 let space = self.resolve_space_tpl(space, state)?;
                 let offset = self.resolve_const_value(offset, state)?;
                 let size = u32::try_from(self.resolve_const_value(size, state)?)
@@ -1458,6 +1944,44 @@ impl CompiledTableEmitter {
         }
     }
 
+    fn exported_build_varnode(
+        &mut self,
+        space: &CompiledSpaceTpl,
+        offset: &CompiledConstTpl,
+        size: &CompiledConstTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<Varnode>> {
+        let Some(handle_index) =
+            negative_handle_selector_index_in_space(space, CompiledHandleSelector::Space)
+        else {
+            return Ok(None);
+        };
+        if !matches_negative_handle_selector(offset, handle_index, CompiledHandleSelector::Offset)
+            || !matches_negative_handle_selector(size, handle_index, CompiledHandleSelector::Size)
+        {
+            return Ok(None);
+        }
+        let varnode = self
+            .exported_build_varnodes
+            .get(&handle_index)
+            .cloned()
+            .ok_or_else(|| anyhow!("exported BUILD handle {handle_index} is missing"))?;
+        let _ = (size, state);
+        Ok(Some(varnode))
+    }
+
+    fn resolved_memory_ea_varnode(
+        &self,
+        space: &CompiledSpaceTpl,
+        offset: &CompiledConstTpl,
+    ) -> Option<Varnode> {
+        let space_handle = handle_selector_index_in_space(space, CompiledHandleSelector::Space)?;
+        if !matches_handle_selector(offset, space_handle, CompiledHandleSelector::Offset) {
+            return None;
+        }
+        self.resolved_memory_ea.get(&space_handle).cloned()
+    }
+
     fn resolve_space_tpl(
         &mut self,
         template: &CompiledSpaceTpl,
@@ -1506,68 +2030,7 @@ impl CompiledTableEmitter {
                     .get(*handle_index as usize)
                     .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
 
-                let val = match handle.value {
-                    crate::runtime::spine::construct::BoundOperand::Register { index, size } => {
-                        // Hardcode x86-64 register space mapping for now (space=4)
-                        match selector {
-                            crate::compiler::CompiledHandleSelector::Space => 4, // "register" space
-                            crate::compiler::CompiledHandleSelector::Offset => {
-                                // Ghidra x86-64 general registers are non-linear:
-                                // RAX-RDI (0-7) are at offset 0
-                                // R8-R15 (8-15) are at offset 0x80 (128)
-                                if index < 8 {
-                                    (index as u64) * 8
-                                } else {
-                                    128 + ((index as u64) - 8) * 8
-                                }
-                            }
-                            crate::compiler::CompiledHandleSelector::Size => size as u64,
-                            crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
-                        }
-                    }
-                    crate::runtime::spine::construct::BoundOperand::Immediate {
-                        value,
-                        encoded_size,
-                        ..
-                    } => match selector {
-                        crate::compiler::CompiledHandleSelector::Space => 0, // "const" space
-                        crate::compiler::CompiledHandleSelector::Offset => value,
-                        crate::compiler::CompiledHandleSelector::Size => encoded_size as u64,
-                        crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
-                    },
-                    crate::runtime::spine::construct::BoundOperand::Relative { target } => {
-                        match selector {
-                            crate::compiler::CompiledHandleSelector::Space => 3, // "ram" space
-                            crate::compiler::CompiledHandleSelector::Offset => target,
-                            crate::compiler::CompiledHandleSelector::Size => 8, // Absolute pointer size
-                            crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
-                        }
-                    }
-                    crate::runtime::spine::construct::BoundOperand::Memory { size, .. } => {
-                        // Memory operands have their address calculation
-                        // emitted during Build. The resolved EA varnode
-                        // is cached in resolved_memory_ea.
-                        let handle_idx = *handle_index as usize;
-                        if let Some(ea_vn) = self.resolved_memory_ea.get(&handle_idx) {
-                            match selector {
-                                // Dynamic: point to the unique-space temp
-                                crate::compiler::CompiledHandleSelector::Space => ea_vn.space_id,
-                                crate::compiler::CompiledHandleSelector::Offset => ea_vn.offset,
-                                crate::compiler::CompiledHandleSelector::Size => ea_vn.size as u64,
-                                crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
-                            }
-                        } else {
-                            // Fallback: not yet resolved (shouldn't happen
-                            // if Build ran first)
-                            match selector {
-                                crate::compiler::CompiledHandleSelector::Space => 3, // ram
-                                crate::compiler::CompiledHandleSelector::Offset => 0,
-                                crate::compiler::CompiledHandleSelector::Size => size as u64,
-                                crate::compiler::CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
-                            }
-                        }
-                    }
-                };
+                let val = self.resolve_fixed_handle_selector(handle, *selector)?;
                 if let Some(plus) = plus {
                     Ok(val.wrapping_add(*plus))
                 } else {
@@ -1590,6 +2053,34 @@ impl CompiledTableEmitter {
             CompiledConstTpl::FlowDestSize => {
                 bail!("ConstTpl flowdest_size resolution is unsupported")
             }
+        }
+    }
+
+    fn resolve_fixed_handle_selector(
+        &self,
+        handle: &RuntimeHandle,
+        selector: CompiledHandleSelector,
+    ) -> Result<u64> {
+        match selector {
+            CompiledHandleSelector::Space => handle
+                .fixed
+                .space
+                .as_ref()
+                .map(|space| space.index)
+                .ok_or_else(|| anyhow!("fixed handle missing space")),
+            CompiledHandleSelector::Offset => {
+                if handle.fixed.offset_space.is_some() {
+                    if let Some(ea_vn) = self.resolved_memory_ea.get(&handle.operand_index) {
+                        Ok(ea_vn.offset)
+                    } else {
+                        Ok(handle.fixed.offset_offset)
+                    }
+                } else {
+                    Ok(handle.fixed.offset_offset)
+                }
+            }
+            CompiledHandleSelector::Size => Ok(handle.fixed.size as u64),
+            CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
         }
     }
 
@@ -1703,11 +2194,25 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let decoded = decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
         assert_eq!(decoded.length, 2);
+        assert_eq!(decoded.mnemonic, "jnz");
         assert!(matches!(
             decoded.flow_kind,
             DecodedFlowKind::ConditionalJump
         ));
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0x75, 0x05], 0x1000);
+    }
+
+    #[test]
+    fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
+        let compiled = compile_x86_64_frontend().expect("compile frontend");
+        let decoded = decode_instruction(&compiled, &[0x7e, 0x05], 0x1000).expect("generated jle");
+        assert_eq!(decoded.length, 2);
+        assert_eq!(decoded.mnemonic, "jle");
+        assert!(matches!(
+            decoded.flow_kind,
+            DecodedFlowKind::ConditionalJump
+        ));
+        assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0x7e, 0x05], 0x1000);
     }
 
     #[test]
@@ -1718,7 +2223,17 @@ mod tests {
             decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "mov");
-        assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
+        let (ops, length, details) =
+            decode_and_lift_with_details(&compiled, &bytes, 0x1000).expect("lift mov [rax], imm32");
+        assert_eq!(length as usize, bytes.len());
+        assert_eq!(
+            details.template_source,
+            Some(CompiledTemplateSource::SpecDerived)
+        );
+        assert!(!details.compat_emitter_used);
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].opcode, PcodeOpcode::Copy);
+        assert_eq!(ops[1].opcode, PcodeOpcode::Store);
     }
 
     #[test]
