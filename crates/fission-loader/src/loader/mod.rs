@@ -464,6 +464,49 @@ mod tests {
     }
 
     #[test]
+    fn test_execution_view_prefers_executable_section_for_overlapping_va() {
+        let mut data = vec![0u8; 32];
+        data[0..4].copy_from_slice(b"DATA");
+        data[16..20].copy_from_slice(b"CODE");
+
+        let binary = LoadedBinaryBuilder::new("reloc.o".to_string(), DataBuffer::Heap(data))
+            .format("ELF64")
+            .entry_point(0)
+            .image_base(0)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".strtab".to_string(),
+                virtual_address: 0,
+                virtual_size: 4,
+                file_offset: 0,
+                file_size: 4,
+                is_executable: false,
+                is_readable: false,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0,
+                virtual_size: 4,
+                file_offset: 16,
+                file_size: 4,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
+
+        assert_eq!(binary.view_executable_bytes(0, 4), Some(&b"CODE"[..]));
+        assert_eq!(
+            binary
+                .section_containing_for_execution(0)
+                .map(|section| section.name.as_str()),
+            Some(".text")
+        );
+    }
+
+    #[test]
     fn test_function_lookup_o1() {
         // Test that O(1) function lookups work correctly
         let builder =

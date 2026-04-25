@@ -1,51 +1,38 @@
-# Changelog: Raw P-code HandleTpl and BUILD Export Parity
+# Changelog: Raw P-code Zero-op ConstructTpl Parity
 
 **Date:** 2026-04-25  
-**Scope:** `fission-sleigh` runtime, SLA template handle remapping, raw P-code parity reporting
+**Scope:** `fission-sleigh` runtime, raw P-code comparator, canonical parity report
 
 ## Summary
 
-Advanced the x86-64 raw P-code path from compatibility fallback behavior toward Ghidra-shaped `ConstructTpl` execution. The main fix resolves the remaining `mov [reg], imm32` (`c7 00 imm32`) row by materializing fixed handles for operands and letting the `SpecDerived` template emit the exact Ghidra `COPY, STORE` sequence without compatibility P-code.
+Resolved the remaining raw P-code decoder-continuation bucket caused by `NOP` constructors. Ghidra reports these instructions as valid decode results with an empty P-code list, so Fission now treats `SpecDerived` empty `ConstructTpl` templates as successful zero-op emission instead of `UnsupportedPcodeTemplate`.
 
-This wave also fixed two exposed follow-on gaps:
+This keeps the no-approximation rule intact:
 
-- `lea` now reuses the effective-address varnode produced by `BUILD`, eliminating the stale handle-selector varnode mismatch.
-- `Jcc` now resolves the negative exported handle produced by `BUILD cc`, so `cmp+jcc` emits the Ghidra-equivalent `INT_NOTEQUAL, BOOL_OR, CBRANCH` sequence without native semantic fallback.
-
-Approximate P-code remains disallowed. The runtime still fails closed for unresolved templates, unsupported dynamic forms, and padding/no-instruction rows.
+- `SpecDerived` empty templates can return `pcode=[]`.
+- `CompatibilityLowered` / `NativeFission` empty templates still cannot masquerade as semantic success.
+- No compatibility emitter, fake placeholder op, or handwritten NOP P-code is used.
 
 ## Implementation Notes
 
-### Runtime Fixed Handles
+### Zero-op `SpecDerived` Templates
 
-- Added `RuntimeFixedHandle` to mirror the Ghidra `FixedHandle` shape used by template resolution.
-- Preserved `space`, `size`, pointer-offset fields, temp-space fields, and a `fixable` flag for checked emission.
-- Kept `BoundOperand` as decode/display input, but moved raw P-code template resolution to fixed-handle data.
+- `RuntimeTemplateEvaluator` now allows `CompiledTemplateSource::SpecDerived` with an empty `op_templates` vector.
+- The evaluator returns `RuntimeExecutionDetails` with `compat_emitter_used=false` and `template_source=SpecDerived`.
+- No `PcodeOp` is materialized for zero-op constructors.
+- Added a unit test covering the zero-op success path.
 
-### `mov [reg], imm32`
+### NOP Stream Continuation
 
-- Added simple dynamic-memory target resolution for fixable memory handles.
-- `COPY` into a dynamic memory handle now stages constants through the fixed temp varnode before emitting `STORE`.
-- Target row `memory_store_imm` now matches Ghidra exactly:
-  - `COPY const(imm32) -> unique(0xd400, 4)`
-  - `STORE const(ram-space-id), register(rax, 8), unique(0xd400, 4)`
+- Target rows `0x140001416` and `0x1400013f6` now match Ghidra as decoded instructions with empty P-code.
+- The previous error stopped stream comparison and caused six downstream `missing_fission_instruction` cascade rows.
+- After the fix, both CRT startup rows decode through the following `NOP` / `ADD` / `RET` instructions.
 
-### BUILD and Exported Handles
+### Padding / No-instruction Classification
 
-- `BUILD` now records effective-address varnodes for parent template reads.
-- Parent templates that reference handle selector varnodes can reuse the varnode emitted by the subconstructor instead of fabricating a placeholder.
-- Negative exported handles are resolved for `Jcc` condition-code subconstructors, removing the previous `handle -1 is missing or unresolved` failure.
-
-### Compiler Remapping
-
-- Improved SLA handle remapping for constructors with leading hidden `BUILD` handles.
-- Added detection for unresolvable handle references before runtime so unsupported templates remain typed and fail-closed.
-- Regenerated the affected x86 parsed inventories and manifest deterministically.
-
-### Benchmark Reporting
-
-- Added a padding classification path for rows where Ghidra also cannot decode and Fission reports an empty/no-op spec-derived template.
-- This keeps padding/no-instruction rows out of semantic mismatch buckets while preserving the original decode-error evidence.
+- The comparator now preserves padding/no-instruction evidence when Ghidra reports `no instruction` and Fission has an empty zero-op decode at that address.
+- These rows are bucketed as `ghidra_decode_error` plus `both_decode_error_or_padding`.
+- Padding rows are not promoted to semantic `full_match`.
 
 ## Validation
 
@@ -54,34 +41,31 @@ Required checks run:
 ```text
 python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
 cargo check -p fission-sleigh
-cargo test -p fission-sleigh generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility_lift -- --test-threads=1
-cargo build --release -p fission-cli
+cargo test -p fission-sleigh spec_derived_empty_template_is_zero_op_success -- --test-threads=1
 cargo test -p fission-sleigh -- --test-threads=1
+cargo build --release -p fission-cli
 ```
 
 Result:
 
 ```text
-fission-sleigh: 55 passed, 0 failed
+fission-sleigh: 56 passed, 0 failed
 ```
 
 Targeted raw P-code checks:
 
 ```text
-memory_store_imm: full_match = 1
-lea:              full_match = 2
-cmp_and_jcc:      full_match = 2
+test-functions-maincrtstartup:    full_match = 8
+test-functions-winmaincrtstartup: full_match = 8
 ```
 
 Full canonical report:
 
 ```text
-Report: benchmark/artifacts/raw_p_code_benchmark/handle_tpl_store_fixed/aggregate_raw_pcode_parity_report.json
+Report: benchmark/artifacts/raw_p_code_benchmark/zero_op_construct_tpl/aggregate_raw_pcode_parity_report.json
 
 bucket_totals:
-  full_match: 36
-  missing_fission_instruction: 6
-  unsupported_template: 4
+  full_match: 44
   ghidra_decode_error: 2
   both_decode_error_or_padding: 2
 
@@ -91,22 +75,90 @@ invariants:
   invalid_pcode_shape: 0
 
 template_source_totals:
-  SpecDerived: 36
+  SpecDerived: 46
+```
+
+Before/after bucket movement versus the prior `handle_tpl_store_fixed` report:
+
+```text
+full_match:                  36 -> 44
+missing_fission_instruction:  6 -> 0
+unsupported_template:         4 -> 0
+ghidra_decode_error:          2 -> 2
+both_decode_error_or_padding: 2 -> 2
 ```
 
 Performance summary from the same report:
 
 ```text
-Fission instructions/sec: 2.0408834352675123
-Ghidra instructions/sec:  1.064634893718624
-Fission/Ghidra instruction throughput ratio: 1.9169796587626258
-Fission/Ghidra P-code throughput ratio:      1.995867710563557
+Fission instructions/sec: 2.779414007794098
+Ghidra instructions/sec:  0.8307026869880608
+Fission/Ghidra instruction throughput ratio: 3.3458589352486885
+Fission/Ghidra P-code throughput ratio:      2.945029012507419
 ```
 
 ## Remaining Owners
 
-- `missing_fission_instruction = 6`: decoder coverage, not P-code semantic parity.
-- `unsupported_template = 4`: typed unsupported templates; keep fail-closed until the real template/handle form is implemented.
-- `ghidra_decode_error = 2` and `both_decode_error_or_padding = 2`: benchmark padding/no-instruction cases, not runtime semantic failures.
+- All Ghidra-ok canonical semantic rows are now `full_match`.
+- No raw P-code semantic mismatch buckets remain.
+- Remaining `ghidra_decode_error = 2` / `both_decode_error_or_padding = 2` rows are padding/no-instruction cases, not runtime semantic parity failures.
+- If these rows are cleaned up later, the owner is benchmark corpus row-boundary policy, not `ConstructTpl` execution.
 
-No semantic mismatch buckets remain in the latest canonical raw P-code report.
+## Follow-up: Architecture Raw P-code Seed Alignment
+
+After the canonical x86-64 lane reached semantic parity, the architecture smoke lane exposed a separate loader/oracle seed issue for LLVM relocatable objects.
+
+Changes:
+
+- ELF `ET_REL` sections are now assigned Ghidra-like load addresses starting at `0x100000`, preserving section alignment.
+- Relocatable function symbols are rebased through their owning section address, so `llvm_smoke` now lists at `0x100000` instead of ambiguous `0x0`.
+- Disassembly byte reads now prefer executable sections when multiple relocatable sections overlap the same original `sh_addr`.
+- The raw P-code architecture smoke manifest now starts rows at `0x100000` and opts into Ghidra missing-instruction disassembly for object-file rows.
+
+Validation:
+
+```text
+python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+cargo check -p fission-loader
+cargo test -p fission-loader test_execution_view_prefers_executable_section_for_overlapping_va -- --test-threads=1
+cargo check -p fission-sleigh
+cargo check -p fission-cli
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical_after_et_rel_seed
+python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py --manifest benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --output-dir benchmark/artifacts/raw_p_code_benchmark/architecture_parallel_et_rel_seed --fission-release --workers 2
+```
+
+Canonical raw P-code remained stable:
+
+```text
+Report: benchmark/artifacts/raw_p_code_benchmark/canonical_after_et_rel_seed/aggregate_raw_pcode_parity_report.json
+
+bucket_totals:
+  full_match: 44
+  ghidra_decode_error: 2
+  both_decode_error_or_padding: 2
+
+invariants:
+  compat_emitter_used: 0
+  fake_placeholder_op: 0
+  invalid_pcode_shape: 0
+```
+
+Architecture smoke now reaches real instruction comparison for x86-64:
+
+```text
+Report: benchmark/artifacts/raw_p_code_benchmark/architecture_parallel_et_rel_seed/architecture_parallel_report.json
+
+aggregate bucket totals:
+  full_match: 4
+  pcode_op_count_mismatch: 4
+  pcode_opcode_mismatch: 3
+  decode_no_match: 5
+  missing_fission_instruction: 14
+  ghidra_decode_error: 3
+```
+
+New direct owner:
+
+- x86-64 LLVM row mismatch is caused by `.sla` hidden `BUILD check_Rmr32_dest` not being represented in the runtime constructor tree. Ghidra emits the hidden subconstructor's `INT_ZEXT` for 32-bit register writes; Fission currently drops that hidden build during handle remapping.
+- This must be fixed by real `ConstructState` / `ParserWalker` hidden operand execution, not by injecting a handwritten x86 zero-extension rule.
+- AARCH64/RISC-V rows now show real `DecodeNoMatch` coverage gaps after Ghidra decodes instructions; those are decision/runtime coverage owners, not raw P-code emission parity owners.

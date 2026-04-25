@@ -90,6 +90,7 @@ def run_one(
     ghidra_dir: Path | None,
     output_dir: Path,
     no_analyze: bool,
+    disassemble_missing: bool,
     fission_release: bool,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +116,7 @@ def run_one(
             "--output",
             str(ghidra_json),
             *(["--no-analyze"] if no_analyze else []),
+            *(["--disassemble-missing"] if disassemble_missing else []),
         ]
     )
     run(
@@ -194,6 +196,9 @@ def run_manifest(args: argparse.Namespace) -> int:
             or args.ghidra_dir,
             output_dir=output_dir,
             no_analyze=bool(row.get("no_analyze", args.no_analyze)),
+            disassemble_missing=bool(
+                row.get("disassemble_missing", args.disassemble_missing)
+            ),
             fission_release=args.fission_release,
         )
         for bucket, count in report["bucket_totals"].items():
@@ -290,6 +295,7 @@ def main() -> int:
     parser.add_argument("--feature", help="Run only rows matching one feature tag from the manifest")
     parser.add_argument("--group", help="Run only rows matching one feature_group tag from the manifest")
     parser.add_argument("--no-analyze", action="store_true")
+    parser.add_argument("--disassemble-missing", action="store_true")
     parser.add_argument("--fission-release", action="store_true")
     args = parser.parse_args()
 
@@ -308,6 +314,7 @@ def main() -> int:
         ghidra_dir=args.ghidra_dir,
         output_dir=args.output_dir,
         no_analyze=args.no_analyze,
+        disassemble_missing=args.disassemble_missing,
         fission_release=args.fission_release,
     )
     print(json.dumps({

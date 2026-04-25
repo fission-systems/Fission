@@ -1,4 +1,5 @@
 mod engine;
+pub mod native;
 mod registry;
 mod spine;
 
@@ -89,12 +90,16 @@ pub struct RuntimeExecutionDetails {
     pub template_source: Option<crate::compiler::CompiledTemplateSource>,
 }
 
+use std::sync::Arc;
+use crate::runtime::native::NativeBackend;
+
 #[derive(Debug, Clone)]
 pub struct RuntimeSleighFrontend {
     language: String,
     entry: EntrySpec,
     status: RuntimeFrontendStatus,
     compiled: Option<CompiledFrontend>,
+    native_backend: Option<Arc<NativeBackend>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,11 +220,41 @@ impl RuntimeSleighFrontend {
         } else {
             None
         };
+
+        let native_backend = if let Some(ref _c) = compiled {
+            let spec_root = crate::compiler::generated_root_for_entry_spec(&entry.path).ok();
+            let dylib_name = if cfg!(target_os = "windows") {
+                "native_backend.dll"
+            } else if cfg!(target_os = "macos") {
+                "native_backend.dylib"
+            } else {
+                "native_backend.so"
+            };
+
+            spec_root.and_then(|root| {
+                let path = root.join(dylib_name);
+                if path.exists() {
+                    match NativeBackend::load(&path) {
+                        Ok(backend) => Some(Arc::new(backend)),
+                        Err(e) => {
+                            tracing::error!("Failed to load native backend at {}: {}", path.display(), e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
         Ok(Self {
             language,
             entry,
             status,
             compiled,
+            native_backend,
         })
     }
 
@@ -326,6 +361,7 @@ impl RuntimeSleighFrontend {
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
                 })?,
+                self.native_backend.as_ref(),
                 bytes,
                 address,
             ),
@@ -434,6 +470,7 @@ impl RuntimeSleighFrontend {
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
                 })?,
+                self.native_backend.as_ref(),
                 bytes,
                 address,
             ),

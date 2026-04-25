@@ -7,15 +7,19 @@ use crate::runtime::{
     registry, DecodedInstruction, ExecutionEngineKey, RuntimeExecutionDetails, RuntimeSleighError,
 };
 
+use std::sync::Arc;
+use crate::runtime::native::NativeBackend;
+
 pub(crate) fn decode_and_lift_with_details(
     entry: &EntrySpec,
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => {
-            compiled_table::decode_and_lift_with_details(compiled, bytes, address)
+            compiled_table::decode_and_lift_with_details(compiled, native, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
@@ -31,12 +35,13 @@ pub(crate) fn decode_and_lift_with_details(
 pub(crate) fn decode_instruction(
     entry: &EntrySpec,
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => {
-            compiled_table::decode_instruction(compiled, bytes, address)
+            compiled_table::decode_instruction(compiled, native, bytes, address)
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),

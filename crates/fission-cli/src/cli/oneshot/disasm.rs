@@ -32,9 +32,7 @@ fn collect_function_instructions(
         }
     }
 
-    let section = binary.sections.iter().find(|s| {
-        func_start >= s.virtual_address && func_start < s.virtual_address + s.virtual_size
-    });
+    let section = binary.section_containing_for_execution(func_start);
 
     let (bytes, base) = if let Some(sec) = section {
         let offset = (func_start - sec.virtual_address) as usize;
@@ -128,10 +126,7 @@ pub(super) fn disassemble(
     let mut stdout = io::stdout().lock();
 
     // Find the section containing this address
-    let section = binary
-        .sections
-        .iter()
-        .find(|s| addr >= s.virtual_address && addr < s.virtual_address + s.virtual_size);
+    let section = binary.section_containing_for_execution(addr);
 
     let (bytes, base) = if let Some(sec) = section {
         // Calculate offset within section

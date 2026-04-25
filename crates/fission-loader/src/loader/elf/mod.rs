@@ -11,6 +11,12 @@ use schema::*;
 
 pub struct ElfLoader;
 
+const ET_REL: u16 = 1;
+const SHF_WRITE: u64 = 0x1;
+const SHF_ALLOC: u64 = 0x2;
+const SHF_EXECINSTR: u64 = 0x4;
+const RELOCATABLE_IMAGE_BASE: u64 = 0x100000;
+
 impl ElfLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
@@ -57,6 +63,7 @@ impl ElfLoader {
 
         let is_64bit = true;
         let entry_point = header.entry;
+        let is_relocatable = header.type_ == ET_REL;
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
@@ -76,6 +83,12 @@ impl ElfLoader {
                 );
             }
 
+            let section_addresses = if is_relocatable {
+                assign_relocatable_section_addresses_64(&shdrs)
+            } else {
+                shdrs.iter().map(|shdr| shdr.sh_addr).collect()
+            };
+
             // Get String Table for Section Names
             let strtab_idx = header.shstrndx as usize;
             let mut strtab_data = Vec::new();
@@ -88,23 +101,27 @@ impl ElfLoader {
                 }
             }
 
-            for shdr in &shdrs {
+            for (index, shdr) in shdrs.iter().enumerate() {
+                let virtual_address = section_addresses.get(index).copied().unwrap_or(shdr.sh_addr);
                 // Calculate simplified Image Base (lowest VA of loadable section)
-                if (shdr.sh_flags & 0x2) != 0 && shdr.sh_addr < image_base && shdr.sh_addr != 0 {
-                    image_base = shdr.sh_addr;
+                if (shdr.sh_flags & SHF_ALLOC) != 0
+                    && virtual_address < image_base
+                    && virtual_address != 0
+                {
+                    image_base = virtual_address;
                 }
 
                 let name = extract_cstring(&strtab_data, shdr.sh_name as usize);
 
                 sections_info.push(SectionInfo {
                     name: name.clone(),
-                    virtual_address: shdr.sh_addr,
+                    virtual_address,
                     virtual_size: shdr.sh_size, // ELF does not distinguish VSize/RawSize clearly in SH, mostly same
                     file_offset: shdr.sh_offset,
                     file_size: shdr.sh_size, // except NOBITS
-                    is_executable: (shdr.sh_flags & 0x4) != 0,
-                    is_readable: (shdr.sh_flags & 0x2) != 0,
-                    is_writable: (shdr.sh_flags & 0x1) != 0,
+                    is_executable: (shdr.sh_flags & SHF_EXECINSTR) != 0,
+                    is_readable: (shdr.sh_flags & SHF_ALLOC) != 0,
+                    is_writable: (shdr.sh_flags & SHF_WRITE) != 0,
                 });
 
                 // If this is a symbol table, read functions
@@ -117,6 +134,8 @@ impl ElfLoader {
                         shdr.sh_entsize,
                         shdr.sh_link as usize, // Link to String Table
                         &shdrs,
+                        &section_addresses,
+                        is_relocatable,
                         &mut functions_info,
                         endian,
                     );
@@ -168,6 +187,7 @@ impl ElfLoader {
 
         let is_64bit = false;
         let entry_point = header.entry as u64;
+        let is_relocatable = header.type_ == ET_REL;
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
@@ -187,6 +207,12 @@ impl ElfLoader {
                 );
             }
 
+            let section_addresses = if is_relocatable {
+                assign_relocatable_section_addresses_32(&shdrs)
+            } else {
+                shdrs.iter().map(|shdr| shdr.sh_addr as u64).collect()
+            };
+
             // Get String Table for Section Names
             let strtab_idx = header.shstrndx as usize;
             let mut strtab_data = Vec::new();
@@ -199,26 +225,30 @@ impl ElfLoader {
                 }
             }
 
-            for shdr in &shdrs {
+            for (index, shdr) in shdrs.iter().enumerate() {
+                let virtual_address = section_addresses
+                    .get(index)
+                    .copied()
+                    .unwrap_or(shdr.sh_addr as u64);
                 // Calculate simplified Image Base
-                if (shdr.sh_flags & 0x2) != 0
-                    && (shdr.sh_addr as u64) < image_base
-                    && shdr.sh_addr != 0
+                if (shdr.sh_flags as u64 & SHF_ALLOC) != 0
+                    && virtual_address < image_base
+                    && virtual_address != 0
                 {
-                    image_base = shdr.sh_addr as u64;
+                    image_base = virtual_address;
                 }
 
                 let name = extract_cstring(&strtab_data, shdr.sh_name as usize);
 
                 sections_info.push(SectionInfo {
                     name,
-                    virtual_address: shdr.sh_addr as u64,
+                    virtual_address,
                     virtual_size: shdr.sh_size as u64,
                     file_offset: shdr.sh_offset as u64,
                     file_size: shdr.sh_size as u64,
-                    is_executable: (shdr.sh_flags & 0x4) != 0,
-                    is_readable: (shdr.sh_flags & 0x2) != 0,
-                    is_writable: (shdr.sh_flags & 0x1) != 0,
+                    is_executable: (shdr.sh_flags as u64 & SHF_EXECINSTR) != 0,
+                    is_readable: (shdr.sh_flags as u64 & SHF_ALLOC) != 0,
+                    is_writable: (shdr.sh_flags as u64 & SHF_WRITE) != 0,
                 });
 
                 // If this is a symbol table, read functions
@@ -230,6 +260,8 @@ impl ElfLoader {
                         shdr.sh_entsize as u64,
                         shdr.sh_link as usize,
                         &shdrs,
+                        &section_addresses,
+                        is_relocatable,
                         &mut functions_info,
                         endian,
                     );
@@ -279,6 +311,8 @@ impl ElfLoader {
         entsize: u64,
         strtab_shndx: usize,
         shdrs: &[Elf64Shdr],
+        section_addresses: &[u64],
+        is_relocatable: bool,
         out_funcs: &mut Vec<FunctionInfo>,
         endian: binrw::Endian,
     ) {
@@ -340,14 +374,24 @@ impl ElfLoader {
             let binding = sym.st_info >> 4;
             let is_export = binding == 1 || binding == 2;
 
+            let address = if is_relocatable {
+                section_addresses
+                    .get(sym.st_shndx as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(sym.st_value)
+            } else {
+                sym.st_value
+            };
+
             // Deduplicate by address
-            if out_funcs.iter().any(|f| f.address == sym.st_value) {
+            if out_funcs.iter().any(|f| f.address == address) {
                 continue;
             }
 
             out_funcs.push(FunctionInfo {
                 name,
-                address: sym.st_value,
+                address,
                 size: sym.st_size,
                 is_export,
                 is_import: false,
@@ -362,6 +406,8 @@ impl ElfLoader {
         entsize: u64,
         strtab_shndx: usize,
         shdrs: &[Elf32Shdr],
+        section_addresses: &[u64],
+        is_relocatable: bool,
         out_funcs: &mut Vec<FunctionInfo>,
         endian: binrw::Endian,
     ) {
@@ -418,17 +464,63 @@ impl ElfLoader {
             let binding = sym.st_info >> 4;
             let is_export = binding == 1 || binding == 2;
 
-            if out_funcs.iter().any(|f| f.address == sym.st_value as u64) {
+            let address = if is_relocatable {
+                section_addresses
+                    .get(sym.st_shndx as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(sym.st_value as u64)
+            } else {
+                sym.st_value as u64
+            };
+
+            if out_funcs.iter().any(|f| f.address == address) {
                 continue;
             }
 
             out_funcs.push(FunctionInfo {
                 name,
-                address: sym.st_value as u64,
+                address,
                 size: sym.st_size as u64,
                 is_export,
                 is_import: false,
             });
         }
     }
+}
+
+fn assign_relocatable_section_addresses_64(shdrs: &[Elf64Shdr]) -> Vec<u64> {
+    let mut next = RELOCATABLE_IMAGE_BASE;
+    let mut addresses = vec![0; shdrs.len()];
+    for (index, shdr) in shdrs.iter().enumerate() {
+        if (shdr.sh_flags & SHF_ALLOC) == 0 || shdr.sh_size == 0 {
+            continue;
+        }
+        next = align_up(next, shdr.sh_addralign);
+        addresses[index] = next;
+        next = next.saturating_add(shdr.sh_size);
+    }
+    addresses
+}
+
+fn assign_relocatable_section_addresses_32(shdrs: &[Elf32Shdr]) -> Vec<u64> {
+    let mut next = RELOCATABLE_IMAGE_BASE;
+    let mut addresses = vec![0; shdrs.len()];
+    for (index, shdr) in shdrs.iter().enumerate() {
+        if (shdr.sh_flags as u64 & SHF_ALLOC) == 0 || shdr.sh_size == 0 {
+            continue;
+        }
+        next = align_up(next, shdr.sh_addralign as u64);
+        addresses[index] = next;
+        next = next.saturating_add(shdr.sh_size as u64);
+    }
+    addresses
+}
+
+fn align_up(value: u64, alignment: u64) -> u64 {
+    let alignment = alignment.max(1);
+    if !alignment.is_power_of_two() {
+        return value;
+    }
+    (value + alignment - 1) & !(alignment - 1)
 }

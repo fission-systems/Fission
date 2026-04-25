@@ -1568,6 +1568,7 @@ dependencies = [
  "fission-loader",
  "fission-pcode",
  "flate2",
+ "libloading 0.8.9",
  "serde",
  "serde_json",
  "tempfile",

@@ -22,18 +22,10 @@ use crate::runtime::{
     RuntimeExecutionDetails, RuntimeSleighError,
 };
 
-#[derive(Debug, Clone, Copy)]
-struct InstructionExtensionState {
-    w: bool,
-    r: bool,
-    x: bool,
-    b: bool,
-}
-
 #[derive(Debug, Clone)]
 struct CompiledInstructionContext<'a> {
     inner: RuntimeInstructionContext<'a>,
-    extension_state: InstructionExtensionState,
+    context_register: u64,
 }
 
 impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
@@ -44,47 +36,19 @@ impl<'a> std::ops::Deref for CompiledInstructionContext<'a> {
     }
 }
 
+impl<'a> std::ops::DerefMut for CompiledInstructionContext<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
 impl<'a> CompiledInstructionContext<'a> {
     fn parse(bytes: &'a [u8], address: u64) -> Result<Self> {
         if bytes.is_empty() {
             bail!("empty compiled-table decode buffer");
         }
-        let mut cursor = 0usize;
-        let mut operand_size_override = false;
-        let mut extension_state = InstructionExtensionState {
-            w: false,
-            r: false,
-            x: false,
-            b: false,
-        };
-        while cursor < bytes.len() {
-            match bytes[cursor] {
-                0x66 => {
-                    operand_size_override = true;
-                    cursor += 1;
-                }
-                0x67 | 0xF0 | 0xF2 | 0xF3 | 0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 => {
-                    cursor += 1;
-                }
-                value @ 0x40..=0x4F => {
-                    extension_state = InstructionExtensionState {
-                        w: value & 0x08 != 0,
-                        r: value & 0x04 != 0,
-                        x: value & 0x02 != 0,
-                        b: value & 0x01 != 0,
-                    };
-                    cursor += 1;
-                }
-                _ => break,
-            }
-        }
-        let instruction_width_profile = if extension_state.w {
-            2
-        } else if operand_size_override {
-            0
-        } else {
-            1
-        };
+        let cursor = 0usize;
+        let instruction_width_profile = 1;
         Ok(Self {
             inner: RuntimeInstructionContext::new(
                 bytes,
@@ -92,7 +56,7 @@ impl<'a> CompiledInstructionContext<'a> {
                 cursor,
                 instruction_width_profile,
             ),
-            extension_state,
+            context_register: 0,
         })
     }
 }
@@ -110,21 +74,48 @@ struct TokenFieldBundle {
     length: usize,
 }
 
+use std::sync::Arc;
+use crate::runtime::native::NativeBackend;
+
 pub(crate) fn decode_and_lift_with_details(
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
-    let ctx = CompiledInstructionContext::parse(bytes, address)?;
-    let selection =
-        select_constructor(compiled, &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
+    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.context_register = compiled.default_context;
+
+    let instruction_table = compiled.subtables.get("instruction").expect("missing 'instruction' subtable");
+    let selection = if let Some(native) = native {
+        let constructor_index = native.decode_match("instruction", bytes, ctx.context_register)?
+            .ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
+                language: compiled.entry_id.clone(),
+                address,
+            })?;
+        let constructor = instruction_table.constructors.get(constructor_index)
+            .ok_or_else(|| anyhow!("invalid constructor index returned by backend"))?;
+        RuntimeSelection {
+            constructor,
+            constructor_index,
+            trace: spine::RuntimeMatchTrace {
+                root_bucket: "native".to_string(),
+                probes: Vec::new(),
+                leaf_constructor_indexes: vec![constructor_index],
+            },
+        }
+    } else {
+        select_constructor(compiled, "instruction", &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
             language: compiled.entry_id.clone(),
             address,
-        })?;
+        })?
+    };
+
     if !selection.constructor.runtime_ready {
         return Err(unsupported_constructor_error(compiled, selection.constructor).into());
     }
-    let decoded = bind_instruction(&ctx, selection)?;
+
+    let decoded = bind_instruction(compiled, native, &ctx, selection)?;
     let mut emitter = CompiledTableEmitter::new(address);
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, &decoded)
@@ -153,19 +144,41 @@ pub(crate) fn decode_and_lift_with_details(
 
 pub(crate) fn decode_instruction(
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<DecodedInstruction> {
-    let ctx = CompiledInstructionContext::parse(bytes, address)?;
-    let selection =
-        select_constructor(compiled, &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
+    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.context_register = compiled.default_context;
+
+    let instruction_table = compiled.subtables.get("instruction").expect("missing 'instruction' subtable");
+    let selection = if let Some(native) = native {
+        let constructor_index = native.decode_match("instruction", bytes, ctx.context_register)?
+            .ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
+                language: compiled.entry_id.clone(),
+                address,
+            })?;
+        let constructor = instruction_table.constructors.get(constructor_index)
+            .ok_or_else(|| anyhow!("invalid constructor index returned by backend"))?;
+        RuntimeSelection {
+            constructor,
+            constructor_index,
+            trace: spine::RuntimeMatchTrace {
+                root_bucket: "native".to_string(),
+                probes: Vec::new(),
+                leaf_constructor_indexes: vec![constructor_index],
+            },
+        }
+    } else {
+        select_constructor(compiled, "instruction", &ctx).ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
             language: compiled.entry_id.clone(),
             address,
-        })?;
-    let constructor = selection.constructor;
-    let decoded = bind_instruction(&ctx, selection)?;
+        })?
+    };
+
+    let decoded = bind_instruction(compiled, native, &ctx, selection.clone())?;
     let length = decoded.length;
-    let mnemonic = disasm_mnemonic(constructor, &decoded);
+    let mnemonic = disasm_mnemonic(selection.constructor, &decoded);
     let operands_text = decoded
         .operands
         .iter()
@@ -192,11 +205,13 @@ pub(crate) fn decode_instruction(
 
 fn select_constructor<'a>(
     compiled: &'a CompiledFrontend,
+    table_name: &str,
     ctx: &CompiledInstructionContext<'_>,
 ) -> Option<RuntimeSelection<'a>> {
+    let subtable = compiled.subtables.get(table_name)?;
     spine::select_constructor(
         compiled,
-        [("global".to_string(), compiled.decision_tree.root_node_index)],
+        [(table_name.to_string(), subtable.decision_tree.root_node_index)],
         || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
     )
@@ -232,8 +247,15 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
                 (byte & mask) >> shift
             }
-            CompiledDecisionProbe::ContextBitSlice { .. }
-            | CompiledDecisionProbe::ContextFieldRef(_) => 0,
+            CompiledDecisionProbe::ContextBitSlice {
+                offset,
+                mask,
+                shift,
+            } => {
+                let val = (self.ctx.context_register >> offset) & u64::from(mask);
+                (val >> shift) as u8
+            }
+            CompiledDecisionProbe::ContextFieldRef(_) => 0,
             CompiledDecisionProbe::TokenFieldRef(
                 CompiledTokenFieldRef::InstructionWidthProfile,
             ) => self.ctx.instruction_width_profile,
@@ -297,9 +319,9 @@ fn parse_token_fields(
         .get(offset)
         .ok_or_else(|| anyhow!("missing token field bundle at {offset}"))?;
     let operand_mode = byte >> 6;
-    let reg = ((byte >> 3) & 0x7) | ((ctx.extension_state.r as u8) << 3);
+    let reg = ((byte >> 3) & 0x7) | ((false as u8) << 3);
     let rm_low = byte & 0x7;
-    let rm = rm_low | ((ctx.extension_state.b as u8) << 3);
+    let rm = rm_low | ((false as u8) << 3);
     if operand_mode == 3 {
         return Ok(TokenFieldBundle {
             operand_mode,
@@ -331,14 +353,14 @@ fn parse_token_fields(
         let index_low = (sib >> 3) & 0x7;
         let base_low = sib & 0x7;
         if index_low != 4 {
-            index = Some(index_low | ((ctx.extension_state.x as u8) << 3));
+            index = Some(index_low | ((false as u8) << 3));
         }
         if operand_mode == 0 && base_low == 5 {
             base = None;
             displacement = read_sint(ctx.bytes, offset + length, 4)?;
             length += 4;
         } else {
-            base = Some(base_low | ((ctx.extension_state.b as u8) << 3));
+            base = Some(base_low | ((false as u8) << 3));
         }
     } else if operand_mode == 0 && rm_low == 5 {
         base = None;
@@ -436,6 +458,29 @@ fn constructor_matches(
                 bail!("row/page mismatch");
             }
         }
+        CompiledPatternMatcher::BitConstraints(constraints) => {
+            for constraint in constraints {
+                match constraint {
+                    crate::compiler::PatternConstraint::Instruction { offset, mask, value } => {
+                        let mut inst_val = 0u64;
+                        for i in 0..8 {
+                            if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i) {
+                                inst_val |= u64::from(*byte) << (i * 8);
+                            }
+                        }
+                        if (inst_val & mask) != *value {
+                            bail!("instruction bit constraint mismatch");
+                        }
+                    }
+                    crate::compiler::PatternConstraint::Context { offset, mask, value } => {
+                        let val = (ctx.context_register >> offset) & mask;
+                        if val != *value {
+                            bail!("context bit constraint mismatch");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     let requires_token_bundle = constructor.mod_constraint.is_some()
@@ -443,8 +488,8 @@ fn constructor_matches(
         || constructor.operand_specs.iter().any(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::TokenFieldRm { .. }
-                    | CompiledOperandSpec::TokenFieldReg { .. }
+                CompiledOperandSpec::TokenFieldExtraction { .. }
+                    | CompiledOperandSpec::SubtableEvaluation { .. }
             )
         });
     if requires_token_bundle {
@@ -459,15 +504,7 @@ fn constructor_matches(
         {
             bail!("operand_reg mismatch");
         }
-        if constructor.operand_specs.iter().any(|spec| {
-            matches!(
-                spec,
-                CompiledOperandSpec::TokenFieldRm {
-                    memory_only: true,
-                    ..
-                }
-            )
-        }) && token_fields.operand_mode == 3
+        if false && token_fields.operand_mode == 3
         {
             bail!("memory-only token field mismatch");
         }
@@ -476,15 +513,19 @@ fn constructor_matches(
     Ok(())
 }
 
-fn bind_instruction(
+fn bind_instruction<'a>(
+    compiled: &'a CompiledFrontend,
+    native: Option<&'a Arc<NativeBackend>>,
     ctx: &CompiledInstructionContext<'_>,
-    selection: RuntimeSelection<'_>,
+    selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
     constructor_matches(ctx, selection.constructor)?;
-    CompiledParserWalker::new(ctx, selection)?.walk()
+    CompiledParserWalker::new(compiled, native, ctx, selection)?.walk()
 }
 
 struct CompiledParserWalker<'a, 'b> {
+    compiled: &'a CompiledFrontend,
+    native: Option<&'a Arc<NativeBackend>>,
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     cursor: usize,
@@ -495,17 +536,22 @@ struct CompiledParserWalker<'a, 'b> {
 
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn new(
+        compiled: &'a CompiledFrontend,
+        native: Option<&'a Arc<NativeBackend>>,
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
         let opcode_len = opcode_len_from_matcher(&selection.constructor.matcher);
+        let handles = vec![None; selection.constructor.constructor_template.handles.len()];
         Ok(Self {
+            compiled,
+            native,
             ctx,
+            selection,
             cursor: ctx.cursor + opcode_len,
             token_fields: None,
-            handles: vec![None; selection.constructor.constructor_template.handles.len()],
+            handles,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
-            selection,
         })
     }
 
@@ -617,15 +663,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<BoundOperand> {
         match &template.spec {
-            CompiledOperandSpec::TokenFieldRm { size, memory_only } => {
+            CompiledOperandSpec::TokenFieldExtraction { bit_offset, bit_width, sign_extend } => {
                 let token_fields = self.ensure_token_fields()?;
                 if token_fields.operand_mode == 3 {
-                    if *memory_only {
-                        bail!("memory-only token field operand cannot bind register");
-                    }
                     Ok(BoundOperand::Register {
                         index: token_fields.rm,
-                        size: *size,
+                        size: *bit_width / 8,
                     })
                 } else {
                     Ok(BoundOperand::Memory {
@@ -640,29 +683,56 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                                 .wrapping_add(self.cursor as u64)
                                 .wrapping_add_signed(token_fields.displacement)
                         }),
-                        size: *size,
+                        size: *bit_width / 8,
                     })
                 }
             }
-            CompiledOperandSpec::TokenFieldReg { size } => {
-                let token_fields = self.ensure_token_fields()?;
-                Ok(BoundOperand::Register {
-                    index: token_fields.reg,
-                    size: *size,
+            CompiledOperandSpec::ContextFieldExtraction { bit_offset, bit_width, sign_extend } => {
+                let val = (self.ctx.context_register >> bit_offset) & ((1u64 << bit_width) - 1);
+                let value = if *sign_extend {
+                    let shift = 64 - bit_width;
+                    ((val << shift) as i64 >> shift) as u64
+                } else {
+                    val
+                };
+                Ok(BoundOperand::Immediate {
+                    value,
+                    encoded_size: (*bit_width / 8).max(1),
+                    signed: *sign_extend,
                 })
             }
-            CompiledOperandSpec::OpcodeTokenReg { size } => {
-                let opcode_len = opcode_len_from_matcher(&self.selection.constructor.matcher);
-                let opcode = *self
-                    .ctx
-                    .bytes
-                    .get(self.ctx.cursor + opcode_len - 1)
-                    .ok_or_else(|| anyhow!("missing opcode reg byte"))?;
-                let reg = (opcode & 0x7) | ((self.ctx.extension_state.b as u8) << 3);
-                Ok(BoundOperand::Register {
-                    index: reg,
-                    size: *size,
-                })
+            CompiledOperandSpec::SubtableEvaluation { table_name } => {
+                let mut sub_ctx = (*self.ctx).clone();
+                sub_ctx.cursor = self.cursor;
+
+                let selection = if let Some(native) = self.native {
+                    let constructor_index = native.decode_match(table_name, self.ctx.bytes, sub_ctx.context_register)?
+                        .ok_or_else(|| anyhow!("DecodeNoMatch in subtable {table_name} at 0x{:x}", sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)))?;
+                    let subtable = self.compiled.subtables.get(table_name)
+                        .ok_or_else(|| anyhow!("missing subtable {table_name}"))?;
+                    let constructor = subtable.constructors.get(constructor_index)
+                        .ok_or_else(|| anyhow!("invalid constructor index {constructor_index} in subtable {table_name}"))?;
+                    RuntimeSelection {
+                        constructor,
+                        constructor_index,
+                        trace: spine::RuntimeMatchTrace {
+                            root_bucket: format!("native:{}", table_name),
+                            probes: Vec::new(),
+                            leaf_constructor_indexes: vec![constructor_index],
+                        },
+                    }
+                } else {
+                    select_constructor(self.compiled, table_name, &sub_ctx)
+                        .ok_or_else(|| anyhow!("DecodeNoMatch in subtable {table_name} at 0x{:x}", sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)))?
+                };
+
+                let sub_state = bind_instruction(self.compiled, self.native, &sub_ctx, selection)?;
+                self.cursor += sub_state.length - sub_ctx.cursor;
+                
+                // Return the exported handle from the sub-constructor
+                sub_state.handles.first()
+                    .map(|h| h.value.clone())
+                    .ok_or_else(|| anyhow!("subtable {table_name} did not export a handle"))
             }
             CompiledOperandSpec::Immediate { size, signed } => {
                 let value = read_uint(self.ctx.bytes, self.cursor, *size)?;
@@ -698,6 +768,14 @@ fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> usize {
         CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
         CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
         CompiledPatternMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::BitConstraints(constraints) => constraints
+            .iter()
+            .filter_map(|c| match c {
+                crate::compiler::PatternConstraint::Instruction { offset, .. } => Some(*offset as usize + 1),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0),
     }
 }
 
@@ -2141,7 +2219,7 @@ mod tests {
         bytes: &[u8],
         address: u64,
     ) {
-        match decode_and_lift_with_details(compiled, bytes, address) {
+        match decode_and_lift_with_details(compiled, None, bytes, address) {
             Ok((ops, length, details)) => {
                 assert_eq!(length as usize, bytes.len());
                 assert!(
@@ -2173,7 +2251,7 @@ mod tests {
     #[test]
     fn generated_runtime_decodes_ret_with_spec_derived_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
-        let decoded = decode_instruction(&compiled, &[0xC3], 0x1000).expect("generated ret");
+        let decoded = decode_instruction(&compiled, None, &[0xC3], 0x1000).expect("generated ret");
         assert_eq!(decoded.length, 1);
         assert!(matches!(decoded.flow_kind, DecodedFlowKind::Return));
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0xC3], 0x1000);
@@ -2183,7 +2261,7 @@ mod tests {
     fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov");
+        let decoded = decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "mov");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
@@ -2192,7 +2270,7 @@ mod tests {
     #[test]
     fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
-        let decoded = decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
+        let decoded = decode_instruction(&compiled, None, &[0x75, 0x05], 0x1000).expect("generated jne");
         assert_eq!(decoded.length, 2);
         assert_eq!(decoded.mnemonic, "jnz");
         assert!(matches!(
@@ -2205,7 +2283,7 @@ mod tests {
     #[test]
     fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
-        let decoded = decode_instruction(&compiled, &[0x7e, 0x05], 0x1000).expect("generated jle");
+        let decoded = decode_instruction(&compiled, None, &[0x7e, 0x05], 0x1000).expect("generated jle");
         assert_eq!(decoded.length, 2);
         assert_eq!(decoded.mnemonic, "jle");
         assert!(matches!(
@@ -2220,11 +2298,11 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xC7, 0x00, 0x01, 0x00, 0x00, 0x00];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
+            decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov [rax], imm32");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "mov");
         let (ops, length, details) =
-            decode_and_lift_with_details(&compiled, &bytes, 0x1000).expect("lift mov [rax], imm32");
+            decode_and_lift_with_details(&compiled, None, &bytes, 0x1000).expect("lift mov [rax], imm32");
         assert_eq!(length as usize, bytes.len());
         assert_eq!(
             details.template_source,
@@ -2241,7 +2319,7 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x83, 0xEC, 0x28];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
+            decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated sub rsp, imm8");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "sub");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
@@ -2253,7 +2331,7 @@ mod tests {
         let bytes = [0x48, 0x8B, 0x05, 0x15, 0x30, 0x00, 0x00];
         let address = 0x1400_013e4;
         let decoded =
-            decode_instruction(&compiled, &bytes, address).expect("generated rip-relative mov");
+            decode_instruction(&compiled, None, &bytes, address).expect("generated rip-relative mov");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "mov");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, address);
@@ -2264,7 +2342,7 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xE8, 0x1A, 0xFC, 0xFF, 0xFF];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1400_013ef).expect("generated call rel32");
+            decode_instruction(&compiled, None, &bytes, 0x1400_013ef).expect("generated call rel32");
         assert_eq!(decoded.length, bytes.len());
         assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_013ef);
@@ -2275,22 +2353,22 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
             .expect("decode context");
-        let selection = select_constructor(&compiled, &ctx).expect("constructor selection");
-        let state = bind_instruction(&ctx, selection).expect("bind instruction");
+        let selection = select_constructor(&compiled, "instruction", &ctx).expect("constructor selection");
+        let state = bind_instruction(&compiled, None, &ctx, selection).expect("bind instruction");
         assert_eq!(state.match_trace.root_bucket, "global");
         assert!(!state.match_trace.probes.is_empty());
         assert!(!state.construct_nodes.is_empty());
         assert!(state
             .handles
             .iter()
-            .any(|handle| matches!(handle.spec, CompiledOperandSpec::TokenFieldRm { .. })));
+            .any(|handle| matches!(handle.spec, CompiledOperandSpec::TokenFieldExtraction { .. })));
     }
 
     #[test]
     fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x8d, 0x04, 0x11];
-        let decoded = decode_instruction(&compiled, &bytes, 0x1400_1450).expect("generated lea");
+        let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_1450).expect("generated lea");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "lea");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
@@ -2301,7 +2379,7 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1400_19c0).expect("generated mov rip-relative");
+            decode_instruction(&compiled, None, &bytes, 0x1400_19c0).expect("generated mov rip-relative");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "mov");
         assert!(matches!(
@@ -2314,7 +2392,7 @@ mod tests {
     fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lift() {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x48, 0x63, 0x41, 0x3c];
-        let decoded = decode_instruction(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
+        let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_2600).expect("generated movsxd");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "movsxd");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_2600);
@@ -2325,7 +2403,7 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0x31, 0xc0];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
+            decode_instruction(&compiled, None, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "xor");
         assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_19e0);
@@ -2336,7 +2414,7 @@ mod tests {
         let compiled = compile_x86_64_frontend().expect("compile frontend");
         let bytes = [0xdb, 0xe3];
         let decoded =
-            decode_instruction(&compiled, &bytes, 0x1400_25c0).expect("generated fninit decode");
+            decode_instruction(&compiled, None, &bytes, 0x1400_25c0).expect("generated fninit decode");
         assert_eq!(decoded.length, bytes.len());
         assert_eq!(decoded.mnemonic, "fninit");
         assert!(matches!(decoded.flow_kind, DecodedFlowKind::None));

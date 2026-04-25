@@ -1,14 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use super::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 use super::preprocessor::ExpandedSpec;
 use super::sla::CompiledSlaTemplateLibrary;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompiledSubtableDefinition {
+    pub name: String,
+    pub constructors: Vec<CompiledExecutableConstructor>,
+    pub decision_tree: CompiledDecisionTree,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledFrontend {
     pub arch: String,
+    pub default_context: u64,
     pub entry_spec: String,
     pub entry_id: String,
     pub include_manifest: Vec<String>,
@@ -16,15 +27,14 @@ pub struct CompiledFrontend {
     pub definitions: Vec<CompiledSpecDefinition>,
     pub macros: Vec<CompiledMacro>,
     pub constructors: Vec<CompiledConstructor>,
-    pub executable_constructors: Vec<CompiledExecutableConstructor>,
-    pub decision_tree: CompiledDecisionTree,
+    pub subtables: BTreeMap<String, CompiledSubtableDefinition>,
     pub language_layout: CompiledLanguageLayout,
     pub construct_templates: Vec<CompiledConstructTpl>,
     pub pcode_ops: Vec<CompiledPcodeOp>,
     pub pattern_nodes: Vec<CompiledPatternNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledLanguageLayout {
     pub address_spaces: Vec<CompiledAddressSpace>,
     pub registers: Vec<CompiledRegister>,
@@ -34,57 +44,68 @@ pub struct CompiledLanguageLayout {
     pub display_templates: Vec<CompiledDisplayTemplate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledAddressSpace {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledRegister {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledTokenField {
     pub name: String,
+    pub bit_offset: u32,
+    pub bit_width: u32,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledContextField {
     pub name: String,
+    pub bit_offset: u32,
+    pub bit_width: u32,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSubtable {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDisplayTemplate {
     pub constructor_hash: u64,
     pub display: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSpecDefinition {
     pub kind: String,
     pub source: String,
     pub statement: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledMacro {
     pub name: String,
     pub source: String,
     pub body_line_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompiledContextOp {
+    pub bit_offset: u32,
+    pub bit_width: u32,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledConstructor {
     pub mnemonic: String,
     pub display: String,
@@ -95,9 +116,10 @@ pub struct CompiledConstructor {
     pub with_stack: Vec<String>,
     pub semantic_ops: Vec<String>,
     pub signature_hash: u64,
+    pub context_changes: Vec<CompiledContextOp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledExecutableConstructor {
     pub mnemonic: String,
     pub source: String,
@@ -114,7 +136,7 @@ pub struct CompiledExecutableConstructor {
     pub unsupported_template_kind: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDecisionTree {
     pub root_node_index: usize,
     pub root_buckets: Vec<CompiledDecisionBucket>,
@@ -122,26 +144,26 @@ pub struct CompiledDecisionTree {
     pub decision_node_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDecisionBucket {
     pub key: String,
     pub node_index: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDecisionNode {
     pub probe: CompiledDecisionProbe,
     pub branches: Vec<CompiledDecisionEdge>,
     pub leaf_constructor_indexes: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDecisionEdge {
     pub value: u8,
     pub next_node_index: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledDecisionProbe {
     Terminal,
     InstructionBitSlice { offset: u8, mask: u8, shift: u8 },
@@ -151,21 +173,34 @@ pub enum CompiledDecisionProbe {
     TerminalPatternCheck,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompiledPatternMatcher {
-    ExactBytes(Vec<u8>),
-    RowCc { prefix: Vec<u8>, row: u8 },
-    RowPage { row: u8, page: u8 },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatternConstraint {
+    Instruction { offset: u32, mask: u64, value: u64 },
+    Context { offset: u32, mask: u64, value: u64 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompiledPatternMatcher {
+    ExactBytes(Vec<u8>),
+    RowCc {
+        prefix: Vec<u8>,
+        row: u8,
+    },
+    RowPage {
+        row: u8,
+        page: u8,
+    },
+    BitConstraints(Vec<PatternConstraint>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledTokenFieldRef {
     InstructionWidthProfile,
     AddressingForm,
     RegisterSelector,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledContextFieldRef {
     DefaultContext,
 }
@@ -185,21 +220,46 @@ impl CompiledPatternMatcher {
                 }
             }
             Self::RowPage { row, page } => format!("row_{row}_page_{page}"),
+            Self::BitConstraints(constraints) => {
+                let mut hash = 0u64;
+                for constraint in constraints {
+                    match constraint {
+                        PatternConstraint::Instruction {
+                            offset,
+                            mask,
+                            value,
+                        } => {
+                            hash ^= (*offset as u64) ^ *mask ^ *value;
+                        }
+                        PatternConstraint::Context {
+                            offset,
+                            mask,
+                            value,
+                        } => {
+                            hash ^= (*offset as u64) ^ *mask ^ *value ^ 0x12345678;
+                        }
+                    }
+                }
+                format!("bits_{hash:016x}")
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandSpec {
-    TokenFieldRm {
-        size: u32,
-        memory_only: bool,
+    TokenFieldExtraction {
+        bit_offset: u32,
+        bit_width: u32,
+        sign_extend: bool,
     },
-    TokenFieldReg {
-        size: u32,
+    ContextFieldExtraction {
+        bit_offset: u32,
+        bit_width: u32,
+        sign_extend: bool,
     },
-    OpcodeTokenReg {
-        size: u32,
+    SubtableEvaluation {
+        table_name: String,
     },
     Immediate {
         size: u32,
@@ -214,7 +274,7 @@ pub enum CompiledOperandSpec {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledConstructorTemplate {
     pub handles: Vec<CompiledHandleTemplate>,
     pub decode_steps: Vec<CompiledOperandDecodeStep>,
@@ -223,19 +283,19 @@ pub struct CompiledConstructorTemplate {
     pub template_source: CompiledTemplateSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledHandleTemplate {
     pub operand_index: usize,
     pub spec: CompiledOperandSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandDecodeStep {
     ConsumeTokenFields,
     DecodeOperand { operand_index: usize },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledSemanticOp {
     Nop,
     Return,
@@ -254,7 +314,7 @@ pub enum CompiledSemanticOp {
     AccumulatorExtend { src_size: u32, dst_size: u32 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledConstructTpl {
     pub constructor_hash: u64,
     pub ops: Vec<CompiledSemanticOp>,
@@ -262,7 +322,7 @@ pub struct CompiledConstructTpl {
     pub template_source: CompiledTemplateSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledTemplateSource {
     SpecDerived,
     /// Fission-native templates for constructors whose SLA templates reference
@@ -273,7 +333,7 @@ pub enum CompiledTemplateSource {
     CompatibilityLowered,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledOpTpl {
     pub opcode: CompiledOpTplOpcode,
     pub output: Option<CompiledVarnodeTpl>,
@@ -281,7 +341,7 @@ pub struct CompiledOpTpl {
     pub label: Option<CompiledLabelRef>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOpTplOpcode {
     Copy,
     Load,
@@ -320,7 +380,7 @@ pub enum CompiledOpTplOpcode {
     Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledVarnodeTpl {
     /// Ghidra-shaped `VarnodeTpl`: `(space, offset, size)` are all `ConstTpl`
     /// descendants. This is the only canonical varnode shape for
@@ -362,7 +422,7 @@ pub enum CompiledVarnodeTpl {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledHandleTpl {
     pub space: Option<CompiledSpaceTpl>,
     pub size: Option<CompiledConstTpl>,
@@ -373,13 +433,13 @@ pub struct CompiledHandleTpl {
     pub temp_offset: Option<CompiledConstTpl>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledSpaceTpl {
     SpaceRef(CompiledSpaceRef),
     Const(Box<CompiledConstTpl>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledConstTpl {
     Real {
         value: u64,
@@ -409,18 +469,18 @@ pub enum CompiledConstTpl {
     FlowDestSize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSpaceRef {
     pub name: String,
     pub index: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledLabelRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledHandleSelector {
     Space,
     Offset,
@@ -447,7 +507,7 @@ impl CompiledVarnodeTpl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledArithmeticOpcode {
     Add,
     Sub,
@@ -462,16 +522,17 @@ pub enum CompiledArithmeticOpcode {
     Dec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledFixedRegister {
     Accumulator,
     StackPointer,
     FramePointer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledConstructTplKind {
     Unsupported,
+    Generic,
     Nop,
     Ret,
     Call,
@@ -540,6 +601,7 @@ impl CompiledConstructTplKind {
             Self::Cbw => "cbw",
             Self::Cwde => "cwde",
             Self::Cdqe => "cdqe",
+            Self::Generic => "generic",
         }
     }
 }
@@ -661,20 +723,20 @@ impl CompiledArithmeticOpcode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSemanticTemplate {
     pub status: String,
     pub action_hash: u64,
     pub op_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledPcodeOp {
     pub name: String,
     pub defined_in: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledPatternNode {
     pub node_id: String,
     pub source: String,
@@ -683,7 +745,7 @@ pub struct CompiledPatternNode {
     pub control_flow: ControlFlowClass,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ControlFlowClass {
     None,
     Branch,
@@ -710,17 +772,23 @@ pub fn compile_frontend(
     arch: &str,
     expanded: &ExpandedSpec,
     ast: &SpecAst,
+    entry_spec: &Path,
 ) -> Result<CompiledFrontend> {
     let mut collector = Collector {
         definitions: Vec::new(),
         macros: Vec::new(),
         constructors: Vec::new(),
-        executable_constructors: Vec::new(),
+        subtable_executables: BTreeMap::new(),
         pcode_ops: BTreeSet::new(),
         pcode_op_sources: BTreeMap::new(),
+        default_context: 0,
         pattern_nodes: Vec::new(),
+        field_info: BTreeMap::new(),
     };
     collector.collect_items(&ast.items, &mut Vec::new());
+
+    // Infer default context from .pspec if available
+    collector.default_context = infer_default_context_from_pspec(entry_spec, &collector.field_info)?;
 
     let language_layout = collector.language_layout();
     let construct_templates = collector.construct_templates();
@@ -738,9 +806,22 @@ pub fn compile_frontend(
         .collect::<Vec<_>>();
     pcode_ops.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
-    let decision_tree = build_decision_tree(&collector.executable_constructors);
+    let mut subtables = BTreeMap::new();
+    for (name, constructors) in &collector.subtable_executables {
+        let decision_tree = build_decision_tree(constructors);
+        subtables.insert(
+            name.clone(),
+            CompiledSubtableDefinition {
+                name: name.clone(),
+                constructors: constructors.clone(),
+                decision_tree,
+            },
+        );
+    }
+
     Ok(CompiledFrontend {
         arch: arch.to_string(),
+        default_context: collector.default_context,
         entry_spec: expanded
             .entry_spec
             .file_name()
@@ -766,8 +847,7 @@ pub fn compile_frontend(
         definitions: collector.definitions,
         macros: collector.macros,
         constructors: collector.constructors,
-        executable_constructors: collector.executable_constructors,
-        decision_tree,
+        subtables,
         language_layout,
         construct_templates,
         pcode_ops,
@@ -775,137 +855,190 @@ pub fn compile_frontend(
     })
 }
 
+fn infer_default_context_from_pspec(
+    entry_spec: &Path,
+    field_info: &BTreeMap<String, FieldBitRange>,
+) -> Result<u64> {
+    let pspec_path = entry_spec.with_extension("pspec");
+    if !pspec_path.exists() {
+        return Ok(0);
+    }
+
+    let content = fs::read_to_string(&pspec_path)
+        .with_context(|| format!("read pspec {}", pspec_path.display()))?;
+    let mut default_context = 0u64;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("<set ") {
+            if let Some(name) = extract_xml_attribute(line, "name") {
+                if let Some(val_str) = extract_xml_attribute(line, "val") {
+                    let val = if val_str.starts_with("0x") {
+                        u64::from_str_radix(&val_str[2..], 16).unwrap_or(0)
+                    } else {
+                        val_str.parse::<u64>().unwrap_or(0)
+                    };
+
+                    if let Some(info) = field_info.get(&name) {
+                        let mask = ((1u64 << info.bit_width) - 1) << info.bit_offset;
+                        default_context &= !mask;
+                        default_context |= (val << info.bit_offset) & mask;
+                    }
+                }
+            }
+        }
+    }
+    Ok(default_context)
+}
+
+fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {
+    let key = format!("{}=\"", attr);
+    if let Some(start) = line.find(&key) {
+        let after = &line[start + key.len()..];
+        if let Some(end) = after.find('"') {
+            return Some(after[..end].to_string());
+        }
+    }
+    None
+}
+
 pub fn apply_sla_construct_templates(
     compiled: &mut CompiledFrontend,
     library: &CompiledSlaTemplateLibrary,
 ) -> usize {
     let mut updated = 0usize;
-    for constructor in &mut compiled.executable_constructors {
-        let Some(templates) = library.constructors_by_source.get(&constructor.source) else {
-            continue;
-        };
-        if templates.len() != 1 {
-            constructor.runtime_ready = false;
-            constructor.unsupported_template_kind =
-                Some("sla_constructor_mapping_mismatch".to_string());
-            continue;
-        }
-        let decoded = &templates[0].constructor_template;
-        // Only reject templates containing truly unsupported opcodes.
-        // Build (subtable inlining) and CallOther (user-defined ops) are
-        // now handled at emission time in the runtime emitter.
-        let has_unsupported_opcode = decoded
-            .op_templates
-            .iter()
-            .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Unsupported));
-
-        // Build handle index remapping from SLA ordering to our ordering.
-        // Fission extracts `operand_specs` based on the display string.
-        // Ghidra emits `ELEM_OPPRINT` indices in the exact order of the display string.
-        // Therefore, `opprint_indices[fission_idx]` gives the SLA operand index.
-        //
-        // When opprint_indices is empty, this constructor has no visible operands
-        // in its display string (sub-constructors, prefix-only, etc.), so we
-        // must NOT remap — the SLA template indices are already correct.
-        let opprint = &templates[0].opprint_indices;
-        let mut remapped_templates = decoded.op_templates.clone();
-
-        let mut handle_remap = Vec::new();
-        if !opprint.is_empty() {
-            handle_remap = vec![usize::MAX; 32];
-            for (fission_idx, sla_idx) in opprint.iter().enumerate() {
-                if *sla_idx < handle_remap.len() {
-                    handle_remap[*sla_idx] = fission_idx;
-                }
-            }
-        } else if let Some(hidden_prefix_count) = infer_leading_hidden_build_handle_count(
-            &remapped_templates,
-            constructor.operand_specs.len(),
-        ) {
-            handle_remap = vec![usize::MAX; hidden_prefix_count + constructor.operand_specs.len()];
-            for fission_idx in 0..constructor.operand_specs.len() {
-                handle_remap[hidden_prefix_count + fission_idx] = fission_idx;
-            }
-        }
-
-        if !handle_remap.is_empty() {
-            for op in &mut remapped_templates {
-                remap_op_tpl_handles(op, &handle_remap);
-            }
-            remap_build_operand_indices(&mut remapped_templates, &handle_remap);
-        }
-
-        let num_handles = constructor.operand_specs.len();
-        if templates_reference_unresolvable_handles(&remapped_templates, num_handles) {
-            if let Some(hidden_prefix_count) =
-                infer_leading_hidden_build_handle_count(&decoded.op_templates, num_handles)
-            {
-                let mut hidden_remap = vec![usize::MAX; hidden_prefix_count + num_handles];
-                for fission_idx in 0..num_handles {
-                    hidden_remap[hidden_prefix_count + fission_idx] = fission_idx;
-                }
-                let mut hidden_remapped_templates = decoded.op_templates.clone();
-                for op in &mut hidden_remapped_templates {
-                    remap_op_tpl_handles(op, &hidden_remap);
-                }
-                remap_build_operand_indices(&mut hidden_remapped_templates, &hidden_remap);
-                if !templates_reference_unresolvable_handles(
-                    &hidden_remapped_templates,
-                    num_handles,
-                ) {
-                    remapped_templates = hidden_remapped_templates;
-                }
-            }
-        }
-
-        // Detect SLA templates that reference handle indices beyond what
-        // Fission's runtime can resolve (our handles vec has exactly
-        // operand_specs.len() entries). If any op_template references a
-        // handle index >= operand_specs.len(), we must mark the constructor
-        // unsupported rather than panicking at runtime.
-        let has_unresolvable_handle =
-            templates_reference_unresolvable_handles(&remapped_templates, num_handles);
-
-        if has_unresolvable_handle && !has_unsupported_opcode {
-            // The SLA template references handles that Fission's runtime can't
-            // resolve (e.g., the `cc` subconstructor in J^cc). If the constructor
-            // already has Fission-native semantic ops (ConditionalJump, SetCc,
-            // etc.), keep those instead of overwriting with broken SLA templates.
-            // This allows Jcc/Setcc/etc. to remain runtime_ready using their
-            // native Fission templates.
-            let has_native_semantics = !constructor.constructor_template.semantic_ops.is_empty();
-            if has_native_semantics {
-                // Keep the original Fission-generated op_templates; don't
-                // overwrite with the SLA templates that have unresolvable handles.
-                // Tag as NativeFission so the evaluator uses the native executor.
-                constructor.constructor_template.template_source =
-                    CompiledTemplateSource::NativeFission;
-                constructor.unsupported_template_kind = None;
-                updated += 1;
+    for subtable in compiled.subtables.values_mut() {
+        for constructor in &mut subtable.constructors {
+            let Some(templates) = library.constructors_by_source.get(&constructor.source) else {
+                continue;
+            };
+            if templates.len() != 1 {
+                constructor.runtime_ready = false;
+                constructor.unsupported_template_kind =
+                    Some("sla_constructor_mapping_mismatch".to_string());
                 continue;
             }
-            // No native semantics — mark as unsupported (fail-closed).
-            constructor.constructor_template.op_templates = remapped_templates;
-            constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
-            constructor.runtime_ready = false;
-            constructor.unsupported_template_kind =
-                Some("sla_template_references_unresolvable_handle".to_string());
-        } else {
-            constructor.constructor_template.op_templates = remapped_templates;
-            constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
-            let is_unsupported = has_unsupported_opcode;
-            constructor.runtime_ready = !is_unsupported;
-            constructor.unsupported_template_kind = if has_unsupported_opcode {
-                Some("unsupported_pcode_opcode_in_sla_construct_tpl".to_string())
+            let decoded = &templates[0].constructor_template;
+            // Only reject templates containing truly unsupported opcodes.
+            // Build (subtable inlining) and CallOther (user-defined ops) are
+            // now handled at emission time in the runtime emitter.
+            let has_unsupported_opcode = decoded
+                .op_templates
+                .iter()
+                .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Unsupported));
+
+            // Build handle index remapping from SLA ordering to our ordering.
+            // Fission extracts `operand_specs` based on the display string.
+            // Ghidra emits `ELEM_OPPRINT` indices in the exact order of the display string.
+            // Therefore, `opprint_indices[fission_idx]` gives the SLA operand index.
+            //
+            // When opprint_indices is empty, this constructor has no visible operands
+            // in its display string (sub-constructors, prefix-only, etc.), so we
+            // must NOT remap — the SLA template indices are already correct.
+            let opprint = &templates[0].opprint_indices;
+            let mut remapped_templates = decoded.op_templates.clone();
+
+            let mut handle_remap = Vec::new();
+            if !opprint.is_empty() {
+                handle_remap = vec![usize::MAX; 32];
+                for (fission_idx, sla_idx) in opprint.iter().enumerate() {
+                    if *sla_idx < handle_remap.len() {
+                        handle_remap[*sla_idx] = fission_idx;
+                    }
+                }
+            } else if let Some(hidden_prefix_count) = infer_leading_hidden_build_handle_count(
+                &remapped_templates,
+                constructor.operand_specs.len(),
+            ) {
+                handle_remap =
+                    vec![usize::MAX; hidden_prefix_count + constructor.operand_specs.len()];
+                for fission_idx in 0..constructor.operand_specs.len() {
+                    handle_remap[hidden_prefix_count + fission_idx] = fission_idx;
+                }
+            }
+
+            if !handle_remap.is_empty() {
+                for op in &mut remapped_templates {
+                    remap_op_tpl_handles(op, &handle_remap);
+                }
+                remap_build_operand_indices(&mut remapped_templates, &handle_remap);
+            }
+
+            let num_handles = constructor.operand_specs.len();
+            if templates_reference_unresolvable_handles(&remapped_templates, num_handles) {
+                if let Some(hidden_prefix_count) =
+                    infer_leading_hidden_build_handle_count(&decoded.op_templates, num_handles)
+                {
+                    let mut hidden_remap = vec![usize::MAX; hidden_prefix_count + num_handles];
+                    for fission_idx in 0..num_handles {
+                        hidden_remap[hidden_prefix_count + fission_idx] = fission_idx;
+                    }
+                    let mut hidden_remapped_templates = decoded.op_templates.clone();
+                    for op in &mut hidden_remapped_templates {
+                        remap_op_tpl_handles(op, &hidden_remap);
+                    }
+                    remap_build_operand_indices(&mut hidden_remapped_templates, &hidden_remap);
+                    if !templates_reference_unresolvable_handles(
+                        &hidden_remapped_templates,
+                        num_handles,
+                    ) {
+                        remapped_templates = hidden_remapped_templates;
+                    }
+                }
+            }
+
+            // Detect SLA templates that reference handle indices beyond what
+            // Fission's runtime can resolve (our handles vec has exactly
+            // operand_specs.len() entries). If any op_template references a
+            // handle index >= operand_specs.len(), we must mark the constructor
+            // unsupported rather than panicking at runtime.
+            let has_unresolvable_handle =
+                templates_reference_unresolvable_handles(&remapped_templates, num_handles);
+
+            if has_unresolvable_handle && !has_unsupported_opcode {
+                // The SLA template references handles that Fission's runtime can't
+                // resolve (e.g., the `cc` subconstructor in J^cc). If the constructor
+                // already has Fission-native semantic ops (ConditionalJump, SetCc,
+                // etc.), keep those instead of overwriting with broken SLA templates.
+                // This allows Jcc/Setcc/etc. to remain runtime_ready using their
+                // native Fission templates.
+                let has_native_semantics = !constructor.constructor_template.semantic_ops.is_empty();
+                if has_native_semantics {
+                    // Keep the original Fission-generated op_templates; don't
+                    // overwrite with the SLA templates that have unresolvable handles.
+                    // Tag as NativeFission so the evaluator uses the native executor.
+                    constructor.constructor_template.template_source =
+                        CompiledTemplateSource::NativeFission;
+                    constructor.unsupported_template_kind = None;
+                    updated += 1;
+                    continue;
+                }
+                // No native semantics — mark as unsupported (fail-closed).
+                constructor.constructor_template.op_templates = remapped_templates;
+                constructor.constructor_template.template_source =
+                    CompiledTemplateSource::SpecDerived;
+                constructor.runtime_ready = false;
+                constructor.unsupported_template_kind =
+                    Some("sla_template_references_unresolvable_handle".to_string());
             } else {
-                None
-            };
+                constructor.constructor_template.op_templates = remapped_templates;
+                constructor.constructor_template.template_source =
+                    CompiledTemplateSource::SpecDerived;
+                let is_unsupported = has_unsupported_opcode;
+                constructor.runtime_ready = !is_unsupported;
+                constructor.unsupported_template_kind = if has_unsupported_opcode {
+                    Some("unsupported_pcode_opcode_in_sla_construct_tpl".to_string())
+                } else {
+                    None
+                };
+            }
+            updated += 1;
         }
-        updated += 1;
     }
     compiled.construct_templates = compiled
-        .executable_constructors
-        .iter()
+        .subtables
+        .values()
+        .flat_map(|subtable| &subtable.constructors)
         .map(|constructor| CompiledConstructTpl {
             constructor_hash: constructor.signature_hash,
             ops: constructor.constructor_template.semantic_ops.clone(),
@@ -1121,15 +1254,28 @@ fn collect_max_handle_index_from_space(s: &CompiledSpaceTpl, max_idx: &mut Optio
         collect_max_handle_index_from_const(c, max_idx);
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    Instruction,
+    Context,
+}
+
+struct FieldBitRange {
+    bit_offset: u32,
+    bit_width: u32,
+    kind: FieldKind,
+}
 
 struct Collector {
     definitions: Vec<CompiledSpecDefinition>,
     macros: Vec<CompiledMacro>,
     constructors: Vec<CompiledConstructor>,
-    executable_constructors: Vec<CompiledExecutableConstructor>,
+    subtable_executables: BTreeMap<String, Vec<CompiledExecutableConstructor>>,
     pcode_ops: BTreeSet<String>,
     pcode_op_sources: BTreeMap<String, String>,
+    default_context: u64,
     pattern_nodes: Vec<CompiledPatternNode>,
+    field_info: BTreeMap<String, FieldBitRange>,
 }
 
 impl Collector {
@@ -1149,14 +1295,26 @@ impl Collector {
                     name: definition_name(&definition.statement),
                     source: definition.source.clone(),
                 }),
-                "token" => token_fields.push(CompiledTokenField {
-                    name: definition_name(&definition.statement),
-                    source: definition.source.clone(),
-                }),
-                "context" => context_fields.push(CompiledContextField {
-                    name: definition_name(&definition.statement),
-                    source: definition.source.clone(),
-                }),
+                "token" => {
+                    let name = definition_name(&definition.statement);
+                    let info = self.field_info.get(&name);
+                    token_fields.push(CompiledTokenField {
+                        name,
+                        bit_offset: info.map(|i| i.bit_offset).unwrap_or(0),
+                        bit_width: info.map(|i| i.bit_width).unwrap_or(0),
+                        source: definition.source.clone(),
+                    })
+                }
+                "context" => {
+                    let name = definition_name(&definition.statement);
+                    let info = self.field_info.get(&name);
+                    context_fields.push(CompiledContextField {
+                        name,
+                        bit_offset: info.map(|i| i.bit_offset).unwrap_or(0),
+                        bit_width: info.map(|i| i.bit_width).unwrap_or(0),
+                        source: definition.source.clone(),
+                    })
+                }
                 "table" => subtables.push(CompiledSubtable {
                     name: definition_name(&definition.statement),
                     source: definition.source.clone(),
@@ -1183,8 +1341,9 @@ impl Collector {
     }
 
     fn construct_templates(&self) -> Vec<CompiledConstructTpl> {
-        self.executable_constructors
-            .iter()
+        self.subtable_executables
+            .values()
+            .flatten()
             .map(|constructor| CompiledConstructTpl {
                 constructor_hash: constructor.signature_hash,
                 ops: constructor.constructor_template.semantic_ops.clone(),
@@ -1224,6 +1383,9 @@ impl Collector {
                             self.pcode_ops.insert(name.clone());
                             self.pcode_op_sources.insert(name, source.clone());
                         }
+                    }
+                    if kind == "token" || kind == "context" {
+                        self.parse_define_bits(&definition.statement, &kind);
                     }
                     self.definitions.push(CompiledSpecDefinition {
                         kind,
@@ -1307,16 +1469,246 @@ impl Collector {
                 .collect(),
             semantic_ops,
             signature_hash,
+            context_changes: Vec::new(),
         });
-        if let Some(executable) = compile_executable_constructor(
+        if let Some(executable) = self.compile_executable_constructor(
             &constructor.signature,
             &mnemonic,
             &source,
             signature_hash,
         ) {
-            self.executable_constructors.push(executable);
+            let table_name = if let Some(pos) = constructor.signature.find(':') {
+                let name = constructor.signature[..pos].trim();
+                if name.is_empty() || name.len() > 64 || name.contains(' ') {
+                    "instruction".to_string()
+                } else {
+                    name.to_string()
+                }
+            } else {
+                "instruction".to_string()
+            };
+            self.subtable_executables
+                .entry(table_name)
+                .or_default()
+                .push(executable);
         }
     }
+
+    fn compile_executable_constructor(
+        &self,
+        signature: &str,
+        mnemonic: &str,
+        source: &str,
+        signature_hash: u64,
+    ) -> Option<CompiledExecutableConstructor> {
+        if !runtime_signature_is_supported(signature) {
+            return None;
+        }
+        let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
+        let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic);
+        let matcher = self.parse_opcode_matcher(signature)?;
+        let mod_constraint = parse_single_value(signature, "mod=");
+        let operand_reg_values = parse_value_list(signature, "reg=");
+        let opsize_variants = parse_opsize_variants(signature);
+        let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
+        let semantic_ops = semantic_ops_for_kind(construct_tpl_kind);
+        let op_templates = op_templates_for_constructor(&operand_specs, construct_tpl_kind);
+        let mut decode_steps = Vec::new();
+        if operand_specs.iter().any(|spec| {
+            matches!(
+                spec,
+                CompiledOperandSpec::TokenFieldExtraction { .. }
+                    | CompiledOperandSpec::SubtableEvaluation { .. }
+            )
+        }) {
+            decode_steps.push(CompiledOperandDecodeStep::ConsumeTokenFields);
+        }
+        decode_steps.extend((0..operand_specs.len()).map(|operand_index| {
+            CompiledOperandDecodeStep::DecodeOperand { operand_index }
+        }));
+        let constructor_template = CompiledConstructorTemplate {
+            handles: operand_specs
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(operand_index, spec)| CompiledHandleTemplate {
+                    operand_index,
+                    spec,
+                })
+                .collect(),
+            decode_steps,
+            semantic_ops,
+            op_templates,
+            template_source: CompiledTemplateSource::NativeFission,
+        };
+
+        Some(CompiledExecutableConstructor {
+            mnemonic: mnemonic.to_string(),
+            source: source.to_string(),
+            display: signature.to_string(),
+            signature_hash,
+            matcher,
+            mod_constraint,
+            operand_reg_values,
+            opsize_variants,
+            operand_specs: operand_specs.clone(),
+            construct_tpl_kind,
+            constructor_template,
+            runtime_ready: true,
+            unsupported_template_kind: unsupported_template_reason(
+                signature,
+                construct_tpl_kind,
+                &operand_specs,
+            ),
+        })
+    }
+
+    fn parse_opcode_matcher(&self, signature: &str) -> Option<CompiledPatternMatcher> {
+        let bytes = parse_byte_sequence(signature);
+        if let Some(row) = parse_single_value(signature, "row=") {
+            if signature.contains("& cc") {
+                return Some(CompiledPatternMatcher::RowCc { prefix: bytes, row });
+            }
+            if let Some(page) = parse_single_value(signature, "page=") {
+                return Some(CompiledPatternMatcher::RowPage { row, page });
+            }
+        }
+
+        // Handle bitfield patterns like b_2431=0x00
+        let mut constraints = Vec::new();
+        let matcher_part = if let Some(pos) = signature.find(" is ") {
+            &signature[pos + 4..]
+        } else {
+            signature
+        };
+
+        for part in matcher_part.split(['&', ';', '\n']) {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some((name, value_str)) = part.split_once('=') {
+                let name = name.trim();
+                let value_str = value_str.trim();
+                let value = if value_str.starts_with("0x") {
+                    u64::from_str_radix(&value_str[2..], 16).unwrap_or(0)
+                } else {
+                    value_str.parse::<u64>().unwrap_or(0)
+                };
+
+                if let Some(info) = self.field_info.get(name) {
+                    let mask = ((1u64 << info.bit_width) - 1) << info.bit_offset;
+                    match info.kind {
+                        FieldKind::Instruction => {
+                            constraints.push(PatternConstraint::Instruction {
+                                offset: 0,
+                                mask,
+                                value: (value << info.bit_offset) & mask,
+                            });
+                        }
+                        FieldKind::Context => {
+                            constraints.push(PatternConstraint::Context {
+                                offset: 0,
+                                mask,
+                                value: (value << info.bit_offset) & mask,
+                            });
+                        }
+                    }
+                } else if name.starts_with("b_") {
+                    let bits_str = &name[2..];
+                    if let Ok(bits) = bits_str.parse::<u32>() {
+                        let (start_bit, end_bit) = if bits_str.len() <= 2 {
+                            (bits, bits)
+                        } else if bits_str.len() <= 4 {
+                            (bits / 100, bits % 100)
+                        } else {
+                            (bits / 1000, bits % 1000)
+                        };
+
+                        let mut s = start_bit;
+                        let mut e = end_bit;
+                        if s < e {
+                            std::mem::swap(&mut s, &mut e);
+                        }
+                        let mask = ((1u64 << (s - e + 1)) - 1) << e;
+                        constraints.push(PatternConstraint::Instruction {
+                            offset: 0,
+                            mask,
+                            value: (value << e) & mask,
+                        });
+                    }
+                } else if name == "ctx" {
+                    constraints.push(PatternConstraint::Context {
+                        offset: 0,
+                        mask: 0xffffffff,
+                        value,
+                    });
+                }
+            }
+        }
+
+        if !constraints.is_empty() {
+            return Some(CompiledPatternMatcher::BitConstraints(constraints));
+        }
+
+        // Fallback for any constructor signature
+        Some(CompiledPatternMatcher::BitConstraints(vec![]))
+    }
+
+    fn parse_define_bits(&mut self, statement: &str, kind_str: &str) {
+        let trimmed = strip_comments(statement).trim();
+        let kind = match kind_str {
+            "token" => FieldKind::Instruction,
+            "context" => FieldKind::Context,
+            _ => return,
+        };
+
+        let start_pos = if let Some(pos) = trimmed.find(')') {
+            pos + 1
+        } else {
+            return;
+        };
+
+        let fields_str = trimmed[start_pos..].trim_end_matches(';');
+        for field_part in fields_str.split_whitespace() {
+            if let Some((name, range_str)) = field_part.split_once('=') {
+                let name = name.trim();
+                let range_str = range_str
+                    .trim()
+                    .trim_start_matches('(')
+                    .trim_end_matches(')');
+                if let Some((start_str, end_str)) = range_str.split_once(',') {
+                    let start = start_str.trim().parse::<u32>().unwrap_or(0);
+                    let end = end_str.trim().parse::<u32>().unwrap_or(0);
+                    let (bit_offset, bit_width) = if start <= end {
+                        (start, end - start + 1)
+                    } else {
+                        (end, start - end + 1)
+                    };
+                    self.field_info.insert(
+                        name.to_string(),
+                        FieldBitRange {
+                            bit_offset,
+                            bit_width,
+                            kind,
+                        },
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn strip_comments(raw: &str) -> &str {
+    let mut in_string = false;
+    for (idx, ch) in raw.char_indices() {
+        if ch == '"' {
+            in_string = !in_string;
+        } else if ch == '#' && !in_string {
+            return &raw[..idx];
+        }
+    }
+    raw
 }
 
 fn constructor_mnemonic(signature: &str) -> String {
@@ -1428,13 +1820,26 @@ fn decision_probes_for_constructors(
         .unwrap_or(1)
         .min(4);
 
-    let mut probes = (0..max_opcode_len)
-        .map(|offset| CompiledDecisionProbe::InstructionBitSlice {
-            offset: offset as u8,
-            mask: 0xff,
-            shift: 0,
-        })
-        .collect::<Vec<_>>();
+    let mut probes = Vec::new();
+    for offset in 0..max_opcode_len {
+        for bit in 0..8 {
+            probes.push(CompiledDecisionProbe::InstructionBitSlice {
+                offset: offset as u8,
+                mask: 1 << bit,
+                shift: bit as u8,
+            });
+        }
+    }
+
+    // Add context probes for architectures that use context for decision making (like ARM/AARCH64)
+    for bit in 0..8 {
+        probes.push(CompiledDecisionProbe::ContextBitSlice {
+            offset: 0,
+            mask: 1 << bit,
+            shift: bit as u8,
+        });
+    }
+
     probes.extend([
         CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile),
         CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm),
@@ -1448,6 +1853,14 @@ fn pattern_matcher_probe_len(matcher: &CompiledPatternMatcher) -> usize {
         CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
         CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
         CompiledPatternMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::BitConstraints(constraints) => constraints
+            .iter()
+            .filter_map(|c| match c {
+                PatternConstraint::Instruction { offset, .. } => Some(*offset as usize + 8),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0),
     }
 }
 
@@ -1551,19 +1964,12 @@ fn decision_feature_values(
             let has_token_bundle = constructor.operand_specs.iter().any(|spec| {
                 matches!(
                     spec,
-                    CompiledOperandSpec::TokenFieldRm { .. }
-                        | CompiledOperandSpec::TokenFieldReg { .. }
+                    CompiledOperandSpec::TokenFieldExtraction { .. }
+                        | CompiledOperandSpec::ContextFieldExtraction { .. }
+                        | CompiledOperandSpec::SubtableEvaluation { .. }
                 )
             });
-            let memory_only = constructor.operand_specs.iter().any(|spec| {
-                matches!(
-                    spec,
-                    CompiledOperandSpec::TokenFieldRm {
-                        memory_only: true,
-                        ..
-                    }
-                )
-            });
+            let memory_only = false;
             if memory_only {
                 vec![0, 1, 2]
             } else if has_token_bundle {
@@ -1575,9 +1981,45 @@ fn decision_feature_values(
         CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
             constructor.operand_reg_values.clone()
         }
-        CompiledDecisionProbe::ContextBitSlice { .. }
-        | CompiledDecisionProbe::ContextFieldRef(_)
+        CompiledDecisionProbe::ContextBitSlice {
+            offset,
+            mask,
+            shift,
+        } => context_probe_values(&constructor.matcher, offset as usize)
+            .into_iter()
+            .map(|value| (value & u64::from(mask)) >> shift)
+            .map(|v| v as u8)
+            .collect(),
+        CompiledDecisionProbe::ContextFieldRef(_)
         | CompiledDecisionProbe::TerminalPatternCheck => Vec::new(),
+    }
+}
+
+fn context_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<u64> {
+    match matcher {
+        CompiledPatternMatcher::BitConstraints(constraints) => {
+            let mut val = 0u64;
+            let mut has_constraint = false;
+            for constraint in constraints {
+                if let PatternConstraint::Context {
+                    offset: c_offset,
+                    mask: _,
+                    value,
+                } = constraint
+                {
+                    if offset == *c_offset as usize {
+                        val |= value;
+                        has_constraint = true;
+                    }
+                }
+            }
+            if has_constraint {
+                vec![val]
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -1603,6 +2045,33 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
             }
             Vec::new()
         }
+        CompiledPatternMatcher::BitConstraints(constraints) => {
+            let mut byte_val = 0u8;
+            let mut has_constraint = false;
+            for constraint in constraints {
+                if let PatternConstraint::Instruction {
+                    offset: c_offset,
+                    mask,
+                    value,
+                } = constraint
+                {
+                    let byte_offset = (*c_offset as usize);
+                    if offset >= byte_offset && offset < byte_offset + 8 {
+                        let shift = (offset - byte_offset) * 8;
+                        let byte_mask = (mask >> shift) & 0xff;
+                        if byte_mask != 0 {
+                            byte_val |= (((value >> shift) & 0xff) as u8);
+                            has_constraint = true;
+                        }
+                    }
+                }
+            }
+            if has_constraint {
+                vec![byte_val]
+            } else {
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -1615,13 +2084,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .operand_specs
         .iter()
         .filter(|spec| {
-            matches!(
-                spec,
-                CompiledOperandSpec::TokenFieldRm {
-                    memory_only: true,
-                    ..
-                }
-            )
+            false
         })
         .count()
         * 2;
@@ -1629,47 +2092,9 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
         CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
         CompiledPatternMatcher::RowPage { .. } => 1,
+        CompiledPatternMatcher::BitConstraints(constraints) => constraints.len().min(4),
     };
     score
-}
-
-fn compile_executable_constructor(
-    signature: &str,
-    mnemonic: &str,
-    source: &str,
-    signature_hash: u64,
-) -> Option<CompiledExecutableConstructor> {
-    if !runtime_signature_is_supported(signature) {
-        return None;
-    }
-    let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-    let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic);
-    let matcher = parse_opcode_matcher(signature)?;
-    let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
-    let mod_constraint = parse_single_value(signature, "mod=");
-    let operand_selector_key = format!("{}{}=", "reg_", "opcode");
-    let operand_reg_values = parse_value_list(signature, &operand_selector_key);
-    let opsize_variants = parse_opsize_variants(signature);
-    let unsupported_template_kind =
-        unsupported_template_reason(signature, construct_tpl_kind, &operand_specs);
-    let runtime_ready = unsupported_template_kind.is_none();
-    let constructor_template = build_constructor_template(&operand_specs, construct_tpl_kind);
-
-    Some(CompiledExecutableConstructor {
-        mnemonic: normalized_mnemonic,
-        source: source.to_string(),
-        display: signature.to_string(),
-        signature_hash,
-        matcher,
-        mod_constraint,
-        operand_reg_values,
-        opsize_variants,
-        operand_specs,
-        construct_tpl_kind,
-        constructor_template,
-        runtime_ready,
-        unsupported_template_kind,
-    })
 }
 
 fn normalize_executable_mnemonic(mnemonic: &str) -> String {
@@ -1688,17 +2113,7 @@ fn normalize_executable_mnemonic(mnemonic: &str) -> String {
         .to_string()
 }
 
-fn runtime_signature_is_supported(signature: &str) -> bool {
-    if signature.contains("$(LONGMODE_OFF)") {
-        return false;
-    }
-    if signature.contains("$(VEX_") || signature.contains("$(EVEX_") || signature.contains("$(PRE_")
-    {
-        return false;
-    }
-    if !signature.contains("vexMode=0") && signature.contains("vexMode=") {
-        return false;
-    }
+fn runtime_signature_is_supported(_signature: &str) -> bool {
     true
 }
 
@@ -1736,24 +2151,7 @@ fn classify_construct_tpl_kind(mnemonic: &str) -> CompiledConstructTplKind {
         "CBW" => CompiledConstructTplKind::Cbw,
         "CWDE" => CompiledConstructTplKind::Cwde,
         "CDQE" => CompiledConstructTplKind::Cdqe,
-        _ => CompiledConstructTplKind::Unsupported,
-    }
-}
-
-fn parse_opcode_matcher(signature: &str) -> Option<CompiledPatternMatcher> {
-    let bytes = parse_byte_sequence(signature);
-    if let Some(row) = parse_single_value(signature, "row=") {
-        if signature.contains("& cc") {
-            return Some(CompiledPatternMatcher::RowCc { prefix: bytes, row });
-        }
-        if let Some(page) = parse_single_value(signature, "page=") {
-            return Some(CompiledPatternMatcher::RowPage { row, page });
-        }
-    }
-    if bytes.is_empty() {
-        None
-    } else {
-        Some(CompiledPatternMatcher::ExactBytes(bytes))
+        _ => CompiledConstructTplKind::Generic,
     }
 }
 
@@ -1762,11 +2160,16 @@ fn parse_operand_specs(
     matcher: &CompiledPatternMatcher,
     construct_tpl_kind: CompiledConstructTplKind,
 ) -> Result<Vec<CompiledOperandSpec>> {
-    let head = signature
-        .trim_start_matches(':')
-        .split(" is ")
-        .next()
-        .unwrap_or(signature);
+    let first_line = signature.lines().next().unwrap_or(signature);
+    let head = if let Some(pos) = first_line.find(" is ") {
+        &first_line[..pos]
+    } else if let Some(pos) = first_line.find("is ") {
+         &first_line[..pos]
+    } else {
+        first_line
+    };
+    let head = head.trim().trim_start_matches(':');
+    
     let operand_part = head
         .split_whitespace()
         .skip(1)
@@ -1809,35 +2212,35 @@ fn parse_operand_specs(
             continue;
         }
         if let Some(size) = register_size_token(token) {
-            let spec = match matcher {
-                CompiledPatternMatcher::RowPage { .. }
-                    if token.starts_with("Rmr") || token.starts_with("CRmr") =>
-                {
-                    CompiledOperandSpec::OpcodeTokenReg { size }
-                }
-                _ if token.starts_with("Reg")
-                    || token == "Sreg"
-                    || token == "creg"
-                    || token == "creg_x"
-                    || token == "debugreg"
-                    || token == "debugreg_x" =>
-                {
-                    CompiledOperandSpec::TokenFieldReg { size }
-                }
-                _ => CompiledOperandSpec::TokenFieldRm {
-                    size,
-                    memory_only: token.starts_with('m'),
-                },
-            };
-            specs.push(spec);
+            specs.push(CompiledOperandSpec::TokenFieldExtraction {
+                bit_offset: 0,
+                bit_width: size * 8,
+                sign_extend: false,
+            });
             continue;
+        }
+
+        // Fallback for unknown operands
+        let token = token.trim();
+        // A valid subtable name must be a simple identifier (no symbols, no spaces, not too long)
+        if !token.is_empty() && token.len() <= 64 && token.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            specs.push(CompiledOperandSpec::SubtableEvaluation {
+                table_name: token.to_string(),
+            });
+        } else {
+            // It's an inline pattern or a complex expression. We treat it as an immediate placeholder.
+            specs.push(CompiledOperandSpec::Immediate { size: 0, signed: false });
         }
     }
 
-    if specs.is_empty() {
-        return Err(anyhow::anyhow!(
-            "no executable operand specs parsed for {signature}"
-        ));
+    if specs.is_empty() && !operand_part.is_empty() {
+        return Ok(vec![CompiledOperandSpec::SubtableEvaluation {
+            table_name: "unknown".to_string(),
+        }]);
+    }
+    
+    if specs.is_empty() && operand_part.is_empty() {
+        return Ok(Vec::new());
     }
 
     if matches!(construct_tpl_kind, CompiledConstructTplKind::Setcc) && specs.len() != 1 {
@@ -1973,7 +2376,8 @@ fn unsupported_template_reason(
         | CompiledConstructTplKind::Setcc
         | CompiledConstructTplKind::Cbw
         | CompiledConstructTplKind::Cwde
-        | CompiledConstructTplKind::Cdqe => {}
+        | CompiledConstructTplKind::Cdqe
+        | CompiledConstructTplKind::Generic => {}
     }
 
     if operand_specs.len() > 2
@@ -2021,7 +2425,7 @@ fn build_constructor_template(
     if operand_specs.iter().any(|spec| {
         matches!(
             spec,
-            CompiledOperandSpec::TokenFieldRm { .. } | CompiledOperandSpec::TokenFieldReg { .. }
+            CompiledOperandSpec::TokenFieldExtraction { .. } | CompiledOperandSpec::SubtableEvaluation { .. }
         )
     }) {
         decode_steps.push(CompiledOperandDecodeStep::ConsumeTokenFields);
@@ -2086,6 +2490,7 @@ fn semantic_ops_for_kind(construct_tpl_kind: CompiledConstructTplKind) -> Vec<Co
             src_size: 4,
             dst_size: 8,
         },
+        Kind::Generic => Op::Nop,
     }]
 }
 
@@ -2116,7 +2521,7 @@ fn op_templates_for_constructor(
     };
 
     match construct_tpl_kind {
-        Kind::Nop | Kind::Unsupported => Vec::new(),
+        Kind::Nop | Kind::Unsupported | Kind::Generic => Vec::new(),
         Kind::Ret => vec![
             CompiledOpTpl {
                 opcode: Opcode::Load,
@@ -2512,10 +2917,10 @@ fn op_templates_for_constructor(
 
 fn operand_spec_size(spec: &CompiledOperandSpec) -> u32 {
     match spec {
-        CompiledOperandSpec::TokenFieldRm { size, .. }
-        | CompiledOperandSpec::TokenFieldReg { size }
-        | CompiledOperandSpec::OpcodeTokenReg { size }
-        | CompiledOperandSpec::Immediate { size, .. }
+        CompiledOperandSpec::TokenFieldExtraction { bit_width, .. }
+        | CompiledOperandSpec::ContextFieldExtraction { bit_width, .. } => *bit_width / 8,
+        CompiledOperandSpec::SubtableEvaluation { .. } => 0,
+        CompiledOperandSpec::Immediate { size, .. }
         | CompiledOperandSpec::Relative { size }
         | CompiledOperandSpec::FixedRegister { size, .. } => *size,
     }
@@ -2588,7 +2993,7 @@ mod tests {
         let expanded = expand_entry_spec(&entry_spec).expect("expand spec");
         let ast = parse_expanded_spec(&expanded).expect("parse spec");
         let arch = infer_arch_from_entry_spec(&entry_spec).expect("infer arch");
-        let compiled = compile_frontend(&arch, &expanded, &ast).expect("compile frontend");
+        let compiled = compile_frontend(&arch, &expanded, &ast, &entry_spec).expect("compile frontend");
         assert!(!compiled.pcode_ops.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
         assert!(compiled
@@ -2601,6 +3006,9 @@ mod tests {
         assert!(!compiled.language_layout.display_templates.is_empty());
         assert!(!compiled.construct_templates.is_empty());
         assert!(compiled
+            .subtables
+            .get("instruction")
+            .unwrap()
             .decision_tree
             .nodes
             .iter()

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 pub use ast::parse_expanded_spec;
@@ -32,6 +32,7 @@ pub use ir::{
     CompiledRegister, CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpaceRef,
     CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource,
     CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass,
+    PatternConstraint,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{
@@ -79,10 +80,11 @@ pub struct GhidraLanguageManifest {
 }
 
 fn is_executable_candidate_entry(entry_id: &str) -> bool {
-    matches!(
-        entry_id,
-        "x86" | "x86-64" | "AARCH64" | "AARCH64BE" | "AARCH64_AppleSilicon" | "ARM7_le" | "ARM7_be" | "mips32le" | "riscv.lp64d"
-    )
+    entry_id.starts_with("x86")
+        || entry_id.starts_with("AARCH64")
+        || entry_id.starts_with("ARM")
+        || entry_id.starts_with("mips")
+        || entry_id.starts_with("riscv")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -591,7 +593,7 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
     let ast = ast::parse_expanded_spec(&expanded)
         .with_context(|| format!("parse expanded spec {}", entry_spec.display()))?;
-    let mut compiled = ir::compile_frontend(&arch, &expanded, &ast)
+    let mut compiled = ir::compile_frontend(&arch, &expanded, &ast, entry_spec)
         .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
     if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
         let library = sla::load_construct_templates_from_sla(&sla_path)
@@ -644,6 +646,24 @@ fn find_named_file(root: &Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()
         } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
             out.push(path);
         }
+    }
+    Ok(())
+}
+
+use std::process::Command;
+
+pub fn compile_native_backend(source_path: &Path, output_path: &Path) -> Result<()> {
+    let status = Command::new("rustc")
+        .arg("--crate-type=cdylib")
+        .arg("-O")
+        .arg("-o")
+        .arg(output_path)
+        .arg(source_path)
+        .status()
+        .with_context(|| "failed to execute rustc")?;
+
+    if !status.success() {
+        bail!("rustc failed to compile native backend: {}", status);
     }
     Ok(())
 }
@@ -704,14 +724,23 @@ pub fn write_all_generated_artifacts(output_root: &Path) -> Result<FrontendCompi
                     pcodeop_count: compiled.pcode_ops.len(),
                     include_count: compiled.include_manifest.len(),
                     runtime_ready: compiled
-                        .executable_constructors
-                        .iter()
-                        .any(|constructor| constructor.runtime_ready),
-                    decision_node_count: compiled.decision_tree.decision_node_count,
-                    constructor_template_count: compiled.executable_constructors.len(),
+                        .subtables
+                        .values()
+                        .any(|subtable| subtable.constructors.iter().any(|c| c.runtime_ready)),
+                    decision_node_count: compiled
+                        .subtables
+                        .values()
+                        .map(|s| s.decision_tree.decision_node_count)
+                        .sum(),
+                    constructor_template_count: compiled
+                        .subtables
+                        .values()
+                        .map(|s| s.constructors.len())
+                        .sum(),
                     unsupported_template_count: compiled
-                        .executable_constructors
-                        .iter()
+                        .subtables
+                        .values()
+                        .flat_map(|s| &s.constructors)
                         .filter(|constructor| !constructor.runtime_ready)
                         .count(),
                     compile_status: "ok".to_string(),
@@ -906,6 +935,28 @@ mod tests {
             .find(|entry| entry.processor == "RISCV")
             .expect("RISCV manifest entry");
         assert_eq!(riscv.runtime_status, "registered_compile_only");
+    }
+
+    #[test]
+    fn force_regenerate_aarch64() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap()
+            .to_path_buf();
+        let aarch64_spec = repo_root.join("crates/fission-sleigh/specs/languages/AARCH64/AARCH64.slaspec");
+        println!("Compiling spec: {}", aarch64_spec.display());
+        let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+        println!("Compiled AARCH64: {} subtables", compiled.subtables.len());
+        let artifacts = codegen::render_generated_artifacts(&compiled).expect("render artifacts");
+        let entry_output_root = generated_root_for_entry_spec(&aarch64_spec).expect("get generated root");
+        println!("Writing artifacts to: {}", entry_output_root.display());
+        codegen::write_generated_artifacts(&entry_output_root, &artifacts).expect("write artifacts");
+        
+        let source_path = entry_output_root.join("native_backend.rs");
+        let output_path = entry_output_root.join("native_backend.dylib");
+        println!("Compiling native backend...");
+        compile_native_backend(&source_path, &output_path).expect("compile native backend");
     }
 
     #[test]

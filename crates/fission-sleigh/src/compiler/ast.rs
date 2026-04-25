@@ -100,7 +100,7 @@ impl<'a> ParseCursor<'a> {
                 continue;
             }
 
-            if trimmed.starts_with(':') {
+            if trimmed.starts_with(':') || (trimmed.contains(':') && !trimmed.starts_with('@') && !trimmed.starts_with("define")) {
                 items.push(AstItem::Constructor(self.collect_constructor()?));
                 continue;
             }

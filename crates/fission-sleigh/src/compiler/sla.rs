@@ -126,12 +126,17 @@ fn decode_construct_templates(
             .with_context(|| format!("decode construct_tpl for {source_key}"))?;
             
         let mut opprint_indices = Vec::new();
+        // TODO: parse ELEM_CONTEXT_OP correctly when PatternExpression is implemented
+        let _context_changes: Vec<crate::compiler::ir::CompiledContextOp> = Vec::new();
         for child in &constructor.children {
             if child.id == sla_format::ELEM_OPPRINT {
                 if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize) {
                     opprint_indices.push(index);
                 }
             }
+            // TODO: Extract context_op elements and parse their startbit, endbit, and pattern expression values.
+            // If it requires deep PatternExpression parsing, just store basic parameters in `CompiledContextOp` or skip for now.
+            // if child.id == sla_format::ELEM_CONTEXT_OP { ... }
         }
 
         constructors_by_source
@@ -143,6 +148,7 @@ fn decode_construct_templates(
                 line,
                 opprint_indices,
                 constructor_template: template,
+                // context_changes, // if added to CompiledSlaConstructorTemplate
             });
     }
 

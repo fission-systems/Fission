@@ -299,6 +299,19 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     detail["compat_emitter_used"] = bool(fission.get("compat_emitter_used"))
     detail["template_source"] = fission.get("template_source")
 
+    ghidra_error = str(ghidra.get("error") or "")
+    if (
+        ghidra.get("status") != "ok"
+        and "no instruction" in ghidra_error.lower()
+        and fission.get("status") == "ok"
+        and not fission.get("pcode", [])
+    ):
+        buckets.extend(["ghidra_decode_error", "both_decode_error_or_padding"])
+        detail["ghidra_error"] = ghidra.get("error")
+        detail["ghidra_opcodes"] = []
+        detail["fission_opcodes"] = []
+        return buckets, detail
+
     if ghidra.get("status") != "ok":
         buckets.append("ghidra_decode_error")
         detail["ghidra_error"] = ghidra.get("error")
@@ -459,6 +472,8 @@ def main() -> int:
         detail["buckets"] = buckets
         detail["owner_hints"] = hints
         rows.append(detail)
+        if "both_decode_error_or_padding" in buckets and "ghidra_decode_error" in buckets:
+            break
 
     report = {
         "binary": ghidra.get("binary") or fission.get("binary"),

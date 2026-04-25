@@ -75,6 +75,35 @@ mod tests {
     }
 
     #[test]
+    fn spec_derived_empty_template_is_zero_op_success() {
+        let state = RuntimeConstructState {
+            construct_tpl_kind: CompiledConstructTplKind::Nop,
+            constructor_template: CompiledConstructorTemplate {
+                handles: Vec::new(),
+                decode_steps: Vec::new(),
+                semantic_ops: Vec::new(),
+                op_templates: Vec::new(),
+                template_source: CompiledTemplateSource::SpecDerived,
+            },
+            construct_nodes: Vec::new(),
+            handles: Vec::new(),
+            operands: Vec::new(),
+            condition_code: None,
+            length: 1,
+            match_trace: empty_trace(),
+        };
+
+        let details = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
+            .emit("test-language", &state)
+            .expect("SpecDerived empty templates are valid zero-op constructors");
+        assert!(!details.compat_emitter_used);
+        assert_eq!(
+            details.template_source,
+            Some(CompiledTemplateSource::SpecDerived)
+        );
+    }
+
+    #[test]
     fn evaluator_source_has_no_compatibility_emit_hook() {
         let source = include_str!("template.rs");
         assert!(!source.contains(concat!("emit_", "compatibility_op")));
@@ -100,13 +129,6 @@ where
     ) -> Result<RuntimeExecutionDetails> {
         match state.constructor_template.template_source {
             CompiledTemplateSource::SpecDerived => {
-                if state.constructor_template.op_templates.is_empty() {
-                    return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                        language: language.to_string(),
-                        reason: "spec_derived_construct_tpl_has_no_ops".to_string(),
-                    }
-                    .into());
-                }
                 if !state
                     .constructor_template
                     .op_templates

@@ -128,6 +128,11 @@ def main() -> int:
     parser.add_argument("--project-location", type=Path, default=None)
     parser.add_argument("--project-name", default=None)
     parser.add_argument("--no-analyze", action="store_true")
+    parser.add_argument(
+        "--disassemble-missing",
+        action="store_true",
+        help="If no instruction exists at the requested address, ask Ghidra to disassemble there before reading raw p-code.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
@@ -151,6 +156,9 @@ def main() -> int:
         instructions: list[dict[str, Any]] = []
         for _ in range(args.count):
             instr = listing.getInstructionAt(current)
+            if instr is None and args.disassemble_missing:
+                flat.disassemble(current)
+                instr = listing.getInstructionAt(current)
             if instr is None:
                 instructions.append(
                     {

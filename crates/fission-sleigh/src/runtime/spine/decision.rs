@@ -9,6 +9,7 @@ pub trait DecisionProbeEvaluator {
 #[derive(Debug, Clone)]
 pub struct RuntimeSelection<'a> {
     pub constructor: &'a CompiledExecutableConstructor,
+    pub constructor_index: usize,
     pub trace: RuntimeMatchTrace,
 }
 
@@ -35,10 +36,13 @@ where
     E: DecisionProbeEvaluator,
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
+    // For now, we only support the 'instruction' subtable for root selection.
+    let instruction_table = compiled.subtables.get("instruction").expect("missing 'instruction' subtable");
     for (root_bucket, root_node_index) in roots {
         let mut evaluator = evaluator_factory();
         if let Some(selection) = walk_decision_tree(
-            compiled,
+            &instruction_table.decision_tree,
+            &instruction_table.constructors,
             root_node_index,
             &root_bucket,
             &mut evaluator,
@@ -51,7 +55,8 @@ where
 }
 
 fn walk_decision_tree<'a, E, M>(
-    compiled: &'a CompiledFrontend,
+    decision_tree: &'a crate::compiler::CompiledDecisionTree,
+    constructors: &'a [CompiledExecutableConstructor],
     root_node_index: usize,
     root_bucket: &str,
     evaluator: &mut E,
@@ -69,24 +74,33 @@ where
     };
 
     loop {
-        let node = compiled.decision_tree.nodes.get(node_index)?;
+        let node = decision_tree.nodes.get(node_index)?;
         match node.probe {
             CompiledDecisionProbe::Terminal => {
                 trace.leaf_constructor_indexes = node.leaf_constructor_indexes.clone();
                 let mut unsupported_fallback = None;
                 for constructor_index in &node.leaf_constructor_indexes {
-                    let constructor = compiled.executable_constructors.get(*constructor_index)?;
+                    let constructor = constructors.get(*constructor_index)?;
                     if constructor_matches(constructor).is_ok() {
                         if constructor.runtime_ready {
-                            return Some(RuntimeSelection { constructor, trace });
+                            return Some(RuntimeSelection {
+                                constructor,
+                                constructor_index: *constructor_index,
+                                trace,
+                            });
                         }
                         if unsupported_fallback.is_none() {
-                            unsupported_fallback = Some(constructor);
+                            unsupported_fallback = Some((constructor, *constructor_index));
                         }
                     }
                 }
-                return unsupported_fallback
-                    .map(|constructor| RuntimeSelection { constructor, trace });
+                return unsupported_fallback.map(|(constructor, constructor_index)| {
+                    RuntimeSelection {
+                        constructor,
+                        constructor_index,
+                        trace,
+                    }
+                });
             }
             probe => {
                 let value = evaluator.probe_value(probe).ok()?;

@@ -36,6 +36,50 @@ impl LoadedBinary {
         None
     }
 
+    /// Get bytes for instruction decoding, preferring executable sections when
+    /// relocatable objects map multiple sections to the same virtual address.
+    pub fn view_executable_bytes(&self, address: u64, size: usize) -> Option<&[u8]> {
+        let section = self.executable_section_containing(address)?;
+        self.view_section_bytes(section, address, size)
+    }
+
+    /// Return the executable section containing `address`.
+    pub fn executable_section_containing(&self, address: u64) -> Option<&SectionInfo> {
+        self.sections
+            .iter()
+            .filter(|section| section.is_executable && section_contains(section, address))
+            .min_by_key(|section| section.file_offset)
+    }
+
+    /// Return any section containing `address`, preferring executable sections
+    /// for overlapping relocatable-section address ranges.
+    pub fn section_containing_for_execution(&self, address: u64) -> Option<&SectionInfo> {
+        self.executable_section_containing(address).or_else(|| {
+            self.sections
+                .iter()
+                .find(|section| section_contains(section, address))
+        })
+    }
+
+    /// Get a slice from a known section without re-running address lookup.
+    pub fn view_section_bytes(
+        &self,
+        section: &SectionInfo,
+        address: u64,
+        size: usize,
+    ) -> Option<&[u8]> {
+        if !section_contains(section, address) {
+            return None;
+        }
+        let offset_in_section = address - section.virtual_address;
+        let file_offset = section.file_offset as usize + offset_in_section as usize;
+        if file_offset + size <= self.data.as_slice().len() {
+            Some(&self.data.as_slice()[file_offset..file_offset + size])
+        } else {
+            None
+        }
+    }
+
     /// Read a pointer at the given address
     pub fn read_ptr(&self, address: u64) -> Result<u64> {
         let size = if self.is_64bit { 8 } else { 4 };
@@ -190,4 +234,15 @@ impl LoadedBinary {
         }
         mapped
     }
+}
+
+fn section_contains(section: &SectionInfo, address: u64) -> bool {
+    let section_size = if section.virtual_size > 0 {
+        section.virtual_size
+    } else {
+        section.file_size
+    };
+    section_size > 0
+        && address >= section.virtual_address
+        && address < section.virtual_address + section_size
 }

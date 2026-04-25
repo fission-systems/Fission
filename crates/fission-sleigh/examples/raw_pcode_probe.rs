@@ -250,7 +250,10 @@ fn main() -> Result<()> {
     let mut instructions = Vec::new();
     let mut current = args.address;
     for _ in 0..args.count {
-        let Some(bytes) = binary.view_bytes(current, args.window_bytes) else {
+        let Some(bytes) = binary
+            .view_executable_bytes(current, args.window_bytes)
+            .or_else(|| binary.view_bytes(current, args.window_bytes))
+        else {
             instructions.push(InstructionReport {
                 address: current,
                 status: "error".to_string(),

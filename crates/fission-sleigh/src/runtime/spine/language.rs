@@ -71,8 +71,9 @@ impl LanguageRuntime {
     pub fn attempt_report(&self) -> RuntimeAttemptReport {
         let unsupported_template_count = self
             .compiled
-            .executable_constructors
-            .iter()
+            .subtables
+            .values()
+            .flat_map(|s| s.constructors.iter())
             .filter(|constructor| constructor.unsupported_template_kind.is_some())
             .count();
         let executable_candidate =
@@ -86,8 +87,18 @@ impl LanguageRuntime {
             endian: self.profile.endian,
             compiled_table_available: true,
             constructor_inventory_count: self.compiled.constructors.len(),
-            decision_node_count: self.compiled.decision_tree.decision_node_count,
-            constructor_template_count: self.compiled.executable_constructors.len(),
+            decision_node_count: self
+                .compiled
+                .subtables
+                .values()
+                .map(|s| s.decision_tree.decision_node_count)
+                .sum(),
+            constructor_template_count: self
+                .compiled
+                .subtables
+                .values()
+                .map(|s| s.constructors.len())
+                .sum(),
             unsupported_template_count,
             executable_candidate,
             fail_closed_reason: (!executable_candidate).then(|| {

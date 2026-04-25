@@ -36,11 +36,110 @@ pub fn render_generated_artifacts(compiled: &CompiledFrontend) -> Result<Generat
                 contents: render_semantic_ir(compiled),
             },
             GeneratedArtifact {
+                relative_path: "native_backend.rs".to_string(),
+                contents: render_native_backend(compiled),
+            },
+            GeneratedArtifact {
                 relative_path: "generated_frontend.rs".to_string(),
                 contents: render_rust_codegen(compiled),
             },
         ],
     })
+}
+
+pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
+    let mut output = String::new();
+    output.push_str("// Auto-generated Fission Native Backend\n");
+    output.push_str("#[no_mangle]\n");
+    output.push_str("pub extern \"C\" fn fission_decode_match(table_ptr: *const i8, bytes: *const u8, bytes_len: usize, ctx_ptr: *const u64) -> i32 {\n");
+    output.push_str("    let table_name = unsafe { std::ffi::CStr::from_ptr(table_ptr).to_str().unwrap() };\n");
+    output.push_str("    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };\n");
+    output.push_str("    let ctx = unsafe { *ctx_ptr };\n");
+    output.push_str("    match table_name {\n");
+    for (name, subtable) in &compiled.subtables {
+        output.push_str(&format!(
+            "        {:?} => match_node_{}_{}(bytes, ctx),\n",
+            name,
+            name.replace(|c: char| !c.is_alphanumeric(), "_"),
+            subtable.decision_tree.root_node_index
+        ));
+    }
+    output.push_str("        _ => -1\n");
+    output.push_str("    }\n");
+    output.push_str("}\n\n");
+
+    for (table_name, subtable) in &compiled.subtables {
+        let safe_table_name = table_name.replace(|c: char| !c.is_alphanumeric(), "_");
+        for (i, node) in subtable.decision_tree.nodes.iter().enumerate() {
+            output.push_str(&format!(
+                "fn match_node_{}_{}(bytes: &[u8], ctx: u64) -> i32 {{\n",
+                safe_table_name, i
+            ));
+            match node.probe {
+                crate::compiler::CompiledDecisionProbe::Terminal => {
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("    {}\n", idx));
+                    } else {
+                        output.push_str("    -1\n");
+                    }
+                }
+                crate::compiler::CompiledDecisionProbe::InstructionBitSlice {
+                    offset,
+                    mask,
+                    shift,
+                } => {
+                    output.push_str(&format!(
+                        "    let probe = (bytes.get({offset}).copied().unwrap_or(0) & {mask}) >> {shift};\n"
+                    ));
+                    output.push_str("    match probe {\n");
+                    for edge in &node.branches {
+                        output.push_str(&format!(
+                            "        {} => match_node_{}_{}(bytes, ctx),\n",
+                            edge.value, safe_table_name, edge.next_node_index
+                        ));
+                    }
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("        _ => {},\n", idx));
+                    } else {
+                        output.push_str("        _ => -1,\n");
+                    }
+                    output.push_str("    }\n");
+                }
+                crate::compiler::CompiledDecisionProbe::ContextBitSlice {
+                    offset,
+                    mask,
+                    shift,
+                } => {
+                    output.push_str(&format!(
+                        "    let probe = ((ctx >> {offset}) & {} as u64) >> {shift};\n",
+                        mask
+                    ));
+                    output.push_str("    match probe as u8 {\n");
+                    for edge in &node.branches {
+                        output.push_str(&format!(
+                            "        {} => match_node_{}_{}(bytes, ctx),\n",
+                            edge.value, safe_table_name, edge.next_node_index
+                        ));
+                    }
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("        _ => {},\n", idx));
+                    } else {
+                        output.push_str("        _ => -1,\n");
+                    }
+                    output.push_str("    }\n");
+                }
+                _ => {
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("    {}\n", idx));
+                    } else {
+                        output.push_str("    -1\n");
+                    }
+                }
+            }
+            output.push_str("}\n\n");
+        }
+    }
+    output
 }
 
 pub fn write_generated_artifacts(root: &Path, artifacts: &GeneratedArtifactSet) -> Result<()> {
@@ -95,8 +194,8 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         })
         .collect::<Vec<_>>()
         .join(",\n");
-    let executable_lines = compiled
-        .executable_constructors
+    let all_executables = compiled.subtables.values().flat_map(|s| &s.constructors).collect::<Vec<_>>();
+    let executable_lines = all_executables
         .iter()
         .map(|ctor| {
             format!(
@@ -114,31 +213,6 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
                 render_constructor_template(&ctor.constructor_template),
                 ctor.runtime_ready,
                 render_optional_string(ctor.unsupported_template_kind.as_deref())
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",\n");
-    let decision_node_lines = compiled
-        .decision_tree
-        .nodes
-        .iter()
-        .map(|node| {
-            let branches = node
-                .branches
-                .iter()
-                .map(|edge| {
-                    format!(
-                        "{{\"value\": {}, \"next_node_index\": {}}}",
-                        edge.value, edge.next_node_index
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "    {{\"probe\": {}, \"branches\": [{}], \"leaf_constructor_indexes\": {}}}",
-                render_decision_probe(node.probe),
-                branches,
-                render_usize_array(&node.leaf_constructor_indexes)
             )
         })
         .collect::<Vec<_>>()
@@ -183,24 +257,26 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
             .iter()
             .map(|entry| (&entry.name, &entry.source)),
     );
-    let subtables = render_named_sources(
+    let subtables_layout = render_named_sources(
         compiled
             .language_layout
             .subtables
             .iter()
             .map(|entry| (&entry.name, &entry.source)),
     );
+    let total_decision_nodes: usize = compiled.subtables.values().map(|s| s.decision_tree.decision_node_count).sum();
+    let instruction_table = compiled.subtables.get("instruction").expect("missing 'instruction' subtable");
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [\n{}\n  ],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
         json_string(&compiled.entry_id),
         compiled.definitions.len(),
         compiled.macros.len(),
         compiled.constructors.len(),
-        compiled.executable_constructors.len(),
-        compiled.decision_tree.decision_node_count,
-        compiled.decision_tree.root_node_index,
+        all_executables.len(),
+        total_decision_nodes,
+        instruction_table.decision_tree.root_node_index,
         compiled.pcode_ops.len(),
         compiled.language_layout.address_spaces.len(),
         compiled.language_layout.registers.len(),
@@ -212,10 +288,9 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         registers,
         token_fields,
         context_fields,
-        subtables,
+        subtables_layout,
         definition_lines,
         constructor_lines,
-        decision_node_lines,
         executable_lines
     )
 }
@@ -302,13 +377,17 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
         .iter()
         .take(256)
         .map(|ctor| {
+            let context_changes = ctor.context_changes.iter().map(|op| {
+                format!("GeneratedContextOp {{ bit_offset: {}, bit_width: {}, value: {} }}", op.bit_offset, op.bit_width, op.value)
+            }).collect::<Vec<_>>().join(", ");
             format!(
-                "    GeneratedConstructor {{ mnemonic: {}, source: {}, control_flow: {}, signature_hash: 0x{:016x}, semantic_template_status: {} }},",
+                "    GeneratedConstructor {{ mnemonic: {}, source: {}, control_flow: {}, signature_hash: 0x{:016x}, semantic_template_status: {}, context_changes: &[{}] }},",
                 rust_string(&ctor.mnemonic),
                 rust_string(&ctor.source),
                 rust_string(ctor.control_flow.as_str()),
                 ctor.signature_hash,
-                rust_string(&ctor.semantic_template.status)
+                rust_string(&ctor.semantic_template.status),
+                context_changes
             )
         })
         .collect::<Vec<_>>()
@@ -316,6 +395,12 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
     format!(
         "// Auto-generated by fission-sleigh compiler-only wave.\n\
          // Source: {} / {}\n\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
+         pub struct GeneratedContextOp {{\n\
+             pub bit_offset: u32,\n\
+             pub bit_width: u32,\n\
+             pub value: u64,\n\
+         }}\n\n\
          #[derive(Debug, Clone, Copy)]\n\
          pub struct GeneratedConstructor {{\n\
              pub mnemonic: &'static str,\n\
@@ -323,22 +408,25 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
              pub control_flow: &'static str,\n\
              pub signature_hash: u64,\n\
              pub semantic_template_status: &'static str,\n\
-         }}\n\n\
-         pub const GENERATED_ARCH: &str = {};\n\
-         pub const GENERATED_ENTRY_SPEC: &str = {};\n\
-         pub const GENERATED_ENTRY_ID: &str = {};\n\
-         pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};\n\
-         pub const GENERATED_DECISION_NODE_COUNT: usize = {};\n\
-         pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[\n\
-{}\n\
-         ];\n",
-        compiled.arch,
-        compiled.entry_spec,
+             pub context_changes: &'static [GeneratedContextOp],\n\
+         pub const GENERATED_ARCH: &str = {};
+         pub const GENERATED_DEFAULT_CONTEXT: u64 = {};
+         pub const GENERATED_ENTRY_SPEC: &str = {};
+         pub const GENERATED_ENTRY_ID: &str = {};
+         pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};
+         pub const GENERATED_DECISION_NODE_COUNT: usize = {};
+         pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[
+         {}
+         ];
+         ",
+         compiled.arch,
+         compiled.default_context,
+         compiled.entry_spec,
         rust_string(&compiled.arch),
         rust_string(&compiled.entry_spec),
         rust_string(&compiled.entry_id),
-        compiled.executable_constructors.len(),
-        compiled.decision_tree.decision_node_count,
+        compiled.subtables.values().map(|s| s.constructors.len()).sum::<usize>(),
+        compiled.subtables.values().map(|s| s.decision_tree.decision_node_count).sum::<usize>(),
         constructor_rows
     )
 }
@@ -358,6 +446,21 @@ fn render_matcher(matcher: &crate::compiler::CompiledPatternMatcher) -> String {
             "{{\"kind\": \"row_page\", \"row\": {}, \"page\": {}}}",
             row, page
         ),
+        crate::compiler::CompiledPatternMatcher::BitConstraints(constraints) => {
+            let rendered = constraints
+                .iter()
+                .map(|c| match c {
+                    crate::compiler::PatternConstraint::Instruction { offset, mask, value } => {
+                        format!("{{\"kind\": \"instruction\", \"offset\": {offset}, \"mask\": {mask}, \"value\": {value}}}")
+                    }
+                    crate::compiler::PatternConstraint::Context { offset, mask, value } => {
+                        format!("{{\"kind\": \"context\", \"offset\": {offset}, \"mask\": {mask}, \"value\": {value}}}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{\"kind\": \"bit_constraints\", \"constraints\": [{}]}}", rendered)
+        }
     }
 }
 
@@ -394,16 +497,18 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     let rows = specs
         .iter()
         .map(|spec| match spec {
-            crate::compiler::CompiledOperandSpec::TokenFieldRm { size, memory_only } => {
+            crate::compiler::CompiledOperandSpec::TokenFieldExtraction { bit_offset, bit_width, sign_extend } => {
                 format!(
-                    "{{\"kind\": \"token_field_rm\", \"size\": {size}, \"memory_only\": {memory_only}}}"
+                    "{{\"kind\": \"token_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::TokenFieldReg { size } => {
-                format!("{{\"kind\": \"token_field_reg\", \"size\": {size}}}")
+            crate::compiler::CompiledOperandSpec::ContextFieldExtraction { bit_offset, bit_width, sign_extend } => {
+                format!(
+                    "{{\"kind\": \"context_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
+                )
             }
-            crate::compiler::CompiledOperandSpec::OpcodeTokenReg { size } => {
-                format!("{{\"kind\": \"opcode_token_reg\", \"size\": {size}}}")
+            crate::compiler::CompiledOperandSpec::SubtableEvaluation { table_name } => {
+                format!("{{\"kind\": \"subtable_evaluation\", \"table_name\": {}}}", json_string(table_name))
             }
             crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
                 format!("{{\"kind\": \"immediate\", \"size\": {size}, \"signed\": {signed}}}")

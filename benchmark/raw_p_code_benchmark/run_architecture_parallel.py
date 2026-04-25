@@ -42,6 +42,8 @@ def run_row(
     ]
     if ghidra_dir is not None:
         cmd += ["--ghidra-dir", str(ghidra_dir)]
+    if bool(row.get("disassemble_missing", False)):
+        cmd.append("--disassemble-missing")
     if fission_release:
         cmd.append("--fission-release")
 
