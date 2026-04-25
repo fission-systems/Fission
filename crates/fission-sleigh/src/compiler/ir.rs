@@ -265,6 +265,11 @@ pub struct CompiledConstructTpl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompiledTemplateSource {
     SpecDerived,
+    /// Fission-native templates for constructors whose SLA templates reference
+    /// unresolvable subconstructor handles (e.g., J^cc `cc` subtable).
+    /// These use Fission varnode shapes (Handle, ConditionPredicate, etc.)
+    /// and are evaluated by the native template executor.
+    NativeFission,
     CompatibilityLowered,
 }
 
@@ -587,6 +592,7 @@ impl CompiledTemplateSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SpecDerived => "spec_derived",
+            Self::NativeFission => "native_fission",
             Self::CompatibilityLowered => "compatibility_lowered",
         }
     }
@@ -830,17 +836,44 @@ pub fn apply_sla_construct_templates(
             max_idx.is_some_and(|idx| idx >= 0 && (idx as usize) >= num_handles)
         });
 
-        constructor.constructor_template.op_templates = remapped_templates;
-        constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
-        let is_unsupported = has_unsupported_opcode || has_unresolvable_handle;
-        constructor.runtime_ready = !is_unsupported;
-        constructor.unsupported_template_kind = if has_unsupported_opcode {
-            Some("unsupported_pcode_opcode_in_sla_construct_tpl".to_string())
-        } else if has_unresolvable_handle {
-            Some("sla_template_references_unresolvable_handle".to_string())
+        if has_unresolvable_handle && !has_unsupported_opcode {
+            // The SLA template references handles that Fission's runtime can't
+            // resolve (e.g., the `cc` subconstructor in J^cc). If the constructor
+            // already has Fission-native semantic ops (ConditionalJump, SetCc,
+            // etc.), keep those instead of overwriting with broken SLA templates.
+            // This allows Jcc/Setcc/etc. to remain runtime_ready using their
+            // native Fission templates.
+            let has_native_semantics = !constructor
+                .constructor_template
+                .semantic_ops
+                .is_empty();
+            if has_native_semantics {
+                // Keep the original Fission-generated op_templates; don't
+                // overwrite with the SLA templates that have unresolvable handles.
+                // Tag as NativeFission so the evaluator uses the native executor.
+                constructor.constructor_template.template_source =
+                    CompiledTemplateSource::NativeFission;
+                constructor.unsupported_template_kind = None;
+                updated += 1;
+                continue;
+            }
+            // No native semantics — mark as unsupported (fail-closed).
+            constructor.constructor_template.op_templates = remapped_templates;
+            constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
+            constructor.runtime_ready = false;
+            constructor.unsupported_template_kind =
+                Some("sla_template_references_unresolvable_handle".to_string());
         } else {
-            None
-        };
+            constructor.constructor_template.op_templates = remapped_templates;
+            constructor.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
+            let is_unsupported = has_unsupported_opcode;
+            constructor.runtime_ready = !is_unsupported;
+            constructor.unsupported_template_kind = if has_unsupported_opcode {
+                Some("unsupported_pcode_opcode_in_sla_construct_tpl".to_string())
+            } else {
+                None
+            };
+        }
         updated += 1;
     }
     compiled.construct_templates = compiled

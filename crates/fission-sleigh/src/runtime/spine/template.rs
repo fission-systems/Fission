@@ -128,6 +128,25 @@ where
                     template_source: Some(state.constructor_template.template_source),
                 })
             }
+            CompiledTemplateSource::NativeFission => {
+                // Fission-native templates (Jcc, Setcc, etc.) that bypass
+                // the SLA template layer. These use Fission varnode shapes
+                // (Handle, ConditionPredicate) and are resolved by the emitter.
+                if state.constructor_template.op_templates.is_empty() {
+                    return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+                        language: language.to_string(),
+                        reason: "native_fission_construct_tpl_has_no_ops".to_string(),
+                    }
+                    .into());
+                }
+                for op in &state.constructor_template.op_templates {
+                    self.emitter.emit_op_template(state, op)?;
+                }
+                Ok(RuntimeExecutionDetails {
+                    compat_emitter_used: false,
+                    template_source: Some(state.constructor_template.template_source),
+                })
+            }
             CompiledTemplateSource::CompatibilityLowered => {
                 Err(RuntimeSleighError::UnsupportedPcodeTemplate {
                     language: language.to_string(),
