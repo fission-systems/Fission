@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -43,6 +44,7 @@ def main() -> int:
     started_at = time.perf_counter()
     proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
     elapsed_sec = time.perf_counter() - started_at
+    print(proc.stderr, file=sys.stderr)
     if proc.returncode != 0:
         raise SystemExit(
             f"fission raw p-code probe failed with exit={proc.returncode}\n"

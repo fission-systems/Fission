@@ -175,6 +175,7 @@ def run_manifest(args: argparse.Namespace) -> int:
     feature_totals: dict[str, dict[str, int]] = {}
     group_totals: dict[str, dict[str, int]] = {}
     performance_totals: dict[str, float] = {}
+    similarity_totals: dict[str, float] = {"sum_average_similarity_score": 0.0, "sum_parity_ratio": 0.0}
     row_reports = []
     for row in rows:
         binary = Path(row.get("binary", args.binary or ""))
@@ -220,6 +221,9 @@ def run_manifest(args: argparse.Namespace) -> int:
         performance = report.get("performance", {})
         add_performance_totals(performance_totals, performance.get("ghidra", {}), prefix="ghidra")
         add_performance_totals(performance_totals, performance.get("fission", {}), prefix="fission")
+        similarity = report.get("similarity_summary", {})
+        similarity_totals["sum_average_similarity_score"] += similarity.get("average_similarity_score", 0.0)
+        similarity_totals["sum_parity_ratio"] += similarity.get("parity_ratio", 0.0)
         first_mismatch = next(
             (entry for entry in report["rows"] if entry.get("buckets") != ["full_match"]),
             None,
@@ -236,6 +240,7 @@ def run_manifest(args: argparse.Namespace) -> int:
                 "report": report["report"],
                 "total_instructions": report["total_instructions"],
                 "bucket_totals": report["bucket_totals"],
+                "similarity_summary": similarity,
                 "performance": performance,
                 "first_mismatch": first_mismatch,
             }
@@ -261,6 +266,10 @@ def run_manifest(args: argparse.Namespace) -> int:
             group: dict(sorted(buckets.items()))
             for group, buckets in sorted(group_totals.items())
         },
+        "similarity_summary": {
+            "average_similarity_score": similarity_totals["sum_average_similarity_score"] / len(rows) if rows else 0.0,
+            "average_parity_ratio": similarity_totals["sum_parity_ratio"] / len(rows) if rows else 0.0,
+        },
         "performance_summary": finalize_performance_summary(performance_totals),
         "rows": row_reports,
     }
@@ -274,6 +283,7 @@ def run_manifest(args: argparse.Namespace) -> int:
         "compat_emitter_used_total": aggregate["compat_emitter_used_total"],
         "invariant_totals": aggregate["invariant_totals"],
         "template_source_totals": aggregate["template_source_totals"],
+        "similarity_summary": aggregate["similarity_summary"],
         "performance_summary": aggregate["performance_summary"],
         "feature_count": len(aggregate["feature_totals"]),
         "group_count": len(aggregate["group_totals"]),

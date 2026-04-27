@@ -14,8 +14,9 @@ pub trait RuntimeTemplateExecutor {
 mod tests {
     use super::*;
     use crate::compiler::{
-        CompiledConstTpl, CompiledConstructTplKind, CompiledConstructorTemplate, CompiledOpTpl,
-        CompiledOpTplOpcode, CompiledTemplateSource, CompiledVarnodeTpl,
+        CompiledConstTpl, CompiledConstructTplKind, CompiledConstructorTemplate,
+        CompiledDisplayTemplate, CompiledOpTpl, CompiledOpTplOpcode, CompiledTemplateSource,
+        CompiledVarnodeTpl,
     };
     use crate::runtime::spine::RuntimeMatchTrace;
 
@@ -36,12 +37,14 @@ mod tests {
             root_bucket: "test".to_string(),
             probes: Vec::new(),
             leaf_constructor_indexes: Vec::new(),
+            matched_leaf_pattern: None,
         }
     }
 
     #[test]
     fn spec_derived_template_rejects_compatibility_varnode() {
         let state = RuntimeConstructState {
+            mnemonic: "mov".to_string(),
             construct_tpl_kind: CompiledConstructTplKind::Mov,
             constructor_template: CompiledConstructorTemplate {
                 handles: Vec::new(),
@@ -56,10 +59,14 @@ mod tests {
                     })],
                     label: None,
                 }],
+                export: None,
                 template_source: CompiledTemplateSource::SpecDerived,
             },
+            display_template: CompiledDisplayTemplate::empty(),
+            display_operands: Vec::new(),
             construct_nodes: Vec::new(),
             handles: Vec::new(),
+            exported_handle: None,
             operands: Vec::new(),
             condition_code: None,
             length: 1,
@@ -77,16 +84,21 @@ mod tests {
     #[test]
     fn spec_derived_empty_template_is_zero_op_success() {
         let state = RuntimeConstructState {
+            mnemonic: "nop".to_string(),
             construct_tpl_kind: CompiledConstructTplKind::Nop,
             constructor_template: CompiledConstructorTemplate {
                 handles: Vec::new(),
                 decode_steps: Vec::new(),
                 semantic_ops: Vec::new(),
                 op_templates: Vec::new(),
+                export: None,
                 template_source: CompiledTemplateSource::SpecDerived,
             },
+            display_template: CompiledDisplayTemplate::empty(),
+            display_operands: Vec::new(),
             construct_nodes: Vec::new(),
             handles: Vec::new(),
+            exported_handle: None,
             operands: Vec::new(),
             condition_code: None,
             length: 1,

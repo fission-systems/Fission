@@ -426,6 +426,19 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
 
     if not buckets:
         buckets.append("full_match")
+
+    import difflib
+    if ghidra is None or fission is None:
+        detail["similarity_score"] = 0.0
+    else:
+        g_opcodes = detail.get("ghidra_opcodes", [])
+        f_opcodes = detail.get("fission_opcodes", [])
+        if not g_opcodes and not f_opcodes:
+            # If both have empty opcodes but neither is None, they match perfectly (zero-op instruction)
+            detail["similarity_score"] = 1.0
+        else:
+            detail["similarity_score"] = difflib.SequenceMatcher(None, g_opcodes, f_opcodes).ratio()
+
     return buckets, detail
 
 
@@ -451,6 +464,7 @@ def main() -> int:
     totals: Counter[str] = Counter()
     owner_hint_totals: Counter[str] = Counter()
     rows = []
+    total_similarity = 0.0
     for idx in range(max(len(g_instrs), len(f_instrs))):
         fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
         # Inject the merged resolver into both instructions.
@@ -461,6 +475,7 @@ def main() -> int:
         if f_instr is not None:
             f_instr = {**f_instr, "_space_resolver": merged_resolver}
         buckets, detail = bucket_instruction(g_instr, f_instr)
+        total_similarity += detail.get("similarity_score", 0.0)
         for bucket in set(buckets):
             totals[bucket] += 1
         if fission_instruction and fission_instruction.get("compat_emitter_used"):
@@ -475,6 +490,8 @@ def main() -> int:
         if "both_decode_error_or_padding" in buckets and "ghidra_decode_error" in buckets:
             break
 
+    average_similarity = total_similarity / len(rows) if rows else 0.0
+
     report = {
         "binary": ghidra.get("binary") or fission.get("binary"),
         "start_address": ghidra.get("start_address") or fission.get("start_address"),
@@ -486,6 +503,10 @@ def main() -> int:
         "total_instructions": len(rows),
         "bucket_totals": dict(sorted(totals.items())),
         "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
+        "similarity_summary": {
+            "average_similarity_score": average_similarity,
+            "parity_ratio": totals.get("full_match", 0) / len(rows) if rows else 0.0,
+        },
         "performance": {
             "ghidra": performance_from_report(ghidra),
             "fission": performance_from_report(fission),
