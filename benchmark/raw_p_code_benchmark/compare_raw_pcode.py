@@ -595,6 +595,8 @@ def main() -> int:
     owner_hint_totals: Counter[str] = Counter()
     rows = []
     total_similarity = 0.0
+    similarity_denominator = 0
+    similarity_excluded_padding_or_no_instruction = 0
     similarity_component_totals: Counter[str] = Counter()
     for idx in range(max(len(g_instrs), len(f_instrs))):
         fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
@@ -606,9 +608,13 @@ def main() -> int:
         if f_instr is not None:
             f_instr = {**f_instr, "_space_resolver": merged_resolver}
         buckets, detail = bucket_instruction(g_instr, f_instr)
-        total_similarity += detail.get("similarity_score", 0.0)
-        for name, value in detail.get("similarity_components", {}).items():
-            similarity_component_totals[name] += float(value)
+        if "both_decode_error_or_padding" in buckets:
+            similarity_excluded_padding_or_no_instruction += 1
+        else:
+            similarity_denominator += 1
+            total_similarity += detail.get("similarity_score", 0.0)
+            for name, value in detail.get("similarity_components", {}).items():
+                similarity_component_totals[name] += float(value)
         for bucket in set(buckets):
             totals[bucket] += 1
         if fission_instruction and fission_instruction.get("compat_emitter_used"):
@@ -623,11 +629,12 @@ def main() -> int:
         if "both_decode_error_or_padding" in buckets and "ghidra_decode_error" in buckets:
             break
 
-    average_similarity = total_similarity / len(rows) if rows else 0.0
+    average_similarity = total_similarity / similarity_denominator if similarity_denominator else 0.0
     average_similarity_components = {
-        name: value / len(rows) if rows else 0.0
+        name: value / similarity_denominator if similarity_denominator else 0.0
         for name, value in sorted(similarity_component_totals.items())
     }
+    parity_denominator = len(rows) - similarity_excluded_padding_or_no_instruction
 
     report = {
         "binary": ghidra.get("binary") or fission.get("binary"),
@@ -643,7 +650,9 @@ def main() -> int:
         "similarity_summary": {
             "average_similarity_score": average_similarity,
             "average_components": average_similarity_components,
-            "parity_ratio": totals.get("full_match", 0) / len(rows) if rows else 0.0,
+            "parity_ratio": totals.get("full_match", 0) / parity_denominator if parity_denominator else 0.0,
+            "similarity_denominator": similarity_denominator,
+            "similarity_excluded_padding_or_no_instruction": similarity_excluded_padding_or_no_instruction,
         },
         "performance": {
             "ghidra": performance_from_report(ghidra),

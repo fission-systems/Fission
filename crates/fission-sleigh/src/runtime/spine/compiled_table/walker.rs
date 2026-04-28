@@ -17,6 +17,7 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     context_register: u64,
     context_known_mask: u64,
     cursor: usize,
+    shared_token_operand_end: usize,
     token_fields: Option<TokenFieldBundle>,
     handles: Vec<Option<RuntimeHandle>>,
     walker: spine::RuntimeParserWalker,
@@ -95,6 +96,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             context_register: ctx.context_register,
             context_known_mask: ctx.context_known_mask,
             cursor: ctx.cursor + opcode_len,
+            shared_token_operand_end: 0,
             token_fields: None,
             handles,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
@@ -635,6 +637,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledOperandSpec::SubtableEvaluation { table_name } => {
                 let cursor_start = self.cursor;
                 let sub_state = self.decode_subtable(table_name)?;
+                if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
+                    && (legacy_shared_token_policy_shared_token_subtable(table_name)
+                        || legacy_shared_token_policy_modrm_operand_wrapper_subtable(table_name))
+                {
+                    self.shared_token_operand_end = self.shared_token_operand_end.max(sub_state.length);
+                }
                 if legacy_shared_token_policy_zero_width_subtable(table_name) {
                     self.cursor = cursor_start;
                 } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
@@ -851,7 +859,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         // of falling back to ModRM. This keeps BUILD execution tied to .sla
         // token fields rather than re-synthesizing an effective address.
         if legacy_shared_token_policy_opcode_token_subtable(self.selection.trace.root_bucket.as_str()) {
-            self.ctx.instruction_cursor
+            opcode_token_cursor_from_context(self.ctx)
         } else if legacy_shared_token_policy_modrm_token_subtable(self.selection.trace.root_bucket.as_str()) {
             let after_opcode =
                 self.ctx.instruction_cursor + opcode_len_from_instruction_start(self.ctx).unwrap_or(0);
@@ -1013,13 +1021,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
             && legacy_shared_token_policy_opcode_token_subtable(table_name)
         {
-            self.ctx.cursor
+            opcode_token_cursor_from_context(self.ctx)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
             && legacy_shared_token_policy_modrm_trailing_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {
             if constructor_has_shared_token_operand(self.selection.constructor) {
                 self.cursor.saturating_add(1)
+            } else if self.shared_token_operand_end
+                > self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
+            {
+                self.shared_token_operand_end
             } else {
                 self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
             }

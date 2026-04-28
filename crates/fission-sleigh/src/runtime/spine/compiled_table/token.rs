@@ -62,6 +62,21 @@ pub(super) fn opcode_cursor_from_context(ctx: &CompiledInstructionContext<'_>) -
     opcode_cursor_from_cursor(ctx, ctx.cursor)
 }
 
+pub(super) fn opcode_token_cursor_from_context(ctx: &CompiledInstructionContext<'_>) -> usize {
+    let offset = opcode_cursor_from_context(ctx);
+    let opcode = ctx.bytes.get(offset).copied().unwrap_or(0);
+    let opcode_bytes: usize = if opcode == 0x0f {
+        match ctx.bytes.get(offset + 1).copied() {
+            Some(0x38 | 0x3a) => 3,
+            Some(_) => 2,
+            None => 1,
+        }
+    } else {
+        1
+    };
+    offset + opcode_bytes.saturating_sub(1)
+}
+
 pub(super) fn opcode_cursor_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> usize {
     let mut offset = cursor;
     while let Some(byte) = ctx.bytes.get(offset).copied() {
@@ -421,6 +436,10 @@ pub(super) fn legacy_shared_token_policy_shared_token_subtable(table_name: &str)
             | "CRmr32"
             | "ss"
     )
+}
+
+pub(super) fn legacy_shared_token_policy_modrm_operand_wrapper_subtable(table_name: &str) -> bool {
+    matches!(table_name, "rm8" | "rm16" | "rm32" | "rm64")
 }
 
 pub(super) fn constructor_replaces_current(constructor: &CompiledExecutableConstructor) -> bool {

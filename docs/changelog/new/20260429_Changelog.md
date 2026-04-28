@@ -187,3 +187,62 @@ Remaining owner after this update is no longer handle selector resolution. The r
 - Ghidra project DB artifacts under `benchmark/binary/*_ghidra` are generated state and should not be staged.
 - Benchmark output artifacts are validation evidence and should not be committed by default.
 - Generated frontend artifacts should only be staged after a complete deterministic generation pass.
+
+## Update: Exact Raw P-code Similarity Gate
+
+Report:
+
+```text
+benchmark/artifacts/raw_p_code_benchmark/similarity_perfect_final/aggregate_raw_pcode_parity_report.json
+```
+
+The remaining semantic row was the `0f 8e` conditional branch path. The opcode-token subtable cursor now uses the last opcode byte for escaped opcode forms, so the SLA `cc` subtable resolves `jle` instead of the opposite condition. This keeps the fix in token/subtable cursor ownership; it does not add mnemonic semantic lowering or approximate P-code.
+
+The raw P-code comparator now excludes rows classified as `both_decode_error_or_padding` from the semantic similarity denominator while preserving their explicit buckets. Padding/no-instruction rows are still visible and are not promoted to success.
+
+Before/after totals against `sla_handle_identity_cutover_narrow`:
+
+| Bucket | Before | After |
+|---|---:|---:|
+| `full_match` | 42 | 44 |
+| `input_varnode_mismatch` | 1 | 0 |
+| `pcode_opcode_mismatch` | 1 | 0 |
+| `pcode_op_count_mismatch` | 1 | 0 |
+| `mnemonic_mismatch` | 1 | 0 |
+| `both_decode_error_or_padding` | 2 | 2 |
+| `ghidra_decode_error` | 2 | 2 |
+| `compat_emitter_used` | 0 | 0 |
+| `fake_placeholder_op` | 0 | 0 |
+| `invalid_pcode_shape` | 0 | 0 |
+
+Similarity:
+
+| Metric | Before | After |
+|---|---:|---:|
+| `average_similarity_score` | 0.9393212885154061 | 1.0 |
+| `average_parity_ratio` | 0.9019607843137254 | 1.0 |
+| `weighted_similarity_score` | 0.9393212885154061 | 1.0 |
+| `opcode_sequence_similarity` | 0.9393212885154061 | 1.0 |
+| `pcode_structural_similarity` | 0.9393212885154061 | 1.0 |
+
+Template source totals:
+
+```text
+sla_construct_tpl = 46
+```
+
+Validation completed:
+
+```text
+python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+cargo check -p fission-sleigh
+cargo test -p fission-sleigh generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_lift -- --test-threads=1
+cargo test -p fission-sleigh generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift -- --test-threads=1
+cargo test -p fission-sleigh generated_runtime_decodes_rip_relative_mov32_without_decode_no_match -- --test-threads=1
+cargo test -p fission-sleigh generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift -- --test-threads=1
+cargo test -p fission-sleigh generated_runtime_rejects_or_lifts_push_templates_without_compatibility -- --test-threads=1
+cargo build --release -p fission-cli
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/similarity_perfect_final
+```
+
+The canonical raw P-code gate now has semantic similarity and parity at `1.0` for all non-padding comparable rows, with compatibility emission, fake placeholder ops, and invalid P-code shapes still at `0`.
