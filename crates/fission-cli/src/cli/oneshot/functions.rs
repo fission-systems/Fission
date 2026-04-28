@@ -15,6 +15,11 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
                     "size": f.size,
                     "is_import": f.is_import,
                     "is_export": f.is_export,
+                    "origin": f.origin,
+                    "kind": f.kind,
+                    "source_section": f.source_section,
+                    "external_library": f.external_library,
+                    "is_thunk_like": f.is_thunk_like,
                 })
             })
             .collect();

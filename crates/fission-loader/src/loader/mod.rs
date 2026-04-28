@@ -6,6 +6,7 @@ use crate::prelude::*;
 use fission_core::constants::binary_format::*;
 use std::path::Path;
 
+pub mod coff;
 pub mod cpp;
 pub mod demangle;
 pub mod dwarf;
@@ -58,11 +59,18 @@ impl LoadedBinary {
                 "PE"
             } else if bytes.starts_with(b"\x7fELF") {
                 "ELF"
+            } else if coff::CoffLoader::looks_like_coff_object(bytes) {
+                "COFF"
             } else {
                 let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                 if matches!(
                     magic,
-                    MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE
+                    MACHO_MAGIC_32_BE
+                        | MACHO_MAGIC_64_BE
+                        | MACHO_MAGIC_32_LE
+                        | MACHO_MAGIC_64_LE
+                        | MACHO_FAT_MAGIC
+                        | MACHO_FAT_CIGAM
                 ) {
                     "Mach-O"
                 } else {
@@ -71,11 +79,18 @@ impl LoadedBinary {
             }
         } else if bytes.starts_with(b"\x7fELF") {
             "ELF"
+        } else if coff::CoffLoader::looks_like_coff_object(bytes) {
+            "COFF"
         } else {
             let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             if matches!(
                 magic,
-                MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE
+                MACHO_MAGIC_32_BE
+                    | MACHO_MAGIC_64_BE
+                    | MACHO_MAGIC_32_LE
+                    | MACHO_MAGIC_64_LE
+                    | MACHO_FAT_MAGIC
+                    | MACHO_FAT_CIGAM
             ) {
                 "Mach-O"
             } else {
@@ -87,6 +102,7 @@ impl LoadedBinary {
             "PE" => pe::PeLoader::parse(data, path)?,
             "ELF" => elf::ElfLoader::parse(data, path)?,
             "Mach-O" => macho::MachoLoader::parse(data, path)?,
+            "COFF" => coff::CoffLoader::parse(data, path)?,
             _ => return Err(FissionError::loader("Unknown binary format")),
         };
 
@@ -431,6 +447,7 @@ mod tests {
                     size: 20,
                     is_export: true,
                     is_import: false,
+                    ..Default::default()
                 })
                 .add_section(SectionInfo {
                     name: ".text".to_string(),
@@ -521,6 +538,7 @@ mod tests {
                     size: 50,
                     is_export: true,
                     is_import: false,
+                    ..Default::default()
                 })
                 .add_function(FunctionInfo {
                     name: "func_b".to_string(),
@@ -528,6 +546,7 @@ mod tests {
                     size: 100,
                     is_export: false,
                     is_import: false,
+                    ..Default::default()
                 })
                 .add_function(FunctionInfo {
                     name: "func_c".to_string(),
@@ -535,6 +554,7 @@ mod tests {
                     size: 0, // Unknown size
                     is_export: false,
                     is_import: true,
+                    ..Default::default()
                 })
                 .add_section(SectionInfo {
                     name: ".text".to_string(),

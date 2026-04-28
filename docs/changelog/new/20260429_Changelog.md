@@ -246,3 +246,99 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchm
 ```
 
 The canonical raw P-code gate now has semantic similarity and parity at `1.0` for all non-padding comparable rows, with compatibility emission, fake placeholder ops, and invalid P-code shapes still at `0`.
+
+## Update: ELF/Mach-O/COFF Loader Metadata and Function Provenance
+
+This wave promoted loader metadata quality ahead of SLEIGH execution. The loader now separates executable PE images from standalone COFF objects, preserves richer function/import provenance, and avoids mixing imports or thunk-like symbols into default decompile seeds.
+
+Implementation highlights:
+
+- Added additive `FunctionInfo` provenance fields:
+  - `origin`
+  - `kind`
+  - `source_section`
+  - `external_library`
+  - `is_thunk_like`
+- Added standalone COFF object detection and loading. PE signature handling remains separate from bare COFF file-header loading.
+- Added COFF fake-link section placement from deterministic base `0x2000`, with section flags mapped to readable/writable/executable metadata.
+- Added COFF symbol parsing for defined code symbols and undefined external imports.
+- Updated ELF loading to prefer `PT_LOAD` segment mapping for executable/shared objects while keeping relocatable objects on synthetic section placement.
+- Updated ELF symbol handling to parse both `.symtab` and `.dynsym`, separating defined function/export candidates from undefined dynamic import candidates.
+- Expanded Mach-O handling for fat/universal slice selection, 32-bit segment/symbol loading, 64-bit/32-bit load-command collection, function starts, and indirect import/thunk metadata.
+- Annotated PE import, export, pdata, COFF-symbol, and entry fallback functions with provenance.
+- Updated CLI JSON output for `info --imports`, `info --exports`, and `list --json` to expose provenance fields additively.
+- Updated batch function selection so canonical decompile seeds exclude import/external/debug-only entries, and default batch selection excludes thunk-like/runtime-wrapper entries.
+- Rebuilt the x86-64 compiler option corpus to include COFF `.obj` entries again.
+
+Validation evidence:
+
+```text
+cargo check -p fission-loader
+cargo test -p fission-loader -- --test-threads=1
+cargo check -p fission-core
+cargo check -p fission-cli
+cargo build --release -p fission-cli
+cargo test -p fission-cli function_select -- --test-threads=1
+python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+python3 benchmark/binary/build_x8664_option_matrix.py
+```
+
+Compiler option corpus loader smoke:
+
+```text
+entries = 15
+failures = 0
+PE = 8
+ELF = 5
+COFF = 2
+```
+
+Full benchmark smoke:
+
+```text
+python3 benchmark/full_benchmark/full_decomp_benchmark.py \
+  --corpus-manifest benchmark/config/benchmark_corpus/x86_64_compiler_option_matrix.json \
+  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --fission-bin target/release/fission_cli \
+  --limit 3 \
+  --output-dir benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_loader_fixed
+```
+
+Result:
+
+```text
+completed entries = 15
+COFF entries loaded and decompiled
+weighted_avg_norm_sim = 24.877%
+```
+
+The low full-benchmark similarity on this corpus is downstream decompiler quality, not loader failure; this wave's acceptance criterion was stable load/info/list/function-import metadata across PE, ELF, Mach-O, and COFF.
+
+Raw P-code regression guard:
+
+```text
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --fission-release \
+  --require-perfect-canonical \
+  --expected-full-match 44 \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/loader_metadata_guard
+```
+
+Result:
+
+| Metric | Value |
+|---|---:|
+| `full_match` | 44 |
+| `average_similarity_score` | 1.0 |
+| `average_parity_ratio` | 1.0 |
+| `compat_emitter_used` | 0 |
+| `fake_placeholder_op` | 0 |
+| `invalid_pcode_shape` | 0 |
+
+Commit scope notes:
+
+- Benchmark output artifacts remain validation evidence and are not committed by default.
+- Ghidra project DB directories under `benchmark/binary/**/*_ghidra` remain generated state and are not staged.
+- COFF/ELF/PE sample binaries and the corpus manifest are staged because they are the checked-in compiler-option loader smoke corpus.

@@ -1,7 +1,7 @@
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Information about a function found in the binary
-#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
 pub struct FunctionInfo {
     /// Function name (may be empty for unnamed functions)
@@ -14,6 +14,16 @@ pub struct FunctionInfo {
     pub is_export: bool,
     /// Whether this is an imported function (stub)
     pub is_import: bool,
+    /// Loader/discovery source for this function metadata.
+    pub origin: Option<String>,
+    /// Function classification such as code, import, import_thunk, export, or debug_symbol.
+    pub kind: Option<String>,
+    /// Source section name when known.
+    pub source_section: Option<String>,
+    /// External library/dylib/import descriptor name when known.
+    pub external_library: Option<String>,
+    /// Whether this function entry is a thunk/stub and should not be used as a decompile seed.
+    pub is_thunk_like: bool,
 }
 
 /// Information about a section in the binary

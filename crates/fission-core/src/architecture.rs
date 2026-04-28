@@ -10,7 +10,8 @@ use crate::constants::binary_format::{
 use crate::core_constants::{
     ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_386, EM_AARCH64, EM_ARM, EM_BPF,
     EM_LOONGARCH, EM_MIPS, EM_PPC, EM_PPC64, EM_RISCV, EM_SPARCV9, EM_X86_64,
-    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386,
+    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARM64,
+    IMAGE_FILE_MACHINE_I386,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
@@ -196,6 +197,23 @@ pub fn select_pe_load_spec(
             machine: format!("Machine=0x{machine:04x}, is_64bit={is_64bit}"),
         }),
     }
+}
+
+pub fn select_coff_load_spec(
+    machine: u16,
+    is_64bit: bool,
+    image_base: u64,
+) -> ArchitectureSelectionResult {
+    let (mut architecture, mut load_spec) = select_pe_load_spec(machine, is_64bit, image_base)
+        .map_err(|_| ArchitectureSelectionError::UnsupportedMachine {
+            format: "COFF".to_string(),
+            machine: format!("Machine=0x{machine:04x}, is_64bit={is_64bit}"),
+        })?;
+    architecture.abi = Some("coff".to_string());
+    architecture.raw_machine = format!("COFF Machine=0x{machine:04x}");
+    load_spec.format = "COFF".to_string();
+    load_spec.source = format!("COFF Machine=0x{machine:04x}");
+    Ok((architecture, load_spec))
 }
 
 pub fn select_elf_load_spec(

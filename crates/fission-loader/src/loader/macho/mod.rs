@@ -18,6 +18,9 @@ impl MachoLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // Read Magic
         let bytes = data.as_slice();
+        if let Some(slice) = select_fat_slice(bytes) {
+            return Self::parse(DataBuffer::Heap(bytes[slice].to_vec()), path);
+        }
         let mut cursor = Cursor::new(bytes);
         let magic =
             u32::read_be(&mut cursor).map_err(|e| err!(loader, "Invalid MachO Magic: {}", e))?;
@@ -194,6 +197,7 @@ impl MachoLoader {
                 endian,
                 stub_size,
                 &mut iat_symbols,
+                &mut functions_info,
             );
         }
 
@@ -238,6 +242,11 @@ impl MachoLoader {
                             size: 0,
                             is_export: false,
                             is_import: false,
+                            origin: Some("macho-function-starts".to_string()),
+                            kind: Some("code".to_string()),
+                            source_section: None,
+                            external_library: None,
+                            is_thunk_like: false,
                         });
                         new_count += 1;
                     }
@@ -272,22 +281,109 @@ impl MachoLoader {
 
         let is_64bit = false;
         let cputype = header.cputype;
+        let mut sections_info = Vec::new();
+        let mut section_exec_map = Vec::new();
+        let mut functions_info = Vec::new();
+        let mut image_base = u64::MAX;
+        let mut entry_point = 0u64;
+        let mut text_segment_vmaddr = 0u64;
+        let mut symtab_info: Option<SymtabCommand> = None;
+        let mut dysymtab_info: Option<DysymtabCommand> = None;
+
+        for _ in 0..header.ncmds {
+            let cmd_start = reader.position();
+            let cmd_header = LoadCommand::read_options(&mut reader, endian, ())
+                .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?;
+            reader
+                .seek(SeekFrom::Start(cmd_start))
+                .map_err(|e| err!(loader, "Failed to seek to load command start: {}", e))?;
+
+            if cmd_header.cmd == LC_SEGMENT {
+                let seg = SegmentCommand32::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read segment command: {}", e))?;
+                let seg_name = extract_fixed_string(&seg.segname);
+                if seg_name == "__TEXT" && seg.vmaddr != 0 {
+                    text_segment_vmaddr = seg.vmaddr as u64;
+                    image_base = image_base.min(seg.vmaddr as u64);
+                }
+                let seg_is_executable = (seg.initprot & 0x04) != 0;
+                for _ in 0..seg.nsects {
+                    let sect = Section32::read_options(&mut reader, endian, ())
+                        .map_err(|e| err!(loader, "Failed to read section: {}", e))?;
+                    let sect_has_instructions = (sect.flags & 0x80000400) != 0;
+                    let is_executable = seg_is_executable || sect_has_instructions;
+                    section_exec_map.push(is_executable);
+                    sections_info.push(SectionInfo {
+                        name: extract_fixed_string(&sect.sectname),
+                        virtual_address: sect.addr as u64,
+                        virtual_size: sect.size as u64,
+                        file_offset: sect.offset as u64,
+                        file_size: sect.size as u64,
+                        is_executable,
+                        is_readable: true,
+                        is_writable: (seg.initprot & 0x02) != 0,
+                    });
+                }
+            } else if cmd_header.cmd == LC_SYMTAB {
+                symtab_info = Some(
+                    SymtabCommand::read_options(&mut reader, endian, ())
+                        .map_err(|e| err!(loader, "Failed to read symtab command: {}", e))?,
+                );
+            } else if cmd_header.cmd == LC_DYSYMTAB {
+                dysymtab_info = Some(
+                    DysymtabCommand::read_options(&mut reader, endian, ())
+                        .map_err(|e| err!(loader, "Failed to read dysymtab command: {}", e))?,
+                );
+            } else if cmd_header.cmd == LC_MAIN {
+                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read entry point command: {}", e))?;
+                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+            }
+
+            reader
+                .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
+                .map_err(|e| err!(loader, "Failed to skip load command: {}", e))?;
+        }
+
+        if image_base == u64::MAX {
+            image_base = 0;
+        }
         let (architecture, load_spec) =
-            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, 0)
+            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, image_base)
                 .map_err(|e| err!(loader, "{}", e))?;
 
-        // Logic similar to 64...
-        // For brevity in POC, skipping full 32-bit implementation detail,
-        // as it mirrors 64-bit just with 32-bit structs.
-        // In real code we'd implement it fully.
+        if let Some(symtab) = symtab_info.as_ref() {
+            Self::parse_symbols_32(
+                bytes,
+                symtab,
+                endian,
+                &section_exec_map,
+                &mut functions_info,
+            );
+        }
+        let mut iat_symbols = std::collections::HashMap::new();
+        if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
+            Self::parse_dynamic_symbols_32(
+                bytes,
+                &symtab,
+                &dysymtab,
+                &sections_info,
+                endian,
+                &mut iat_symbols,
+                &mut functions_info,
+            );
+        }
 
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 32 (binrw)")
             .architecture(architecture)
             .load_spec(load_spec)
-            .entry_point(0)
-            .image_base(0)
+            .entry_point(entry_point)
+            .image_base(image_base)
             .is_64bit(is_64bit)
+            .add_sections(sections_info)
+            .add_functions(functions_info)
+            .add_iat_symbols(iat_symbols)
             .build()
     }
 
@@ -348,6 +444,11 @@ impl MachoLoader {
                         size: 0,
                         is_export: true,
                         is_import: false,
+                        origin: Some("macho-symtab".to_string()),
+                        kind: Some("code".to_string()),
+                        source_section: Some(format!("section_{}", sect_index)),
+                        external_library: None,
+                        is_thunk_like: false,
                     });
                 }
             } else {
@@ -364,6 +465,7 @@ impl MachoLoader {
         endian: binrw::Endian,
         stub_size: u64,
         iat_symbols: &mut std::collections::HashMap<u64, String>,
+        functions: &mut Vec<FunctionInfo>,
     ) {
         // Find __stubs and __got sections
         let stubs_section = sections.iter().find(|s| s.name == "__stubs");
@@ -394,6 +496,9 @@ impl MachoLoader {
                         let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(stub_addr, name);
+                            if let Some(name) = iat_symbols.get(&stub_addr) {
+                                push_macho_import(functions, stub_addr, name.clone(), "__stubs");
+                            }
                         }
                     }
                 }
@@ -422,6 +527,121 @@ impl MachoLoader {
                         let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(got_addr, name);
+                            if let Some(name) = iat_symbols.get(&got_addr) {
+                                push_macho_import(functions, got_addr, name.clone(), "__got");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_symbols_32(
+        data: &[u8],
+        symtab: &SymtabCommand,
+        endian: binrw::Endian,
+        section_exec_map: &[bool],
+        out: &mut Vec<FunctionInfo>,
+    ) {
+        let mut reader = Cursor::new(data);
+        reader.set_position(symtab.symoff as u64);
+        for _ in 0..symtab.nsyms {
+            let Ok(nlist) = Nlist32::read_options(&mut reader, endian, ()) else {
+                break;
+            };
+            let n_type = nlist.n_type & 0x0e;
+            if n_type != 0x0e || nlist.n_value == 0 {
+                continue;
+            }
+            let sect_index = nlist.n_sect as usize;
+            if sect_index == 0 || sect_index > section_exec_map.len() {
+                continue;
+            }
+            if !section_exec_map[sect_index - 1] {
+                continue;
+            }
+            let name_offset = (symtab.stroff as usize).checked_add(nlist.n_strx as usize);
+            let extracted_name = match name_offset {
+                Some(offset) if offset < data.len() => extract_cstring(data, offset),
+                _ => String::new(),
+            };
+            let final_name = if extracted_name.is_empty() {
+                format!("sub_{:x}", nlist.n_value)
+            } else {
+                extracted_name
+            };
+            out.push(FunctionInfo {
+                name: final_name,
+                address: nlist.n_value as u64,
+                size: 0,
+                is_export: true,
+                is_import: false,
+                origin: Some("macho-symtab".to_string()),
+                kind: Some("code".to_string()),
+                source_section: Some(format!("section_{}", sect_index)),
+                external_library: None,
+                is_thunk_like: false,
+            });
+        }
+    }
+
+    fn parse_dynamic_symbols_32(
+        data: &[u8],
+        symtab: &SymtabCommand,
+        dysymtab: &DysymtabCommand,
+        sections: &[SectionInfo],
+        endian: binrw::Endian,
+        iat_symbols: &mut std::collections::HashMap<u64, String>,
+        functions: &mut Vec<FunctionInfo>,
+    ) {
+        if dysymtab.nindirectsyms == 0 {
+            return;
+        }
+        let stubs_section = sections.iter().find(|s| s.name == "__stubs");
+        let got_section = sections.iter().find(|s| {
+            matches!(
+                s.name.as_str(),
+                "__got" | "__la_symbol_ptr" | "__nl_symbol_ptr"
+            )
+        });
+        let indirect_off = dysymtab.indirectsymoff as u64;
+        if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
+            return;
+        }
+        let mut reader = Cursor::new(data);
+        if let Some(stubs) = stubs_section {
+            let stub_size = 6u64;
+            let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
+            for i in 0..num_stubs {
+                let stub_addr = stubs.virtual_address + i * stub_size;
+                reader.set_position(indirect_off + i * 4);
+                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                    if sym_idx < symtab.nsyms {
+                        let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
+                        if !name.is_empty() {
+                            iat_symbols.insert(stub_addr, name.clone());
+                            push_macho_import(functions, stub_addr, name, "__stubs");
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(got) = got_section {
+            let entry_size = 4u64;
+            let num_entries = (got.virtual_size / entry_size).min(dysymtab.nindirectsyms as u64);
+            let stubs_count = stubs_section
+                .map(|stubs| (stubs.virtual_size / 6) as u32)
+                .unwrap_or(0);
+            for i in 0..num_entries {
+                let got_addr = got.virtual_address + i * entry_size;
+                reader.set_position(indirect_off + (stubs_count as u64 + i) * 4);
+                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                    if sym_idx < symtab.nsyms {
+                        let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
+                        if !name.is_empty() {
+                            iat_symbols.insert(got_addr, name.clone());
+                            push_macho_import(functions, got_addr, name, &got.name);
                         }
                     }
                 }
@@ -447,4 +667,86 @@ impl MachoLoader {
         }
         String::new()
     }
+
+    fn get_symbol_name_32(
+        data: &[u8],
+        symtab: &SymtabCommand,
+        sym_idx: u32,
+        endian: binrw::Endian,
+    ) -> String {
+        let sym_off = symtab.symoff as u64 + (sym_idx as u64 * 12);
+        let mut reader = Cursor::new(data);
+        reader.set_position(sym_off);
+
+        if let Ok(nlist) = Nlist32::read_options(&mut reader, endian, ()) {
+            let str_off = symtab.stroff as usize + nlist.n_strx as usize;
+            if str_off < data.len() {
+                return extract_cstring(data, str_off);
+            }
+        }
+        String::new()
+    }
+}
+
+fn push_macho_import(functions: &mut Vec<FunctionInfo>, address: u64, name: String, section: &str) {
+    if functions
+        .iter()
+        .any(|function| function.address == address && function.is_import)
+    {
+        return;
+    }
+    functions.push(FunctionInfo {
+        name,
+        address,
+        size: 0,
+        is_export: false,
+        is_import: true,
+        origin: Some("macho-indirect-symbols".to_string()),
+        kind: Some("import_thunk".to_string()),
+        source_section: Some(section.to_string()),
+        external_library: None,
+        is_thunk_like: true,
+    });
+}
+
+fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+    if bytes.len() < 8 {
+        return None;
+    }
+    let magic = u32::from_be_bytes(bytes[0..4].try_into().ok()?);
+    if !matches!(magic, MACHO_FAT_MAGIC | MACHO_FAT_CIGAM) {
+        return None;
+    }
+    let nfat_arch = u32::from_be_bytes(bytes[4..8].try_into().ok()?) as usize;
+    let mut best = None;
+    let mut offset = 8usize;
+    for _ in 0..nfat_arch {
+        if offset + 20 > bytes.len() {
+            return best;
+        }
+        let cputype = i32::from_be_bytes(bytes[offset..offset + 4].try_into().ok()?);
+        let slice_offset =
+            u32::from_be_bytes(bytes[offset + 8..offset + 12].try_into().ok()?) as usize;
+        let slice_size =
+            u32::from_be_bytes(bytes[offset + 12..offset + 16].try_into().ok()?) as usize;
+        if slice_offset.checked_add(slice_size)? <= bytes.len() {
+            let candidate = slice_offset..slice_offset + slice_size;
+            if best.is_none()
+                || matches!(
+                    cputype,
+                    MACHO_CPU_TYPE_X86_64
+                        | MACHO_CPU_TYPE_ARM64
+                        | MACHO_CPU_TYPE_X86
+                        | MACHO_CPU_TYPE_ARM
+                )
+            {
+                best = Some(candidate);
+                if matches!(cputype, MACHO_CPU_TYPE_X86_64 | MACHO_CPU_TYPE_ARM64) {
+                    break;
+                }
+            }
+        }
+        offset += 20;
+    }
+    best
 }

@@ -21,12 +21,31 @@ pub(crate) fn prefer_function_name(candidate: &str, current: &str) -> bool {
     candidate.len() > current.len()
 }
 
+fn function_provenance_rank(func: &FunctionInfo) -> u8 {
+    if func.is_import || func.is_thunk_like {
+        return 0;
+    }
+    match func.kind.as_deref() {
+        Some("undefined_external" | "import" | "import_thunk") => 0,
+        Some("debug_symbol") => 2,
+        Some("entry" | "code") => 4,
+        _ if func.is_export => 5,
+        _ if is_generic_function_name(&func.name) => 1,
+        _ => 3,
+    }
+}
+
 fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a FunctionInfo> {
     let mut deduped: Vec<&'a FunctionInfo> = Vec::with_capacity(functions.len());
     for func in functions {
         match deduped.last_mut() {
             Some(current) if current.address == func.address => {
-                if prefer_function_name(&func.name, &current.name) {
+                let candidate_rank = function_provenance_rank(func);
+                let current_rank = function_provenance_rank(current);
+                if candidate_rank > current_rank
+                    || (candidate_rank == current_rank
+                        && prefer_function_name(&func.name, &current.name))
+                {
                     *current = func;
                 }
             }
@@ -37,7 +56,16 @@ fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a Funct
 }
 
 fn should_filter_internal_candidate(func: &FunctionInfo, covering_end: u64) -> bool {
-    if func.is_import || func.is_export || func.address >= covering_end {
+    if func.is_import
+        || func.is_thunk_like
+        || matches!(
+            func.kind.as_deref(),
+            Some("undefined_external" | "import" | "import_thunk" | "debug_symbol")
+        )
+    {
+        return true;
+    }
+    if func.is_export || func.address >= covering_end {
         return false;
     }
     if !is_generic_function_name(&func.name) {
@@ -111,7 +139,7 @@ pub(crate) fn select_batch_functions<'a>(
     let mut selected = Vec::with_capacity(canonical.len());
     for func in canonical {
         if !include_nonuser_functions {
-            if func.is_import {
+            if func.is_import || func.is_thunk_like {
                 accounting.functions_excluded_import_count += 1;
                 continue;
             }
@@ -221,6 +249,7 @@ mod tests {
             size: 0x80,
             is_export: false,
             is_import: false,
+            ..Default::default()
         })
         .add_function(FunctionInfo {
             name: "sub_140001021".to_string(),
@@ -228,6 +257,7 @@ mod tests {
             size: 0,
             is_export: false,
             is_import: false,
+            ..Default::default()
         })
         .add_function(FunctionInfo {
             name: "meaningful_name".to_string(),
@@ -235,6 +265,7 @@ mod tests {
             size: 0x40,
             is_export: false,
             is_import: false,
+            ..Default::default()
         })
         .add_function(FunctionInfo {
             name: "sub_140001080".to_string(),
@@ -242,6 +273,7 @@ mod tests {
             size: 0x40,
             is_export: false,
             is_import: false,
+            ..Default::default()
         })
         .add_function(FunctionInfo {
             name: "register_frame_ctor".to_string(),
@@ -249,6 +281,7 @@ mod tests {
             size: 0,
             is_export: false,
             is_import: false,
+            ..Default::default()
         })
         .add_function(FunctionInfo {
             name: "puts".to_string(),
@@ -256,6 +289,7 @@ mod tests {
             size: 0,
             is_export: false,
             is_import: true,
+            ..Default::default()
         })
         .build()
         .expect("build binary")
@@ -266,7 +300,7 @@ mod tests {
         let binary = test_binary();
         let selected = canonical_functions_sorted(&binary);
         let addrs: Vec<u64> = selected.iter().map(|func| func.address).collect();
-        assert_eq!(addrs, vec![0x140001000, 0x140001080]);
+        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0]);
     }
 
     #[test]
@@ -282,9 +316,9 @@ mod tests {
         let selected = select_batch_functions(&binary, false, None);
         let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
         assert_eq!(addrs, vec![0x140001000, 0x140001080]);
-        assert_eq!(selected.accounting.functions_discovered_total, 4);
+        assert_eq!(selected.accounting.functions_discovered_total, 3);
         assert_eq!(selected.accounting.functions_selected_total, 2);
-        assert_eq!(selected.accounting.functions_excluded_import_count, 1);
+        assert_eq!(selected.accounting.functions_excluded_import_count, 0);
         assert_eq!(
             selected.accounting.functions_excluded_runtime_wrapper_count,
             1
@@ -297,12 +331,9 @@ mod tests {
         let binary = test_binary();
         let selected = select_batch_functions(&binary, true, None);
         let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
-        assert_eq!(
-            addrs,
-            vec![0x140001000, 0x140001080, 0x1400010c0, 0x140001100]
-        );
-        assert_eq!(selected.accounting.functions_discovered_total, 4);
-        assert_eq!(selected.accounting.functions_selected_total, 4);
+        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0]);
+        assert_eq!(selected.accounting.functions_discovered_total, 3);
+        assert_eq!(selected.accounting.functions_selected_total, 3);
         assert_eq!(selected.accounting.functions_excluded_import_count, 0);
         assert_eq!(
             selected.accounting.functions_excluded_runtime_wrapper_count,

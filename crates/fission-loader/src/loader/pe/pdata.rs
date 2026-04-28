@@ -49,6 +49,11 @@ pub(super) fn parse_pdata(
             size: func_size,
             is_export: false,
             is_import: false,
+            origin: Some("pe-pdata".to_string()),
+            kind: Some("code".to_string()),
+            source_section: Some(".pdata".to_string()),
+            external_library: None,
+            is_thunk_like: false,
         });
     }
 

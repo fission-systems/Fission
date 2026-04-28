@@ -175,6 +175,11 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                 serde_json::json!({
                     "address": format!("0x{:x}", f.address),
                     "name": f.name,
+                    "origin": f.origin,
+                    "kind": f.kind,
+                    "source_section": f.source_section,
+                    "external_library": f.external_library,
+                    "is_thunk_like": f.is_thunk_like,
                 })
             })
             .collect();
@@ -209,6 +214,11 @@ pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                     "address": format!("0x{:x}", f.address),
                     "name": f.name,
                     "size": f.size,
+                    "origin": f.origin,
+                    "kind": f.kind,
+                    "source_section": f.source_section,
+                    "external_library": f.external_library,
+                    "is_thunk_like": f.is_thunk_like,
                 })
             })
             .collect();

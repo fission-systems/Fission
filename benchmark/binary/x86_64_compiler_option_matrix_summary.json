@@ -1,0 +1,504 @@
+{
+  "attempted": 15,
+  "corpus": "benchmark/config/benchmark_corpus/x86_64_compiler_option_matrix.json",
+  "failed": 0,
+  "output_root": "benchmark/binary/x86-64/compiler_options/small/binary/c",
+  "results": [
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O0",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o0/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o0",
+      "flags": [
+        "-O0",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o0/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 144880,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O0",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O1",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o1/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o1",
+      "flags": [
+        "-O1",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o1/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 146012,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O1",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O2",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o2",
+      "flags": [
+        "-O2",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 146644,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O2",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O3",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o3/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o3",
+      "flags": [
+        "-O3",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o3/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 147668,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O3",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-Os",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-os/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-os",
+      "flags": [
+        "-Os",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-os/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 146644,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "Os",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-Og",
+        "-g",
+        "-m64",
+        "-static",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-og/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-og",
+      "flags": [
+        "-Og",
+        "-g",
+        "-m64",
+        "-static"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-og/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 145500,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "Og",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O2",
+        "-g",
+        "-m64",
+        "-static",
+        "-fno-omit-frame-pointer",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2-frameptr/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o2-frameptr",
+      "flags": [
+        "-O2",
+        "-g",
+        "-m64",
+        "-static",
+        "-fno-omit-frame-pointer"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2-frameptr/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 146644,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O2",
+        "frame-pointer",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+        "-O2",
+        "-g",
+        "-m64",
+        "-static",
+        "-fno-inline",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2-noinline/sleigh_option_matrix.exe"
+      ],
+      "compiler": "x86_64-w64-mingw32-gcc",
+      "compiler_id": "mingw-gcc-o2-noinline",
+      "flags": [
+        "-O2",
+        "-g",
+        "-m64",
+        "-static",
+        "-fno-inline"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/mingw-gcc-o2-noinline/sleigh_option_matrix.exe",
+      "output_kind": "pe-exe",
+      "size": 146644,
+      "status": "succeeded",
+      "tags": [
+        "mingw-gcc",
+        "O2",
+        "no-inline",
+        "pe"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-none-elf",
+        "-O0",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o0/sleigh_option_matrix.o"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-elf-o0",
+      "flags": [
+        "--target=x86_64-none-elf",
+        "-O0",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o0/sleigh_option_matrix.o",
+      "output_kind": "elf-object",
+      "size": 10192,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O0",
+        "elf",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-none-elf",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o2/sleigh_option_matrix.o"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-elf-o2",
+      "flags": [
+        "--target=x86_64-none-elf",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o2/sleigh_option_matrix.o",
+      "output_kind": "elf-object",
+      "size": 12040,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O2",
+        "elf",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-none-elf",
+        "-O3",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o3/sleigh_option_matrix.o"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-elf-o3",
+      "flags": [
+        "--target=x86_64-none-elf",
+        "-O3",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o3/sleigh_option_matrix.o",
+      "output_kind": "elf-object",
+      "size": 15568,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O3",
+        "elf",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-none-elf",
+        "-Os",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-os/sleigh_option_matrix.o"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-elf-os",
+      "flags": [
+        "--target=x86_64-none-elf",
+        "-Os",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-os/sleigh_option_matrix.o",
+      "output_kind": "elf-object",
+      "size": 10584,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "Os",
+        "elf",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-none-elf",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fno-omit-frame-pointer",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o2-frameptr/sleigh_option_matrix.o"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-elf-o2-frameptr",
+      "flags": [
+        "--target=x86_64-none-elf",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fno-omit-frame-pointer",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o2-frameptr/sleigh_option_matrix.o",
+      "output_kind": "elf-object",
+      "size": 12040,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O2",
+        "frame-pointer",
+        "elf",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-w64-windows-gnu",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-coff-o2/sleigh_option_matrix.obj"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-coff-o2",
+      "flags": [
+        "--target=x86_64-w64-windows-gnu",
+        "-O2",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-coff-o2/sleigh_option_matrix.obj",
+      "output_kind": "coff-object",
+      "size": 9693,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O2",
+        "coff",
+        "freestanding"
+      ]
+    },
+    {
+      "cmd": [
+        "/opt/homebrew/opt/llvm/bin/clang",
+        "--target=x86_64-w64-windows-gnu",
+        "-O3",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+        "-o",
+        "/Users/sjkim1127/Fission/benchmark/binary/x86-64/compiler_options/small/binary/c/clang-coff-o3/sleigh_option_matrix.obj"
+      ],
+      "compiler": "clang",
+      "compiler_id": "clang-coff-o3",
+      "flags": [
+        "--target=x86_64-w64-windows-gnu",
+        "-O3",
+        "-g",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-c"
+      ],
+      "output": "benchmark/binary/x86-64/compiler_options/small/binary/c/clang-coff-o3/sleigh_option_matrix.obj",
+      "output_kind": "coff-object",
+      "size": 13309,
+      "status": "succeeded",
+      "tags": [
+        "clang",
+        "O3",
+        "coff",
+        "freestanding"
+      ]
+    }
+  ],
+  "skipped": 0,
+  "source": "benchmark/binary/x86-64/compiler_options/small/source/c/sleigh_option_matrix.c",
+  "succeeded": 15
+}

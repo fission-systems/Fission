@@ -103,6 +103,11 @@ pub(super) fn parse_imports(
                     size: 0,
                     is_export: false,
                     is_import: true,
+                    origin: Some("pe-import-table".to_string()),
+                    kind: Some("import".to_string()),
+                    source_section: None,
+                    external_library: Some(dll_name.clone()),
+                    is_thunk_like: false,
                 });
 
                 symbol_map.insert(iat_addr, full_name);

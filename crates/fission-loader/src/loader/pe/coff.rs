@@ -110,6 +110,11 @@ pub(super) fn parse_coff_symbols(
             size: 0,
             is_export: false,
             is_import: false,
+            origin: Some("pe-coff-symbol-table".to_string()),
+            kind: Some("code".to_string()),
+            source_section: Some(section.name.clone()),
+            external_library: None,
+            is_thunk_like: false,
         });
 
         if aux_count > 0 {

@@ -159,6 +159,11 @@ impl PeLoader {
                 size: 0,
                 is_export: false,
                 is_import: false,
+                origin: Some("pe-entry".to_string()),
+                kind: Some("entry".to_string()),
+                source_section: None,
+                external_library: None,
+                is_thunk_like: false,
             });
         }
 
@@ -341,6 +346,11 @@ impl<'a> PeLoaderImpl<'a> {
                                     size: 0,
                                     is_export: true,
                                     is_import: false,
+                                    origin: Some("pe-export-table".to_string()),
+                                    kind: Some("export".to_string()),
+                                    source_section: None,
+                                    external_library: None,
+                                    is_thunk_like: false,
                                 });
                             }
                         }
