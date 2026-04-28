@@ -128,6 +128,10 @@ pub struct CompiledConstructor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledExecutableConstructor {
     pub constructor_id: u32,
+    #[serde(default)]
+    pub sla_identity: Option<CompiledSlaConstructorIdentity>,
+    #[serde(default)]
+    pub sla_decode_status: CompiledSlaDecodeStatus,
     pub mnemonic: String,
     pub source: String,
     pub display: String,
@@ -147,6 +151,29 @@ pub struct CompiledExecutableConstructor {
     pub constructor_template: CompiledConstructorTemplate,
     pub runtime_ready: bool,
     pub unsupported_template_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompiledSlaConstructorIdentity {
+    pub subtable_name: String,
+    pub constructor_id: u32,
+    pub constructor_slot: usize,
+    #[serde(default)]
+    pub source_file: String,
+    #[serde(default)]
+    pub source_line: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompiledSlaDecodeStatus {
+    Decoded,
+    Unsupported,
+}
+
+impl Default for CompiledSlaDecodeStatus {
+    fn default() -> Self {
+        Self::Decoded
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,6 +253,7 @@ pub enum CompiledDisjointPattern {
         context: CompiledPatternBlock,
         instruction: CompiledPatternBlock,
     },
+    Or(Vec<CompiledDisjointPattern>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -396,10 +424,10 @@ pub struct CompiledResolvedVarnode {
 pub struct CompiledConstructorTemplate {
     pub handles: Vec<CompiledHandleTemplate>,
     pub decode_steps: Vec<CompiledOperandDecodeStep>,
-    pub semantic_ops: Vec<CompiledSemanticOp>,
-    pub op_templates: Vec<CompiledOpTpl>,
+    pub num_labels: u32,
     #[serde(default)]
-    pub export: Option<CompiledHandleTpl>,
+    pub result: Option<CompiledHandleTpl>,
+    pub ops: Vec<CompiledOpTpl>,
     pub template_source: CompiledTemplateSource,
 }
 
@@ -454,39 +482,17 @@ pub enum CompiledPatternExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompiledSemanticOp {
-    Nop,
-    Return,
-    Call,
-    Jump,
-    ConditionalJump,
-    Copy,
-    AddressOf,
-    StackStore,
-    StackLoad,
-    FrameTeardown,
-    Binary { opcode: CompiledArithmeticOpcode },
-    Compare { bitwise: bool },
-    Extend { signed: bool },
-    SetCc,
-    AccumulatorExtend { src_size: u32, dst_size: u32 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledConstructTpl {
     pub constructor_hash: u64,
-    pub ops: Vec<CompiledSemanticOp>,
-    pub op_templates: Vec<CompiledOpTpl>,
+    pub num_labels: u32,
     #[serde(default)]
-    pub export: Option<CompiledHandleTpl>,
-    pub template_source: CompiledTemplateSource,
+    pub result: Option<CompiledHandleTpl>,
+    pub ops: Vec<CompiledOpTpl>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledTemplateSource {
     SpecDerived,
-    NativeFission,
-    CompatibilityLowered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -779,36 +785,10 @@ impl CompiledDecisionProbe {
     }
 }
 
-impl CompiledSemanticOp {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Nop => "nop",
-            Self::Return => "return",
-            Self::Call => "call",
-            Self::Jump => "jump",
-            Self::ConditionalJump => "conditional_jump",
-            Self::Copy => "copy",
-            Self::AddressOf => "address_of",
-            Self::StackStore => "store_stack",
-            Self::StackLoad => "load_stack",
-            Self::FrameTeardown => "frame_teardown",
-            Self::Binary { .. } => "binary",
-            Self::Compare { bitwise: false } => "compare",
-            Self::Compare { bitwise: true } => "test",
-            Self::Extend { signed: false } => "zext",
-            Self::Extend { signed: true } => "sext",
-            Self::SetCc => "setcc",
-            Self::AccumulatorExtend { .. } => "accumulator_extend",
-        }
-    }
-}
-
 impl CompiledTemplateSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SpecDerived => "spec_derived",
-            Self::NativeFission => "native_fission",
-            Self::CompatibilityLowered => "compatibility_lowered",
         }
     }
 }

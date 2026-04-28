@@ -55,7 +55,8 @@ fn decode_construct_templates(
     // Helper to parse a constructor
     let trace_sla_parse = std::env::var_os("FISSION_TRACE_SLA_PARSE").is_some();
     let mut parse_constructor =
-        |subtable_name: &str,
+        |subtable_id: u32,
+         subtable_name: &str,
          constructor: &PackedElement,
          local_index: usize|
          -> Option<CompiledSlaConstructorTemplate> {
@@ -239,6 +240,10 @@ fn decode_construct_templates(
 
         Some(CompiledSlaConstructorTemplate {
             id,
+            subtable_id,
+            subtable_name: subtable_name.to_string(),
+            constructor_slot: local_index,
+            decode_status: CompiledSlaDecodeStatus::Decoded,
             source_key,
             source_file,
             line,
@@ -276,11 +281,22 @@ fn decode_construct_templates(
             .filter(|child| child.id == sla_format::ELEM_CONSTRUCTOR)
             .enumerate()
         {
-            let slot = local_index;
-            let template = parse_constructor(&name, child, slot).unwrap_or_else(|| {
+            // Decision leaf pairs reference Ghidra's packed constructor id,
+            // not the ordinal after Fission's iteration/filtering. Preserve
+            // that slot identity so terminal verification lands on the same
+            // constructor that the .sla decision tree selected.
+            let slot = child
+                .attr_unsigned(sla_format::ATTR_ID)
+                .map(|value| value as usize)
+                .unwrap_or(local_index);
+            let template = parse_constructor(id, &name, child, slot).unwrap_or_else(|| {
                 CompiledSlaConstructorTemplate {
                     id: slot as u32,
-                    source_key: "unsupported_placeholder".to_string(),
+                    subtable_id: id,
+                    subtable_name: name.clone(),
+                    constructor_slot: slot,
+                    decode_status: CompiledSlaDecodeStatus::Unsupported,
+                    source_key: format!("sla_decode_failed_constructor:{name}:{slot}"),
                     source_file: "unknown".to_string(),
                     line: 0,
                     minimum_length: 0,
@@ -292,10 +308,9 @@ fn decode_construct_templates(
                     flowthru_operand_index: None,
                     constructor_template: CompiledConstructTpl {
                         constructor_hash: 0,
+                        num_labels: 0,
+                        result: None,
                         ops: Vec::new(),
-                        op_templates: Vec::new(),
-                        export: None,
-                        template_source: CompiledTemplateSource::SpecDerived,
                     },
                 }
             });
@@ -320,7 +335,11 @@ fn decode_construct_templates(
             subtable_constructors.push(
                 constructors_by_index.remove(&slot).unwrap_or(CompiledSlaConstructorTemplate {
                     id: slot as u32,
-                    source_key: "unsupported_placeholder".to_string(),
+                    subtable_id: id,
+                    subtable_name: name.clone(),
+                    constructor_slot: slot,
+                    decode_status: CompiledSlaDecodeStatus::Unsupported,
+                    source_key: format!("sla_decode_failed_constructor:{name}:{slot}"),
                     source_file: "unknown".to_string(),
                     line: 0,
                     minimum_length: 0,
@@ -332,10 +351,9 @@ fn decode_construct_templates(
                     flowthru_operand_index: None,
                     constructor_template: CompiledConstructTpl {
                         constructor_hash: 0,
+                        num_labels: 0,
+                        result: None,
                         ops: Vec::new(),
-                        op_templates: Vec::new(),
-                        export: None,
-                        template_source: CompiledTemplateSource::SpecDerived,
                     },
                 }),
             );
@@ -350,38 +368,6 @@ fn decode_construct_templates(
             constructors: subtable_constructors,
             decision_tree,
         });
-    }
-
-    // 3. Algorithm: Identify 'instruction' entry point
-    if !subtables.contains_key("instruction") {
-        let mut all_trees = Vec::new();
-        fn find_trees(el: &PackedElement, trees: &mut Vec<crate::compiler::ir::CompiledDecisionTree>) {
-            if el.id == 16 {
-                let mut nodes = Vec::new();
-                if decode_decision_node(el, &mut nodes).is_ok() {
-                    trees.push(crate::compiler::ir::CompiledDecisionTree {
-                        root_node_index: 0,
-                        nodes,
-                        decision_node_count: 0,
-                        root_buckets: Vec::new(),
-                    });
-                }
-            }
-            for child in &el.children {
-                find_trees(child, trees);
-            }
-        }
-        find_trees(&root, &mut all_trees);
-        all_trees.sort_by_key(|t| std::cmp::Reverse(t.nodes.len()));
-
-        if let Some(biggest) = all_trees.into_iter().next() {
-            eprintln!("Algorithmic Fallback: Creating missing 'instruction' subtable with largest tree ({} nodes)", biggest.nodes.len());
-            subtables.insert("instruction".to_string(), CompiledSlaSubtable {
-                name: "instruction".to_string(),
-                constructors: Vec::new(),
-                decision_tree: Some(biggest),
-            });
-        }
     }
 
     if let Some(inst_table) = subtables.get_mut("instruction") {
@@ -549,6 +535,16 @@ fn decode_disjoint_pattern(element: &PackedElement) -> Result<CompiledDisjointPa
                 instruction,
             })
         }
+        sla_format::ELEM_OR_PAT => {
+            let mut patterns = Vec::new();
+            for child in &element.children {
+                patterns.push(decode_disjoint_pattern(child)?);
+            }
+            if patterns.is_empty() {
+                bail!("or pattern has no alternatives");
+            }
+            Ok(CompiledDisjointPattern::Or(patterns))
+        }
         _ => bail!("unsupported decision leaf pattern element {}", element.id),
     }
 }
@@ -594,8 +590,12 @@ fn decode_construct_tpl(
     element: &PackedElement,
     spaces: &BTreeMap<u64, CompiledSpaceRef>,
 ) -> Result<CompiledConstructTpl> {
+    let num_labels = element
+        .attr_signed(sla_format::ATTR_LABELS)
+        .unwrap_or_default()
+        .max(0) as u32;
     let mut children = element.children.iter();
-    let export = match children.next() {
+    let result = match children.next() {
         Some(child) if child.id == sla_format::ELEM_NULL => None,
         Some(child) if child.id == sla_format::ELEM_HANDLE_TPL => {
             Some(decode_handle_tpl(child, spaces)?)
@@ -611,10 +611,9 @@ fn decode_construct_tpl(
     }
     Ok(CompiledConstructTpl {
         constructor_hash: 0,
-        ops: Vec::new(),
-        op_templates,
-        export,
-        template_source: CompiledTemplateSource::SpecDerived,
+        num_labels,
+        result,
+        ops: op_templates,
     })
 }
 

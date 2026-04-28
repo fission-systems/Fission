@@ -236,143 +236,18 @@ pub fn apply_sla_construct_templates(
 ) -> usize {
     let mut updated = 0usize;
 
-    // Completely overwrite subtables from SLA, keeping any existing context changes if possible
+    // The compiled .sla artifact is the canonical executable identity. Do not
+    // overlay templates onto .slaspec/Ast constructors by source line,
+    // mnemonic, or pprint ordering: Ghidra decision leaves resolve subtable
+    // local constructor ids and the runtime must consume that same domain.
     for (name, sla_subtable) in &library.subtables {
-        let mut executable_constructors = Vec::new();
-        let existing_constructors = compiled
-            .subtables
-            .get(name)
-            .map(|subtable| subtable.constructors.clone())
-            .unwrap_or_default();
-
+        let mut executable_constructors = Vec::with_capacity(sla_subtable.constructors.len());
         for (idx, sla_template) in sla_subtable.constructors.iter().enumerate() {
-            // Preserve existing constructor data only from the same subtable.
-            // Local slot identity must win over global source-line matching,
-            // otherwise recursive wrapper subtables can inherit unrelated
-            // constructors and break Ghidra's local constructor ordinal model.
-            let mut found_constructor = existing_constructors.get(idx).cloned();
-            if found_constructor.is_none() {
-                found_constructor = existing_constructors
-                    .iter()
-                    .find(|c| c.source == sla_template.source_key)
-                    .cloned();
-            }
-            if found_constructor.is_none() {
-                found_constructor = existing_constructors
-                    .iter()
-                    .find(|c| {
-                        c.source
-                            .rsplit(':')
-                            .next()
-                            .and_then(|line| line.parse::<u64>().ok())
-                            == Some(sla_template.line)
-                    })
-                    .cloned();
-            }
-
-            let mut executable = if let Some(mut existing) = found_constructor {
-                let mut remapped_templates = sla_template.constructor_template.op_templates.clone();
-                let mut remapped_display_template = sla_template.display_template.clone();
-                let mut remapped_display_operands = sla_template.display_operands.clone();
-                let opprint = &sla_template.opprint_indices;
-
-                let mut handle_remap = Vec::new();
-                if !opprint.is_empty() {
-                    handle_remap = vec![usize::MAX; 32];
-                    for (fission_idx, sla_idx) in opprint.iter().enumerate() {
-                        if *sla_idx < handle_remap.len() {
-                            handle_remap[*sla_idx] = fission_idx;
-                        }
-                    }
-                }
-
-                if !handle_remap.is_empty() {
-                    for op in &mut remapped_templates {
-                        remap_op_tpl_handles(op, &handle_remap);
-                    }
-                    remap_build_operand_indices(&mut remapped_templates, &handle_remap);
-                    remap_display_template_operands(&mut remapped_display_template, &handle_remap);
-                    remap_display_operands(&mut remapped_display_operands, &handle_remap);
-                }
-
-                existing.constructor_id = sla_template.id;
-                remapped_display_template.constructor_hash = existing.signature_hash;
-                existing.display = remapped_display_template.display.clone();
-                existing.display_template = remapped_display_template;
-                existing.display_operands = remapped_display_operands;
-                existing.minimum_length = sla_template.minimum_length;
-                existing.constructor_template.op_templates = remapped_templates;
-                existing.constructor_template.export = sla_template.constructor_template.export.clone();
-                existing.constructor_template.template_source = CompiledTemplateSource::SpecDerived;
-                existing.runtime_ready = true;
-                existing
-            } else {
-                let mnemonic = constructor_mnemonic(&sla_template.source_key);
-                let mut decode_steps = Vec::new();
-                if let Some(flowthru_operand_index) = sla_template.flowthru_operand_index {
-                    if let Some(CompiledOperandSpec::SubtableEvaluation { table_name }) =
-                        sla_template.operand_specs.get(flowthru_operand_index)
-                    {
-                        decode_steps.push(CompiledOperandDecodeStep::DescendSubtable {
-                            table_name: table_name.clone(),
-                            replace_current: true,
-                        });
-                    }
-                }
-                if decode_steps.is_empty() {
-                    decode_steps.extend(
-                        (0..sla_template.operand_specs.len()).map(|operand_index| {
-                            CompiledOperandDecodeStep::DecodeOperand { operand_index }
-                        }),
-                    );
-                }
-                let runtime_ready = sla_template.source_key != "unsupported_placeholder";
-                CompiledExecutableConstructor {
-                    constructor_id: sla_template.id,
-                    mnemonic: mnemonic.clone(),
-                    source: sla_template.source_key.clone(),
-                    display: sla_template.display_template.display.clone(),
-                    display_template: {
-                        let mut template = sla_template.display_template.clone();
-                        template.constructor_hash = stable_hash(&sla_template.source_key) ^ (idx as u64);
-                        template
-                    },
-                    signature_hash: stable_hash(&sla_template.source_key) ^ (idx as u64),
-                    minimum_length: sla_template.minimum_length,
-                    context_changes: sla_template.context_changes.clone(),
-                    matcher: CompiledPatternMatcher::BitConstraints(vec![]),
-                    mod_constraint: None,
-                    operand_reg_values: Vec::new(),
-                    opsize_variants: Vec::new(),
-                    operand_specs: sla_template.operand_specs.clone(),
-                    display_operands: sla_template.display_operands.clone(),
-                    construct_tpl_kind: CompiledConstructTplKind::Generic,
-                    constructor_template: CompiledConstructorTemplate {
-                        handles: sla_template
-                            .operand_specs
-                            .iter()
-                            .cloned()
-                            .enumerate()
-                            .map(|(operand_index, spec)| CompiledHandleTemplate {
-                                operand_index,
-                                spec,
-                            })
-                            .collect(),
-                        decode_steps,
-                        semantic_ops: Vec::new(),
-                        op_templates: sla_template.constructor_template.op_templates.clone(),
-                        export: sla_template.constructor_template.export.clone(),
-                        template_source: CompiledTemplateSource::SpecDerived,
-                    },
-                    runtime_ready,
-                    unsupported_template_kind: if runtime_ready {
-                        None
-                    } else {
-                        Some("sla_constructor_mapping_mismatch".to_string())
-                    },
-                }
-            };
-            executable_constructors.push(executable);
+            executable_constructors.push(executable_constructor_from_sla_template(
+                name,
+                idx,
+                sla_template,
+            ));
             updated += 1;
         }
 
@@ -399,112 +274,106 @@ pub fn apply_sla_construct_templates(
         .flat_map(|subtable| &subtable.constructors)
         .map(|constructor| CompiledConstructTpl {
             constructor_hash: constructor.signature_hash,
-            ops: constructor.constructor_template.semantic_ops.clone(),
-            op_templates: constructor.constructor_template.op_templates.clone(),
-            export: constructor.constructor_template.export.clone(),
-            template_source: constructor.constructor_template.template_source,
+            num_labels: constructor.constructor_template.num_labels,
+            result: constructor.constructor_template.result.clone(),
+            ops: constructor.constructor_template.ops.clone(),
         })
         .collect();
 
     updated
 }
 
-fn remap_op_tpl_handles(op: &mut CompiledOpTpl, remap: &[usize]) {
-    if let Some(ref mut output) = op.output {
-        remap_varnode_tpl_handles(output, remap);
+fn executable_constructor_from_sla_template(
+    subtable_name: &str,
+    local_index: usize,
+    sla_template: &crate::compiler::sla::CompiledSlaConstructorTemplate,
+) -> CompiledExecutableConstructor {
+    let source = format!(
+        "sla:{}:{}:{}",
+        subtable_name, sla_template.id, sla_template.source_key
+    );
+    let signature_hash = stable_hash(&source) ^ (u64::from(sla_template.id) << 32);
+    let mut display_template = sla_template.display_template.clone();
+    display_template.constructor_hash = signature_hash;
+
+    let mut decode_steps = Vec::new();
+    if let Some(flowthru_operand_index) = sla_template.flowthru_operand_index {
+        if let Some(CompiledOperandSpec::SubtableEvaluation { table_name }) =
+            sla_template.operand_specs.get(flowthru_operand_index)
+        {
+            decode_steps.push(CompiledOperandDecodeStep::DescendSubtable {
+                table_name: table_name.clone(),
+                replace_current: true,
+            });
+        }
     }
-    for input in &mut op.inputs {
-        remap_varnode_tpl_handles(input, remap);
+    if decode_steps.is_empty() {
+        decode_steps.extend(
+            (0..sla_template.operand_specs.len())
+                .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
+        );
+    }
+
+    let decode_failed = sla_template.decode_status != CompiledSlaDecodeStatus::Decoded;
+    CompiledExecutableConstructor {
+        constructor_id: sla_template.id,
+        sla_identity: Some(CompiledSlaConstructorIdentity {
+            subtable_name: subtable_name.to_string(),
+            constructor_id: sla_template.id,
+            constructor_slot: sla_template.constructor_slot,
+            source_file: sla_template.source_file.clone(),
+            source_line: sla_template.line,
+        }),
+        sla_decode_status: if decode_failed {
+            CompiledSlaDecodeStatus::Unsupported
+        } else {
+            CompiledSlaDecodeStatus::Decoded
+        },
+        mnemonic: constructor_mnemonic_from_display(&display_template)
+            .unwrap_or_else(|| format!("ctor_{}", local_index)),
+        source,
+        display: display_template.display.clone(),
+        display_template,
+        signature_hash,
+        minimum_length: sla_template.minimum_length,
+        context_changes: sla_template.context_changes.clone(),
+        matcher: CompiledPatternMatcher::BitConstraints(vec![]),
+        mod_constraint: None,
+        operand_reg_values: Vec::new(),
+        opsize_variants: Vec::new(),
+        operand_specs: sla_template.operand_specs.clone(),
+        display_operands: sla_template.display_operands.clone(),
+        construct_tpl_kind: CompiledConstructTplKind::Generic,
+        constructor_template: CompiledConstructorTemplate {
+            handles: sla_template
+                .operand_specs
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(operand_index, spec)| CompiledHandleTemplate {
+                    operand_index,
+                    spec,
+                })
+                .collect(),
+            decode_steps,
+            num_labels: sla_template.constructor_template.num_labels,
+            result: sla_template.constructor_template.result.clone(),
+            ops: sla_template.constructor_template.ops.clone(),
+            template_source: CompiledTemplateSource::SpecDerived,
+        },
+        runtime_ready: !decode_failed,
+        unsupported_template_kind: decode_failed.then(|| "sla_constructor_decode_failed".to_string()),
     }
 }
 
-fn remap_varnode_tpl_handles(vn: &mut CompiledVarnodeTpl, remap: &[usize]) {
-    match vn {
-        CompiledVarnodeTpl::Varnode { space, offset, size } => {
-            remap_space_tpl_handles(space, remap);
-            remap_const_tpl_handles(offset, remap);
-            remap_const_tpl_handles(size, remap);
-        }
-        CompiledVarnodeTpl::HandleTpl(ref mut handle) => {
-            if let Some(ref mut s) = handle.space { remap_space_tpl_handles(s, remap); }
-            if let Some(ref mut c) = handle.size { remap_const_tpl_handles(c, remap); }
-            if let Some(ref mut s) = handle.ptr_space { remap_space_tpl_handles(s, remap); }
-            if let Some(ref mut c) = handle.ptr_offset { remap_const_tpl_handles(c, remap); }
-            if let Some(ref mut c) = handle.ptr_size { remap_const_tpl_handles(c, remap); }
-            if let Some(ref mut s) = handle.temp_space { remap_space_tpl_handles(s, remap); }
-            if let Some(ref mut c) = handle.temp_offset { remap_const_tpl_handles(c, remap); }
-        }
-        _ => {}
-    }
-}
-
-fn remap_space_tpl_handles(space: &mut CompiledSpaceTpl, remap: &[usize]) {
-    if let CompiledSpaceTpl::Const(ref mut c) = space {
-        remap_const_tpl_handles(c, remap);
-    }
-}
-
-fn remap_const_tpl_handles(c: &mut CompiledConstTpl, remap: &[usize]) {
-    if let CompiledConstTpl::Handle { ref mut handle_index, .. } = c {
-        let idx = *handle_index as usize;
-        if idx < remap.len() {
-            let mapped = remap[idx];
-            if mapped != usize::MAX {
-                *handle_index = mapped as i64;
-            }
-        }
-    }
-}
-
-fn remap_build_operand_indices(ops: &mut Vec<CompiledOpTpl>, remap: &[usize]) {
-    for op in ops {
-        if op.opcode == CompiledOpTplOpcode::Build {
-            if let Some(CompiledVarnodeTpl::Varnode { ref mut offset, .. }) = op.inputs.get_mut(0) {
-                if let CompiledConstTpl::Real { ref mut value } = **offset {
-                    let idx = *value as usize;
-                    if idx < remap.len() {
-                        let mapped = remap[idx];
-                        if mapped != usize::MAX {
-                            *value = mapped as u64;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn remap_display_template_operands(template: &mut CompiledDisplayTemplate, remap: &[usize]) {
-    for piece in &mut template.pieces {
-        if let CompiledDisplayPiece::OperandRef(index) = piece {
-            if *index < remap.len() {
-                let mapped = remap[*index];
-                if mapped != usize::MAX {
-                    *index = mapped;
-                }
-            }
-        }
-    }
-    if let Some(index) = template.flowthru_operand_index {
-        if index < remap.len() {
-            let mapped = remap[index];
-            if mapped != usize::MAX {
-                template.flowthru_operand_index = Some(mapped);
-            }
-        }
-    }
-}
-
-fn remap_display_operands(operands: &mut Vec<CompiledDisplayOperand>, remap: &[usize]) {
-    for operand in operands.iter_mut() {
-        if operand.operand_index < remap.len() {
-            let mapped = remap[operand.operand_index];
-            if mapped != usize::MAX {
-                operand.operand_index = mapped;
-            }
-        }
-    }
-    operands.sort_by_key(|operand| operand.operand_index);
+fn constructor_mnemonic_from_display(template: &CompiledDisplayTemplate) -> Option<String> {
+    template.pieces.iter().find_map(|piece| {
+        let CompiledDisplayPiece::Literal(text) = piece else {
+            return None;
+        };
+        let mnemonic = text.trim();
+        (!mnemonic.is_empty()).then(|| mnemonic.to_ascii_lowercase())
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -602,10 +471,9 @@ impl Collector {
             .flatten()
             .map(|constructor| CompiledConstructTpl {
                 constructor_hash: constructor.signature_hash,
-                ops: constructor.constructor_template.semantic_ops.clone(),
-                op_templates: constructor.constructor_template.op_templates.clone(),
-                export: constructor.constructor_template.export.clone(),
-                template_source: constructor.constructor_template.template_source,
+                num_labels: constructor.constructor_template.num_labels,
+                result: constructor.constructor_template.result.clone(),
+                ops: constructor.constructor_template.ops.clone(),
             })
             .collect()
     }
@@ -800,7 +668,7 @@ impl Collector {
     ) -> Option<CompiledExecutableConstructor> {
         if !runtime_signature_is_supported(signature) { return None; }
         let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-        let construct_tpl_kind = classify_construct_tpl_kind(&normalized_mnemonic);
+        let construct_tpl_kind = classify_display_construct_kind(&normalized_mnemonic);
         let matcher = self
             .parse_opcode_matcher(signature)
             .unwrap_or_else(|| CompiledPatternMatcher::BitConstraints(vec![]));
@@ -826,14 +694,16 @@ impl Collector {
         let constructor_template = CompiledConstructorTemplate {
             handles: operand_specs.iter().cloned().enumerate().map(|(operand_index, spec)| CompiledHandleTemplate { operand_index, spec }).collect(),
             decode_steps,
-            semantic_ops: semantic_ops_for_kind(construct_tpl_kind),
-            op_templates: op_templates_for_constructor(&operand_specs, construct_tpl_kind),
-            export: None,
-            template_source: CompiledTemplateSource::NativeFission,
+            num_labels: 0,
+            result: None,
+            ops: Vec::new(),
+            template_source: CompiledTemplateSource::SpecDerived,
         };
 
         Some(CompiledExecutableConstructor {
             constructor_id: u32::MAX,
+            sla_identity: None,
+            sla_decode_status: CompiledSlaDecodeStatus::Unsupported,
             mnemonic: mnemonic.to_string(),
             source: source.to_string(),
             display: signature.to_string(),
@@ -856,8 +726,11 @@ impl Collector {
                 .collect(),
             construct_tpl_kind,
             constructor_template,
-            runtime_ready: true,
-            unsupported_template_kind: unsupported_template_reason(signature, construct_tpl_kind, &operand_specs),
+            runtime_ready: false,
+            unsupported_template_kind: Some(
+                unsupported_template_reason(signature, construct_tpl_kind, &operand_specs)
+                    .unwrap_or_else(|| "missing_sla_construct_tpl".to_string()),
+            ),
         })
     }
 
@@ -879,17 +752,30 @@ impl Collector {
                             else { value_str.parse::<u64>().unwrap_or(0) };
 
                 if let Some(info) = self.field_info.get(name) {
-                    let mask = ((1u64 << info.bit_width) - 1) << info.bit_offset;
+                    let field_mask = if info.bit_width >= 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << info.bit_width) - 1
+                    };
+                    let mask = field_mask.checked_shl(info.bit_offset).unwrap_or(0);
+                    let shifted_value = value.checked_shl(info.bit_offset).unwrap_or(0) & mask;
                     match info.kind {
-                        FieldKind::Instruction => constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: (value << info.bit_offset) & mask }),
-                        FieldKind::Context => constraints.push(PatternConstraint::Context { offset: 0, mask, value: (value << info.bit_offset) & mask }),
+                        FieldKind::Instruction => constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: shifted_value }),
+                        FieldKind::Context => constraints.push(PatternConstraint::Context { offset: 0, mask, value: shifted_value }),
                     }
                 } else if name.starts_with("b_") {
                     if let Ok(bits) = name[2..].parse::<u32>() {
                         let (s, e) = if name.len() <= 4 { (bits / 100, bits % 100) } else { (bits, bits) };
                         let (start_bit, end_bit) = if s > e { (s, e) } else { (e, s) };
-                        let mask = ((1u64 << (start_bit - end_bit + 1)) - 1) << end_bit;
-                        constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: (value << end_bit) & mask });
+                        let width = start_bit - end_bit + 1;
+                        let field_mask = if width >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << width) - 1
+                        };
+                        let mask = field_mask.checked_shl(end_bit).unwrap_or(0);
+                        let shifted_value = value.checked_shl(end_bit).unwrap_or(0) & mask;
+                        constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: shifted_value });
                     }
                 }
             } else {
@@ -1175,7 +1061,7 @@ fn normalize_executable_mnemonic(mnemonic: &str) -> String {
 
 fn runtime_signature_is_supported(_signature: &str) -> bool { true }
 
-fn classify_construct_tpl_kind(mnemonic: &str) -> CompiledConstructTplKind {
+fn classify_display_construct_kind(mnemonic: &str) -> CompiledConstructTplKind {
     match mnemonic.to_ascii_uppercase().as_str() {
         "FINIT" | "FNINIT" => CompiledConstructTplKind::Unsupported,
         "NOP" | "PAUSE" => CompiledConstructTplKind::Nop,
@@ -1312,7 +1198,9 @@ fn parse_context_changes(
             mask: if info.bit_width >= 64 {
                 u64::MAX
             } else {
-                ((1u64 << info.bit_width) - 1) << info.bit_offset
+                ((1u64 << info.bit_width) - 1)
+                    .checked_shl(info.bit_offset)
+                    .unwrap_or(0)
             },
             shift: info.bit_offset as i32,
             expr: None,

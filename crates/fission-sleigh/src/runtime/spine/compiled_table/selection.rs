@@ -1,14 +1,17 @@
 pub(super) fn candidate_selections<'a>(
     compiled: &'a CompiledFrontend,
-    native: Option<&'a Arc<NativeBackend>>,
+    strategy: &RuntimeDecodeStrategy<'a>,
     ctx: &CompiledInstructionContext<'_>,
     address: u64,
 ) -> Result<Vec<RuntimeSelection<'a>>> {
     let instruction_table = compiled
         .subtables
         .get("instruction")
-        .expect("missing 'instruction' subtable");
-    let primary = if let Some(native) = native {
+        .ok_or_else(|| RuntimeSleighError::UnsupportedPcodeTemplate {
+            language: compiled.entry_id.clone(),
+            reason: "selection_no_instruction_root".to_string(),
+        })?;
+    let primary = if let Some(native) = strategy.native_for_table(compiled, "instruction", ctx) {
         let constructor_index = native
             .decode_match("instruction", ctx.bytes, ctx.context_register)?
             .ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
@@ -208,31 +211,6 @@ pub(super) fn possible_context_probe_values(
     Ok(values)
 }
 
-pub(super) fn native_backend_allowed(
-    compiled: &CompiledFrontend,
-    table_name: &str,
-    ctx: &CompiledInstructionContext<'_>,
-) -> bool {
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_legacy_shared_tokens() {
-        return true;
-    }
-    let Some(subtable) = compiled.subtables.get(table_name) else {
-        return false;
-    };
-    !subtable
-        .decision_tree
-        .nodes
-        .iter()
-        .any(|node| match node.probe {
-            CompiledDecisionProbe::ContextBitSlice { offset, mask, .. } => {
-                let relevant_mask = u64::from(mask) << offset;
-                (ctx.context_known_mask & relevant_mask) != relevant_mask
-            }
-            CompiledDecisionProbe::SlaContextBits { .. } => true,
-            _ => false,
-        })
-}
-
 pub(super) fn unsupported_constructor_error(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
@@ -348,6 +326,11 @@ pub(super) fn disjoint_pattern_instruction_byte_len(pattern: &CompiledDisjointPa
         CompiledDisjointPattern::Combine { instruction, .. } => {
             pattern_block_byte_len(instruction)
         }
+        CompiledDisjointPattern::Or(patterns) => patterns
+            .iter()
+            .map(disjoint_pattern_instruction_byte_len)
+            .max()
+            .unwrap_or(0),
     }
 }
 

@@ -13,7 +13,7 @@ use super::ir::{
     CompiledDisplayPiece, CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl,
     CompiledLabelRef, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandSpec,
     CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode, CompiledSpaceRef,
-    CompiledSpaceTpl, CompiledTemplateSource, CompiledVarnodeTpl,
+    CompiledSpaceTpl, CompiledSlaDecodeStatus, CompiledVarnodeTpl,
 };
 
 pub const GHIDRA_SLA_MAGIC: &[u8; 3] = b"sla";

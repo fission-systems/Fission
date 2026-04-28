@@ -42,9 +42,10 @@ pub use ir::{
     CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
     CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher,
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
-    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpaceRef, CompiledSpaceTpl,
-    CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource, CompiledTokenField,
-    CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
+    CompiledSemanticTemplate, CompiledSlaConstructorIdentity, CompiledSlaDecodeStatus,
+    CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition,
+    CompiledSubtable, CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef,
+    CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{
@@ -735,7 +736,11 @@ mod tests {
         assert_eq!(compiled.arch, "x86");
         assert_eq!(compiled.entry_spec, "x86-64.slaspec");
         assert!(compiled.include_manifest.len() >= 3);
-        assert!(!compiled.constructors.is_empty());
+        assert!(compiled
+            .subtables
+            .values()
+            .any(|subtable| !subtable.constructors.is_empty()));
+        assert!(!compiled.construct_templates.is_empty());
         assert!(!compiled.definitions.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
     }
@@ -861,8 +866,11 @@ mod tests {
             assert_eq!(compiled.arch, entry.arch);
             assert_eq!(compiled.entry_spec, entry.entry_spec);
             assert!(
-                !compiled.constructors.is_empty(),
-                "{} produced no constructors",
+                compiled
+                    .subtables
+                    .values()
+                    .any(|subtable| !subtable.constructors.is_empty()),
+                "{} produced no executable constructor inventory",
                 entry.path.display()
             );
         }

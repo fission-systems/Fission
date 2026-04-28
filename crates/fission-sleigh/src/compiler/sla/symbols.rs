@@ -25,6 +25,10 @@ pub struct CompiledSlaTemplateLibrary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledSlaConstructorTemplate {
     pub id: u32,
+    pub subtable_id: u32,
+    pub subtable_name: String,
+    pub constructor_slot: usize,
+    pub decode_status: CompiledSlaDecodeStatus,
     pub source_key: String,
     pub source_file: String,
     pub line: u64,

@@ -175,7 +175,16 @@ def owner_hints_for(buckets: list[str], detail: dict[str, Any]) -> list[str]:
         "varnode_size_mismatch",
         "label_target_mismatch",
     }:
-        hints.add("varnode_identity")
+        mismatch = detail.get("first_mismatch") or {}
+        ghidra_op = mismatch.get("ghidra_op") or {}
+        fission_op = mismatch.get("fission_op") or {}
+        opcode = normalize_opcode(ghidra_op.get("opcode") or fission_op.get("opcode"))
+        if opcode in {"LOAD", "STORE"}:
+            hints.add("dynamic_pointer_identity")
+        elif opcode in {"COPY", "PIECE", "SUBPIECE"}:
+            hints.add("handle_selector_resolution")
+        else:
+            hints.add("varnode_identity")
     if "temp_space_mismatch" in bucket_set:
         hints.add("temp_allocation")
     if bucket_set & {
@@ -189,6 +198,14 @@ def owner_hints_for(buckets: list[str], detail: dict[str, Any]) -> list[str]:
         hints.add("decode_length")
     if bucket_set & {"unsupported_template", "invalid_pcode_shape"}:
         hints.add("unsupported_template")
+    if "mnemonic_mismatch" in bucket_set and not (
+        bucket_set & {"pcode_opcode_mismatch", "pcode_op_count_mismatch", "input_varnode_mismatch", "output_varnode_mismatch"}
+    ):
+        hints.add("display_only_mnemonic")
+    if "both_decode_error_or_padding" in bucket_set:
+        hints.add("padding_or_no_instruction")
+    if detail.get("template_source") in {"NativeFission", "CompatibilityLowered"}:
+        hints.add("compat_emitter")
     return sorted(hints)
 
 
@@ -200,6 +217,120 @@ BRANCH_LIKE_OPCODES = {
     "CALLIND",
     "RETURN",
 }
+
+
+def safe_ratio(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 1.0 if numerator <= 0 else 0.0
+    return max(0.0, min(1.0, numerator / denominator))
+
+
+def sequence_similarity(left: list[Any], right: list[Any]) -> float:
+    import difflib
+
+    if not left and not right:
+        return 1.0
+    return difflib.SequenceMatcher(None, left, right).ratio()
+
+
+def scalar_similarity(left: Any, right: Any) -> float:
+    return 1.0 if left == right else 0.0
+
+
+def varnode_similarity(ghidra: dict[str, Any] | None, fission: dict[str, Any] | None) -> float:
+    if ghidra is None and fission is None:
+        return 1.0
+    if ghidra is None or fission is None:
+        return 0.0
+
+    score = 0.0
+    score += 0.40 * scalar_similarity(ghidra.get("space"), fission.get("space"))
+    score += 0.20 * scalar_similarity(ghidra.get("size"), fission.get("size"))
+
+    g_value = ghidra.get("value", ghidra.get("offset", ghidra.get("index")))
+    f_value = fission.get("value", fission.get("offset", fission.get("index")))
+    score += 0.40 * scalar_similarity(g_value, f_value)
+    return score
+
+
+def op_similarity(ghidra: dict[str, Any], fission: dict[str, Any]) -> float:
+    opcode_score = scalar_similarity(ghidra.get("opcode"), fission.get("opcode"))
+    output_score = varnode_similarity(ghidra.get("output"), fission.get("output"))
+
+    g_inputs = ghidra.get("inputs", [])
+    f_inputs = fission.get("inputs", [])
+    aligned = max(len(g_inputs), len(f_inputs))
+    if aligned == 0:
+        input_score = 1.0
+    else:
+        input_score = sum(
+            varnode_similarity(
+                g_inputs[idx] if idx < len(g_inputs) else None,
+                f_inputs[idx] if idx < len(f_inputs) else None,
+            )
+            for idx in range(aligned)
+        ) / aligned
+
+    return (0.40 * opcode_score) + (0.20 * output_score) + (0.40 * input_score)
+
+
+def pcode_structural_similarity(
+    ghidra_ops: list[dict[str, Any]],
+    fission_ops: list[dict[str, Any]],
+) -> float:
+    aligned = max(len(ghidra_ops), len(fission_ops))
+    if aligned == 0:
+        return 1.0
+    return sum(
+        op_similarity(ghidra_ops[idx], fission_ops[idx])
+        if idx < len(ghidra_ops) and idx < len(fission_ops)
+        else 0.0
+        for idx in range(aligned)
+    ) / aligned
+
+
+def instruction_similarity_components(
+    ghidra: dict[str, Any] | None,
+    fission: dict[str, Any] | None,
+    ghidra_ops: list[dict[str, Any]],
+    fission_ops: list[dict[str, Any]],
+) -> dict[str, float]:
+    if ghidra is None or fission is None:
+        return {
+            "opcode_sequence_similarity": 0.0,
+            "pcode_structural_similarity": 0.0,
+            "length_similarity": 0.0,
+            "mnemonic_similarity": 0.0,
+            "weighted_similarity_score": 0.0,
+        }
+
+    g_opcodes = [op["opcode"] for op in ghidra_ops]
+    f_opcodes = [op["opcode"] for op in fission_ops]
+    opcode_score = sequence_similarity(g_opcodes, f_opcodes)
+    pcode_score = pcode_structural_similarity(ghidra_ops, fission_ops)
+
+    g_len = int(ghidra.get("length", -1))
+    f_len = int(fission.get("length", -2))
+    length_score = scalar_similarity(g_len, f_len)
+
+    g_mnemonic = str(ghidra.get("mnemonic", "")).lower()
+    decoded = fission.get("decoded") or {}
+    f_mnemonic = str(decoded.get("mnemonic", "")).lower()
+    mnemonic_score = 1.0 if not g_mnemonic or not f_mnemonic else scalar_similarity(g_mnemonic, f_mnemonic)
+
+    weighted = (
+        0.65 * pcode_score
+        + 0.15 * opcode_score
+        + 0.10 * length_score
+        + 0.10 * mnemonic_score
+    )
+    return {
+        "opcode_sequence_similarity": opcode_score,
+        "pcode_structural_similarity": pcode_score,
+        "length_similarity": length_score,
+        "mnemonic_similarity": mnemonic_score,
+        "weighted_similarity_score": weighted,
+    }
 
 
 def performance_from_report(report: dict[str, Any]) -> dict[str, Any]:
@@ -297,7 +428,11 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     detail["ghidra_status"] = ghidra.get("status")
     detail["fission_status"] = fission.get("status")
     detail["compat_emitter_used"] = bool(fission.get("compat_emitter_used"))
-    detail["template_source"] = fission.get("template_source")
+    template_source = fission.get("template_source")
+    detail["template_source"] = (
+        "sla_construct_tpl" if template_source == "SpecDerived" else template_source
+    )
+    detail["raw_template_source"] = template_source
 
     ghidra_error = str(ghidra.get("error") or "")
     if (
@@ -427,17 +562,12 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     if not buckets:
         buckets.append("full_match")
 
-    import difflib
     if ghidra is None or fission is None:
-        detail["similarity_score"] = 0.0
+        components = instruction_similarity_components(ghidra, fission, [], [])
     else:
-        g_opcodes = detail.get("ghidra_opcodes", [])
-        f_opcodes = detail.get("fission_opcodes", [])
-        if not g_opcodes and not f_opcodes:
-            # If both have empty opcodes but neither is None, they match perfectly (zero-op instruction)
-            detail["similarity_score"] = 1.0
-        else:
-            detail["similarity_score"] = difflib.SequenceMatcher(None, g_opcodes, f_opcodes).ratio()
+        components = instruction_similarity_components(ghidra, fission, gops, fops)
+    detail["similarity_components"] = components
+    detail["similarity_score"] = components["weighted_similarity_score"]
 
     return buckets, detail
 
@@ -465,6 +595,7 @@ def main() -> int:
     owner_hint_totals: Counter[str] = Counter()
     rows = []
     total_similarity = 0.0
+    similarity_component_totals: Counter[str] = Counter()
     for idx in range(max(len(g_instrs), len(f_instrs))):
         fission_instruction = f_instrs[idx] if idx < len(f_instrs) else None
         # Inject the merged resolver into both instructions.
@@ -476,6 +607,8 @@ def main() -> int:
             f_instr = {**f_instr, "_space_resolver": merged_resolver}
         buckets, detail = bucket_instruction(g_instr, f_instr)
         total_similarity += detail.get("similarity_score", 0.0)
+        for name, value in detail.get("similarity_components", {}).items():
+            similarity_component_totals[name] += float(value)
         for bucket in set(buckets):
             totals[bucket] += 1
         if fission_instruction and fission_instruction.get("compat_emitter_used"):
@@ -491,6 +624,10 @@ def main() -> int:
             break
 
     average_similarity = total_similarity / len(rows) if rows else 0.0
+    average_similarity_components = {
+        name: value / len(rows) if rows else 0.0
+        for name, value in sorted(similarity_component_totals.items())
+    }
 
     report = {
         "binary": ghidra.get("binary") or fission.get("binary"),
@@ -505,6 +642,7 @@ def main() -> int:
         "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
         "similarity_summary": {
             "average_similarity_score": average_similarity,
+            "average_components": average_similarity_components,
             "parity_ratio": totals.get("full_match", 0) / len(rows) if rows else 0.0,
         },
         "performance": {
