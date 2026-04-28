@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 fn is_cfg_split_opcode(opcode: PcodeOpcode) -> bool {
     matches!(

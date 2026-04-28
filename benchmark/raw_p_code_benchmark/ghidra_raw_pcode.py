@@ -19,7 +19,9 @@ import pyghidra
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GHIDRA_DIRS = (
+    ROOT / "vendor" / "ghidra" / "ghidra_12.0.4_PUBLIC",
     ROOT / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT / "ghidra_12.0.4_PUBLIC",
     ROOT / "ghidra-Ghidra_12.0.4_build",
 )
 
@@ -98,9 +100,10 @@ def resolve_ghidra_dir(cli_value: Path | None) -> Path:
     if cli_value is not None:
         candidates.append(cli_value)
 
-    env_dir = os.environ.get("GHIDRA_INSTALL_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir))
+    for env_name in ("FISSION_GHIDRA_DIR", "GHIDRA_INSTALL_DIR"):
+        env_dir = os.environ.get(env_name)
+        if env_dir:
+            candidates.append(Path(env_dir))
 
     candidates.extend(DEFAULT_GHIDRA_DIRS)
 

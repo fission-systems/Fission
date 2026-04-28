@@ -47,7 +47,7 @@ pub(super) fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
 pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowKind {
     if state
         .constructor_template
-        .op_templates
+        .ops
         .iter()
         .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Return))
     {
@@ -55,7 +55,7 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     }
     if state
         .constructor_template
-        .op_templates
+        .ops
         .iter()
         .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Call))
     {
@@ -63,7 +63,7 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     }
     if state
         .constructor_template
-        .op_templates
+        .ops
         .iter()
         .any(|op| matches!(op.opcode, CompiledOpTplOpcode::CBranch))
     {
@@ -75,7 +75,7 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
 pub(super) fn disasm_mnemonic(state: &RuntimeConstructState) -> String {
     // Final rendering must come from SLEIGH display templates. Until that
     // template IR is executable, keep condition-code rendering isolated to
-    // the display-only Jcc NativeFission holdout. This must not affect p-code
+    // the display-only Jcc compatibility holdout. This must not affect p-code
     // template execution.
     if matches!(state.construct_tpl_kind, CompiledConstructTplKind::Jcc) {
         if let Some(cc) = state.condition_code {

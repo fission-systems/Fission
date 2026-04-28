@@ -134,6 +134,54 @@ The generator progressed through multiple processor families and confirmed expli
 - Reduce the remaining `input_varnode_mismatch = 18` by resolving handle selector and exported handle identity from the native SLA model.
 - Keep display-only mnemonic differences separate from raw P-code parity.
 
+## Update: Handle Selector Cursor Narrowing
+
+Report:
+
+```text
+benchmark/artifacts/raw_p_code_benchmark/sla_handle_identity_cutover_narrow/aggregate_raw_pcode_parity_report.json
+```
+
+Implemented a narrower legacy shared-token cursor policy for SLA-native handle resolution:
+
+- `Rmr*` / `CRmr*` opcode-row subtables can read from the instruction-start token base when a prefix places the current cursor before the opcode token.
+- `Reg*` and destination-check subtables continue to read from the ModRM token base, preserving LEA/RIP-relative output register identity.
+- trailing immediate subtables now advance past the shared ModRM operand when the parent constructor already consumed a shared-token operand.
+
+This keeps the fix in the existing `legacy_shared_token_policy` debt boundary and does not add approximate P-code or a new architecture semantic helper.
+
+Before/after totals against `sla_native_identity_cutover_fixed2`:
+
+| Bucket | Before | After |
+|---|---:|---:|
+| `full_match` | 25 | 42 |
+| `input_varnode_mismatch` | 18 | 1 |
+| `handle_selector_resolution` | 12 | 0 |
+| `varnode_identity` | 6 | 1 |
+| `template_opcode_sequence` | 1 | 1 |
+| `mnemonic_mismatch` | 1 | 1 |
+| `both_decode_error_or_padding` | 2 | 2 |
+| `ghidra_decode_error` | 2 | 2 |
+| `compat_emitter_used` | 0 | 0 |
+| `fake_placeholder_op` | 0 | 0 |
+| `invalid_pcode_shape` | 0 | 0 |
+
+Similarity:
+
+| Metric | Before | After |
+|---|---:|---:|
+| `average_similarity_score` | 0.9337134453781513 | 0.9393212885154061 |
+| `average_parity_ratio` | 0.696078431372549 | 0.9019607843137254 |
+
+Targeted rows:
+
+- `feature-fibonacci-push-prologue`: now full match with `push R15` resolving register offset `184`.
+- `feature-startup-sub-rsp`: remains full match with `sub RSP,0x28` resolving constant `40`.
+- `feature-add-lea`: remains full match after narrowing the opcode-row exception so `Reg32` still resolves `EAX/RAX`.
+- `feature-startup-rip-load`: remains covered by the SLA template path.
+
+Remaining owner after this update is no longer handle selector resolution. The residual parity gap is concentrated in one `cmp_and_jcc` varnode identity row plus the existing Jcc display/template sequence difference and padding/no-instruction rows.
+
 ## Commit Scope Notes
 
 - Ghidra project DB artifacts under `benchmark/binary/*_ghidra` are generated state and should not be staged.

@@ -176,6 +176,7 @@ def run_manifest(args: argparse.Namespace) -> int:
     group_totals: dict[str, dict[str, int]] = {}
     performance_totals: dict[str, float] = {}
     similarity_totals: dict[str, float] = {"sum_average_similarity_score": 0.0, "sum_parity_ratio": 0.0}
+    similarity_component_totals: dict[str, float] = {}
     row_reports = []
     for row in rows:
         binary = Path(row.get("binary", args.binary or ""))
@@ -224,6 +225,8 @@ def run_manifest(args: argparse.Namespace) -> int:
         similarity = report.get("similarity_summary", {})
         similarity_totals["sum_average_similarity_score"] += similarity.get("average_similarity_score", 0.0)
         similarity_totals["sum_parity_ratio"] += similarity.get("parity_ratio", 0.0)
+        for name, value in similarity.get("average_components", {}).items():
+            similarity_component_totals[name] = similarity_component_totals.get(name, 0.0) + float(value)
         first_mismatch = next(
             (entry for entry in report["rows"] if entry.get("buckets") != ["full_match"]),
             None,
@@ -269,6 +272,10 @@ def run_manifest(args: argparse.Namespace) -> int:
         "similarity_summary": {
             "average_similarity_score": similarity_totals["sum_average_similarity_score"] / len(rows) if rows else 0.0,
             "average_parity_ratio": similarity_totals["sum_parity_ratio"] / len(rows) if rows else 0.0,
+            "average_components": {
+                name: value / len(rows) if rows else 0.0
+                for name, value in sorted(similarity_component_totals.items())
+            },
         },
         "performance_summary": finalize_performance_summary(performance_totals),
         "rows": row_reports,

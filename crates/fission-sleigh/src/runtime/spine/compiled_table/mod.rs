@@ -38,6 +38,11 @@ mod selection {
     include!("selection.rs");
 }
 
+mod strategy {
+    use super::*;
+    include!("strategy.rs");
+}
+
 mod walker {
     use super::*;
     include!("walker.rs");
@@ -48,15 +53,22 @@ mod display {
     include!("display.rs");
 }
 
+mod handles {
+    use super::*;
+    include!("handles.rs");
+}
+
 mod template_eval {
     use super::*;
-    include!("lift.rs");
+    include!("template_eval.rs");
 }
 
 use context::*;
 use display::*;
+use handles::*;
 use legacy_token_policy::*;
 use selection::*;
+use strategy::*;
 use template_eval::*;
 use walker::*;
 
@@ -76,8 +88,8 @@ pub(crate) fn decode_and_lift_with_details(
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
 
-    let native = native.filter(|_| native_backend_allowed(compiled, "instruction", &ctx));
-    let candidates = candidate_selections(compiled, native, &ctx, address)?;
+    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+    let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
@@ -89,11 +101,11 @@ pub(crate) fn decode_and_lift_with_details(
             continue;
         }
 
-        let decoded = match bind_instruction(compiled, native, &ctx, selection) {
+        let decoded = match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => decoded,
             Err(err) => {
                 if first_error.is_none() {
-                    first_error = Some(err);
+                    first_error = Some(typed_template_resolution_error(compiled, err));
                 }
                 continue;
             }
@@ -128,13 +140,13 @@ pub(crate) fn decode_instruction(
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
 
-    let native = native.filter(|_| native_backend_allowed(compiled, "instruction", &ctx));
-    let candidates = candidate_selections(compiled, native, &ctx, address)?;
+    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+    let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
     let mut fallback_state = None;
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
-        if terminal_reselect_trace_enabled() {
+        if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
             eprintln!(
                 "[decode-instruction] ctor={} mnemonic={} source={} ctx=0x{:016x} known=0x{:016x}",
                 selection.constructor_index,
@@ -152,11 +164,11 @@ pub(crate) fn decode_instruction(
             continue;
         }
 
-        let decoded = match bind_instruction(compiled, native, &ctx, selection.clone()) {
+        let decoded = match bind_instruction(compiled, strategy, &ctx, selection.clone()) {
             Ok(decoded) => decoded,
             Err(err) => {
                 if first_error.is_none() {
-                    first_error = Some(err);
+                    first_error = Some(typed_template_resolution_error(compiled, err));
                 }
                 continue;
             }
@@ -188,6 +200,29 @@ pub(crate) fn decode_instruction(
         }
         .into()
     }));
+}
+
+fn typed_template_resolution_error(
+    compiled: &CompiledFrontend,
+    err: anyhow::Error,
+) -> anyhow::Error {
+    let rendered = err.to_string();
+    let lower = rendered.to_ascii_lowercase();
+    if lower.contains("tokenfield")
+        || lower.contains("token field")
+        || lower.contains("handle")
+        || lower.contains("varnode")
+        || lower.contains("construct_tpl")
+        || lower.contains("template")
+    {
+        RuntimeSleighError::UnsupportedPcodeTemplate {
+            language: compiled.entry_id.clone(),
+            reason: format!("operand_template_resolution_failed: {rendered}"),
+        }
+        .into()
+    } else {
+        err
+    }
 }
 
 fn decoded_instruction_from_state(

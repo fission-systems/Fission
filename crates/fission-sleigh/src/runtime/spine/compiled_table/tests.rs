@@ -17,9 +17,8 @@ fn assert_spec_derived_lift_or_typed_unsupported(
                 "raw p-code path must not use compatibility emitter"
             );
             assert!(
-                details.template_source == Some(CompiledTemplateSource::SpecDerived)
-                    || details.template_source == Some(CompiledTemplateSource::NativeFission),
-                "expected SpecDerived or NativeFission, got {:?}",
+                details.template_source == Some(CompiledTemplateSource::SpecDerived),
+                "expected SpecDerived, got {:?}",
                 details.template_source
             );
             assert!(!ops.is_empty(), "spec-derived template emitted no p-code");
@@ -166,14 +165,15 @@ fn generated_runtime_records_decision_trace_for_startup_store() {
         .expect("decode context");
     let selection =
         select_constructor(&compiled, "instruction", &ctx).expect("constructor selection");
-    let state = bind_instruction(&compiled, None, &ctx, selection).expect("bind instruction");
-    assert_eq!(state.match_trace.root_bucket, "global");
+    let strategy = RuntimeDecodeStrategy::for_table(&compiled, None, "instruction", &ctx);
+    let state = bind_instruction(&compiled, strategy, &ctx, selection).expect("bind instruction");
+    assert_eq!(state.match_trace.root_bucket, "instruction");
     assert!(!state.match_trace.probes.is_empty());
     assert!(!state.construct_nodes.is_empty());
-    assert!(state.handles.iter().any(|handle| matches!(
-        handle.spec,
-        CompiledOperandSpec::TokenFieldExtraction { .. }
-    )));
+    assert!(
+        !state.handles.is_empty() || state.exported_handle.is_some(),
+        "walker should materialize operand or exported handle state"
+    );
 }
 
 #[test]
@@ -350,8 +350,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/selection.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/walker.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/handles.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/token.rs"),
         manifest_dir.join("src/runtime/spine/decision.rs"),
     ];

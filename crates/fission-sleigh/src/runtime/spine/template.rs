@@ -49,8 +49,9 @@ mod tests {
             constructor_template: CompiledConstructorTemplate {
                 handles: Vec::new(),
                 decode_steps: Vec::new(),
-                semantic_ops: Vec::new(),
-                op_templates: vec![CompiledOpTpl {
+                num_labels: 0,
+                result: None,
+                ops: vec![CompiledOpTpl {
                     opcode: CompiledOpTplOpcode::Copy,
                     output: Some(CompiledVarnodeTpl::Handle { operand_index: 0 }),
                     inputs: vec![CompiledVarnodeTpl::Const(CompiledConstTpl::Integer {
@@ -59,7 +60,6 @@ mod tests {
                     })],
                     label: None,
                 }],
-                export: None,
                 template_source: CompiledTemplateSource::SpecDerived,
             },
             display_template: CompiledDisplayTemplate::empty(),
@@ -89,9 +89,9 @@ mod tests {
             constructor_template: CompiledConstructorTemplate {
                 handles: Vec::new(),
                 decode_steps: Vec::new(),
-                semantic_ops: Vec::new(),
-                op_templates: Vec::new(),
-                export: None,
+                num_labels: 0,
+                result: None,
+                ops: Vec::new(),
                 template_source: CompiledTemplateSource::SpecDerived,
             },
             display_template: CompiledDisplayTemplate::empty(),
@@ -139,55 +139,34 @@ where
         language: &str,
         state: &RuntimeConstructState,
     ) -> Result<RuntimeExecutionDetails> {
-        match state.constructor_template.template_source {
-            CompiledTemplateSource::SpecDerived => {
-                if !state
-                    .constructor_template
-                    .op_templates
-                    .iter()
-                    .all(CompiledOpTpl::uses_only_ghidra_template_shapes)
-                {
-                    return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                        language: language.to_string(),
-                        reason: "spec_derived_construct_tpl_contains_compatibility_varnode"
-                            .to_string(),
-                    }
-                    .into());
-                }
-                for op in &state.constructor_template.op_templates {
-                    self.emitter.emit_op_template(state, op)?;
-                }
-                Ok(RuntimeExecutionDetails {
-                    compat_emitter_used: false,
-                    template_source: Some(state.constructor_template.template_source),
-                })
+        if !matches!(
+            state.constructor_template.template_source,
+            CompiledTemplateSource::SpecDerived
+        ) {
+            return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+                language: language.to_string(),
+                reason: "non_spec_construct_tpl_not_canonical".to_string(),
             }
-            CompiledTemplateSource::NativeFission => {
-                // Fission-native templates (Jcc, Setcc, etc.) that bypass
-                // the SLA template layer. These use Fission varnode shapes
-                // (Handle, ConditionPredicate) and are resolved by the emitter.
-                if state.constructor_template.op_templates.is_empty() {
-                    return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                        language: language.to_string(),
-                        reason: "native_fission_construct_tpl_has_no_ops".to_string(),
-                    }
-                    .into());
-                }
-                for op in &state.constructor_template.op_templates {
-                    self.emitter.emit_op_template(state, op)?;
-                }
-                Ok(RuntimeExecutionDetails {
-                    compat_emitter_used: false,
-                    template_source: Some(state.constructor_template.template_source),
-                })
-            }
-            CompiledTemplateSource::CompatibilityLowered => {
-                Err(RuntimeSleighError::UnsupportedPcodeTemplate {
-                    language: language.to_string(),
-                    reason: "compatibility_lowered_template_not_canonical".to_string(),
-                }
-                .into())
-            }
+            .into());
         }
+        if !state
+            .constructor_template
+            .ops
+            .iter()
+            .all(CompiledOpTpl::uses_only_ghidra_template_shapes)
+        {
+            return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+                language: language.to_string(),
+                reason: "spec_derived_construct_tpl_contains_compatibility_varnode".to_string(),
+            }
+            .into());
+        }
+        for op in &state.constructor_template.ops {
+            self.emitter.emit_op_template(state, op)?;
+        }
+        Ok(RuntimeExecutionDetails {
+            compat_emitter_used: false,
+            template_source: Some(state.constructor_template.template_source),
+        })
     }
 }

@@ -1,0 +1,149 @@
+use super::*;
+
+impl RuntimeSleighFrontend {
+    pub fn decode_and_lift(&self, bytes: &[u8], address: u64) -> Result<Vec<PcodeOp>> {
+        let (ops, _) = self.decode_and_lift_with_len(bytes, address)?;
+        Ok(ops)
+    }
+
+    pub fn decode_and_lift_with_details(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_and_lift_with_details(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                self.native_backend.as_ref(),
+                bytes,
+                address,
+            ),
+        }
+    }
+
+    pub fn decode_and_lift_with_len(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64)> {
+        let (ops, len, _) = self.decode_and_lift_with_details(bytes, address)?;
+        Ok((ops, len))
+    }
+
+    pub fn decode_window(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+    ) -> Result<Vec<DecodedInstruction>> {
+        if limit == 0 || bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut decoded = Vec::with_capacity(limit.min(64));
+        let mut offset = 0usize;
+        let mut current = address;
+        while offset < bytes.len() && decoded.len() < limit {
+            let remaining = &bytes[offset..];
+            let instruction = match self.decode_instruction_with_len(remaining, current) {
+                Ok(instruction) => instruction,
+                Err(err) if decoded.is_empty() => return Err(err),
+                Err(_) => break,
+            };
+            if instruction.length == 0 {
+                bail!("decoder returned zero length at 0x{:x}", current);
+            }
+            let step = instruction.length;
+            if step > remaining.len() {
+                bail!(
+                    "decoded length {} exceeds available bytes {} at 0x{:x}",
+                    step,
+                    remaining.len(),
+                    current
+                );
+            }
+            current = current.saturating_add(step as u64);
+            offset = offset.saturating_add(step);
+            decoded.push(instruction);
+        }
+        Ok(decoded)
+    }
+
+    pub fn discover_direct_call_targets(
+        &self,
+        bytes: &[u8],
+        base_address: u64,
+    ) -> Result<Vec<u64>> {
+        let mut targets = std::collections::BTreeSet::new();
+        let mut offset = 0usize;
+        let mut current = base_address;
+        while offset < bytes.len() {
+            let remaining = &bytes[offset..];
+            let instruction = match self.decode_instruction_with_len(remaining, current) {
+                Ok(instruction) => instruction,
+                Err(err) if offset == 0 => return Err(err),
+                Err(_) => break,
+            };
+            if instruction.flow_kind == DecodedFlowKind::Call {
+                if let Some(target) = instruction.direct_target {
+                    targets.insert(target);
+                }
+            }
+            if instruction.length == 0 || instruction.length > remaining.len() {
+                break;
+            }
+            current = current.saturating_add(instruction.length as u64);
+            offset = offset.saturating_add(instruction.length);
+        }
+        Ok(targets.into_iter().collect())
+    }
+
+    pub(super) fn decode_instruction_with_len(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<DecodedInstruction> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_instruction(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                self.native_backend.as_ref(),
+                bytes,
+                address,
+            ),
+        }
+    }
+}

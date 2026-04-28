@@ -405,7 +405,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -441,7 +441,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -477,7 +477,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -513,7 +513,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -549,7 +549,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -585,7 +585,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -621,7 +621,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -657,7 +657,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -693,7 +693,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -729,7 +729,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -841,7 +841,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -879,7 +879,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -915,7 +915,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -951,7 +951,7 @@
         "ARMt_v6.pspec",
         "ARMv8.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "arm32"
       ]
@@ -2286,7 +2286,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -2328,7 +2328,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -2371,7 +2371,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -2461,7 +2461,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -2508,7 +2508,7 @@
         "mipsfloat.sinc",
         "mipsmicro.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "mips"
       ]
@@ -4279,7 +4279,7 @@
         "riscv64-fp.cspec",
         "riscv64.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "compatibility_aliases": [
         "riscv"
       ]

@@ -35,12 +35,6 @@ impl CompiledTokenCursorPolicy {
     }
 }
 
-pub(super) fn terminal_reselect_trace_enabled() -> bool {
-    std::env::var_os("FISSION_TRACE_TERMINAL_RESELECT").is_some()
-        // Deprecated compatibility alias for existing local debugging scripts.
-        || std::env::var_os("FISSION_TRACE_AARCH64_RESELECT").is_some()
-}
-
 pub(super) fn ensure_token_fields<'a>(
     ctx: &CompiledInstructionContext<'_>,
     cached_token_fields: &'a mut Option<TokenFieldBundle>,
@@ -64,7 +58,11 @@ pub(super) fn opcode_len_from_instruction_start(ctx: &CompiledInstructionContext
     opcode_len_from_cursor(ctx, ctx.instruction_cursor)
 }
 
-pub(super) fn opcode_len_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> Result<usize> {
+pub(super) fn opcode_cursor_from_context(ctx: &CompiledInstructionContext<'_>) -> usize {
+    opcode_cursor_from_cursor(ctx, ctx.cursor)
+}
+
+pub(super) fn opcode_cursor_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> usize {
     let mut offset = cursor;
     while let Some(byte) = ctx.bytes.get(offset).copied() {
         if is_legacy_instruction_prefix(byte) {
@@ -73,6 +71,11 @@ pub(super) fn opcode_len_from_cursor(ctx: &CompiledInstructionContext<'_>, curso
         }
         break;
     }
+    offset
+}
+
+pub(super) fn opcode_len_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> Result<usize> {
+    let offset = opcode_cursor_from_cursor(ctx, cursor);
     let opcode = *ctx
         .bytes
         .get(offset)
@@ -224,6 +227,22 @@ pub(super) fn constructor_consumes_sequential_operand_bytes(
         .any(|handle| operand_spec_consumes_sequential_bytes(compiled, &handle.spec, 0))
 }
 
+pub(super) fn constructor_has_shared_token_operand(
+    constructor: &CompiledExecutableConstructor,
+) -> bool {
+    constructor
+        .constructor_template
+        .handles
+        .iter()
+        .any(|handle| {
+            matches!(
+                &handle.spec,
+                CompiledOperandSpec::SubtableEvaluation { table_name }
+                    if legacy_shared_token_policy_shared_token_subtable(table_name)
+            )
+        })
+}
+
 pub(super) fn subtable_consumes_sequential_bytes(
     compiled: &CompiledFrontend,
     table_name: &str,
@@ -336,6 +355,13 @@ pub(super) fn legacy_shared_token_policy_modrm_token_subtable(table_name: &str) 
             | "check_Reg32_dest"
             | "check_Rmr32_dest"
             | "check_rm32_dest"
+    )
+}
+
+pub(super) fn legacy_shared_token_policy_opcode_row_modrm_subtable(table_name: &str) -> bool {
+    matches!(
+        table_name,
+        "Rmr8" | "Rmr16" | "Rmr32" | "Rmr64" | "CRmr8" | "CRmr16" | "CRmr32"
     )
 }
 

@@ -100,15 +100,6 @@ impl<'a> ParseCursor<'a> {
                 continue;
             }
 
-            if trimmed.starts_with(':')
-                || (trimmed.contains(':')
-                    && !trimmed.starts_with('@')
-                    && !trimmed.starts_with("define"))
-            {
-                items.push(AstItem::Constructor(self.collect_constructor()?));
-                continue;
-            }
-
             if trimmed.starts_with("macro ") {
                 items.push(AstItem::Macro(self.collect_macro()?));
                 continue;
@@ -116,6 +107,15 @@ impl<'a> ParseCursor<'a> {
 
             if trimmed.starts_with("with ") && trimmed.contains('{') {
                 items.push(AstItem::WithBlock(self.collect_with_block()?));
+                continue;
+            }
+
+            if trimmed.starts_with(':')
+                || (trimmed.contains(':')
+                    && !trimmed.starts_with('@')
+                    && !trimmed.starts_with("define"))
+            {
+                items.push(AstItem::Constructor(self.collect_constructor()?));
                 continue;
             }
 
@@ -225,6 +225,10 @@ impl<'a> ParseCursor<'a> {
         while let Some(line) = self.current() {
             let text = line.text.clone();
             let structural_text = strip_comments(&text).trim().to_string();
+            let b_open = count_structural_char(&structural_text, '{');
+            let b_close = count_structural_char(&structural_text, '}');
+            let br_open = count_structural_char(&structural_text, '[');
+            let br_close = count_structural_char(&structural_text, ']');
 
             if structural_text.is_empty() {
                 collected.push(text);
@@ -233,10 +237,10 @@ impl<'a> ParseCursor<'a> {
             }
 
             // Check for parent block termination BEFORE processing depths
-            if brace_depth == 0 && count_structural_char(&structural_text, '}') > 0 {
+            if brace_depth == 0 && b_open == 0 && b_close > 0 {
                 break;
             }
-            if bracket_depth == 0 && count_structural_char(&structural_text, ']') > 0 {
+            if bracket_depth == 0 && br_open == 0 && br_close > 0 {
                 break;
             }
 
@@ -252,16 +256,12 @@ impl<'a> ParseCursor<'a> {
                 }
             }
 
-            let b_open = count_structural_char(&structural_text, '{');
-            let b_close = count_structural_char(&structural_text, '}');
             brace_depth += b_open as i64;
             brace_depth -= b_close as i64;
             if b_open > 0 || b_close > 0 {
                 seen_any_block = true;
             }
 
-            let br_open = count_structural_char(&structural_text, '[');
-            let br_close = count_structural_char(&structural_text, ']');
             bracket_depth += br_open as i64;
             bracket_depth -= br_close as i64;
             if br_open > 0 || br_close > 0 {

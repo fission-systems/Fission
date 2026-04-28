@@ -767,45 +767,24 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let semantic_ops = template
-        .semantic_ops
-        .iter()
-        .map(|op| match op {
-            crate::compiler::CompiledSemanticOp::Binary { opcode } => format!(
-                "{{\"kind\": {}, \"opcode\": {}}}",
-                json_string(op.as_str()),
-                json_string(opcode.as_str())
-            ),
-            crate::compiler::CompiledSemanticOp::Compare { bitwise } => format!(
-                "{{\"kind\": {}, \"bitwise\": {bitwise}}}",
-                json_string(op.as_str())
-            ),
-            crate::compiler::CompiledSemanticOp::Extend { signed } => format!(
-                "{{\"kind\": {}, \"signed\": {signed}}}",
-                json_string(op.as_str())
-            ),
-            crate::compiler::CompiledSemanticOp::AccumulatorExtend { src_size, dst_size } => {
-                format!(
-                    "{{\"kind\": {}, \"src_size\": {src_size}, \"dst_size\": {dst_size}}}",
-                    json_string(op.as_str())
-                )
-            }
-            _ => format!("{{\"kind\": {}}}", json_string(op.as_str())),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let op_templates = template
-        .op_templates
+    let ops = template
+        .ops
         .iter()
         .map(render_op_template)
         .collect::<Vec<_>>()
         .join(", ");
+    let result = template
+        .result
+        .as_ref()
+        .map(render_handle_tpl)
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"handles\": [{}], \"decode_steps\": [{}], \"semantic_ops\": [{}], \"op_templates\": [{}], \"template_source\": {}}}",
+        "{{\"handles\": [{}], \"decode_steps\": [{}], \"num_labels\": {}, \"result\": {}, \"ops\": [{}], \"template_source\": {}}}",
         handles,
         decode_steps,
-        semantic_ops,
-        op_templates,
+        template.num_labels,
+        result,
+        ops,
         json_string(template.template_source.as_str())
     )
 }
@@ -848,44 +827,7 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
             render_const_template(offset),
             render_const_template(size)
         ),
-        crate::compiler::CompiledVarnodeTpl::HandleTpl(handle) => format!(
-            "{{\"kind\": \"handle_tpl\", \"space\": {}, \"size\": {}, \"ptr_space\": {}, \"ptr_offset\": {}, \"ptr_size\": {}, \"temp_space\": {}, \"temp_offset\": {}}}",
-            handle
-                .space
-                .as_ref()
-                .map(render_space_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .size
-                .as_ref()
-                .map(render_const_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .ptr_space
-                .as_ref()
-                .map(render_space_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .ptr_offset
-                .as_ref()
-                .map(render_const_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .ptr_size
-                .as_ref()
-                .map(render_const_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .temp_space
-                .as_ref()
-                .map(render_space_template)
-                .unwrap_or_else(|| "null".to_string()),
-            handle
-                .temp_offset
-                .as_ref()
-                .map(render_const_template)
-                .unwrap_or_else(|| "null".to_string())
-        ),
+        crate::compiler::CompiledVarnodeTpl::HandleTpl(handle) => render_handle_tpl(handle),
         crate::compiler::CompiledVarnodeTpl::Handle { operand_index } => {
             format!("{{\"kind\": \"handle\", \"operand_index\": {operand_index}}}")
         }
@@ -920,6 +862,47 @@ fn render_varnode_template(template: &crate::compiler::CompiledVarnodeTpl) -> St
             format!("{{\"kind\": \"flag\", \"bit\": {bit}}}")
         }
     }
+}
+
+fn render_handle_tpl(handle: &crate::compiler::CompiledHandleTpl) -> String {
+    format!(
+        "{{\"kind\": \"handle_tpl\", \"space\": {}, \"size\": {}, \"ptr_space\": {}, \"ptr_offset\": {}, \"ptr_size\": {}, \"temp_space\": {}, \"temp_offset\": {}}}",
+        handle
+            .space
+            .as_ref()
+            .map(render_space_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .size
+            .as_ref()
+            .map(render_const_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .ptr_space
+            .as_ref()
+            .map(render_space_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .ptr_offset
+            .as_ref()
+            .map(render_const_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .ptr_size
+            .as_ref()
+            .map(render_const_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .temp_space
+            .as_ref()
+            .map(render_space_template)
+            .unwrap_or_else(|| "null".to_string()),
+        handle
+            .temp_offset
+            .as_ref()
+            .map(render_const_template)
+            .unwrap_or_else(|| "null".to_string())
+    )
 }
 
 fn render_space_template(template: &crate::compiler::CompiledSpaceTpl) -> String {

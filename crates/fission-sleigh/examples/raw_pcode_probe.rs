@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
-    load_construct_templates_from_sla, CompiledSpaceRef,
+    load_construct_templates_from_sla, resolve_ghidra_install_paths, CompiledSpaceRef,
 };
 use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use serde::Serialize;
@@ -192,36 +192,26 @@ fn load_space_map(frontend: &RuntimeSleighFrontend) -> SpaceMap {
     let entry = frontend.entry();
     let sla_path = find_packaged_sla(&entry.entry_id);
     match sla_path {
-        Some(path) => {
-            match load_construct_templates_from_sla(&path) {
-                Ok(library) => SpaceMap::from_sla_spaces(&library.spaces),
-                Err(_) => SpaceMap::empty(),
-            }
-        }
+        Some(path) => match load_construct_templates_from_sla(&path) {
+            Ok(library) => SpaceMap::from_sla_spaces(&library.spaces),
+            Err(_) => SpaceMap::empty(),
+        },
         None => SpaceMap::empty(),
     }
 }
 
 fn find_packaged_sla(entry_id: &str) -> Option<PathBuf> {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)?
-        .to_path_buf();
-    let processors_root =
-        repo_root.join("vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors");
-    if !processors_root.exists() {
-        return None;
-    }
+    let paths = resolve_ghidra_install_paths()?;
     let wanted_name = format!("{entry_id}.sla");
     let mut matches = Vec::new();
-    find_named_file(&processors_root, &wanted_name, &mut matches).ok()?;
+    find_named_file(&paths.processors_root, &wanted_name, &mut matches).ok()?;
     matches.sort();
     matches.into_iter().next()
 }
 
 fn find_named_file(root: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(root)
-        .with_context(|| format!("read directory {}", root.display()))?
+    for entry in
+        std::fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))?
     {
         let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
         let path = entry.path();

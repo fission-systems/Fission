@@ -69,7 +69,7 @@ fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
         subtable
             .constructors
             .iter()
-            .all(|ctor| ctor.source_key != "unsupported_placeholder"),
+            .all(|ctor| !ctor.source_key.starts_with("sla_decode_failed_constructor")),
         "Rm_GPR64 subtable should decode concrete constructors, got {:?}",
         subtable
             .constructors

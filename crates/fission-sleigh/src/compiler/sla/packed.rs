@@ -271,6 +271,7 @@ pub mod sla_format {
     pub const ELEM_VALUEMAP_SYM: u32 = 73;
     pub const ELEM_VALUETAB: u32 = 75;
     pub const ELEM_VARLIST_SYM: u32 = 76;
+    pub const ELEM_OR_PAT: u32 = 78;
     pub const ELEM_VARNODE_SYM_HEAD: u32 = 24;
     pub const ELEM_USEROP_HEAD: u32 = 26;
     pub const ELEM_CONTEXT_SYM_HEAD: u32 = 42;
@@ -329,4 +330,5 @@ pub mod sla_format {
     pub const ATTR_BIGENDIAN: u32 = 35;
     pub const ATTR_I: u32 = 52;
     pub const ATTR_SECTION: u32 = 54;
+    pub const ATTR_LABELS: u32 = 55;
 }

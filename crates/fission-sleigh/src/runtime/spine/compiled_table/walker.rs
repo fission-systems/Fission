@@ -1,16 +1,16 @@
 pub(super) fn bind_instruction<'a>(
     compiled: &'a CompiledFrontend,
-    native: Option<&'a Arc<NativeBackend>>,
+    strategy: RuntimeDecodeStrategy<'a>,
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
     constructor_matches(ctx, selection.constructor)?;
-    CompiledParserWalker::new(compiled, native, ctx, selection)?.walk()
+    CompiledParserWalker::new(compiled, strategy, ctx, selection)?.walk()
 }
 
 pub(super) struct CompiledParserWalker<'a, 'b> {
     compiled: &'a CompiledFrontend,
-    native: Option<&'a Arc<NativeBackend>>,
+    strategy: RuntimeDecodeStrategy<'a>,
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     minimum_length: usize,
@@ -49,7 +49,7 @@ impl OperandBinding {
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn new(
         compiled: &'a CompiledFrontend,
-        native: Option<&'a Arc<NativeBackend>>,
+        strategy: RuntimeDecodeStrategy<'a>,
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
@@ -88,7 +88,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
         Ok(Self {
             compiled,
-            native,
+            strategy,
             ctx,
             selection,
             minimum_length,
@@ -220,7 +220,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .selection
             .constructor
             .constructor_template
-            .export
+            .result
             .clone()
         else {
             return Ok(None);
@@ -795,7 +795,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 change.mask as u32,
                 change.mask as u32,
             )?;
-            if terminal_reselect_trace_enabled() {
+            if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
                 eprintln!(
                     "[context-change expr] word={} mask=0x{:08x} value=0x{:08x} ctx=0x{:016x} known=0x{:016x}",
                     change.word_index,
@@ -825,7 +825,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 change.bit_width as u32,
                 field_mask,
             )?;
-            if terminal_reselect_trace_enabled() {
+            if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
                 eprintln!(
                     "[context-change bits] start={} width={} value=0x{:x} ctx=0x{:016x} known=0x{:016x}",
                     change.bit_offset,
@@ -853,7 +853,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         if legacy_shared_token_policy_opcode_token_subtable(self.selection.trace.root_bucket.as_str()) {
             self.ctx.instruction_cursor
         } else if legacy_shared_token_policy_modrm_token_subtable(self.selection.trace.root_bucket.as_str()) {
-            self.ctx.instruction_cursor + opcode_len_from_instruction_start(self.ctx).unwrap_or(0)
+            let after_opcode =
+                self.ctx.instruction_cursor + opcode_len_from_instruction_start(self.ctx).unwrap_or(0);
+            if self.ctx.cursor < after_opcode
+                && legacy_shared_token_policy_opcode_row_modrm_subtable(
+                    self.selection.trace.root_bucket.as_str(),
+                )
+            {
+                self.ctx.cursor
+            } else {
+                after_opcode
+            }
         } else if legacy_shared_token_policy_sib_token_subtable(self.selection.trace.root_bucket.as_str()) {
             self.ctx.instruction_cursor + opcode_len_from_instruction_start(self.ctx).unwrap_or(0) + 1
         } else {
@@ -987,8 +997,19 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 + opcode_len_from_matcher(&self.selection.constructor.matcher)
                     .max(self.selection.constructor.minimum_length as usize)
                     .max(1)
+        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
+            && legacy_shared_token_policy_modrm_token_subtable(table_name)
+            && self.selection.trace.root_bucket == "instruction"
+            && self.selection.constructor.minimum_length <= 1
+        {
+            opcode_cursor_from_context(self.ctx)
+        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
+            && legacy_shared_token_policy_register_subtable(table_name)
+            && self.selection.trace.root_bucket == "instruction"
+        {
+            opcode_cursor_from_context(self.ctx)
         } else if legacy_shared_token_policy_register_subtable(table_name) {
-            self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
+            self.cursor
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
             && legacy_shared_token_policy_opcode_token_subtable(table_name)
         {
@@ -997,7 +1018,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && legacy_shared_token_policy_modrm_trailing_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {
-            self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
+            if constructor_has_shared_token_operand(self.selection.constructor) {
+                self.cursor.saturating_add(1)
+            } else {
+                self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
+            }
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_legacy_shared_tokens()
             && legacy_shared_token_policy_modrm_trailing_subtable(table_name)
             && legacy_shared_token_policy_shared_token_subtable(self.selection.trace.root_bucket.as_str())
@@ -1012,7 +1037,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         };
         sub_ctx.context_register = self.context_register;
         sub_ctx.context_known_mask = self.context_known_mask;
-        if terminal_reselect_trace_enabled() {
+        if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
             eprintln!(
                 "[decode-subtable] table={} cursor=0x{:x} ctx=0x{:016x} known=0x{:016x}",
                 table_name,
@@ -1022,9 +1047,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             );
         }
 
-        let selection = if let Some(native) = self
-            .native
-            .filter(|_| native_backend_allowed(self.compiled, table_name, &sub_ctx))
+        let selection = if let Some(native) =
+            self.strategy
+                .native_for_table(self.compiled, table_name, &sub_ctx)
         {
             let constructor_index = native
                 .decode_match(table_name, self.ctx.bytes, sub_ctx.context_register)?
@@ -1061,7 +1086,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 )
             })?
         };
-        if terminal_reselect_trace_enabled() {
+        if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
             eprintln!(
                 "[decode-subtable selection] table={} ctor={} mnemonic={} source={}",
                 table_name,
@@ -1071,6 +1096,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             );
         }
 
-        bind_instruction(self.compiled, self.native, &sub_ctx, selection)
+        bind_instruction(self.compiled, self.strategy, &sub_ctx, selection)
     }
 }

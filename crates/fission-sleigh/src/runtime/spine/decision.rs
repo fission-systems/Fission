@@ -64,12 +64,6 @@ where
     None
 }
 
-fn terminal_reselect_trace_enabled() -> bool {
-    std::env::var_os("FISSION_TRACE_TERMINAL_RESELECT").is_some()
-        // Deprecated compatibility alias for existing local debugging scripts.
-        || std::env::var_os("FISSION_TRACE_AARCH64_RESELECT").is_some()
-}
-
 fn walk_decision_tree<'a, E, M>(
     decision_tree: &'a crate::compiler::CompiledDecisionTree,
     constructors: &'a [CompiledExecutableConstructor],
@@ -83,7 +77,7 @@ where
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
     let node = decision_tree.nodes.get(node_index)?;
-    let trace_walk = terminal_reselect_trace_enabled();
+    let trace_walk = crate::runtime::diagnostics::terminal_reselect_trace_enabled();
     match node.probe {
         CompiledDecisionProbe::Terminal => {
             trace.leaf_constructor_indexes = if node.leaf_entries.is_empty() {
@@ -224,6 +218,9 @@ fn disjoint_pattern_matches<E: DecisionProbeEvaluator>(
             pattern_block_instruction_matches(evaluator, instruction)
                 && pattern_block_context_matches(evaluator, context)
         }
+        CompiledDisjointPattern::Or(patterns) => patterns
+            .iter()
+            .any(|pattern| disjoint_pattern_matches(evaluator, pattern)),
     }
 }
 
