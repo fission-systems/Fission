@@ -100,7 +100,11 @@ impl<'a> ParseCursor<'a> {
                 continue;
             }
 
-            if trimmed.starts_with(':') || (trimmed.contains(':') && !trimmed.starts_with('@') && !trimmed.starts_with("define")) {
+            if trimmed.starts_with(':')
+                || (trimmed.contains(':')
+                    && !trimmed.starts_with('@')
+                    && !trimmed.starts_with("define"))
+            {
                 items.push(AstItem::Constructor(self.collect_constructor()?));
                 continue;
             }
@@ -214,30 +218,76 @@ impl<'a> ParseCursor<'a> {
     fn collect_constructor_block(&mut self) -> Result<String> {
         let mut collected = Vec::new();
         let mut brace_depth = 0i64;
-        let mut seen_open = false;
-        let start = self.current().cloned();
+        let mut bracket_depth = 0i64;
+        let mut seen_any_block = false;
+        let start_line = self.current().cloned();
 
         while let Some(line) = self.current() {
             let text = line.text.clone();
-            let structural_text = strip_comments(&text).trim();
-            brace_depth += count_structural_char(structural_text, '{') as i64;
-            if count_structural_char(structural_text, '{') > 0 {
-                seen_open = true;
+            let structural_text = strip_comments(&text).trim().to_string();
+
+            if structural_text.is_empty() {
+                collected.push(text);
+                self.index += 1;
+                continue;
             }
-            brace_depth -= count_structural_char(structural_text, '}') as i64;
-            let unbraced_terminal = is_unbraced_constructor_terminal(structural_text);
+
+            // Check for parent block termination BEFORE processing depths
+            if brace_depth == 0 && count_structural_char(&structural_text, '}') > 0 {
+                break;
+            }
+            if bracket_depth == 0 && count_structural_char(&structural_text, ']') > 0 {
+                break;
+            }
+
+            // A new constructor start should terminate the current block IF we're at depth 0
+            if !collected.is_empty() && brace_depth == 0 && bracket_depth == 0 {
+                if structural_text.starts_with(':')
+                    || (structural_text.contains(':')
+                        && !structural_text.starts_with("define")
+                        && !structural_text.starts_with('@')
+                        && !structural_text.starts_with("attach"))
+                {
+                    break;
+                }
+            }
+
+            let b_open = count_structural_char(&structural_text, '{');
+            let b_close = count_structural_char(&structural_text, '}');
+            brace_depth += b_open as i64;
+            brace_depth -= b_close as i64;
+            if b_open > 0 || b_close > 0 {
+                seen_any_block = true;
+            }
+
+            let br_open = count_structural_char(&structural_text, '[');
+            let br_close = count_structural_char(&structural_text, ']');
+            bracket_depth += br_open as i64;
+            bracket_depth -= br_close as i64;
+            if br_open > 0 || br_close > 0 {
+                seen_any_block = true;
+            }
+
             collected.push(text);
             self.index += 1;
 
-            if seen_open && brace_depth == 0 {
+            if seen_any_block && brace_depth == 0 && bracket_depth == 0 {
                 return Ok(collected.join("\n"));
             }
 
-            if !seen_open && unbraced_terminal {
+            if is_unbraced_constructor_terminal(&structural_text)
+                && brace_depth == 0
+                && bracket_depth == 0
+            {
                 return Ok(collected.join("\n"));
             }
         }
 
+        if !collected.is_empty() && brace_depth == 0 && bracket_depth == 0 {
+            return Ok(collected.join("\n"));
+        }
+
+        let start = start_line;
         bail!(
             "unterminated constructor starting at {}:{}",
             start
@@ -294,25 +344,30 @@ impl<'a> ParseCursor<'a> {
     }
 }
 
-fn preserve_inner_block_lines(block_lines: &[PreprocessedLine], body: &str) -> Vec<PreprocessedLine> {
+fn preserve_inner_block_lines(
+    block_lines: &[PreprocessedLine],
+    body: &str,
+) -> Vec<PreprocessedLine> {
     let mut lines = Vec::new();
     if block_lines.len() > 2 {
         lines.extend(block_lines[1..block_lines.len() - 1].iter().cloned());
     } else {
-        lines.extend(body.lines().enumerate().map(|(offset, text)| PreprocessedLine {
-            file: block_lines
-                .first()
-                .map(|line| line.file.clone())
-                .unwrap_or_default(),
-            line_number: block_lines
-                .first()
-                .map(|line| line.line_number + offset + 1)
-                .unwrap_or(offset + 1),
-            text: text.to_string(),
-            include_depth: block_lines
-                .first()
-                .map(|line| line.include_depth)
-                .unwrap_or_default(),
+        lines.extend(body.lines().enumerate().map(|(offset, text)| {
+            PreprocessedLine {
+                file: block_lines
+                    .first()
+                    .map(|line| line.file.clone())
+                    .unwrap_or_default(),
+                line_number: block_lines
+                    .first()
+                    .map(|line| line.line_number + offset + 1)
+                    .unwrap_or(offset + 1),
+                text: text.to_string(),
+                include_depth: block_lines
+                    .first()
+                    .map(|line| line.include_depth)
+                    .unwrap_or_default(),
+            }
         }));
     }
     lines

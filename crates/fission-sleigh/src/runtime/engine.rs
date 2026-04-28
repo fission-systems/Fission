@@ -7,8 +7,8 @@ use crate::runtime::{
     registry, DecodedInstruction, ExecutionEngineKey, RuntimeExecutionDetails, RuntimeSleighError,
 };
 
-use std::sync::Arc;
 use crate::runtime::native::NativeBackend;
+use std::sync::Arc;
 
 pub(crate) fn decode_and_lift_with_details(
     entry: &EntrySpec,

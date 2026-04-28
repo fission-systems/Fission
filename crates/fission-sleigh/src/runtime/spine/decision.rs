@@ -64,6 +64,12 @@ where
     None
 }
 
+fn terminal_reselect_trace_enabled() -> bool {
+    std::env::var_os("FISSION_TRACE_TERMINAL_RESELECT").is_some()
+        // Deprecated compatibility alias for existing local debugging scripts.
+        || std::env::var_os("FISSION_TRACE_AARCH64_RESELECT").is_some()
+}
+
 fn walk_decision_tree<'a, E, M>(
     decision_tree: &'a crate::compiler::CompiledDecisionTree,
     constructors: &'a [CompiledExecutableConstructor],
@@ -77,7 +83,7 @@ where
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
     let node = decision_tree.nodes.get(node_index)?;
-    let trace_walk = std::env::var_os("FISSION_TRACE_AARCH64_RESELECT").is_some();
+    let trace_walk = terminal_reselect_trace_enabled();
     match node.probe {
         CompiledDecisionProbe::Terminal => {
             trace.leaf_constructor_indexes = if node.leaf_entries.is_empty() {
@@ -172,10 +178,7 @@ where
                 if trace_walk {
                     eprintln!(
                         "[decision-walk hit] node={} probe={:?} value={} -> {}",
-                        node_index,
-                        probe,
-                        value,
-                        edge.next_node_index,
+                        node_index, probe, value, edge.next_node_index,
                     );
                 }
                 let mut branch_trace = trace.clone();
@@ -210,7 +213,9 @@ fn disjoint_pattern_matches<E: DecisionProbeEvaluator>(
     pattern: &CompiledDisjointPattern,
 ) -> bool {
     match pattern {
-        CompiledDisjointPattern::Instruction(block) => pattern_block_instruction_matches(evaluator, block),
+        CompiledDisjointPattern::Instruction(block) => {
+            pattern_block_instruction_matches(evaluator, block)
+        }
         CompiledDisjointPattern::Context(block) => pattern_block_context_matches(evaluator, block),
         CompiledDisjointPattern::Combine {
             context,

@@ -52,7 +52,9 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
     output.push_str("// Auto-generated Fission Native Backend\n");
     output.push_str("#[no_mangle]\n");
     output.push_str("pub extern \"C\" fn fission_decode_match(table_ptr: *const i8, bytes: *const u8, bytes_len: usize, ctx_ptr: *const u64) -> i32 {\n");
-    output.push_str("    let table_name = unsafe { std::ffi::CStr::from_ptr(table_ptr).to_str().unwrap() };\n");
+    output.push_str(
+        "    let table_name = unsafe { std::ffi::CStr::from_ptr(table_ptr).to_str().unwrap() };\n",
+    );
     output.push_str("    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };\n");
     output.push_str("    let ctx = unsafe { *ctx_ptr };\n");
     output.push_str("    match table_name {\n");
@@ -70,26 +72,48 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
 
     for (table_name, subtable) in &compiled.subtables {
         let safe_table_name = table_name.replace(|c: char| !c.is_alphanumeric(), "_");
+
+        if subtable.decision_tree.nodes.is_empty() {
+            output.push_str(&format!(
+                "fn match_node_{}_{}(_bytes: &[u8], _ctx: u64) -> i32 {{\n    -1\n}}\n\n",
+                safe_table_name, subtable.decision_tree.root_node_index
+            ));
+            continue;
+        }
+
         for (i, node) in subtable.decision_tree.nodes.iter().enumerate() {
             output.push_str(&format!(
                 "fn match_node_{}_{}(bytes: &[u8], ctx: u64) -> i32 {{\n",
                 safe_table_name, i
             ));
+
             match node.probe {
-                crate::compiler::CompiledDecisionProbe::Terminal => {
+                crate::compiler::ir::CompiledDecisionProbe::Terminal => {
                     if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!(
+                            "    eprintln!(\"Trace node {}: Terminal matched constructor ID {}\");\n",
+                            i, idx
+                        ));
                         output.push_str(&format!("    {}\n", idx));
                     } else {
+                        output.push_str(&format!(
+                            "    eprintln!(\"Trace node {}: Terminal matched NOTHING\");\n",
+                            i
+                        ));
                         output.push_str("    -1\n");
                     }
                 }
-                crate::compiler::CompiledDecisionProbe::InstructionBitSlice {
+                crate::compiler::ir::CompiledDecisionProbe::InstructionBitSlice {
                     offset,
                     mask,
                     shift,
                 } => {
                     output.push_str(&format!(
                         "    let probe = (bytes.get({offset}).copied().unwrap_or(0) & {mask}) >> {shift};\n"
+                    ));
+                    output.push_str(&format!(
+                        "    eprintln!(\"Trace node {}: InstructionBitSlice offset={}, mask={}, probe={{}}\", probe);\n",
+                        i, offset, mask
                     ));
                     output.push_str("    match probe {\n");
                     for edge in &node.branches {
@@ -105,7 +129,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                     }
                     output.push_str("    }\n");
                 }
-                crate::compiler::CompiledDecisionProbe::ContextBitSlice {
+                crate::compiler::ir::CompiledDecisionProbe::ContextBitSlice {
                     offset,
                     mask,
                     shift,
@@ -114,7 +138,76 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                         "    let probe = ((ctx >> {offset}) & {} as u64) >> {shift};\n",
                         mask
                     ));
+                    output.push_str(&format!(
+                        "    eprintln!(\"Trace node {}: ContextBitSlice offset={}, mask={}, probe={{}}\", probe);\n",
+                        i, offset, mask
+                    ));
                     output.push_str("    match probe as u8 {\n");
+                    for edge in &node.branches {
+                        output.push_str(&format!(
+                            "        {} => match_node_{}_{}(bytes, ctx),\n",
+                            edge.value, safe_table_name, edge.next_node_index
+                        ));
+                    }
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("        _ => {},\n", idx));
+                    } else {
+                        output.push_str("        _ => -1,\n");
+                    }
+                    output.push_str("    }\n");
+                }
+                crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits {
+                    start_bit,
+                    bit_size,
+                } => {
+                    let mask = if bit_size == 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << bit_size) - 1
+                    };
+                    output.push_str(&format!(
+                        "    let byte_cnt = ({} + {} + 7) / 8;\n",
+                        start_bit, bit_size
+                    ));
+                    output.push_str(
+                        "    let mut word = 0u64;\n    for i in 0..byte_cnt { word |= (*bytes.get(i as usize).unwrap_or(&0) as u64) << (i * 8); }\n"
+                    );
+                    output.push_str(&format!(
+                        "    let probe = (word >> {start_bit}) & {mask};\n"
+                    ));
+                    output.push_str(&format!(
+                        "    eprintln!(\"Trace node {}: SlaInstructionBits start={}, size={}, word={{:08x}}, probe={{}}\", word, probe);\n",
+                        i, start_bit, bit_size
+                    ));
+                    output.push_str("    match probe {\n");
+                    for edge in &node.branches {
+                        output.push_str(&format!(
+                            "        {} => match_node_{}_{}(bytes, ctx),\n",
+                            edge.value, safe_table_name, edge.next_node_index
+                        ));
+                    }
+                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                        output.push_str(&format!("        _ => {},\n", idx));
+                    } else {
+                        output.push_str("        _ => -1,\n");
+                    }
+                    output.push_str("    }\n");
+                }
+                crate::compiler::ir::CompiledDecisionProbe::SlaContextBits {
+                    start_bit,
+                    bit_size,
+                } => {
+                    let mask = if bit_size == 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << bit_size) - 1
+                    };
+                    output.push_str(&format!("    let probe = (ctx >> {start_bit}) & {mask};\n"));
+                    output.push_str(&format!(
+                        "    eprintln!(\"Trace node {}: SlaContextBits start={}, size={}, probe={{}}\", probe);\n",
+                        i, start_bit, bit_size
+                    ));
+                    output.push_str("    match probe {\n");
                     for edge in &node.branches {
                         output.push_str(&format!(
                             "        {} => match_node_{}_{}(bytes, ctx),\n",
@@ -194,16 +287,21 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         })
         .collect::<Vec<_>>()
         .join(",\n");
-    let all_executables = compiled.subtables.values().flat_map(|s| &s.constructors).collect::<Vec<_>>();
+    let all_executables = compiled
+        .subtables
+        .values()
+        .flat_map(|s| &s.constructors)
+        .collect::<Vec<_>>();
     let executable_lines = all_executables
         .iter()
         .map(|ctor| {
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(&ctor.display),
                 ctor.signature_hash,
+                ctor.minimum_length,
                 render_matcher(&ctor.matcher),
                 render_optional_u8(ctor.mod_constraint),
                 render_u8_array(&ctor.operand_reg_values),
@@ -264,8 +362,15 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
             .iter()
             .map(|entry| (&entry.name, &entry.source)),
     );
-    let total_decision_nodes: usize = compiled.subtables.values().map(|s| s.decision_tree.decision_node_count).sum();
-    let instruction_table = compiled.subtables.get("instruction").expect("missing 'instruction' subtable");
+    let total_decision_nodes: usize = compiled
+        .subtables
+        .values()
+        .map(|s| s.decision_tree.decision_node_count)
+        .sum();
+    let instruction_table = compiled
+        .subtables
+        .get("instruction")
+        .expect("missing 'instruction' subtable");
     format!(
         "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
@@ -378,7 +483,15 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
         .take(256)
         .map(|ctor| {
             let context_changes = ctor.context_changes.iter().map(|op| {
-                format!("GeneratedContextOp {{ bit_offset: {}, bit_width: {}, value: {} }}", op.bit_offset, op.bit_width, op.value)
+                format!(
+                    "GeneratedContextOp {{ bit_offset: {}, bit_width: {}, value: {}, word_index: {}, mask: {}, shift: {} }}",
+                    op.bit_offset,
+                    op.bit_width,
+                    op.value,
+                    op.word_index,
+                    op.mask,
+                    op.shift
+                )
             }).collect::<Vec<_>>().join(", ");
             format!(
                 "    GeneratedConstructor {{ mnemonic: {}, source: {}, control_flow: {}, signature_hash: 0x{:016x}, semantic_template_status: {}, context_changes: &[{}] }},",
@@ -394,12 +507,15 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
         .join("\n");
     format!(
         "// Auto-generated by fission-sleigh compiler-only wave.\n\
-         // Source: {} / {}\n\n\
+         // Source: Generated\n\n\
          #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
          pub struct GeneratedContextOp {{\n\
              pub bit_offset: u32,\n\
              pub bit_width: u32,\n\
              pub value: u64,\n\
+             pub word_index: u32,\n\
+             pub mask: u64,\n\
+             pub shift: i32,\n\
          }}\n\n\
          #[derive(Debug, Clone, Copy)]\n\
          pub struct GeneratedConstructor {{\n\
@@ -409,24 +525,31 @@ fn render_rust_codegen(compiled: &CompiledFrontend) -> String {
              pub signature_hash: u64,\n\
              pub semantic_template_status: &'static str,\n\
              pub context_changes: &'static [GeneratedContextOp],\n\
-         pub const GENERATED_ARCH: &str = {};
-         pub const GENERATED_DEFAULT_CONTEXT: u64 = {};
-         pub const GENERATED_ENTRY_SPEC: &str = {};
-         pub const GENERATED_ENTRY_ID: &str = {};
-         pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};
-         pub const GENERATED_DECISION_NODE_COUNT: usize = {};
-         pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[
-         {}
-         ];
+         }}\n\n\
+         pub const GENERATED_ARCH: &str = {};\n\
+         pub const GENERATED_DEFAULT_CONTEXT: u64 = {};\n\
+         pub const GENERATED_ENTRY_SPEC: &str = {};\n\
+         pub const GENERATED_ENTRY_ID: &str = {};\n\
+         pub const GENERATED_EXECUTABLE_CONSTRUCTOR_COUNT: usize = {};\n\
+         pub const GENERATED_DECISION_NODE_COUNT: usize = {};\n\
+         pub const GENERATED_CONSTRUCTORS: &[GeneratedConstructor] = &[\n\
+         {}\n\
+         ];\n\
          ",
-         compiled.arch,
-         compiled.default_context,
-         compiled.entry_spec,
         rust_string(&compiled.arch),
+        compiled.default_context,
         rust_string(&compiled.entry_spec),
         rust_string(&compiled.entry_id),
-        compiled.subtables.values().map(|s| s.constructors.len()).sum::<usize>(),
-        compiled.subtables.values().map(|s| s.decision_tree.decision_node_count).sum::<usize>(),
+        compiled
+            .subtables
+            .values()
+            .map(|s| s.constructors.len())
+            .sum::<usize>(),
+        compiled
+            .subtables
+            .values()
+            .map(|s| s.decision_tree.decision_node_count)
+            .sum::<usize>(),
         constructor_rows
     )
 }
@@ -459,7 +582,10 @@ fn render_matcher(matcher: &crate::compiler::CompiledPatternMatcher) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{{\"kind\": \"bit_constraints\", \"constraints\": [{}]}}", rendered)
+            format!(
+                "{{\"kind\": \"bit_constraints\", \"constraints\": [{}]}}",
+                rendered
+            )
         }
     }
 }
@@ -472,6 +598,12 @@ fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> Strin
         ),
         crate::compiler::CompiledDecisionProbe::ContextBitSlice { offset, mask, shift } => format!(
             "{{\"kind\": \"context_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
+        ),
+        crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits { start_bit, bit_size } => format!(
+            "{{\"kind\": \"sla_instruction_bits\", \"start_bit\": {start_bit}, \"bit_size\": {bit_size}}}"
+        ),
+        crate::compiler::ir::CompiledDecisionProbe::SlaContextBits { start_bit, bit_size } => format!(
+            "{{\"kind\": \"sla_context_bits\", \"start_bit\": {start_bit}, \"bit_size\": {bit_size}}}"
         ),
         crate::compiler::CompiledDecisionProbe::TokenFieldRef(field) => format!(
             "{{\"kind\": \"token_field_ref\", \"field\": {}}}",
@@ -502,6 +634,66 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     "{{\"kind\": \"token_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
                 )
             }
+            crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift } => {
+                format!(
+                    "{{\"kind\": \"sla_token_field\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}}}"
+                )
+            }
+            crate::compiler::CompiledOperandSpec::SlaVarnodeList {
+                big_endian,
+                sign_bit,
+                bit_start,
+                bit_end,
+                byte_start,
+                byte_end,
+                shift,
+                entries,
+            } => {
+                let entries = entries
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{{\"name\": {}, \"space\": {}, \"offset\": {}, \"size\": {}}}",
+                            json_string(&entry.name),
+                            json_string(&entry.space.name),
+                            entry.offset,
+                            entry.size
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{{\"kind\": \"sla_varnode_list\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"entries\": [{entries}]}}"
+                )
+            }
+            crate::compiler::CompiledOperandSpec::SlaValueMap {
+                big_endian,
+                sign_bit,
+                bit_start,
+                bit_end,
+                byte_start,
+                byte_end,
+                shift,
+                values,
+            } => {
+                let values = values
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{{\"kind\": \"sla_value_map\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"values\": [{values}]}}"
+                )
+            }
+            crate::compiler::CompiledOperandSpec::SlaFixedVarnode { varnode } => {
+                format!(
+                    "{{\"kind\": \"sla_fixed_varnode\", \"varnode\": {{\"name\": {}, \"space\": {}, \"offset\": {}, \"size\": {}}}}}",
+                    json_string(&varnode.name),
+                    json_string(&varnode.space.name),
+                    varnode.offset,
+                    varnode.size
+                )
+            }
             crate::compiler::CompiledOperandSpec::ContextFieldExtraction { bit_offset, bit_width, sign_extend } => {
                 format!(
                     "{{\"kind\": \"context_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
@@ -524,6 +716,12 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
                 })
             ),
+            crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr } => {
+                format!(
+                    "{{\"kind\": \"sla_pattern_expression\", \"expr\": {}}}",
+                    json_string(&format!("{expr:?}"))
+                )
+            }
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -552,6 +750,19 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
             }
             crate::compiler::CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                 format!("{{\"kind\": \"decode_operand\", \"operand_index\": {operand_index}}}")
+            }
+            crate::compiler::CompiledOperandDecodeStep::DescendSubtable {
+                table_name,
+                replace_current,
+            } => {
+                let escaped_table_name = table_name
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"");
+                format!(
+                    "{{\"kind\": \"descend_subtable\", \"table_name\": \"{}\", \"replace_current\": {}}}",
+                    escaped_table_name,
+                    replace_current
+                )
             }
         })
         .collect::<Vec<_>>()

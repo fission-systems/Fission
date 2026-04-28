@@ -22,16 +22,40 @@ crates/fission-sleigh/
 ├── src/
 │   ├── lib.rs
 │   ├── compiler/
-│   │   ├── mod.rs             # Generic compiler-only entrypoints and all-variant orchestration
+│   │   ├── mod.rs             # Public compiler facade and compatibility exports
+│   │   ├── discovery.rs       # Spec root, manifest, generated path, Ghidra install discovery
+│   │   ├── policy.rs          # Runtime status, executable candidate, alias/canonical mapping policy
 │   │   ├── token.rs           # Handwritten line tokenizer
 │   │   ├── preprocessor.rs    # @include/@define/conditional expansion
 │   │   ├── ast.rs             # Constructor / macro / with-block AST
-│   │   ├── ir.rs              # Compiled inventory + pattern graph + semantic IR
+│   │   ├── ir/                # Compiled inventory + pattern graph + semantic IR
+│   │   │   ├── mod.rs         # Public compatibility shim
+│   │   │   ├── types.rs       # Frontend/layout/constructor type definitions
+│   │   │   ├── lowering.rs    # AST/preprocessed spec lowering
+│   │   │   ├── template.rs    # Template compatibility lowering helpers
+│   │   │   └── tests.rs       # IR tests
+│   │   ├── sla/               # Compiled .sla payload decoder
+│   │   │   ├── mod.rs         # Public loader API
+│   │   │   ├── packed.rs      # Packed element/parser constants
+│   │   │   ├── symbols.rs     # Source files, spaces, symbol tables
+│   │   │   ├── templates.rs   # ConstructTpl/OpTpl decode
+│   │   │   ├── display.rs     # print/opprint/display metadata
+│   │   │   └── tests.rs       # SLA decoder tests
 │   │   ├── codegen.rs         # Deterministic generated artifact renderer
 │   │   └── equivalence.rs     # Compiler-only bucketed equivalence report
 │   └── runtime/
-│       ├── mod.rs             # Runtime registry, decode contracts, CFG helpers
+│       ├── mod.rs             # Public runtime facade, decode contracts, shared types
+│       ├── function.rs        # Raw p-code function lifting and CFG block construction
 │       └── spine/             # Ghidra-style common runtime owners and compiled-table execution
+│           └── compiled_table/ # Compiled-table decode/lift split by owner
+│               ├── mod.rs     # Public decode entrypoints
+│               ├── context.rs # Instruction/context bits
+│               ├── selection.rs # Decision traversal and terminal verification
+│               ├── walker.rs  # ParserWalker-style binding
+│               ├── token.rs   # Legacy shared-token cursor compatibility debt
+│               ├── display.rs # Display rendering
+│               ├── lift.rs    # Template execution/emitter adapter
+│               └── tests.rs   # Runtime tests
 └── specs/
    └── languages/             # Local Sleigh spec set used for language resolution
        ├── AARCH64/
@@ -75,6 +99,32 @@ crates/fission-sleigh/
 4. Use vendor implementations as references only.
    - Borrow invariants and ideas, but keep executable logic owned in this crate.
 
+## Internal Layering
+
+The crate is intentionally structured for a future split into compiler/runtime/SLA
+crates. Keep dependency direction clean even while everything still lives in one
+crate:
+
+- `compiler::discovery` owns paths, manifest lookup, and Ghidra install discovery.
+- `compiler::policy` owns runtime status, executable candidate, compatibility
+  aliases, and canonical processor mapping. Do not duplicate this policy in runtime.
+- `compiler::ir` owns generated artifact shapes. Preserve serde field names and
+  generated JSON compatibility.
+- `compiler::sla` owns packed `.sla` decoding and maps only into compiler IR types.
+  It must not depend on runtime modules.
+- `runtime::function` owns function lifting and CFG reconstruction.
+- `runtime::spine::compiled_table` is split by owner. `context`, `selection`,
+  `walker`, `display`, `template_eval`, and `legacy_token_policy` should not grow
+  cross-cutting orchestration logic.
+
+Future crate split boundary:
+
+- compiler layers must not import runtime types.
+- runtime layers may consume compiler facade/IR types but must not call compiler
+  orchestration or generated-artifact writers.
+- SLA decoder code may know IR template types only; it must not know runtime state.
+- generated/native backend loading belongs in runtime frontend/registry ownership.
+
 ## Ghidra Runtime Mapping
 
 Clean-room owner mapping is fixed as:
@@ -93,6 +143,9 @@ executor may still report `compatibility_lowered` template usage while the
 Ghidra `ConstructTpl -> PcodeEmit` migration is incomplete. Architecture-specific
 byte parsers or mnemonic-family emitters are transitional compatibility debt and
 must not be moved into new `helpers`, `providers`, `quirks`, or `text` modules.
+If compatibility cursor behavior must remain temporarily, keep it behind
+`legacy_token_policy` and document it as debt rather than a canonical architecture
+provider.
 
 ## Anti-Patterns
 

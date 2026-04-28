@@ -1,0 +1,798 @@
+fn decode_construct_templates(
+    artifact: &CompiledSlaArtifact,
+) -> Result<CompiledSlaTemplateLibrary> {
+    if artifact.version != GHIDRA_SLA_FORMAT_VERSION {
+        bail!(
+            "unsupported SLEIGH format version {} in {}",
+            artifact.version,
+            artifact.path.display()
+        );
+    }
+    let mut parser = PackedParser::new(&artifact.payload);
+    let root = parser.parse_root()?;
+    if root.id != sla_format::ELEM_SLEIGH {
+        bail!(
+            "compiled SLEIGH root element was {}, expected sleigh",
+            root.id
+        );
+    }
+
+    let source_files = decode_source_files(&root)?;
+    let spaces = decode_spaces(&root)?;
+
+    // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
+    let mut symbol_names = BTreeMap::new();
+    if let Some(sym_tab) = root.descendants_with_id(sla_format::ELEM_SYMBOL_TABLE).into_iter().next() {
+        for head in &sym_tab.children {
+            if let Some(id) = head.attr_unsigned(sla_format::ATTR_ID) {
+                if let Some(name) = head.attr_string(sla_format::ATTR_NAME) {
+                    symbol_names.insert(id as u32, name.to_string());
+                }
+            }
+        }
+    }
+
+    eprintln!("SLA Symbols Found: {} names", symbol_names.len());
+
+    let mut constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>> =
+        BTreeMap::new();
+    let mut subtables = BTreeMap::new();
+    let mut subtable_names_by_id = BTreeMap::new();
+    for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
+        let id = subtable_sym.attr_unsigned(sla_format::ATTR_ID).unwrap_or(u64::MAX) as u32;
+        let name = subtable_sym
+            .attr_string(sla_format::ATTR_NAME)
+            .map(|s| s.to_string())
+            .or_else(|| symbol_names.get(&id).cloned())
+            .unwrap_or_else(|| format!("unknown_subtable_{id}"));
+        subtable_names_by_id.insert(id, name);
+    }
+
+    let display_symbols =
+        decode_display_symbols(&root, &spaces, &symbol_names, &subtable_names_by_id)?;
+    let operand_symbols = decode_operand_symbols(&root, &display_symbols)?;
+
+    // Helper to parse a constructor
+    let trace_sla_parse = std::env::var_os("FISSION_TRACE_SLA_PARSE").is_some();
+    let mut parse_constructor =
+        |subtable_name: &str,
+         constructor: &PackedElement,
+         local_index: usize|
+         -> Option<CompiledSlaConstructorTemplate> {
+        // Ghidra SubtableSymbol.decode() assigns constructor ids by local
+        // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
+        // through sub.getConstructor(id). The constructor element's own ATTR_ID
+        // is not the terminal selection index.
+        let id = local_index as u32;
+        let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);
+        let line = constructor.attr_unsigned(sla_format::ATTR_LINE).unwrap_or(0);
+        let minimum_length = constructor
+            .attr_unsigned(sla_format::ATTR_LENGTH)
+            .unwrap_or(0) as u32;
+        let source_file = source_index
+            .and_then(|idx| source_files.get(&idx).cloned())
+            .unwrap_or_else(|| format!("<generated:{subtable_name}>"));
+        let source_key = if source_index.is_some() {
+            format!("{}:{line}", basename(&source_file))
+        } else {
+            format!("{subtable_name}#ctor{local_index}")
+        };
+
+        let main_tpl = constructor
+            .children
+            .iter()
+            .find(|child| {
+                child.id == sla_format::ELEM_CONSTRUCT_TPL
+                    && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
+            })
+            .or_else(|| {
+                constructor
+                    .children
+                    .iter()
+                    .find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)
+            });
+        let Some(main_tpl) = main_tpl else {
+            if trace_sla_parse {
+                eprintln!(
+                    "[sla-parse] missing construct_tpl subtable={subtable_name} slot={local_index} attrs={:?}",
+                    constructor.attrs
+                );
+            }
+            return None;
+        };
+
+        let template = match decode_construct_tpl(main_tpl, &spaces) {
+            Ok(template) => template,
+            Err(err) => {
+                if trace_sla_parse {
+                    eprintln!(
+                        "[sla-parse] decode_construct_tpl failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
+                    );
+                }
+                return None;
+            }
+        };
+
+        let mut opprint_indices = Vec::new();
+        let mut display_pieces = Vec::new();
+        let mut operand_specs_by_index = BTreeMap::new();
+        let mut display_operands_by_index = BTreeMap::new();
+        let mut flowthru_operand_index = None;
+        for child in &constructor.children {
+            match child.id {
+                sla_format::ELEM_OPER => {
+                    let Some(symbol_id) = child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32) else {
+                        if trace_sla_parse {
+                            eprintln!(
+                                "[sla-parse] oper missing symbol id subtable={subtable_name} slot={local_index} source_key={source_key}"
+                            );
+                        }
+                        return None;
+                    };
+                    let Some(operand_symbol) = operand_symbols.get(&symbol_id) else {
+                        if trace_sla_parse {
+                            eprintln!(
+                                "[sla-parse] missing operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id}"
+                            );
+                        }
+                        return None;
+                    };
+                    let Some(spec) = compiled_operand_spec_for_symbol(
+                        operand_symbol,
+                        &subtable_names_by_id,
+                    ) else {
+                        if trace_sla_parse {
+                            eprintln!(
+                                "[sla-parse] unsupported operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id} symbol={operand_symbol:?}"
+                            );
+                        }
+                        return None;
+                    };
+                    operand_specs_by_index.insert(
+                        operand_symbol.hand_index,
+                        spec,
+                    );
+                    display_operands_by_index.insert(
+                        operand_symbol.hand_index,
+                        CompiledDisplayOperand {
+                            operand_index: operand_symbol.hand_index,
+                            kind: operand_symbol.display_kind.clone(),
+                        },
+                    );
+                }
+                sla_format::ELEM_OPPRINT => {
+                    if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize) {
+                        opprint_indices.push(index);
+                        display_pieces.push(CompiledDisplayPiece::OperandRef(index));
+                    }
+                }
+                sla_format::ELEM_PRINT => {
+                    if let Some(piece) = child.attr_string(sla_format::ATTR_PIECE) {
+                        display_pieces.push(CompiledDisplayPiece::Literal(piece.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let operand_count = operand_specs_by_index
+            .keys()
+            .next_back()
+            .map(|value| value + 1)
+            .unwrap_or(0);
+        let mut operand_specs = Vec::with_capacity(operand_count);
+        let mut display_operands = Vec::with_capacity(operand_count);
+        for slot in 0..operand_count {
+            let Some(spec) = operand_specs_by_index.remove(&slot) else {
+                if trace_sla_parse {
+                    eprintln!(
+                        "[sla-parse] missing operand spec subtable={subtable_name} slot={local_index} operand={slot} source_key={source_key}"
+                    );
+                }
+                return None;
+            };
+            operand_specs.push(spec);
+            display_operands.push(
+                display_operands_by_index.remove(&slot).unwrap_or(CompiledDisplayOperand {
+                    operand_index: slot,
+                    kind: CompiledDisplayOperandKind::Generic,
+                }),
+            );
+        }
+
+        let has_print_literals = display_pieces
+            .iter()
+            .any(|piece| matches!(piece, CompiledDisplayPiece::Literal(_)));
+        if !has_print_literals && display_pieces.len() == 1 {
+            if let Some(CompiledDisplayPiece::OperandRef(index)) = display_pieces.first() {
+                flowthru_operand_index = Some(*index);
+            }
+        }
+        let first_whitespace = display_pieces.iter().position(|piece| {
+            matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' '))
+        });
+        let display_text = display_pieces
+            .iter()
+            .map(|piece| match piece {
+                CompiledDisplayPiece::Literal(lit) => lit.clone(),
+                CompiledDisplayPiece::OperandRef(index) => format!("\\n{}", operand_piece_label(*index)),
+            })
+            .collect::<String>();
+
+        let mut context_changes = Vec::new();
+        for child in constructor
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_CONTEXT_OP)
+        {
+            match decode_context_op(child) {
+                Ok(change) => context_changes.push(change),
+                Err(err) => {
+                    if trace_sla_parse {
+                        eprintln!(
+                            "[sla-parse] decode_context_op failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
+                        );
+                    }
+                    return None;
+                }
+            }
+        }
+
+        Some(CompiledSlaConstructorTemplate {
+            id,
+            source_key,
+            source_file,
+            line,
+            minimum_length,
+            display_template: CompiledDisplayTemplate {
+                constructor_hash: 0,
+                pieces: display_pieces,
+                first_whitespace,
+                flowthru_operand_index,
+                display: display_text,
+            },
+            display_operands,
+            opprint_indices,
+            operand_specs,
+            context_changes,
+            flowthru_operand_index,
+            constructor_template: template,
+        })
+    };
+
+    // 2. Pass Two: Process subtable symbols and their content
+    for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
+        let id = subtable_sym.attr_unsigned(sla_format::ATTR_ID).unwrap_or(u64::MAX) as u32;
+        let name = subtable_sym.attr_string(sla_format::ATTR_NAME)
+            .map(|s| s.to_string())
+            .or_else(|| symbol_names.get(&id).cloned())
+            .unwrap_or_else(|| format!("unknown_subtable_{id}"));
+
+        let mut constructors_by_index = BTreeMap::new();
+        let mut decision_tree = None;
+
+        for (local_index, child) in subtable_sym
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_CONSTRUCTOR)
+            .enumerate()
+        {
+            let slot = local_index;
+            let template = parse_constructor(&name, child, slot).unwrap_or_else(|| {
+                CompiledSlaConstructorTemplate {
+                    id: slot as u32,
+                    source_key: "unsupported_placeholder".to_string(),
+                    source_file: "unknown".to_string(),
+                    line: 0,
+                    minimum_length: 0,
+                    display_template: CompiledDisplayTemplate::empty(),
+                    display_operands: Vec::new(),
+                    opprint_indices: Vec::new(),
+                    operand_specs: Vec::new(),
+                    context_changes: Vec::new(),
+                    flowthru_operand_index: None,
+                    constructor_template: CompiledConstructTpl {
+                        constructor_hash: 0,
+                        ops: Vec::new(),
+                        op_templates: Vec::new(),
+                        export: None,
+                        template_source: CompiledTemplateSource::SpecDerived,
+                    },
+                }
+            });
+            constructors_by_index.insert(slot, template);
+        }
+
+        for child in &subtable_sym.children {
+            if child.id == sla_format::ELEM_DECISION {
+                decision_tree = decode_decision_tree(child).ok();
+            } else if child.id == sla_format::ELEM_DECISION {
+                decision_tree = decode_decision_tree(child).ok();
+            }
+        }
+
+        let constructor_count = constructors_by_index
+            .keys()
+            .next_back()
+            .map(|value| value + 1)
+            .unwrap_or(0);
+        let mut subtable_constructors = Vec::with_capacity(constructor_count);
+        for slot in 0..constructor_count {
+            subtable_constructors.push(
+                constructors_by_index.remove(&slot).unwrap_or(CompiledSlaConstructorTemplate {
+                    id: slot as u32,
+                    source_key: "unsupported_placeholder".to_string(),
+                    source_file: "unknown".to_string(),
+                    line: 0,
+                    minimum_length: 0,
+                    display_template: CompiledDisplayTemplate::empty(),
+                    display_operands: Vec::new(),
+                    opprint_indices: Vec::new(),
+                    operand_specs: Vec::new(),
+                    context_changes: Vec::new(),
+                    flowthru_operand_index: None,
+                    constructor_template: CompiledConstructTpl {
+                        constructor_hash: 0,
+                        ops: Vec::new(),
+                        op_templates: Vec::new(),
+                        export: None,
+                        template_source: CompiledTemplateSource::SpecDerived,
+                    },
+                }),
+            );
+        }
+
+        for tpl in &subtable_constructors {
+            constructors_by_source.entry(tpl.source_key.clone()).or_default().push(tpl.clone());
+        }
+
+        subtables.insert(name.clone(), CompiledSlaSubtable {
+            name,
+            constructors: subtable_constructors,
+            decision_tree,
+        });
+    }
+
+    // 3. Algorithm: Identify 'instruction' entry point
+    if !subtables.contains_key("instruction") {
+        let mut all_trees = Vec::new();
+        fn find_trees(el: &PackedElement, trees: &mut Vec<crate::compiler::ir::CompiledDecisionTree>) {
+            if el.id == 16 {
+                let mut nodes = Vec::new();
+                if decode_decision_node(el, &mut nodes).is_ok() {
+                    trees.push(crate::compiler::ir::CompiledDecisionTree {
+                        root_node_index: 0,
+                        nodes,
+                        decision_node_count: 0,
+                        root_buckets: Vec::new(),
+                    });
+                }
+            }
+            for child in &el.children {
+                find_trees(child, trees);
+            }
+        }
+        find_trees(&root, &mut all_trees);
+        all_trees.sort_by_key(|t| std::cmp::Reverse(t.nodes.len()));
+
+        if let Some(biggest) = all_trees.into_iter().next() {
+            eprintln!("Algorithmic Fallback: Creating missing 'instruction' subtable with largest tree ({} nodes)", biggest.nodes.len());
+            subtables.insert("instruction".to_string(), CompiledSlaSubtable {
+                name: "instruction".to_string(),
+                constructors: Vec::new(),
+                decision_tree: Some(biggest),
+            });
+        }
+    }
+
+    if let Some(inst_table) = subtables.get_mut("instruction") {
+        if let Some(tree) = &inst_table.decision_tree {
+            if !tree.nodes.is_empty() {
+                let root_node = &tree.nodes[tree.root_node_index];
+                eprintln!("'instruction' Root Node: probe={:?}, branches={}", root_node.probe, root_node.branches.len());
+            }
+        }
+    }
+
+    Ok(CompiledSlaTemplateLibrary {
+        path: artifact.path.clone(),
+        version: artifact.version,
+        source_files,
+        spaces,
+        constructors_by_source,
+        subtables,
+    })
+}
+
+pub fn decode_decision_tree(
+    element: &PackedElement,
+) -> Result<crate::compiler::ir::CompiledDecisionTree> {
+    let mut nodes = Vec::new();
+    let root_idx = decode_decision_node(element, &mut nodes)?;
+    let decision_node_count = nodes.len();
+    Ok(crate::compiler::ir::CompiledDecisionTree {
+        root_node_index: root_idx,
+        nodes,
+        decision_node_count,
+        root_buckets: vec![crate::compiler::ir::CompiledDecisionBucket {
+            key: "global".to_string(),
+            node_index: root_idx,
+        }],
+    })
+}
+
+fn decode_decision_node(
+    element: &PackedElement,
+    nodes: &mut Vec<crate::compiler::ir::CompiledDecisionNode>,
+) -> Result<usize> {
+    let node_idx = nodes.len();
+    nodes.push(crate::compiler::ir::CompiledDecisionNode {
+        probe: crate::compiler::ir::CompiledDecisionProbe::Terminal,
+        branches: Vec::new(),
+        leaf_constructor_indexes: Vec::new(),
+        leaf_entries: Vec::new(),
+    });
+
+    let is_context = element.attr_bool(sla_format::ATTR_CONTEXT);
+    let start_bit = element.attr_int(sla_format::ATTR_STARTBIT) as u32;
+    let bit_size = element.attr_int(sla_format::ATTR_SIZE) as u32;
+
+    if bit_size > 0 {
+        let probe = if is_context {
+            crate::compiler::ir::CompiledDecisionProbe::SlaContextBits {
+                start_bit,
+                bit_size,
+            }
+        } else {
+            crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits {
+                start_bit,
+                bit_size,
+            }
+        };
+        nodes[node_idx].probe = probe;
+
+        let mut val = 0u32;
+        for child in &element.children {
+            if child.id == sla_format::ELEM_DECISION {
+                let child_idx = decode_decision_node(child, nodes)?;
+                nodes[node_idx].branches.push(crate::compiler::ir::CompiledDecisionEdge {
+                    value: val as u8,
+                    next_node_index: child_idx,
+                });
+                val += 1;
+            }
+        }
+    } else {
+        nodes[node_idx].probe = crate::compiler::ir::CompiledDecisionProbe::Terminal;
+        for child in &element.children {
+            if child.id == sla_format::ELEM_PAIR {
+                let constructor_id = child
+                    .attr_unsigned(sla_format::ATTR_ID)
+                    .or_else(|| {
+                        child.children.iter().find_map(|pair_child| {
+                            (pair_child.id == sla_format::ELEM_CONSTRUCTOR)
+                                .then(|| pair_child.attr_unsigned(sla_format::ATTR_ID))
+                                .flatten()
+                        })
+                    });
+                let Some(constructor_id) = constructor_id else {
+                    continue;
+                };
+                nodes[node_idx]
+                    .leaf_constructor_indexes
+                    .push(constructor_id as usize);
+                let pattern = child
+                    .children
+                    .iter()
+                    .find_map(|pair_child| decode_disjoint_pattern(pair_child).ok())
+                    .unwrap_or_else(always_true_instruction_pattern);
+                nodes[node_idx].leaf_entries.push(CompiledDecisionLeafEntry {
+                    constructor_index: constructor_id as usize,
+                    pattern,
+                });
+            }
+        }
+    }
+
+    Ok(node_idx)
+}
+
+fn always_true_instruction_pattern() -> CompiledDisjointPattern {
+    CompiledDisjointPattern::Instruction(CompiledPatternBlock {
+        offset: 0,
+        nonzero_size: 0,
+        mask_words: Vec::new(),
+        value_words: Vec::new(),
+    })
+}
+
+fn decode_disjoint_pattern(element: &PackedElement) -> Result<CompiledDisjointPattern> {
+    match element.id {
+        sla_format::ELEM_INSTRUCT_PAT => Ok(CompiledDisjointPattern::Instruction(
+            decode_pattern_block(
+                element
+                    .children
+                    .iter()
+                    .find(|child| child.id == sla_format::ELEM_PAT_BLOCK)
+                    .ok_or_else(|| anyhow!("instruction pattern missing pat_block"))?,
+            )?,
+        )),
+        sla_format::ELEM_CONTEXT_PAT => Ok(CompiledDisjointPattern::Context(
+            decode_pattern_block(
+                element
+                    .children
+                    .iter()
+                    .find(|child| child.id == sla_format::ELEM_PAT_BLOCK)
+                    .ok_or_else(|| anyhow!("context pattern missing pat_block"))?,
+            )?,
+        )),
+        sla_format::ELEM_COMBINE_PAT => {
+            let context = element
+                .children
+                .iter()
+                .find(|child| child.id == sla_format::ELEM_CONTEXT_PAT)
+                .ok_or_else(|| anyhow!("combine pattern missing context_pat"))?;
+            let instruction = element
+                .children
+                .iter()
+                .find(|child| child.id == sla_format::ELEM_INSTRUCT_PAT)
+                .ok_or_else(|| anyhow!("combine pattern missing instruct_pat"))?;
+            let CompiledDisjointPattern::Context(context) = decode_disjoint_pattern(context)? else {
+                bail!("combine pattern context child decoded to unexpected kind");
+            };
+            let CompiledDisjointPattern::Instruction(instruction) =
+                decode_disjoint_pattern(instruction)?
+            else {
+                bail!("combine pattern instruction child decoded to unexpected kind");
+            };
+            Ok(CompiledDisjointPattern::Combine {
+                context,
+                instruction,
+            })
+        }
+        _ => bail!("unsupported decision leaf pattern element {}", element.id),
+    }
+}
+
+fn decode_pattern_block(element: &PackedElement) -> Result<CompiledPatternBlock> {
+    if element.id != sla_format::ELEM_PAT_BLOCK {
+        bail!("expected pat_block element, got {}", element.id);
+    }
+    let offset = element.attr_signed(sla_format::ATTR_OFF).unwrap_or_default() as i32;
+    let nonzero_size = element
+        .attr_signed(sla_format::ATTR_NONZERO)
+        .unwrap_or_default() as i32;
+    let mut mask_words = Vec::new();
+    let mut value_words = Vec::new();
+    for child in &element.children {
+        if child.id != sla_format::ELEM_MASK_WORD {
+            continue;
+        }
+        mask_words.push(
+            child
+                .attr_unsigned(sla_format::ATTR_MASK)
+                .ok_or_else(|| anyhow!("mask_word missing mask"))? as u32,
+        );
+        value_words.push(
+            child
+                .attr_unsigned(sla_format::ATTR_VAL)
+                .ok_or_else(|| anyhow!("mask_word missing value"))? as u32,
+        );
+    }
+    Ok(CompiledPatternBlock {
+        offset,
+        nonzero_size,
+        mask_words,
+        value_words,
+    })
+}
+
+fn basename(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn decode_construct_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledConstructTpl> {
+    let mut children = element.children.iter();
+    let export = match children.next() {
+        Some(child) if child.id == sla_format::ELEM_NULL => None,
+        Some(child) if child.id == sla_format::ELEM_HANDLE_TPL => {
+            Some(decode_handle_tpl(child, spaces)?)
+        }
+        Some(child) => bail!("construct_tpl result is unexpected element {}", child.id),
+        None => None,
+    };
+    let mut op_templates = Vec::new();
+    for child in children {
+        if child.id == sla_format::ELEM_OP_TPL {
+            op_templates.push(decode_op_tpl(child, spaces)?);
+        }
+    }
+    Ok(CompiledConstructTpl {
+        constructor_hash: 0,
+        ops: Vec::new(),
+        op_templates,
+        export,
+        template_source: CompiledTemplateSource::SpecDerived,
+    })
+}
+
+fn decode_op_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledOpTpl> {
+    let opcode_code = element
+        .attr_unsigned(sla_format::ATTR_CODE)
+        .ok_or_else(|| anyhow!("op_tpl missing opcode"))?;
+    let opcode = map_pcode_opcode(opcode_code as u32);
+    let mut children = element.children.iter();
+    let output = match children.next() {
+        Some(child) if child.id == sla_format::ELEM_NULL => None,
+        Some(child) if child.id == sla_format::ELEM_VARNODE_TPL => {
+            Some(decode_varnode_tpl(child, spaces)?)
+        }
+        Some(child) => bail!("op_tpl output is unexpected element {}", child.id),
+        None => None,
+    };
+    let mut inputs = Vec::new();
+    for child in children {
+        if child.id == sla_format::ELEM_VARNODE_TPL {
+            inputs.push(decode_varnode_tpl(child, spaces)?);
+        } else {
+            bail!("op_tpl input is unexpected element {}", child.id);
+        }
+    }
+    Ok(CompiledOpTpl {
+        opcode,
+        output,
+        inputs,
+        label: if matches!(opcode, CompiledOpTplOpcode::Label) {
+            Some(CompiledLabelRef {
+                name: format!("label_{opcode_code}"),
+            })
+        } else {
+            None
+        },
+    })
+}
+
+fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
+    match PcodeOpcode::from_flat_u32(code) {
+        PcodeOpcode::Copy => CompiledOpTplOpcode::Copy,
+        PcodeOpcode::Load => CompiledOpTplOpcode::Load,
+        PcodeOpcode::Store => CompiledOpTplOpcode::Store,
+        PcodeOpcode::Branch => CompiledOpTplOpcode::Branch,
+        PcodeOpcode::CBranch => CompiledOpTplOpcode::CBranch,
+        PcodeOpcode::Call => CompiledOpTplOpcode::Call,
+        PcodeOpcode::CallOther => CompiledOpTplOpcode::CallOther,
+        PcodeOpcode::Return => CompiledOpTplOpcode::Return,
+        PcodeOpcode::IntEqual => CompiledOpTplOpcode::IntEqual,
+        PcodeOpcode::IntNotEqual => CompiledOpTplOpcode::IntNotEqual,
+        PcodeOpcode::IntSLess => CompiledOpTplOpcode::IntSLess,
+        PcodeOpcode::IntLess => CompiledOpTplOpcode::IntLess,
+        PcodeOpcode::IntZExt => CompiledOpTplOpcode::IntZExt,
+        PcodeOpcode::IntSExt => CompiledOpTplOpcode::IntSExt,
+        PcodeOpcode::IntAdd => CompiledOpTplOpcode::IntAdd,
+        PcodeOpcode::IntSub => CompiledOpTplOpcode::IntSub,
+        PcodeOpcode::IntCarry => CompiledOpTplOpcode::IntCarry,
+        PcodeOpcode::IntSCarry => CompiledOpTplOpcode::IntSCarry,
+        PcodeOpcode::IntSBorrow => CompiledOpTplOpcode::IntSBorrow,
+        PcodeOpcode::IntXor => CompiledOpTplOpcode::IntXor,
+        PcodeOpcode::IntAnd => CompiledOpTplOpcode::IntAnd,
+        PcodeOpcode::IntOr => CompiledOpTplOpcode::IntOr,
+        PcodeOpcode::IntLeft => CompiledOpTplOpcode::IntLeft,
+        PcodeOpcode::IntRight => CompiledOpTplOpcode::IntRight,
+        PcodeOpcode::IntSRight => CompiledOpTplOpcode::IntSRight,
+        PcodeOpcode::IntMult => CompiledOpTplOpcode::IntMult,
+        PcodeOpcode::BoolNegate => CompiledOpTplOpcode::BoolNegate,
+        PcodeOpcode::BoolAnd => CompiledOpTplOpcode::BoolAnd,
+        PcodeOpcode::BoolOr => CompiledOpTplOpcode::BoolOr,
+        PcodeOpcode::MultiEqual => CompiledOpTplOpcode::Build,
+        PcodeOpcode::Piece => CompiledOpTplOpcode::Piece,
+        PcodeOpcode::SubPiece => CompiledOpTplOpcode::Subpiece,
+        PcodeOpcode::PtrAdd => CompiledOpTplOpcode::Label,
+        PcodeOpcode::PopCount => CompiledOpTplOpcode::PopCount,
+        _ => CompiledOpTplOpcode::Unsupported,
+    }
+}
+
+fn decode_varnode_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledVarnodeTpl> {
+    if element.children.len() != 3 {
+        bail!("varnode_tpl expected 3 const_tpl children");
+    }
+    let space = decode_space_tpl(&element.children[0], spaces)?;
+    let offset = decode_const_tpl(&element.children[1], spaces)?;
+    let size = decode_const_tpl(&element.children[2], spaces)?;
+    Ok(CompiledVarnodeTpl::Varnode {
+        space,
+        offset: Box::new(offset),
+        size: Box::new(size),
+    })
+}
+
+fn decode_space_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledSpaceTpl> {
+    match element.id {
+        sla_format::ELEM_CONST_SPACEID => Ok(CompiledSpaceTpl::SpaceRef(decode_space_ref(
+            element, spaces,
+        )?)),
+        _ => Ok(CompiledSpaceTpl::Const(Box::new(decode_const_tpl(
+            element, spaces,
+        )?))),
+    }
+}
+
+fn decode_handle_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledHandleTpl> {
+    if element.children.len() != 7 {
+        bail!("handle_tpl expected 7 const_tpl children");
+    }
+    Ok(CompiledHandleTpl {
+        space: Some(decode_space_tpl(&element.children[0], spaces)?),
+        size: Some(decode_const_tpl(&element.children[1], spaces)?),
+        ptr_space: Some(decode_space_tpl(&element.children[2], spaces)?),
+        ptr_offset: Some(decode_const_tpl(&element.children[3], spaces)?),
+        ptr_size: Some(decode_const_tpl(&element.children[4], spaces)?),
+        temp_space: Some(decode_space_tpl(&element.children[5], spaces)?),
+        temp_offset: Some(decode_const_tpl(&element.children[6], spaces)?),
+    })
+}
+
+fn decode_const_tpl(
+    element: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+) -> Result<CompiledConstTpl> {
+    match element.id {
+        sla_format::ELEM_CONST_REAL => Ok(CompiledConstTpl::Real {
+            value: element
+                .attr_unsigned(sla_format::ATTR_VAL)
+                .ok_or_else(|| anyhow!("const_real missing value"))?,
+        }),
+        sla_format::ELEM_CONST_HANDLE => {
+            let handle_index = element
+                .attr_signed(sla_format::ATTR_VAL)
+                .ok_or_else(|| anyhow!("const_handle missing handle index"))?;
+            let selector_code = element
+                .attr_signed(sla_format::ATTR_S)
+                .ok_or_else(|| anyhow!("const_handle missing selector"))?;
+            let selector = match selector_code {
+                0 => CompiledHandleSelector::Space,
+                1 => CompiledHandleSelector::Offset,
+                2 => CompiledHandleSelector::Size,
+                3 => CompiledHandleSelector::OffsetPlus,
+                other => bail!("unsupported const_handle selector {other}"),
+            };
+            Ok(CompiledConstTpl::Handle {
+                handle_index,
+                selector,
+                plus: element.attr_unsigned(sla_format::ATTR_PLUS),
+            })
+        }
+        sla_format::ELEM_CONST_SPACEID => Ok(CompiledConstTpl::SpaceId(decode_space_ref(
+            element, spaces,
+        )?)),
+        sla_format::ELEM_CONST_RELATIVE => Ok(CompiledConstTpl::Relative {
+            value: element
+                .attr_unsigned(sla_format::ATTR_VAL)
+                .ok_or_else(|| anyhow!("const_relative missing value"))?,
+        }),
+        sla_format::ELEM_CONST_START => Ok(CompiledConstTpl::InstStart),
+        sla_format::ELEM_CONST_NEXT => Ok(CompiledConstTpl::InstNext),
+        sla_format::ELEM_CONST_NEXT2 => Ok(CompiledConstTpl::InstNext2),
+        sla_format::ELEM_CONST_CURSPACE => Ok(CompiledConstTpl::CurSpace),
+        sla_format::ELEM_CONST_CURSPACE_SIZE => Ok(CompiledConstTpl::CurSpaceSize),
+        sla_format::ELEM_CONST_FLOWREF => Ok(CompiledConstTpl::FlowRef),
+        sla_format::ELEM_CONST_FLOWREF_SIZE => Ok(CompiledConstTpl::FlowRefSize),
+        sla_format::ELEM_CONST_FLOWDEST => Ok(CompiledConstTpl::FlowDest),
+        sla_format::ELEM_CONST_FLOWDEST_SIZE => Ok(CompiledConstTpl::FlowDestSize),
+        other => bail!("unsupported ConstTpl element {other}"),
+    }
+}

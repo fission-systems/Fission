@@ -1,5 +1,6 @@
 use crate::compiler::{
-    CompiledConstructTplKind, CompiledConstructorTemplate, CompiledOperandSpec, CompiledSpaceRef,
+    CompiledConstructTplKind, CompiledConstructorTemplate, CompiledDisplayOperand,
+    CompiledDisplayTemplate, CompiledOperandSpec, CompiledSpaceRef,
 };
 
 use super::RuntimeMatchTrace;
@@ -7,10 +8,14 @@ use super::RuntimeMatchTrace;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct RuntimeConstructState {
+    pub mnemonic: String,
     pub construct_tpl_kind: CompiledConstructTplKind,
     pub constructor_template: CompiledConstructorTemplate,
+    pub display_template: CompiledDisplayTemplate,
+    pub display_operands: Vec<CompiledDisplayOperand>,
     pub construct_nodes: Vec<RuntimeConstructNode>,
     pub handles: Vec<RuntimeHandle>,
+    pub exported_handle: Option<RuntimeHandle>,
     pub operands: Vec<BoundOperand>,
     pub condition_code: Option<u8>,
     pub length: usize,
@@ -34,6 +39,7 @@ pub struct RuntimeHandle {
     pub spec: CompiledOperandSpec,
     pub value: BoundOperand,
     pub fixed: RuntimeFixedHandle,
+    pub subtable_state: Option<Box<RuntimeConstructState>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,6 +59,11 @@ pub struct RuntimeFixedHandle {
 pub enum BoundOperand {
     Register {
         index: u8,
+        size: u32,
+    },
+    NamedVarnode {
+        name: String,
+        display_index: Option<u32>,
         size: u32,
     },
     Memory {

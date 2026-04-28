@@ -1,21 +1,31 @@
 mod ast;
 mod codegen;
+mod discovery;
 mod equivalence;
 mod ir;
+mod policy;
 mod preprocessor;
 mod sla;
 mod token;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
+use policy::{canonical_processor_name, compatibility_aliases_for, is_executable_candidate_entry};
 use serde::{Deserialize, Serialize};
 
 pub use ast::parse_expanded_spec;
 pub use ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
+use discovery::generated_output_root_for_entry_spec;
+pub use discovery::{
+    entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
+    generated_root_for_entry_spec, ghidra_language_manifest_path, infer_arch_from_entry_spec,
+    resolve_ghidra_install_paths, spec_root_for_arch, GhidraInstallPaths,
+};
 pub use equivalence::{
     build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
     RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
@@ -23,16 +33,18 @@ pub use equivalence::{
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
     CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledContextField, CompiledContextFieldRef, CompiledDecisionBucket, CompiledDecisionEdge,
-    CompiledDecisionNode, CompiledDecisionProbe, CompiledDecisionTree, CompiledDisplayTemplate,
-    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleTemplate,
-    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
+    CompiledContextField, CompiledContextFieldRef, CompiledContextOp, CompiledDecisionBucket,
+    CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode, CompiledDecisionProbe,
+    CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
+    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
+    CompiledHandleTemplate, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
     CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
-    CompiledOperandSpec, CompiledPatternMatcher, CompiledPatternNode, CompiledPcodeOp,
-    CompiledRegister, CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpaceRef,
-    CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource,
-    CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass,
-    PatternConstraint,
+    CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher,
+    CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
+    CompiledSemanticOp, CompiledSemanticTemplate, CompiledSpaceRef, CompiledSpaceTpl,
+    CompiledSpecDefinition, CompiledSubtable, CompiledTemplateSource, CompiledTokenField,
+    CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{
@@ -79,14 +91,6 @@ pub struct GhidraLanguageManifest {
     pub entries: Vec<GhidraLanguageManifestEntry>,
 }
 
-fn is_executable_candidate_entry(entry_id: &str) -> bool {
-    entry_id.starts_with("x86")
-        || entry_id.starts_with("AARCH64")
-        || entry_id.starts_with("ARM")
-        || entry_id.starts_with("mips")
-        || entry_id.starts_with("riscv")
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrontendCompileReportEntry {
     pub arch: String,
@@ -108,141 +112,6 @@ pub struct FrontendCompileReportEntry {
 pub struct FrontendCompileManifest {
     pub variant_count: usize,
     pub entries: Vec<FrontendCompileReportEntry>,
-}
-
-pub fn spec_root_for_arch(arch: &str) -> PathBuf {
-    let arch = canonical_processor_name(arch)
-        .map(str::to_string)
-        .unwrap_or_else(|| arch.to_string());
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join("languages")
-        .join(arch)
-}
-
-pub fn ghidra_language_manifest_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join(GHIDRA_LANGUAGE_MANIFEST_FILE)
-}
-
-pub fn generated_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("generated")
-}
-
-pub fn generated_root_for_arch(arch: &str) -> PathBuf {
-    generated_root().join(
-        canonical_processor_name(arch)
-            .map(str::to_string)
-            .unwrap_or_else(|| arch.to_string()),
-    )
-}
-
-pub fn entry_id_from_path(entry_spec: &Path) -> Result<String> {
-    let stem = entry_spec
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or_else(|| anyhow!("entry spec {} has no UTF-8 file stem", entry_spec.display()))?;
-    Ok(stem.to_string())
-}
-
-pub fn generated_root_for_entry_spec(entry_spec: &Path) -> Result<PathBuf> {
-    let arch = infer_arch_from_entry_spec(entry_spec)?;
-    let entry_id = entry_id_from_path(entry_spec)?;
-    Ok(generated_root_for_arch(&arch).join(entry_id))
-}
-
-fn generated_output_root_for_entry_spec(entry_spec: &Path, output_root: &Path) -> Result<PathBuf> {
-    let arch = infer_arch_from_entry_spec(entry_spec)?;
-    let entry_id = entry_id_from_path(entry_spec)?;
-    if output_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name == entry_id)
-        .unwrap_or(false)
-    {
-        return Ok(output_root.to_path_buf());
-    }
-    if output_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name == arch)
-        .unwrap_or(false)
-    {
-        return Ok(output_root.join(entry_id));
-    }
-    Ok(output_root.join(arch).join(entry_id))
-}
-
-pub fn infer_arch_from_entry_spec(entry_spec: &Path) -> Result<String> {
-    let languages_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join("languages");
-    let parent = entry_spec.parent().ok_or_else(|| {
-        anyhow!(
-            "entry spec {} has no parent directory",
-            entry_spec.display()
-        )
-    })?;
-    let arch_dir = parent
-        .strip_prefix(&languages_root)
-        .with_context(|| {
-            format!(
-                "entry spec {} is outside compiler spec root {}",
-                entry_spec.display(),
-                languages_root.display()
-            )
-        })?
-        .components()
-        .next()
-        .ok_or_else(|| {
-            anyhow!(
-                "missing arch directory for entry spec {}",
-                entry_spec.display()
-            )
-        })?;
-    Ok(arch_dir.as_os_str().to_string_lossy().into_owned())
-}
-
-pub fn entry_spec_from_path(entry_spec: PathBuf) -> Result<EntrySpec> {
-    let arch = infer_arch_from_entry_spec(&entry_spec)?;
-    let entry_id = entry_id_from_path(&entry_spec)?;
-    let entry_spec_name = entry_spec
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow!("entry spec {} has no UTF-8 file name", entry_spec.display()))?
-        .to_string();
-    Ok(EntrySpec {
-        arch,
-        path: entry_spec,
-        entry_spec: entry_spec_name,
-        entry_id,
-        language_ids: Vec::new(),
-        compatibility_aliases: Vec::new(),
-    })
-}
-
-fn compatibility_aliases_for(processor: &str) -> Vec<String> {
-    match processor {
-        "AARCH64" => vec!["aarch64".to_string()],
-        "ARM" => vec!["arm32".to_string()],
-        "MIPS" => vec!["mips".to_string()],
-        "PowerPC" => vec!["powerpc".to_string()],
-        "RISCV" => vec!["riscv".to_string()],
-        "x86" => vec!["x86".to_string()],
-        _ => Vec::new(),
-    }
-}
-
-fn canonical_processor_name(name: &str) -> Option<&'static str> {
-    match name {
-        "aarch64" => Some("AARCH64"),
-        "arm32" => Some("ARM"),
-        "mips" => Some("MIPS"),
-        "powerpc" => Some("PowerPC"),
-        "riscv" => Some("RISCV"),
-        _ => None,
-    }
 }
 
 fn read_processors_from_spec_tree() -> Result<Vec<String>> {
@@ -475,7 +344,7 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
                 endian,
                 variant_class,
                 imported_aux_files: aux_files.clone(),
-                runtime_status: if is_executable_candidate_entry(&spec.entry_id) {
+                runtime_status: if is_executable_candidate_entry(&spec.entry_id)? {
                     "executable_candidate".to_string()
                 } else {
                     "registered_compile_only".to_string()
@@ -591,9 +460,8 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     let arch = infer_arch_from_entry_spec(entry_spec)?;
     let expanded = preprocessor::expand_entry_spec(entry_spec)
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
-    let ast = ast::parse_expanded_spec(&expanded)
-        .with_context(|| format!("parse expanded spec {}", entry_spec.display()))?;
-    let mut compiled = ir::compile_frontend(&arch, &expanded, &ast, entry_spec)
+    let ast_result = ast::parse_expanded_spec(&expanded);
+    let mut compiled = ir::compile_frontend(&arch, &expanded, ast_result, entry_spec)
         .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
     if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
         let library = sla::load_construct_templates_from_sla(&sla_path)
@@ -608,19 +476,12 @@ fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
         .file_stem()
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| anyhow!("entry spec {} has no UTF-8 stem", entry_spec.display()))?;
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .ok_or_else(|| anyhow!("cannot infer repository root from CARGO_MANIFEST_DIR"))?
-        .to_path_buf();
-    let processors_root =
-        repo_root.join("vendor/ghidra/ghidra_12.0.4_PUBLIC/Ghidra/Processors");
-    if !processors_root.exists() {
+    let Some(paths) = resolve_ghidra_install_paths() else {
         return Ok(None);
-    }
+    };
     let wanted_name = format!("{stem}.sla");
     let mut matches = Vec::new();
-    find_named_file(&processors_root, &wanted_name, &mut matches)?;
+    find_named_file(&paths.processors_root, &wanted_name, &mut matches)?;
     matches.sort();
     match matches.len() {
         0 => Ok(None),
@@ -633,9 +494,7 @@ fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
 }
 
 fn find_named_file(root: &Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in
-        fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))?
-    {
+    for entry in fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))? {
         let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
         let path = entry.path();
         let file_type = entry
@@ -938,21 +797,55 @@ mod tests {
     }
 
     #[test]
+    fn runtime_status_policy_comes_from_checked_in_manifest() {
+        let manifest: GhidraLanguageManifest =
+            serde_json::from_str(&fs::read_to_string(ghidra_language_manifest_path()).unwrap())
+                .expect("parse checked-in manifest");
+        for entry in manifest.entries {
+            assert_eq!(
+                policy::runtime_status_for_entry(&entry.entry_id).expect("runtime status"),
+                entry.runtime_status,
+                "{} must use manifest runtime_status",
+                entry.entry_id
+            );
+        }
+    }
+
+    #[test]
+    fn packaged_ghidra_path_discovery_uses_resolver() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source = fs::read_to_string(manifest_dir.join("src/compiler/mod.rs"))
+            .expect("read compiler module");
+        let processor_specific_path = ["Ghidra", "/", "Processors", "/", "x86"].concat();
+        assert!(
+            !source.contains(&processor_specific_path),
+            "compiler module must not construct processor-specific Ghidra paths"
+        );
+        assert!(
+            source.contains("resolve_ghidra_install_paths"),
+            "compiler module should route packaged SLA lookup through the resolver"
+        );
+    }
+
+    #[test]
     fn force_regenerate_aarch64() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
             .unwrap()
             .to_path_buf();
-        let aarch64_spec = repo_root.join("crates/fission-sleigh/specs/languages/AARCH64/AARCH64.slaspec");
+        let aarch64_spec =
+            repo_root.join("crates/fission-sleigh/specs/languages/AARCH64/AARCH64.slaspec");
         println!("Compiling spec: {}", aarch64_spec.display());
         let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
         println!("Compiled AARCH64: {} subtables", compiled.subtables.len());
         let artifacts = codegen::render_generated_artifacts(&compiled).expect("render artifacts");
-        let entry_output_root = generated_root_for_entry_spec(&aarch64_spec).expect("get generated root");
+        let entry_output_root =
+            generated_root_for_entry_spec(&aarch64_spec).expect("get generated root");
         println!("Writing artifacts to: {}", entry_output_root.display());
-        codegen::write_generated_artifacts(&entry_output_root, &artifacts).expect("write artifacts");
-        
+        codegen::write_generated_artifacts(&entry_output_root, &artifacts)
+            .expect("write artifacts");
+
         let source_path = entry_output_root.join("native_backend.rs");
         let output_path = entry_output_root.join("native_backend.dylib");
         println!("Compiling native backend...");
