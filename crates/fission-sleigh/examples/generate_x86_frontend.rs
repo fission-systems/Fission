@@ -1,11 +1,16 @@
 use anyhow::Result;
 use fission_sleigh::compiler::{
-    generated_root_for_arch, write_generated_artifacts_for_entry_spec, x86_64_entry_spec_path,
+    compile_generated_native_backend_for_entry_spec, generated_root_for_arch,
+    write_generated_artifacts_for_entry_spec, x86_64_entry_spec_path,
 };
 
 fn main() -> Result<()> {
     let output_root = generated_root_for_arch("x86");
-    write_generated_artifacts_for_entry_spec(&x86_64_entry_spec_path(), &output_root)?;
+    let entry_spec = x86_64_entry_spec_path();
+    write_generated_artifacts_for_entry_spec(&entry_spec, &output_root)?;
+    let native_backend =
+        compile_generated_native_backend_for_entry_spec(&entry_spec, &output_root)?;
     println!("{}", output_root.display());
+    println!("{}", native_backend.display());
     Ok(())
 }

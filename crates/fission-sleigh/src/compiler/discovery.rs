@@ -14,8 +14,33 @@ pub fn ghidra_language_manifest_path() -> PathBuf {
         .join(GHIDRA_LANGUAGE_MANIFEST_FILE)
 }
 
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("fission-sleigh crate should live under repo/crates/fission-sleigh")
+        .to_path_buf()
+}
+
+pub fn sleigh_build_cache_root() -> PathBuf {
+    if let Some(path) = env::var_os("FISSION_SLEIGH_CACHE_DIR") {
+        return PathBuf::from(path);
+    }
+
+    if let Some(path) = env::var_os("CARGO_TARGET_DIR") {
+        let target = PathBuf::from(path);
+        return if target.is_absolute() {
+            target.join("fission-sleigh")
+        } else {
+            repo_root().join(target).join("fission-sleigh")
+        };
+    }
+
+    repo_root().join("target").join("fission-sleigh")
+}
+
 pub fn generated_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("generated")
+    sleigh_build_cache_root().join("generated")
 }
 
 pub fn generated_root_for_arch(arch: &str) -> PathBuf {

@@ -1,9 +1,0 @@
-{
-  "arch": "CR16",
-  "entry_spec": "CR16B.slaspec",
-  "entry_id": "CR16B",
-  "include_manifest": [
-    "CR16B.slaspec@0",
-    "CR16B.sinc@1"
-  ]
-}

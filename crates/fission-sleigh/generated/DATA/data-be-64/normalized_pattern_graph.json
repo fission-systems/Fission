@@ -1,8 +1,0 @@
-{
-  "arch": "DATA",
-  "entry_spec": "data-be-64.slaspec",
-  "entry_id": "data-be-64",
-  "pattern_nodes": [
-    {"node_id": "data.sinc:26#f5441e89eb4f1351", "mnemonic": "nop", "source": "data.sinc:26", "with_depth": 0, "control_flow": "none"}
-  ]
-}

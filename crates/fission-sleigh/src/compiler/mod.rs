@@ -24,7 +24,7 @@ use discovery::generated_output_root_for_entry_spec;
 pub use discovery::{
     entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
     generated_root_for_entry_spec, ghidra_language_manifest_path, infer_arch_from_entry_spec,
-    resolve_ghidra_install_paths, spec_root_for_arch, GhidraInstallPaths,
+    resolve_ghidra_install_paths, sleigh_build_cache_root, spec_root_for_arch, GhidraInstallPaths,
 };
 pub use equivalence::{
     build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
@@ -512,7 +512,22 @@ fn find_named_file(root: &Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()
 
 use std::process::Command;
 
+pub fn native_backend_library_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "native_backend.dll"
+    } else if cfg!(target_os = "macos") {
+        "native_backend.dylib"
+    } else {
+        "native_backend.so"
+    }
+}
+
 pub fn compile_native_backend(source_path: &Path, output_path: &Path) -> Result<()> {
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create native backend output root {}", parent.display()))?;
+    }
+
     let status = Command::new("rustc")
         .arg("--crate-type=cdylib")
         .arg("-O")
@@ -526,6 +541,17 @@ pub fn compile_native_backend(source_path: &Path, output_path: &Path) -> Result<
         bail!("rustc failed to compile native backend: {}", status);
     }
     Ok(())
+}
+
+pub fn compile_generated_native_backend_for_entry_spec(
+    entry_spec: &Path,
+    output_root: &Path,
+) -> Result<PathBuf> {
+    let entry_output_root = generated_output_root_for_entry_spec(entry_spec, output_root)?;
+    let source_path = entry_output_root.join("native_backend.rs");
+    let output_path = entry_output_root.join(native_backend_library_name());
+    compile_native_backend(&source_path, &output_path)?;
+    Ok(output_path)
 }
 
 pub fn compile_frontends_for_arch(arch: &str) -> Result<Vec<CompiledFrontend>> {

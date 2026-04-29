@@ -1,5 +1,0 @@
-# semantic action inventory
-arch: ARM
-entry_spec: ARM8_be.slaspec
-entry_id: ARM8_be
-

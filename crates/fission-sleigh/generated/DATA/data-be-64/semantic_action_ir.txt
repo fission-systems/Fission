@@ -1,8 +1,0 @@
-# semantic action inventory
-arch: DATA
-entry_spec: data-be-64.slaspec
-entry_id: data-be-64
-
-- nop [none] data.sinc:26
-  semantic_ops: <none>
-  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0

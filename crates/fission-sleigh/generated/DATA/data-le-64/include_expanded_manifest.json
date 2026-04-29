@@ -1,9 +1,0 @@
-{
-  "arch": "DATA",
-  "entry_spec": "data-le-64.slaspec",
-  "entry_id": "data-le-64",
-  "include_manifest": [
-    "data-le-64.slaspec@0",
-    "data.sinc@1"
-  ]
-}

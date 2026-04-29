@@ -1,8 +1,0 @@
-{
-  "arch": "AARCH64",
-  "entry_spec": "AARCH64BE.slaspec",
-  "entry_id": "AARCH64BE",
-  "pattern_nodes": [
-
-  ]
-}

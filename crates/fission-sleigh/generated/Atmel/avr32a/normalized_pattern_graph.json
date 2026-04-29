@@ -1,8 +1,0 @@
-{
-  "arch": "Atmel",
-  "entry_spec": "avr32a.slaspec",
-  "entry_id": "avr32a",
-  "pattern_nodes": [
-
-  ]
-}

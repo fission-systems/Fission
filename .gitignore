@@ -3,6 +3,10 @@
 /target2/
 /coverage/
 
+# fission-sleigh generated/cache artifacts are build products. The runtime
+# compiles native backends into target/fission-sleigh instead of checking them in.
+/crates/fission-sleigh/generated/
+
 # Native/C++ build artifacts
 /build/
 ghidra_decompiler/build/

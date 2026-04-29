@@ -1,8 +1,0 @@
-{
-  "arch": "AARCH64",
-  "entry_spec": "AARCH64_AppleSilicon.slaspec",
-  "entry_id": "AARCH64_AppleSilicon",
-  "pattern_nodes": [
-
-  ]
-}

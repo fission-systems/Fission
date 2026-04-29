@@ -31,13 +31,7 @@ impl RuntimeSleighFrontend {
 
         let native_backend = if let Some(ref _c) = compiled {
             let spec_root = crate::compiler::generated_root_for_entry_spec(&entry.path).ok();
-            let dylib_name = if cfg!(target_os = "windows") {
-                "native_backend.dll"
-            } else if cfg!(target_os = "macos") {
-                "native_backend.dylib"
-            } else {
-                "native_backend.so"
-            };
+            let dylib_name = crate::compiler::native_backend_library_name();
 
             spec_root.and_then(|root| {
                 let path = root.join(dylib_name);

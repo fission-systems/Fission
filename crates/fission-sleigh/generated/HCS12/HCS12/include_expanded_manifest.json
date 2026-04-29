@@ -1,9 +1,0 @@
-{
-  "arch": "HCS12",
-  "entry_spec": "HCS12.slaspec",
-  "entry_id": "HCS12",
-  "include_manifest": [
-    "HCS12.slaspec@0",
-    "HCS_HC12.sinc@1"
-  ]
-}

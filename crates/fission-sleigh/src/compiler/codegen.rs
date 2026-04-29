@@ -1030,13 +1030,12 @@ fn rust_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use tempfile::tempdir;
 
     use super::*;
     use crate::compiler::{
-        compile_frontend_for_entry_spec, generated_root_for_entry_spec, x86_64_entry_spec_path,
+        compile_frontend_for_entry_spec, generated_root_for_entry_spec, sleigh_build_cache_root,
+        x86_64_entry_spec_path,
     };
 
     #[test]
@@ -1060,18 +1059,31 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_generated_artifacts_match_renderer_output() {
+    fn generated_root_is_build_cache_not_checked_in_source() {
+        let cache_root = sleigh_build_cache_root();
+        let generated_root =
+            generated_root_for_entry_spec(&x86_64_entry_spec_path()).expect("generated root");
+        assert!(
+            generated_root.starts_with(&cache_root),
+            "generated artifacts must live under build cache, got {} outside {}",
+            generated_root.display(),
+            cache_root.display()
+        );
+    }
+
+    #[test]
+    fn generated_artifacts_round_trip_through_build_cache_directory() {
         let compiled =
             compile_frontend_for_entry_spec(&x86_64_entry_spec_path()).expect("compile frontend");
         let artifacts = render_generated_artifacts(&compiled).expect("render artifacts");
-        let root =
-            generated_root_for_entry_spec(&x86_64_entry_spec_path()).expect("generated root");
+        let dir = tempdir().expect("tempdir");
+        write_generated_artifacts(dir.path(), &artifacts).expect("write artifacts");
         for artifact in artifacts.artifacts {
-            let path = root.join(&artifact.relative_path);
-            let checked_in = fs::read_to_string(&path)
-                .unwrap_or_else(|_| panic!("missing checked-in artifact {}", path.display()));
+            let path = dir.path().join(&artifact.relative_path);
+            let written = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("missing generated artifact {}", path.display()));
             assert_eq!(
-                checked_in,
+                written,
                 artifact.contents,
                 "artifact mismatch at {}",
                 path.display()

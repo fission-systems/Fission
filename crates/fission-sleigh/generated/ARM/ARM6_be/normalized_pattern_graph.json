@@ -1,8 +1,0 @@
-{
-  "arch": "ARM",
-  "entry_spec": "ARM6_be.slaspec",
-  "entry_id": "ARM6_be",
-  "pattern_nodes": [
-
-  ]
-}

@@ -1,8 +1,0 @@
-{
-  "arch": "CP1600",
-  "entry_spec": "CP1600.slaspec",
-  "entry_id": "CP1600",
-  "include_manifest": [
-    "CP1600.slaspec@0"
-  ]
-}

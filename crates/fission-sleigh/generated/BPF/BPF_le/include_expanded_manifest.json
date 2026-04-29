@@ -1,9 +1,0 @@
-{
-  "arch": "BPF",
-  "entry_spec": "BPF_le.slaspec",
-  "entry_id": "BPF_le",
-  "include_manifest": [
-    "BPF_le.slaspec@0",
-    "BPF.sinc@1"
-  ]
-}
