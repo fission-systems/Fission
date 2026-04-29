@@ -342,3 +342,45 @@ Commit scope notes:
 - Benchmark output artifacts remain validation evidence and are not committed by default.
 - Ghidra project DB directories under `benchmark/binary/**/*_ghidra` remain generated state and are not staged.
 - COFF/ELF/PE sample binaries and the corpus manifest are staged because they are the checked-in compiler-option loader smoke corpus.
+
+## Update: Raw Ghidra FIDBF DBHandle Decoder
+
+This wave removed the remaining marker/compatibility path in `fission-signatures` and made raw Ghidra `.fidbf` records the only successful FID database source.
+
+Implementation highlights:
+
+- Added a read-only raw DBHandle decoder for Ghidra `LocalBufferFile`-backed `.fidbf` files.
+- Added Ghidra field primitive decoding for `Byte`, `Short`, `Int`, `Long`, `String`, `Binary`, boolean, and fixed-width fields.
+- Added FID-specific table decoding for:
+  - `Libraries Table`
+  - `Strings Table`
+  - `Functions Table`
+  - `Inferior Table`
+  - `Superior Table`
+- Expanded `FidbfLibrary` with language version, language minor version, and compiler spec id from the actual Libraries table.
+- Expanded `FidbfFunction` with `specific_hash_additional_size`, `domain_path`, raw `flags`, `auto_pass`, `auto_fail`, `force_specific`, and `force_relation`.
+- Removed filename-derived language inference. Language/compiler metadata now comes only from decoded Libraries table records.
+- Removed the old marker-only raw `.fidbf` success path. Marker-only bytes now fail closed as malformed/unsupported.
+- Removed the legacy SQLite `.fidbf` parser and `rusqlite` dependency. SQLite-marked `.fidbf` input now returns typed `UnsupportedSqliteFidDatabase`.
+- Kept packed `.fidb` as typed `UnsupportedPackedFidDatabase`.
+- Updated FID matching so `force_specific` requires exact specific-hash match, and `force_relation` is fail-closed until relation context validation is implemented.
+
+Validation evidence:
+
+```text
+cargo check -p fission-signatures --target-dir target/codex-fidbf-raw
+cargo test -p fission-signatures --target-dir target/codex-fidbf-raw -- --test-threads=1
+cargo check -p fission-static --target-dir target/codex-fidbf-raw
+cargo check -p fission-cli --target-dir target/codex-fidbf-raw
+cargo build --release -p fission-cli --target-dir target/codex-fidbf-raw
+cargo tree -i rusqlite
+```
+
+Results:
+
+```text
+fission-signatures tests: 24 passed
+cargo tree -i rusqlite: package ID specification `rusqlite` did not match any packages
+```
+
+The exact remaining owner is FID hash input parity. Database records are now decoded from the raw DBHandle tables; functions that cannot supply exact hash inputs must still be reported as typed unsupported rather than receiving approximate `StrongFid` matches.

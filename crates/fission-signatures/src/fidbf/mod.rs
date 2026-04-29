@@ -1,5 +1,8 @@
 pub mod loader;
 pub mod parser;
+mod raw_db;
+mod raw_fields;
+mod tables;
 pub mod types;
 
 pub use loader::{discover_fidbf_paths, parse_all_fidbf_for_arch};

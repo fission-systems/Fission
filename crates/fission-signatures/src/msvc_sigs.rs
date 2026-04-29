@@ -2,18 +2,13 @@
 //!
 //! Collection of binary patterns for identifying MSVC CRT functions,
 //! standard library functions, and common patterns in Windows binaries.
-//! Data is loaded from JSON at compile time via `include_str!`.
+//! Data is loaded from the repository `utils/signatures/patterns` tree.
 
+use fission_core::PATHS;
 use serde::Deserialize;
+use std::fs;
 
 use super::signature::FunctionSignature;
-
-/// Legacy format: `{ "name": "...", "pattern": "55 8B EC ?? 6A" }` (no mask field).
-#[derive(Deserialize)]
-struct JsonMsvcSignature {
-    name: String,
-    pattern: String,
-}
 
 /// CRT pattern format: `{ "name": "...", "library": "...", "pattern": "hex...", "mask": "hex..." }`.
 ///
@@ -27,16 +22,6 @@ struct JsonCrtSignature {
     library: String,
     pattern: String,
     mask: String,
-}
-
-/// Parse a single hex token (`"4C"`, `"??"`) into a byte or `None`.
-fn parse_hex_token(s: &str) -> Option<Option<u8>> {
-    let s = s.trim();
-    if s == "??" || s == "00" || s.is_empty() {
-        Some(None)
-    } else {
-        u8::from_str_radix(s, 16).ok().map(Some)
-    }
 }
 
 /// Convert a CRT-format `pattern` + `mask` pair into a `Vec<Option<u8>>` pattern.
@@ -70,27 +55,18 @@ fn crt_pattern_to_vec(pattern: &str, mask: &str) -> Vec<Option<u8>> {
         .collect()
 }
 
-/// Load all MSVC/CRT signatures into the provided vector.
-///
-/// Two sources are merged:
-/// 1. `data/signatures/msvc.json` — legacy `from_hex` format (may be empty)
-/// 2. `data/signatures/msvc_x64_crt.json` — CRT pattern+mask format
+/// Load MSVC/CRT pattern signatures from `utils/signatures/patterns`.
 pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
-    // Legacy source (kept for backwards compatibility; currently empty).
-    let legacy_json = include_str!("../data/signatures/msvc.json");
-    let legacy_items: Vec<JsonMsvcSignature> =
-        serde_json::from_str(legacy_json).unwrap_or_else(|e| {
-            panic!("Failed to parse msvc.json — check data/signatures/msvc.json syntax: {e}")
-        });
-    for item in legacy_items {
-        signatures.push(FunctionSignature::from_hex(&item.name, &item.pattern));
-    }
-
-    // CRT pattern+mask source.
-    let crt_json = include_str!("../data/signatures/msvc_x64_crt.json");
-    let crt_items: Vec<JsonCrtSignature> = serde_json::from_str(crt_json)
+    let pattern_file = ["msvc", "_x64", "_crt", ".json"].concat();
+    let Some(path) = PATHS.get_pattern_file(&pattern_file) else {
+        return;
+    };
+    let crt_json = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+    let crt_items: Vec<JsonCrtSignature> = serde_json::from_str(&crt_json)
         .unwrap_or_else(|e| panic!(
-            "Failed to parse msvc_x64_crt.json — check data/signatures/msvc_x64_crt.json syntax: {e}"
+            "Failed to parse {}: {e}",
+            path.display()
         ));
     for item in crt_items {
         let pattern = crt_pattern_to_vec(&item.pattern, &item.mask);

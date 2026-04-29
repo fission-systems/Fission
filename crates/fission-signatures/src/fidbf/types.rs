@@ -6,6 +6,9 @@ pub struct FidbfLibrary {
     pub variant: String,
     pub ghidra_version: String,
     pub language_id: String,
+    pub language_version: i32,
+    pub language_minor_version: i32,
+    pub compiler_spec_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -18,12 +21,21 @@ pub struct FidbfFunction {
     pub code_unit_size: u32,
     pub entry_point: u64,
     pub has_terminator: bool,
+    pub specific_hash_additional_size: u8,
+    pub domain_path: String,
+    pub flags: u8,
+    pub auto_pass: bool,
+    pub auto_fail: bool,
+    pub force_specific: bool,
+    pub force_relation: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FidbfRelationType {
     Call,
     Jump,
+    Inferior,
+    Superior,
     Unknown(i32),
 }
 
@@ -32,6 +44,8 @@ impl From<i32> for FidbfRelationType {
         match value {
             0 => Self::Call,
             1 => Self::Jump,
+            2 => Self::Inferior,
+            3 => Self::Superior,
             other => Self::Unknown(other),
         }
     }
@@ -137,6 +151,8 @@ impl FidbfDatabase {
         let mut results: Vec<FidbfMatch> = self
             .find_by_full_hash(full_hash)
             .into_iter()
+            .filter(|func| !func.force_relation)
+            .filter(|func| !func.force_specific || func.specific_hash == specific_hash)
             .filter_map(|func| {
                 let score = self.score_match(func, specific_hash);
                 if score >= FID_ACCEPT_THRESHOLD {

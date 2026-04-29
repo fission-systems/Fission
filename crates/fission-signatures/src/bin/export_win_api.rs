@@ -1,8 +1,11 @@
-use fission_signatures::win_api::WIN_API_DB;
+use fission_signatures::SIGNATURE_RESOURCES;
 use std::io::{self, Write};
 
 fn main() -> io::Result<()> {
-    let mut sigs: Vec<_> = WIN_API_DB.iter().collect();
+    let mut sigs: Vec<_> = SIGNATURE_RESOURCES
+        .api_signatures()
+        .map_err(|e| io::Error::other(e.to_string()))?
+        .collect();
     sigs.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut out = io::BufWriter::new(io::stdout());
