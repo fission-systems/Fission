@@ -43,9 +43,9 @@ pub use ir::{
     CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher,
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
     CompiledSemanticTemplate, CompiledSlaConstructorIdentity, CompiledSlaDecodeStatus,
-    CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition,
-    CompiledSubtable, CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef,
-    CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
+    CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable,
+    CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl,
+    ControlFlowClass, PatternConstraint,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{

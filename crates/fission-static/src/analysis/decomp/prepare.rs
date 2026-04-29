@@ -7,7 +7,7 @@ use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 #[cfg(feature = "native_decomp")]
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 #[cfg(feature = "native_decomp")]
-use fission_signatures::WIN_API_DB;
+use fission_signatures::SIGNATURE_RESOURCES;
 
 #[cfg(feature = "native_decomp")]
 use std::collections::BTreeMap;
@@ -45,18 +45,16 @@ pub struct PrepareOptions<'a> {
     pub timeout_ms: Option<u64>,
     /// When set, per-step timings are written here (e.g. for `--benchmark` JSON).
     pub timings: Option<&'a mut PrepareTimings>,
-    /// Pre-serialized Win API signatures JSON. When set, used directly for set_signatures_json
-    /// instead of serializing WIN_API_DB per-call (avoids redundant work in parallel workers).
+    /// Pre-serialized API signatures JSON. When set, used directly for set_signatures_json
+    /// instead of serializing signature resources per-call (avoids redundant work in parallel workers).
     pub signatures_json: Option<&'a str>,
 }
 
 #[cfg(feature = "native_decomp")]
-/// Serialize Win API signatures to JSON once. Use for parallel workers to avoid
+/// Serialize API signatures to JSON once. Use for parallel workers to avoid
 /// redundant serialization per worker.
-pub fn serialize_win_api_signatures_json() -> Option<Arc<str>> {
-    serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>())
-        .ok()
-        .map(Arc::from)
+pub fn serialize_api_signatures_json() -> Option<Arc<str>> {
+    SIGNATURE_RESOURCES.api_signatures_json().map(Arc::from)
 }
 
 #[cfg(feature = "native_decomp")]
@@ -255,11 +253,11 @@ pub fn prepare_native_decompiler_for_binary<'a>(
 ) -> Result<()> {
     let total_start = Instant::now();
 
-    // Inject Win API signatures for type back-propagation (before load_binary is fine)
+    // Inject API signatures for type back-propagation (before load_binary is fine)
     let json_owned: Option<String> = options
         .signatures_json
         .is_none()
-        .then(|| serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>()).ok())
+        .then(|| SIGNATURE_RESOURCES.api_signatures_json())
         .and_then(|o| o);
     let json_ref: Option<&str> = options.signatures_json.or_else(|| json_owned.as_deref());
     if let Some(json) = json_ref {

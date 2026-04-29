@@ -159,6 +159,15 @@ entry_id: BPF_le
 - LDXB_MSH [none] BPF.sinc:122
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d326c99ad68062ee op_count=0
+- joff: [none] BPF.sinc:133
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=87791b4f5cd248f3 op_count=0
+- jtoff: [none] BPF.sinc:134
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=87791b4f5cd248f3 op_count=0
+- jfoff: [none] BPF.sinc:135
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=87791b4f5cd248f3 op_count=0
 - JA [branch] BPF.sinc:137
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ecc160ea8fa27cc2 op_count=0

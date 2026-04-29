@@ -348,6 +348,9 @@ export default function BottomPanel({
                                     <th>Address</th>
                                     <th>Library</th>
                                     <th>Function</th>
+                                    <th>Kind</th>
+                                    <th>Origin</th>
+                                    <th>Section</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -360,6 +363,9 @@ export default function BottomPanel({
                                         <td className="data-table__addr">{imp.address}</td>
                                         <td className="data-table__lib">{imp.library}</td>
                                         <td className="data-table__name">{imp.name}</td>
+                                        <td className="data-table__enc">{imp.kind ?? "import"}</td>
+                                        <td className="data-table__enc">{imp.origin ?? "—"}</td>
+                                        <td className="data-table__enc">{imp.source_section ?? "—"}</td>
                                     </tr>
                                 ))}
                             </tbody>

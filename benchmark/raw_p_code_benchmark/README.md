@@ -46,6 +46,31 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
   --output-dir benchmark/artifacts/raw_p_code_benchmark/canonical-latest
 ```
 
+The x86-64 canonical exact-parity gate is stricter and should be used before
+promoting SLEIGH runtime changes:
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --fission-release \
+  --require-perfect-canonical \
+  --expected-full-match 44 \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/perfect-gate-latest
+```
+
+This gate fails the command unless comparable semantic rows are exact:
+
+- `average_similarity_score = 1.0`
+- `average_parity_ratio = 1.0`
+- `compat_emitter_used = 0`
+- `fake_placeholder_op = 0`
+- `invalid_pcode_shape = 0`
+- successful rows use only decoded `.sla ConstructTpl` (`sla_construct_tpl`)
+
+Rows classified as `both_decode_error_or_padding` stay visible in bucket totals,
+but are excluded from the semantic similarity denominator.
+
 Target one feature slice from the same manifest:
 
 ```bash

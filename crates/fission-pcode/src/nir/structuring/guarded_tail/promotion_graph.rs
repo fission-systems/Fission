@@ -12,10 +12,9 @@ impl<'a> PreviewBuilder<'a> {
             .take(if_idx)
             .filter(|stmt| {
                 Self::stmt_contains_goto_label(stmt, label) > 0
-                    && Self::stmt_is_single_branch_if_to_label(stmt, label)
-                        .is_some_and(|entry_cond| {
-                            Self::exprs_share_guard_family(candidate_cond, entry_cond)
-                        })
+                    && Self::stmt_is_single_branch_if_to_label(stmt, label).is_some_and(
+                        |entry_cond| Self::exprs_share_guard_family(candidate_cond, entry_cond),
+                    )
             })
             .count()
     }

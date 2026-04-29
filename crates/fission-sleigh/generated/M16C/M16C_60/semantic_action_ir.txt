@@ -3,6 +3,462 @@ arch: M16C
 entry_spec: M16C_60.slaspec
 entry_id: M16C_60
 
+- src4dsp8: [none] M16C_60.slaspec:302
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f663bcdff78566f2 op_count=0
+- src4dsp8: [none] M16C_60.slaspec:303
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68450ded21d3b4b1 op_count=0
+- src4dsp16: [none] M16C_60.slaspec:304
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=74da8d17101f47cd op_count=0
+- src4B: [none] M16C_60.slaspec:311
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=26f4e2a192ae99a5 op_count=0
+- src4B: [none] M16C_60.slaspec:312
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=39855636bff6c1d0 op_count=0
+- src4B: [none] M16C_60.slaspec:313
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a898d0916a19e56c op_count=0
+- src4B: [none] M16C_60.slaspec:314
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9242585e7a00f2e7 op_count=0
+- src4B: [none] M16C_60.slaspec:315
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0539a22db1f86a3a op_count=0
+- src4B: [none] M16C_60.slaspec:316
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8cee19435e59acc9 op_count=0
+- src4W: [none] M16C_60.slaspec:319
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fef1f8c6be9ada8 op_count=0
+- src4W: [none] M16C_60.slaspec:320
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4a7f78df43492b2 op_count=0
+- src4W: [none] M16C_60.slaspec:321
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94aa1f2bbd3b6bbb op_count=0
+- src4W: [none] M16C_60.slaspec:322
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aa985c2a616ee3e8 op_count=0
+- src4W: [none] M16C_60.slaspec:323
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c897364c258bd3dd op_count=0
+- src4W: [none] M16C_60.slaspec:324
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8faa87747ee5f0aa op_count=0
+- skipBytesBeforeDst4: [none] M16C_60.slaspec:331
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeDst4: [none] M16C_60.slaspec:332
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeDst4: [none] M16C_60.slaspec:333
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeDst4: [none] M16C_60.slaspec:334
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- dst4dsp8: [none] M16C_60.slaspec:337
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f663bcdff78566f2 op_count=0
+- dst4dsp8: [none] M16C_60.slaspec:338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68450ded21d3b4b1 op_count=0
+- dst4dsp16: [none] M16C_60.slaspec:339
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=74da8d17101f47cd op_count=0
+- dst4B: [none] M16C_60.slaspec:346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ac668e0c9b354e6 op_count=0
+- dst4B: [none] M16C_60.slaspec:347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29742a83273ca6c1 op_count=0
+- dst4B: [none] M16C_60.slaspec:348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2edd527a9a716753 op_count=0
+- dst4B: [none] M16C_60.slaspec:349
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4537293b0bb91c9 op_count=0
+- dst4B: [none] M16C_60.slaspec:350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a696341ec3413d04 op_count=0
+- dst4B: [none] M16C_60.slaspec:351
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8cee19435e59acc9 op_count=0
+- dst4W: [none] M16C_60.slaspec:354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bff829f6decc8cd9 op_count=0
+- dst4W: [none] M16C_60.slaspec:355
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b67d9f556a3e0fb op_count=0
+- dst4W: [none] M16C_60.slaspec:356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=edda361f6495b024 op_count=0
+- dst4W: [none] M16C_60.slaspec:357
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19c6bd426ebce516 op_count=0
+- dst4W: [none] M16C_60.slaspec:358
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e244d8d02ed8abb3 op_count=0
+- dst4W: [none] M16C_60.slaspec:359
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8faa87747ee5f0aa op_count=0
+- dst4L: [none] M16C_60.slaspec:362
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ade6dff6d45ad7bf op_count=0
+- dst4L: [none] M16C_60.slaspec:363
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=04c2a78bb3ad3e23 op_count=0
+- dst4L: [none] M16C_60.slaspec:364
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a03ab6de0f55abee op_count=0
+- dst4L: [none] M16C_60.slaspec:365
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bec39ef3ce89d1cc op_count=0
+- dst4L: [none] M16C_60.slaspec:366
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=10aad57f87d05c01 op_count=0
+- dst4L: [none] M16C_60.slaspec:367
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4bf229b843252bf8 op_count=0
+- dst4T: [none] M16C_60.slaspec:370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e12263394519dd15 op_count=0
+- dst4T: [none] M16C_60.slaspec:371
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41cb61d9a04af827 op_count=0
+- dst4T: [none] M16C_60.slaspec:372
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c21483608c89fcf2 op_count=0
+- dst4T: [none] M16C_60.slaspec:373
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f51cb34de2bb782f op_count=0
+- dst4A: [none] M16C_60.slaspec:376
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=57c8e0c94436e460 op_count=0
+- dst4A: [none] M16C_60.slaspec:377
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5684139dac9ecc79 op_count=0
+- dst4A: [none] M16C_60.slaspec:378
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af832fb75e0cffb8 op_count=0
+- dst4Ax: [none] M16C_60.slaspec:383
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b67d9f556a3e0fb op_count=0
+- dst4B_afterSrc4: [none] M16C_60.slaspec:388
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c60cab6769a413b op_count=0
+- dst4W_afterSrc4: [none] M16C_60.slaspec:390
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c204ab6766383c6 op_count=0
+- dst4L_afterSrc4: [none] M16C_60.slaspec:392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c67cab676a05fe9 op_count=0
+- skipBytesBeforeDst2: [none] M16C_60.slaspec:404
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeDst2: [none] M16C_60.slaspec:405
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- dst2B: [none] M16C_60.slaspec:410
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9cd804299043e1d2 op_count=0
+- dst2B: [none] M16C_60.slaspec:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9cca7c299038705e op_count=0
+- dst2B: [none] M16C_60.slaspec:412
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0410d2d33afab773 op_count=0
+- dst2B: [none] M16C_60.slaspec:413
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee3069e51186686b op_count=0
+- dst2B: [none] M16C_60.slaspec:414
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8cee19435e59acc9 op_count=0
+- dst3B: [none] M16C_60.slaspec:419
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9cd804299043e1d2 op_count=0
+- dst3B: [none] M16C_60.slaspec:420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9cca7c299038705e op_count=0
+- dst3B: [none] M16C_60.slaspec:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0410d2d33afab773 op_count=0
+- dst3B: [none] M16C_60.slaspec:422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee3069e51186686b op_count=0
+- dst3B: [none] M16C_60.slaspec:423
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8cee19435e59acc9 op_count=0
+- dst3B_afterDsp8: [none] M16C_60.slaspec:428
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=956a21b6732388e6 op_count=0
+- dsp8spB: [none] M16C_60.slaspec:438
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=510154332c11b788 op_count=0
+- dsp8spW: [none] M16C_60.slaspec:440
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e139bb289cee9507 op_count=0
+- dsp20A0B: [none] M16C_60.slaspec:443
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b1911aabb00b620c op_count=0
+- dsp20A0W: [none] M16C_60.slaspec:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a1f57e8995c4c75b op_count=0
+- memBaseAx: [none] M16C_60.slaspec:452
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b67d9f556a3e0fb op_count=0
+- regBase: [none] M16C_60.slaspec:455
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bff829f6decc8cd9 op_count=0
+- regBase: [none] M16C_60.slaspec:456
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b67d9f556a3e0fb op_count=0
+- memBase: [none] M16C_60.slaspec:459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b037385d8789e9da op_count=0
+- memBase: [none] M16C_60.slaspec:460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27c7c7e42937e9d3 op_count=0
+- memBase: [none] M16C_60.slaspec:461
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0dc774acffec715b op_count=0
+- memBase: [none] M16C_60.slaspec:462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=88153fa4eeec9a0f op_count=0
+- memBase11: [none] M16C_60.slaspec:464
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0410d2d33afab773 op_count=0
+- regBit: [none] M16C_60.slaspec:468
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1302b4ebab95d2d op_count=0
+- memBit: [none] M16C_60.slaspec:471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42553d3e430d9239 op_count=0
+- memBit: [none] M16C_60.slaspec:472
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c57ed275d6ee938 op_count=0
+- srcImm3: [none] M16C_60.slaspec:478
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=509d7966c873093f op_count=0
+- srcImm8: [none] M16C_60.slaspec:479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2f9490d9fc38a5f op_count=0
+- srcImm16: [none] M16C_60.slaspec:480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=74da8d17101f47cd op_count=0
+- srcSimm8: [none] M16C_60.slaspec:482
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9390e637362e1462 op_count=0
+- srcSimm16: [none] M16C_60.slaspec:483
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90700bb36d15e880 op_count=0
+- srcSimm4_0407: [none] M16C_60.slaspec:487
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5a5fa3c6663cd3bf op_count=0
+- srcSimm4_0003: [none] M16C_60.slaspec:488
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=db5c4ba50e2aa51f op_count=0
+- srcSimm4Shift_0407: [none] M16C_60.slaspec:492
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- srcSimm4Shift_0407: [none] M16C_60.slaspec:493
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- srcSimm4Shift_0003: [none] M16C_60.slaspec:494
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- srcSimm4Shift_0003: [none] M16C_60.slaspec:495
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- srcZero8: [none] M16C_60.slaspec:497
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d019d0e89d27b27 op_count=0
+- srcIntNum: [none] M16C_60.slaspec:500
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32d4a997298c47b5 op_count=0
+- abs20offset: [none] M16C_60.slaspec:505
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e2b27b7c180c5836 op_count=0
+- abs20offsetW: [none] M16C_60.slaspec:507
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=282cce9cee49e6d9 op_count=0
+- abs16offset: [none] M16C_60.slaspec:509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8cee19435e59acc9 op_count=0
+- rel16offset1: [none] M16C_60.slaspec:512
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69e2bd1cf979b333 op_count=0
+- rel8offset1: [none] M16C_60.slaspec:514
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69e2bd1cf979b333 op_count=0
+- rel8offset2: [none] M16C_60.slaspec:515
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69e2bd1cf979b333 op_count=0
+- rel3offset2: [none] M16C_60.slaspec:517
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69e2bd1cf979b333 op_count=0
+- reloffset_dst4W: [none] M16C_60.slaspec:519
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ff21cc638a84d76 op_count=0
+- reloffset_dst4L: [none] M16C_60.slaspec:521
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e481c67df458ee5 op_count=0
+- reloffset_dst4T: [none] M16C_60.slaspec:523
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e7375cc04c878dd op_count=0
+- cnd8: [none] M16C_60.slaspec:528
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=349e8f43f13b2a21 op_count=0
+- cnd8: [none] M16C_60.slaspec:529
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df158bf827dc3423 op_count=0
+- cnd8: [none] M16C_60.slaspec:530
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15c8721f1f0340a0 op_count=0
+- cnd8: [none] M16C_60.slaspec:531
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cdbf13cbbfb624b5 op_count=0
+- cnd8: [none] M16C_60.slaspec:532
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=421f9978789f2757 op_count=0
+- cnd8: [none] M16C_60.slaspec:533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fc79522ffdaf928 op_count=0
+- cnd8: [none] M16C_60.slaspec:534
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d65230f0a9877ca op_count=0
+- cnd8: [none] M16C_60.slaspec:535
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cb85d2f6e0980d8 op_count=0
+- cnd8: [none] M16C_60.slaspec:536
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27e71a245f9e2c5a op_count=0
+- cnd8: [none] M16C_60.slaspec:537
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8bf3b0a560298909 op_count=0
+- cnd8: [none] M16C_60.slaspec:538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82e943727aeff3ec op_count=0
+- cnd8: [none] M16C_60.slaspec:539
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2cd75492f1f0160e op_count=0
+- cnd8: [none] M16C_60.slaspec:540
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df48e90378956c71 op_count=0
+- cnd8: [none] M16C_60.slaspec:541
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=821eb51f4505e293 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:543
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=349e8f43f13b2a21 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:544
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df158bf827dc3423 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:545
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15c8721f1f0340a0 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:546
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cdbf13cbbfb624b5 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:547
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cb85d2f6e0980d8 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:548
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27e71a245f9e2c5a op_count=0
+- b2cnd4: [none] M16C_60.slaspec:549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8bf3b0a560298909 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:550
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82e943727aeff3ec op_count=0
+- b2cnd4: [none] M16C_60.slaspec:551
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=421f9978789f2757 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:552
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fc79522ffdaf928 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:553
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d65230f0a9877ca op_count=0
+- b2cnd4: [none] M16C_60.slaspec:554
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2cd75492f1f0160e op_count=0
+- b2cnd4: [none] M16C_60.slaspec:555
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df48e90378956c71 op_count=0
+- b2cnd4: [none] M16C_60.slaspec:556
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=821eb51f4505e293 op_count=0
+- b2cnd3: [none] M16C_60.slaspec:559
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=421f9978789f2757 op_count=0
+- b2cnd3: [none] M16C_60.slaspec:560
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fc79522ffdaf928 op_count=0
+- b2cnd3: [none] M16C_60.slaspec:561
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d65230f0a9877ca op_count=0
+- b2cnd3: [none] M16C_60.slaspec:562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2cd75492f1f0160e op_count=0
+- b2cnd3: [none] M16C_60.slaspec:563
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df48e90378956c71 op_count=0
+- b2cnd3: [none] M16C_60.slaspec:564
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=821eb51f4505e293 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:566
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cb85d2f6e0980d8 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27e71a245f9e2c5a op_count=0
+- b1cnd3: [none] M16C_60.slaspec:568
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8bf3b0a560298909 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=82e943727aeff3ec op_count=0
+- b1cnd3: [none] M16C_60.slaspec:570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=349e8f43f13b2a21 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=df158bf827dc3423 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:572
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15c8721f1f0340a0 op_count=0
+- b1cnd3: [none] M16C_60.slaspec:573
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cdbf13cbbfb624b5 op_count=0
+- flagBit: [none] M16C_60.slaspec:578
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cfe150e89cf5e38 op_count=0
+- flagBit: [none] M16C_60.slaspec:579
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a79cb05aa397f95 op_count=0
+- flagBit: [none] M16C_60.slaspec:580
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1fda952035c23916 op_count=0
+- flagBit: [none] M16C_60.slaspec:581
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2358b177d102ea3 op_count=0
+- flagBit: [none] M16C_60.slaspec:582
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=12bde52f9482e61c op_count=0
+- flagBit: [none] M16C_60.slaspec:583
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=80398b26b4ecec49 op_count=0
+- flagBit: [none] M16C_60.slaspec:584
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13e765413f042c7a op_count=0
+- flagBit: [none] M16C_60.slaspec:585
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3c844b38388b37f7 op_count=0
 - ABS.B [none] M16C_60.slaspec:591
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b145cecb6b7753c3 op_count=0
@@ -411,7 +867,7 @@ entry_id: M16C_60
 - INT [call] M16C_60.slaspec:1860
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e04533eade57137d op_count=0
-- INTO [mixed] M16C_60.slaspec:1874
+- INTO [call] M16C_60.slaspec:1874
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=59f85d7346bc091b op_count=0
 - J^b1cnd3 [conditional_branch] M16C_60.slaspec:1888
@@ -498,6 +954,9 @@ entry_id: M16C_60
 - LDE.W [none] M16C_60.slaspec:2120
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4062a8283b7c84db op_count=0
+- ldIntbVal: [none] M16C_60.slaspec:2129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77ba8a8180a42615 op_count=0
 - LDINTB [none] M16C_60.slaspec:2134
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=30dbf66eab43849c op_count=0
@@ -678,6 +1137,57 @@ entry_id: M16C_60
 - POPC [none] M16C_60.slaspec:2517
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3b909c6c79c0b2cd op_count=0
+- popRegFB: [none] M16C_60.slaspec:2522
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6738acbddd59c92e op_count=0
+- popRegFB: [none] M16C_60.slaspec:2523
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- popRegSB: [none] M16C_60.slaspec:2525
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cefc35ba20d17e67 op_count=0
+- popRegSB: [none] M16C_60.slaspec:2526
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f6862d4f8a6ab0b7 op_count=0
+- popRegA1: [none] M16C_60.slaspec:2528
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1960a7532a8f5bdf op_count=0
+- popRegA1: [none] M16C_60.slaspec:2529
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=957d6a4f52f5d134 op_count=0
+- popRegA0: [none] M16C_60.slaspec:2530
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0ea4c32cf8b791fd op_count=0
+- popRegA0: [none] M16C_60.slaspec:2531
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31a1cc4fab76bdf5 op_count=0
+- popRegR3: [none] M16C_60.slaspec:2533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6824f4d36b25762 op_count=0
+- popRegR3: [none] M16C_60.slaspec:2534
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31a4cc4fab78f3cc op_count=0
+- popRegR2: [none] M16C_60.slaspec:2535
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77b5d1c514720677 op_count=0
+- popRegR2: [none] M16C_60.slaspec:2536
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d87c14f4ea658e2 op_count=0
+- popRegR1: [none] M16C_60.slaspec:2537
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=38e9fb92e67502a3 op_count=0
+- popRegR1: [none] M16C_60.slaspec:2538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d84394f4ea33bf3 op_count=0
+- popRegR0: [none] M16C_60.slaspec:2539
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0d0264a449eaee67 op_count=0
+- popRegR0: [none] M16C_60.slaspec:2540
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d81414f4ea113b4 op_count=0
+- popRegList: [none] M16C_60.slaspec:2542
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d7dc14f4e9e045d op_count=0
 - POPM [none] M16C_60.slaspec:2544
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=5051c9b986037f5b op_count=0
@@ -705,6 +1215,57 @@ entry_id: M16C_60
 - PUSHC [none] M16C_60.slaspec:2588
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=68f5d8503b1db74e op_count=0
+- pushRegR0: [none] M16C_60.slaspec:2593
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=037c8e2d37b0c1dd op_count=0
+- pushRegR0: [none] M16C_60.slaspec:2594
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- pushRegR1: [none] M16C_60.slaspec:2595
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8f70943caa5075df op_count=0
+- pushRegR1: [none] M16C_60.slaspec:2596
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33901460721f8d80 op_count=0
+- pushRegR2: [none] M16C_60.slaspec:2597
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7799ac1beba6e565 op_count=0
+- pushRegR2: [none] M16C_60.slaspec:2598
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=338d1460721d57a9 op_count=0
+- pushRegR3: [none] M16C_60.slaspec:2599
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=222e911c892300b7 op_count=0
+- pushRegR3: [none] M16C_60.slaspec:2600
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=339714607225ac2e op_count=0
+- pushRegA0: [none] M16C_60.slaspec:2602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c01ae30c01cee77b op_count=0
+- pushRegA0: [none] M16C_60.slaspec:2603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33939c607222aa6f op_count=0
+- pushRegA1: [none] M16C_60.slaspec:2604
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f35d30cfc7686c0 op_count=0
+- pushRegA1: [none] M16C_60.slaspec:2605
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8efc096014e7cc31 op_count=0
+- pushRegSB: [none] M16C_60.slaspec:2607
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ee9e1791c0d8d3c op_count=0
+- pushRegSB: [none] M16C_60.slaspec:2608
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8eff896014eadb88 op_count=0
+- pushRegFB: [none] M16C_60.slaspec:2610
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5abe7143d19ed8fe op_count=0
+- pushRegFB: [none] M16C_60.slaspec:2611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2beff3606e193c45 op_count=0
+- pushRegList: [none] M16C_60.slaspec:2613
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ccb53060382cb8fa op_count=0
 - PUSHM [none] M16C_60.slaspec:2615
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fd103eb05e940002 op_count=0
@@ -897,6 +1458,12 @@ entry_id: M16C_60
 - STE.W [none] M16C_60.slaspec:3400
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1b7ccf84abde345b op_count=0
+- steA1A0B: [none] M16C_60.slaspec:3406
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=768e8b46287c76b4 op_count=0
+- steA1A0W: [none] M16C_60.slaspec:3408
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4f2d8d9650f5d23 op_count=0
 - STE.B [none] M16C_60.slaspec:3411
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4c19c4fac118604d op_count=0
@@ -909,6 +1476,21 @@ entry_id: M16C_60
 - STZ [conditional_branch] M16C_60.slaspec:3433
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4c5c9df25f09b7ed op_count=0
+- skipBytesBeforeImm82: [none] M16C_60.slaspec:3439
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeImm82: [none] M16C_60.slaspec:3440
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeImm82: [none] M16C_60.slaspec:3441
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- skipBytesBeforeImm82: [none] M16C_60.slaspec:3442
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- stzxImm82: [none] M16C_60.slaspec:3444
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2f9490d9fc38a5f op_count=0
 - STZX [none] M16C_60.slaspec:3446
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ba135be86f39f20c op_count=0

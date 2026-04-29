@@ -3,6 +3,117 @@ arch: Loongarch
 entry_spec: loongarch64_f64.slaspec
 entry_id: loongarch64_f64
 
+- RD: [none] loongarch_main.sinc:394
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20c168e7fecb0ccc op_count=0
+- RDsrc: [none] loongarch_main.sinc:396
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20c168e7fecb0ccc op_count=0
+- RDsrc: [none] loongarch_main.sinc:397
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RJ: [none] loongarch_main.sinc:399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20d5e0e7fedc81be op_count=0
+- RJsrc: [none] loongarch_main.sinc:401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20d5e0e7fedc81be op_count=0
+- RJsrc: [none] loongarch_main.sinc:402
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RK: [none] loongarch_main.sinc:404
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20d268e7fed97fff op_count=0
+- RKsrc: [none] loongarch_main.sinc:406
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20d268e7fed97fff op_count=0
+- RKsrc: [none] loongarch_main.sinc:407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RD32: [none] loongarch_main.sinc:409
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e36904ac1b8d6a7b op_count=0
+- RD32src: [none] loongarch_main.sinc:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e36904ac1b8d6a7b op_count=0
+- RD32src: [none] loongarch_main.sinc:412
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- RJ32: [none] loongarch_main.sinc:414
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5e134de3463f925 op_count=0
+- RJ32src: [none] loongarch_main.sinc:416
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5e134de3463f925 op_count=0
+- RJ32src: [none] loongarch_main.sinc:417
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- RK32: [none] loongarch_main.sinc:419
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15008cd5d4bb06ec op_count=0
+- RK32src: [none] loongarch_main.sinc:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15008cd5d4bb06ec op_count=0
+- RK32src: [none] loongarch_main.sinc:422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- FRD: [none] loongarch_main.sinc:426
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1d156c0347eaf8e op_count=0
+- FRJ: [none] loongarch_main.sinc:428
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1bcdec0346d3a9c op_count=0
+- FRK: [none] loongarch_main.sinc:430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e1b95ec0346a2b45 op_count=0
+- addu16_imm: [none] loongarch_main.sinc:443
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f6e8c45865348e2c op_count=0
+- alsl_shift: [none] loongarch_main.sinc:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfb9cc739e321f9c op_count=0
+- ldst_addr: [none] loongarch_main.sinc:447
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91e0685b1c1a25f1 op_count=0
+- ldstptr_addr: [none] loongarch_main.sinc:449
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fb7489b9ea555498 op_count=0
+- ldstx_addr: [none] loongarch_main.sinc:451
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9999a0d16f321a31 op_count=0
+- pcadd2: [none] loongarch_main.sinc:453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e11fff62a9535fb2 op_count=0
+- pcadd12: [none] loongarch_main.sinc:454
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e11fff62a9535fb2 op_count=0
+- pcala12: [none] loongarch_main.sinc:456
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e11fff62a9535fb2 op_count=0
+- pcadd18: [none] loongarch_main.sinc:458
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e11fff62a9535fb2 op_count=0
+- Rel16: [none] loongarch_main.sinc:460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel21: [none] loongarch_main.sinc:461
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel26: [none] loongarch_main.sinc:462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- RelJ16: [none] loongarch_main.sinc:464
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2a5eb4255df339d op_count=0
+- simm12i: [none] loongarch_main.sinc:466
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddf339240618014d op_count=0
+- simm32i: [none] loongarch_main.sinc:468
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddf339240618014d op_count=0
+- simm52i: [none] loongarch_main.sinc:470
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddf339240618014d op_count=0
 - add.w [none] loongarch32_instructions.sinc:9
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=433feb0fbc98b062 op_count=0
@@ -420,6 +531,9 @@ entry_id: loongarch64_f64
 - stle.w [conditional_branch] loongarch32_instructions.sinc:1134
   semantic_ops: bound_check_exception
   semantic_template: status=unsupported_template action_hash=de9f61a50dcce6c4 op_count=1
+- csr: [none] loongarch32_instructions.sinc:1150
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f595a170d3d4e8b7 op_count=0
 - csrxchg [none] loongarch32_instructions.sinc:1154
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a9ddea3c1b7e7a15 op_count=0
@@ -429,12 +543,33 @@ entry_id: loongarch64_f64
 - csrrw [none] loongarch32_instructions.sinc:1165
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=65352a6791307d7a op_count=0
+- cache_obj: [none] loongarch32_instructions.sinc:1174
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3d9fa39d1237d098 op_count=0
+- op_type: [none] loongarch32_instructions.sinc:1175
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d019d0e89d27b27 op_count=0
+- op_type: [none] loongarch32_instructions.sinc:1176
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a844b05aa42ad9a op_count=0
+- op_type: [none] loongarch32_instructions.sinc:1177
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1fd0952035b9e491 op_count=0
+- op_type: [none] loongarch32_instructions.sinc:1178
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d23213177d0d2ce4 op_count=0
 - cacop [none] loongarch32_instructions.sinc:1180
   semantic_ops: cacop
   semantic_template: status=unsupported_template action_hash=5df562591d0b6fae op_count=1
+- level: [none] loongarch32_instructions.sinc:1186
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31b4966ff2c5f447 op_count=0
 - lddir [none] loongarch32_instructions.sinc:1189
   semantic_ops: lddir
   semantic_template: status=unsupported_template action_hash=b1d30e9a1f32d029 op_count=1
+- seq: [none] loongarch32_instructions.sinc:1195
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31b4966ff2c5f447 op_count=0
 - ldpte [none] loongarch32_instructions.sinc:1198
   semantic_ops: ldpte
   semantic_template: status=unsupported_template action_hash=ef005a4b538ad7d1 op_count=1
@@ -903,6 +1038,45 @@ entry_id: loongarch64_f64
 - fstx.s [none] loongarch_float.sinc:413
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bbf119c3d170673c op_count=0
+- SNaN: [none] loongarch_float.sinc:417
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SNaN: [none] loongarch_float.sinc:418
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fcond: [none] loongarch_float.sinc:420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=51464ebd91335fcd op_count=0
+- fcond: [none] loongarch_float.sinc:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b85e8a6e322923e op_count=0
+- fcond: [none] loongarch_float.sinc:422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0bf60173f1a408d6 op_count=0
+- fcond: [none] loongarch_float.sinc:423
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a978204795aa0e1 op_count=0
+- fcond: [none] loongarch_float.sinc:424
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=edc193d7ca8ed3c8 op_count=0
+- fcond: [none] loongarch_float.sinc:425
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f68286427a0d6de3 op_count=0
+- fcond: [none] loongarch_float.sinc:426
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91fc03aa89ff8d67 op_count=0
+- fcond: [none] loongarch_float.sinc:427
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9043c81e78104906 op_count=0
+- fcond: [none] loongarch_float.sinc:428
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa3355e52b7db552 op_count=0
+- fcond: [none] loongarch_float.sinc:429
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fba1f55a12066056 op_count=0
+- fcond: [none] loongarch_float.sinc:430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=25bd0411e844ccab op_count=0
 - fcmp.^fcond^".s" [none] loongarch_float.sinc:434
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=69620e62cf5772eb op_count=0
@@ -1035,6 +1209,45 @@ entry_id: loongarch64_f64
 - fnmsub.d [none] loongarch_double.sinc:283
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9153bffba9b5218f op_count=0
+- dSNaN: [none] loongarch_double.sinc:287
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- dSNaN: [none] loongarch_double.sinc:288
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- dcond: [none] loongarch_double.sinc:290
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4308f9cebf84d6a7 op_count=0
+- dcond: [none] loongarch_double.sinc:291
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=740471f8f253fc80 op_count=0
+- dcond: [none] loongarch_double.sinc:292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fac2bf91918a2068 op_count=0
+- dcond: [none] loongarch_double.sinc:293
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ba14f2efb5df5177 op_count=0
+- dcond: [none] loongarch_double.sinc:294
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f1ebf9cfa5c8f49e op_count=0
+- dcond: [none] loongarch_double.sinc:295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ea3bc1b8cb12a3dd op_count=0
+- dcond: [none] loongarch_double.sinc:296
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bcc0d071a11e0d91 op_count=0
+- dcond: [none] loongarch_double.sinc:297
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e892b5286876850c op_count=0
+- dcond: [none] loongarch_double.sinc:298
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9476724061c0e7c op_count=0
+- dcond: [none] loongarch_double.sinc:299
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b7ce822d2b2dfad0 op_count=0
+- dcond: [none] loongarch_double.sinc:300
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0879ce7a3656a15d op_count=0
 - fcmp.^dcond^".d" [none] loongarch_double.sinc:304
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=44fc6f993a13f1e3 op_count=0

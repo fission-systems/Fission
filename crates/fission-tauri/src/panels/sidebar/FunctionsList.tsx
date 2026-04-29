@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import type { FunctionDto } from "../../types";
+import type { FunctionCategory, FunctionDto } from "../../types";
 
-type CategoryFilter = "all" | "import" | "export" | "internal";
+type CategoryFilter = "all" | FunctionCategory;
 
 interface FunctionsListProps {
     functions: FunctionDto[];
@@ -57,6 +57,9 @@ export default function FunctionsList({
         import: functions.filter((f) => f.category === "import").length,
         export: functions.filter((f) => f.category === "export").length,
         internal: functions.filter((f) => f.category === "internal").length,
+        thunk: functions.filter((f) => f.category === "thunk").length,
+        external: functions.filter((f) => f.category === "external").length,
+        debug: functions.filter((f) => f.category === "debug").length,
     }), [functions]);
 
     const filtered = useMemo(() => {
@@ -67,11 +70,26 @@ export default function FunctionsList({
             list = list.filter(
                 (f) =>
                     f.name.toLowerCase().includes(lc) ||
-                    f.address.toLowerCase().includes(lc),
+                    f.address.toLowerCase().includes(lc) ||
+                    (f.kind ?? "").toLowerCase().includes(lc) ||
+                    (f.origin ?? "").toLowerCase().includes(lc) ||
+                    (f.source_section ?? "").toLowerCase().includes(lc),
             );
         }
         return list;
     }, [functions, filter, category]);
+
+    const categoryLabel = (cat: CategoryFilter) => {
+        switch (cat) {
+            case "all": return "All";
+            case "import": return "Imp";
+            case "export": return "Exp";
+            case "internal": return "Code";
+            case "thunk": return "Thunk";
+            case "external": return "Ext";
+            case "debug": return "Dbg";
+        }
+    };
 
     if (functions.length === 0 && !loading) {
         return (
@@ -88,13 +106,13 @@ export default function FunctionsList({
             {/* Category filter */}
             {functions.length > 0 && (
                 <div className="functions-list__cats">
-                    {(["all", "import", "export", "internal"] as CategoryFilter[]).map((cat) => (
+                    {(["all", "internal", "export", "import", "thunk", "external", "debug"] as CategoryFilter[]).map((cat) => (
                         <button
                             key={cat}
                             className={`functions-list__cat-btn ${category === cat ? "functions-list__cat-btn--active" : ""}`}
                             onClick={() => setCategory(cat)}
                         >
-                            {cat === "all" ? "All" : cat === "import" ? "Imp" : cat === "export" ? "Exp" : "Int"}
+                            {categoryLabel(cat)}
                             <span className="functions-list__cat-count">{counts[cat]}</span>
                         </button>
                     ))}
@@ -122,12 +140,16 @@ export default function FunctionsList({
                         onContextMenu={(e) => handleContextMenu(e, f)}
                     >
                         <span className="functions-list__item-addr">{f.address}</span>
-                        <span className="functions-list__item-name">{f.name}</span>
-                        {f.category === "import" && (
-                            <span className="functions-list__item-badge functions-list__item-badge--import">IMP</span>
-                        )}
-                        {f.category === "export" && (
-                            <span className="functions-list__item-badge functions-list__item-badge--export">EXP</span>
+                        <span className="functions-list__item-main">
+                            <span className="functions-list__item-name">{f.name}</span>
+                            <span className="functions-list__item-meta">
+                                {[f.kind, f.origin, f.source_section].filter(Boolean).join(" · ") || "code"}
+                            </span>
+                        </span>
+                        {f.category !== "internal" && (
+                            <span className={`functions-list__item-badge functions-list__item-badge--${f.category}`}>
+                                {categoryLabel(f.category).toUpperCase()}
+                            </span>
                         )}
                     </div>
                 ))}
@@ -193,4 +215,3 @@ export default function FunctionsList({
         </div>
     );
 }
-

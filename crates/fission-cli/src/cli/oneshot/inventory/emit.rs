@@ -31,7 +31,7 @@ use fission_ffi::DecompilerNative;
 #[cfg(feature = "native_decomp")]
 use fission_static::analysis::decomp::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    serialize_win_api_signatures_json,
+    serialize_api_signatures_json,
 };
 
 #[cfg(not(feature = "native_decomp"))]
@@ -56,7 +56,7 @@ fn prepare_inventory_decompiler(
     let gdt_path_owned = fission_core::PATHS
         .get_gdt_path(binary.is_64bit)
         .and_then(|p| p.to_str().map(String::from));
-    let signatures_json = serialize_win_api_signatures_json();
+    let signatures_json = serialize_api_signatures_json();
     let mut prepare_timings = PrepareTimings::default();
     let mut prepare_options = PrepareOptions {
         compiler_id: compiler_id.as_deref(),

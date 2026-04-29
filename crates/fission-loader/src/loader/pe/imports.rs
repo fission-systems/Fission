@@ -1,5 +1,4 @@
 use super::*;
-use std::io::Cursor;
 
 pub(super) fn parse_imports(
     loader: &PeLoaderImpl<'_>,
@@ -15,21 +14,21 @@ pub(super) fn parse_imports(
     let mut functions = Vec::new();
     let mut symbol_map = std::collections::HashMap::new();
 
-    let mut cursor = Cursor::new(loader.data);
-    cursor.set_position(offset);
+    let mut descriptor_offset = offset;
 
     loop {
-        let desc = ImportDescriptor::read_le(&mut cursor).unwrap_or(ImportDescriptor {
-            original_first_thunk: 0,
-            time_date_stamp: 0,
-            forwarder_chain: 0,
-            name: 0,
-            first_thunk: 0,
-        });
+        let desc = loader
+            .read_import_descriptor(descriptor_offset)
+            .unwrap_or(ImportDescriptor {
+                original_first_thunk: 0,
+                name: 0,
+                first_thunk: 0,
+            });
 
         if desc.original_first_thunk == 0 && desc.first_thunk == 0 {
             break;
         }
+        descriptor_offset = descriptor_offset.saturating_add(20);
 
         let name_offset = loader
             .rva_to_file_offset(desc.name, image_base)
@@ -55,15 +54,13 @@ pub(super) fn parse_imports(
         let iat_base_rva = desc.first_thunk;
 
         if thunk_offset != 0 {
-            let mut thunk_cursor = Cursor::new(loader.data);
-            thunk_cursor.set_position(thunk_offset);
-
             let mut idx = 0;
             loop {
+                let thunk_entry_offset = thunk_offset + (idx * if loader.is_64bit { 8 } else { 4 });
                 let raw_thunk = if loader.is_64bit {
-                    u64::read_le(&mut thunk_cursor).unwrap_or(0)
+                    loader.read_u64(thunk_entry_offset).unwrap_or(0)
                 } else {
-                    u32::read_le(&mut thunk_cursor).unwrap_or(0) as u64
+                    loader.read_u32(thunk_entry_offset).unwrap_or(0) as u64
                 };
 
                 if raw_thunk == 0 {

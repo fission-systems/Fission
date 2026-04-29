@@ -7,7 +7,7 @@ use fission_pcode::{
     NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext, PcodeFunction,
     PcodeOpcode,
 };
-use fission_signatures::WIN_API_DB;
+use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::win_types::WindowsStructures;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeSet, HashMap};
@@ -528,7 +528,10 @@ fn build_nir_call_param_rules(
             acc
         },
     );
-    for sig in WIN_API_DB.iter() {
+    let Ok(signatures) = SIGNATURE_RESOURCES.api_signatures() else {
+        return call_param_rules;
+    };
+    for sig in signatures {
         for (arg_index, param) in sig.params.iter().enumerate() {
             let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
                 continue;

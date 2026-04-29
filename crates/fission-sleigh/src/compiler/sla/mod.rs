@@ -12,8 +12,8 @@ use super::ir::{
     CompiledDisjointPattern, CompiledDisplayOperand, CompiledDisplayOperandKind,
     CompiledDisplayPiece, CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl,
     CompiledLabelRef, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandSpec,
-    CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode, CompiledSpaceRef,
-    CompiledSpaceTpl, CompiledSlaDecodeStatus, CompiledVarnodeTpl,
+    CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode,
+    CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl, CompiledVarnodeTpl,
 };
 
 pub const GHIDRA_SLA_MAGIC: &[u8; 3] = b"sla";

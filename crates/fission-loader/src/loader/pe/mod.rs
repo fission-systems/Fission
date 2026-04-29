@@ -1,50 +1,138 @@
+use crate::loader::reader::ByteReader;
 use crate::loader::types::{
     DataBuffer, LoadedBinary, LoadedBinaryBuilder, PdbDebugInfo, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
-use binrw::BinRead;
 use fission_core::architecture::select_pe_load_spec;
-use std::io::Cursor;
 
 mod coff;
 mod imports;
 mod pdata;
-pub mod schema;
-use schema::*;
 
 pub struct PeLoader;
 
 const IMAGE_DEBUG_TYPE_CODEVIEW: u32 = 2;
+const PE_SIGNATURE_SIZE: usize = 4;
+const PE_FILE_HEADER_SIZE: usize = 20;
+const PE_SECTION_HEADER_SIZE: usize = 40;
+const PE32_MAGIC: u16 = 0x10b;
+const PE32_PLUS_MAGIC: u16 = 0x20b;
+const IMAGE_DEBUG_DIRECTORY_SIZE: usize = 28;
+
+#[derive(Clone, Debug)]
+struct RawPeFile {
+    file_header: PeFileHeader,
+    optional_header: PeOptionalHeader,
+    section_headers: Vec<PeSectionHeader>,
+}
+
+#[derive(Clone, Debug)]
+struct PeFileHeader {
+    machine: u16,
+    pointer_to_symbol_table: u32,
+    number_of_symbols: u32,
+}
+
+#[derive(Clone, Debug)]
+enum PeOptionalHeader {
+    Pe32(PeOptionalHeaderData),
+    Pe32Plus(PeOptionalHeaderData),
+}
+
+#[derive(Clone, Debug)]
+struct PeOptionalHeaderData {
+    image_base: u64,
+    address_of_entry_point: u32,
+    section_alignment: u32,
+    data_directories: Vec<DataDirectory>,
+}
+
+#[derive(Clone, Debug)]
+struct PeSectionHeader {
+    name: String,
+    virtual_size: u32,
+    virtual_address: u32,
+    size_of_raw_data: u32,
+    pointer_to_raw_data: u32,
+    characteristics: u32,
+}
+
+#[derive(Clone, Debug)]
+struct DataDirectory {
+    virtual_address: u32,
+    size: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ExportDirectory {
+    number_of_functions: u32,
+    number_of_names: u32,
+    address_of_functions: u32,
+    address_of_names: u32,
+    address_of_name_ordinals: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ImportDescriptor {
+    original_first_thunk: u32,
+    name: u32,
+    first_thunk: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ImageDebugDirectory {
+    debug_type: u32,
+    size_of_data: u32,
+    address_of_raw_data: u32,
+    pointer_to_raw_data: u32,
+}
+
+#[derive(Clone, Debug)]
+struct CoffSymbol {
+    name: SymbolName,
+    value: u32,
+    section_number: i16,
+    symbol_type: u16,
+    storage_class: u8,
+    number_of_aux_symbols: u8,
+}
+
+#[derive(Clone, Debug)]
+enum SymbolName {
+    ShortName(String),
+    LongName(u32),
+}
+
+mod storage_class {
+    pub const C_EXT: u8 = 2;
+    pub const C_STAT: u8 = 3;
+}
+
+mod symbol_type {
+    pub const DT_FCN: u16 = 2;
+}
 
 impl PeLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
-        let mut cursor = Cursor::new(bytes);
-        let pe_file = PeFile::read_le(&mut cursor)
-            .map_err(|e| err!(loader, "binrw PE parse error: {}", e))?;
+        let pe_file = parse_pe_file(bytes)?;
 
         // Extract basic info
-        let is_64bit = match pe_file.nt_headers.optional_header {
-            OptionalHeader::Pe32(_) => false,
-            OptionalHeader::Pe32Plus(_) => true,
+        let is_64bit = match pe_file.optional_header {
+            PeOptionalHeader::Pe32(_) => false,
+            PeOptionalHeader::Pe32Plus(_) => true,
         };
 
-        let (image_base, entry_point, _section_alignment) =
-            match &pe_file.nt_headers.optional_header {
-                OptionalHeader::Pe32(opt) => (
-                    opt.image_base as u64,
-                    opt.image_base as u64 + opt.address_of_entry_point as u64,
-                    opt.section_alignment,
-                ),
-                OptionalHeader::Pe32Plus(opt) => (
-                    opt.image_base,
-                    opt.image_base + opt.address_of_entry_point as u64,
-                    opt.section_alignment,
-                ),
-            };
+        let (image_base, entry_point, _section_alignment) = match &pe_file.optional_header {
+            PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => (
+                opt.image_base,
+                opt.image_base + opt.address_of_entry_point as u64,
+                opt.section_alignment,
+            ),
+        };
 
         let (architecture, load_spec) =
-            select_pe_load_spec(pe_file.nt_headers.file_header.machine, is_64bit, image_base)
+            select_pe_load_spec(pe_file.file_header.machine, is_64bit, image_base)
                 .map_err(|e| err!(loader, "{}", e))?;
 
         // Sections
@@ -76,13 +164,8 @@ impl PeLoader {
 
         // Parse Exports
         // DataDirectory[0] is Export Table
-        let export_dir_rva = match &pe_file.nt_headers.optional_header {
-            OptionalHeader::Pe32(opt) => opt
-                .data_directories
-                .get(0)
-                .map(|d| d.virtual_address)
-                .unwrap_or(0),
-            OptionalHeader::Pe32Plus(opt) => opt
+        let export_dir_rva = match &pe_file.optional_header {
+            PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => opt
                 .data_directories
                 .get(0)
                 .map(|d| d.virtual_address)
@@ -97,13 +180,8 @@ impl PeLoader {
 
         // Parse Imports
         // DataDirectory[1] is Import Table
-        let import_dir_rva = match &pe_file.nt_headers.optional_header {
-            OptionalHeader::Pe32(opt) => opt
-                .data_directories
-                .get(1)
-                .map(|d| d.virtual_address)
-                .unwrap_or(0),
-            OptionalHeader::Pe32Plus(opt) => opt
+        let import_dir_rva = match &pe_file.optional_header {
+            PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => opt
                 .data_directories
                 .get(1)
                 .map(|d| d.virtual_address)
@@ -118,7 +196,7 @@ impl PeLoader {
         }
 
         // Parse COFF Symbol Table (if present)
-        let file_header = &pe_file.nt_headers.file_header;
+        let file_header = &pe_file.file_header;
         if file_header.pointer_to_symbol_table != 0 && file_header.number_of_symbols > 0 {
             if let Ok(coff_functions) = loader.parse_coff_symbols(
                 file_header.pointer_to_symbol_table,
@@ -170,8 +248,8 @@ impl PeLoader {
         // Parse Exception Directory (PDATA) for x64 binaries - contains function metadata
         // DataDirectory[3] is Exception Table (.pdata section)
         if is_64bit {
-            let exception_dir_rva = match &pe_file.nt_headers.optional_header {
-                OptionalHeader::Pe32Plus(opt) => opt
+            let exception_dir_rva = match &pe_file.optional_header {
+                PeOptionalHeader::Pe32Plus(opt) => opt
                     .data_directories
                     .get(3)
                     .map(|d| (d.virtual_address, d.size))
@@ -196,17 +274,16 @@ impl PeLoader {
             }
         }
 
-        let pdb_debug_info = match &pe_file.nt_headers.optional_header {
-            OptionalHeader::Pe32(opt) => opt.data_directories.get(6).and_then(|dir| {
-                loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)
-            }),
-            OptionalHeader::Pe32Plus(opt) => opt.data_directories.get(6).and_then(|dir| {
-                loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)
-            }),
+        let pdb_debug_info = match &pe_file.optional_header {
+            PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => {
+                opt.data_directories.get(6).and_then(|dir| {
+                    loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)
+                })
+            }
         };
 
         LoadedBinaryBuilder::new(path, data)
-            .format("PE (binrw)")
+            .format("PE")
             .architecture(architecture)
             .load_spec(load_spec)
             .entry_point(entry_point)
@@ -240,6 +317,119 @@ pub fn detect_pe_is_64bit(bytes: &[u8]) -> bool {
     }
 }
 
+fn parse_pe_file(bytes: &[u8]) -> Result<RawPeFile> {
+    let reader = ByteReader::little(bytes);
+    if reader.slice(0, 2)? != b"MZ" {
+        return Err(err!(loader, "MalformedHeader: missing DOS MZ signature"));
+    }
+    let pe_offset = reader.u32(0x3c)? as usize;
+    if reader.slice(pe_offset, PE_SIGNATURE_SIZE)? != b"PE\0\0" {
+        return Err(err!(loader, "MalformedHeader: missing PE signature"));
+    }
+
+    let file_header_offset = pe_offset + PE_SIGNATURE_SIZE;
+    let machine = reader.u16(file_header_offset)?;
+    let number_of_sections = reader.u16(file_header_offset + 2)?;
+    let pointer_to_symbol_table = reader.u32(file_header_offset + 8)?;
+    let number_of_symbols = reader.u32(file_header_offset + 12)?;
+    let size_of_optional_header = reader.u16(file_header_offset + 16)? as usize;
+    let optional_header_offset = file_header_offset + PE_FILE_HEADER_SIZE;
+    let magic = reader.u16(optional_header_offset)?;
+
+    let optional_header = match magic {
+        PE32_MAGIC => {
+            let data = parse_optional_header_data(
+                &reader,
+                optional_header_offset,
+                false,
+                size_of_optional_header,
+            )?;
+            PeOptionalHeader::Pe32(data)
+        }
+        PE32_PLUS_MAGIC => {
+            let data = parse_optional_header_data(
+                &reader,
+                optional_header_offset,
+                true,
+                size_of_optional_header,
+            )?;
+            PeOptionalHeader::Pe32Plus(data)
+        }
+        _ => {
+            return Err(err!(
+                loader,
+                "MalformedHeader: unsupported PE optional header magic 0x{magic:x}"
+            ));
+        }
+    };
+
+    let section_table_offset = optional_header_offset
+        .checked_add(size_of_optional_header)
+        .ok_or_else(|| err!(loader, "MalformedHeader: PE section table offset overflow"))?;
+    let mut section_headers = Vec::with_capacity(number_of_sections as usize);
+    for idx in 0..number_of_sections as usize {
+        let offset = section_table_offset + idx * PE_SECTION_HEADER_SIZE;
+        section_headers.push(PeSectionHeader {
+            name: reader.fixed_string(offset, 8)?,
+            virtual_size: reader.u32(offset + 8)?,
+            virtual_address: reader.u32(offset + 12)?,
+            size_of_raw_data: reader.u32(offset + 16)?,
+            pointer_to_raw_data: reader.u32(offset + 20)?,
+            characteristics: reader.u32(offset + 36)?,
+        });
+    }
+
+    Ok(RawPeFile {
+        file_header: PeFileHeader {
+            machine,
+            pointer_to_symbol_table,
+            number_of_symbols,
+        },
+        optional_header,
+        section_headers,
+    })
+}
+
+fn parse_optional_header_data(
+    reader: &ByteReader<'_>,
+    optional_header_offset: usize,
+    is_pe32_plus: bool,
+    size_of_optional_header: usize,
+) -> Result<PeOptionalHeaderData> {
+    let address_of_entry_point = reader.u32(optional_header_offset + 16)?;
+    let image_base = if is_pe32_plus {
+        reader.u64(optional_header_offset + 24)?
+    } else {
+        u64::from(reader.u32(optional_header_offset + 28)?)
+    };
+    let section_alignment = reader.u32(optional_header_offset + 32)?;
+    let (number_offset, directories_offset) = if is_pe32_plus {
+        (optional_header_offset + 108, optional_header_offset + 112)
+    } else {
+        (optional_header_offset + 92, optional_header_offset + 96)
+    };
+    let number_of_rva_and_sizes = reader.u32(number_offset).unwrap_or(0) as usize;
+    let max_dirs_by_size = size_of_optional_header
+        .saturating_sub(directories_offset.saturating_sub(optional_header_offset))
+        / 8;
+    let directory_count = number_of_rva_and_sizes.min(max_dirs_by_size).min(32);
+    let mut data_directories = Vec::with_capacity(directory_count);
+    for idx in 0..directory_count {
+        let offset = directories_offset + idx * 8;
+        data_directories.push(DataDirectory {
+            virtual_address: reader.u32(offset)?,
+            size: reader.u32(offset + 4)?,
+        });
+    }
+
+    Ok(PeOptionalHeaderData {
+        image_base,
+        address_of_entry_point,
+        section_alignment,
+        data_directories,
+    })
+}
+
 struct PeLoaderImpl<'a> {
     data: &'a [u8],
     sections: &'a [SectionInfo],
@@ -253,18 +443,73 @@ impl<'a> PeLoaderImpl<'a> {
         None
     }
 
-    // Proper helpers utilizing raw data access
-    fn read_at<T: BinRead>(&self, offset: u64) -> Result<T>
-    where
-        for<'b> T::Args<'b>: Default,
-    {
-        let mut cursor = Cursor::new(self.data);
-        cursor.set_position(offset);
-        T::read_le(&mut cursor).map_err(|e| err!(loader, "binrw read error: {}", e))
-    }
-
     fn read_string_at(&self, offset: u64) -> String {
         extract_cstring(self.data, offset as usize)
+    }
+
+    fn reader(&self) -> ByteReader<'a> {
+        ByteReader::little(self.data)
+    }
+
+    fn read_u16(&self, offset: u64) -> Result<u16> {
+        self.reader().u16(offset as usize)
+    }
+
+    fn read_i16(&self, offset: u64) -> Result<i16> {
+        self.reader().i16(offset as usize)
+    }
+
+    fn read_u32(&self, offset: u64) -> Result<u32> {
+        self.reader().u32(offset as usize)
+    }
+
+    fn read_u64(&self, offset: u64) -> Result<u64> {
+        self.reader().u64(offset as usize)
+    }
+
+    fn read_import_descriptor(&self, offset: u64) -> Result<ImportDescriptor> {
+        Ok(ImportDescriptor {
+            original_first_thunk: self.read_u32(offset)?,
+            name: self.read_u32(offset + 12)?,
+            first_thunk: self.read_u32(offset + 16)?,
+        })
+    }
+
+    fn read_export_directory(&self, offset: u64) -> Result<ExportDirectory> {
+        Ok(ExportDirectory {
+            number_of_functions: self.read_u32(offset + 20)?,
+            number_of_names: self.read_u32(offset + 24)?,
+            address_of_functions: self.read_u32(offset + 28)?,
+            address_of_names: self.read_u32(offset + 32)?,
+            address_of_name_ordinals: self.read_u32(offset + 36)?,
+        })
+    }
+
+    fn read_debug_directory(&self, offset: u64) -> Result<ImageDebugDirectory> {
+        Ok(ImageDebugDirectory {
+            debug_type: self.read_u32(offset + 12)?,
+            size_of_data: self.read_u32(offset + 16)?,
+            address_of_raw_data: self.read_u32(offset + 20)?,
+            pointer_to_raw_data: self.read_u32(offset + 24)?,
+        })
+    }
+
+    fn read_coff_symbol(&self, offset: u64) -> Result<CoffSymbol> {
+        let name_bytes = self.reader().slice(offset as usize, 8)?;
+        let name = if name_bytes[0..4] == [0, 0, 0, 0] {
+            SymbolName::LongName(u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()))
+        } else {
+            let len = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
+            SymbolName::ShortName(String::from_utf8_lossy(&name_bytes[..len]).to_string())
+        };
+        Ok(CoffSymbol {
+            name,
+            value: self.read_u32(offset + 8)?,
+            section_number: self.read_i16(offset + 12)?,
+            symbol_type: self.read_u16(offset + 14)?,
+            storage_class: self.reader().u8(offset as usize + 16)?,
+            number_of_aux_symbols: self.reader().u8(offset as usize + 17)?,
+        })
     }
 
     fn rva_to_file_offset(&self, rva: u32, image_base: u64) -> Option<u64> {
@@ -299,7 +544,7 @@ impl<'a> PeLoaderImpl<'a> {
         let offset = self
             .rva_to_file_offset(dir_rva, image_base)
             .ok_or(err!(loader, "Invalid Export Dir RVA"))?;
-        let export_dir: ExportDirectory = self.read_at(offset)?;
+        let export_dir = self.read_export_directory(offset)?;
 
         let mut functions = Vec::new();
 
@@ -316,16 +561,14 @@ impl<'a> PeLoaderImpl<'a> {
                 .unwrap_or(0);
 
             if names_offset != 0 && ordinals_offset != 0 && funcs_offset != 0 {
-                let mut names_cursor = Cursor::new(self.data);
-                names_cursor.set_position(names_offset);
-
-                let mut ords_cursor = Cursor::new(self.data);
-                ords_cursor.set_position(ordinals_offset);
-
-                for _ in 0..export_dir.number_of_names.min(10000) {
+                for idx in 0..export_dir.number_of_names.min(10000) {
                     // Safety limit
-                    let name_rva = u32::read_le(&mut names_cursor).unwrap_or(0);
-                    let ordinal = u16::read_le(&mut ords_cursor).unwrap_or(0);
+                    let name_rva = self
+                        .read_u32(names_offset + u64::from(idx) * 4)
+                        .unwrap_or(0);
+                    let ordinal = self
+                        .read_u16(ordinals_offset + u64::from(idx) * 2)
+                        .unwrap_or(0);
 
                     if name_rva != 0 {
                         let name_offset =
@@ -337,7 +580,7 @@ impl<'a> PeLoaderImpl<'a> {
                         let func_idx = ordinal as u64; // Indices are 0-based from table start
                         if func_idx < export_dir.number_of_functions as u64 {
                             let entry_offset = funcs_offset + func_idx * 4;
-                            let func_rva = self.read_at::<u32>(entry_offset).unwrap_or(0);
+                            let func_rva = self.read_u32(entry_offset).unwrap_or(0);
 
                             if func_rva != 0 {
                                 functions.push(crate::loader::types::FunctionInfo {
@@ -410,10 +653,10 @@ impl<'a> PeLoaderImpl<'a> {
             return None;
         }
         let dir_offset = self.rva_to_file_offset(dir_rva, image_base)?;
-        let entry_count = (dir_size as usize) / std::mem::size_of::<ImageDebugDirectory>();
+        let entry_count = (dir_size as usize) / IMAGE_DEBUG_DIRECTORY_SIZE;
         for idx in 0..entry_count {
-            let entry: ImageDebugDirectory = self
-                .read_at(dir_offset + (idx * std::mem::size_of::<ImageDebugDirectory>()) as u64)
+            let entry = self
+                .read_debug_directory(dir_offset + (idx * IMAGE_DEBUG_DIRECTORY_SIZE) as u64)
                 .ok()?;
             if entry.debug_type != IMAGE_DEBUG_TYPE_CODEVIEW || entry.size_of_data < 4 {
                 continue;
@@ -529,7 +772,7 @@ mod tests {
         let Ok(bin) = result else {
             panic!("PE parsing should succeed")
         };
-        assert_eq!(bin.format, "PE (binrw)");
+        assert_eq!(bin.format, "PE");
         assert_eq!(bin.sections.len(), 1);
         assert_eq!(bin.sections[0].name, ".text");
         assert_eq!(bin.sections[0].is_executable, true);

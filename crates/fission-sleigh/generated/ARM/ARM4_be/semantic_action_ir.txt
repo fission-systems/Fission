@@ -3,6 +3,1056 @@ arch: ARM
 entry_spec: ARM4_be.slaspec
 entry_id: ARM4_be
 
+- rn: [none] ARMinstructions.sinc:633
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa5cf7cdf2c215e6 op_count=0
+- rn: [none] ARMinstructions.sinc:634
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b4748e7618bb8b2 op_count=0
+- rm: [none] ARMinstructions.sinc:636
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa5cf7cdf2c215e6 op_count=0
+- rm: [none] ARMinstructions.sinc:637
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b3d48e76183642d op_count=0
+- rs: [none] ARMinstructions.sinc:639
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa5cf7cdf2c215e6 op_count=0
+- rs: [none] ARMinstructions.sinc:640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b51c8e76194e6b7 op_count=0
+- cc: [none] ARMinstructions.sinc:642
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c675f8e73ab406ae op_count=0
+- cc: [none] ARMinstructions.sinc:643
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90741099de6e0ebc op_count=0
+- cc: [none] ARMinstructions.sinc:644
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77f58fe70e161dda op_count=0
+- cc: [none] ARMinstructions.sinc:645
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0c972d2b4a7dff0c op_count=0
+- cc: [none] ARMinstructions.sinc:646
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5e3d14e6ff97dda7 op_count=0
+- cc: [none] ARMinstructions.sinc:647
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fc49711f0035e319 op_count=0
+- cc: [none] ARMinstructions.sinc:648
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53baebe6f91e0695 op_count=0
+- cc: [none] ARMinstructions.sinc:649
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d0ba3ec0061baab op_count=0
+- cc: [none] ARMinstructions.sinc:650
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63687d267fffe63f op_count=0
+- cc: [none] ARMinstructions.sinc:651
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=06bece6a97f2eb8f op_count=0
+- cc: [none] ARMinstructions.sinc:652
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=199850ee39f97328 op_count=0
+- cc: [none] ARMinstructions.sinc:653
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee33d12b26babdb4 op_count=0
+- cc: [none] ARMinstructions.sinc:654
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=60374c06eb45a466 op_count=0
+- cc: [none] ARMinstructions.sinc:655
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=752d763df8a8c848 op_count=0
+- COND: [conditional_branch] ARMinstructions.sinc:657
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4f6ddc7492af6ae op_count=0
+- COND: [none] ARMinstructions.sinc:658
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SBIT_CZNO: [none] ARMinstructions.sinc:666
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SBIT_CZNO: [none] ARMinstructions.sinc:667
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31fa5632e2e13dab op_count=0
+- SBIT_ZN: [none] ARMinstructions.sinc:668
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SBIT_ZN: [none] ARMinstructions.sinc:669
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=00797624e9c7722b op_count=0
+- Addr24: [none] ARMinstructions.sinc:671
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67c41a652e5b92b7 op_count=0
+- shift1: [none] ARMinstructions.sinc:697
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] ARMinstructions.sinc:700
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- mcrOperands: [none] ARMinstructions.sinc:810
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- shift2: [none] ARMinstructions.sinc:816
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5b9c582cde1fa8b op_count=0
+- shift2: [none] ARMinstructions.sinc:821
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ec757e0f53a351e op_count=0
+- shift2: [none] ARMinstructions.sinc:826
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8441e52693d8a65c op_count=0
+- shift2: [none] ARMinstructions.sinc:831
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d09432b1c119104c op_count=0
+- shift2: [none] ARMinstructions.sinc:836
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b224b1a33afc814 op_count=0
+- shift2: [none] ARMinstructions.sinc:841
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a13922e95381e4c5 op_count=0
+- shift2: [none] ARMinstructions.sinc:846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3220fe4c46e94153 op_count=0
+- shift2: [none] ARMinstructions.sinc:851
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=296ddd2fca193e20 op_count=0
+- shift3: [none] ARMinstructions.sinc:860
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=778f58c3087a9b16 op_count=0
+- shift3: [none] ARMinstructions.sinc:865
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d0322d04228b10c op_count=0
+- shift3: [none] ARMinstructions.sinc:870
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f4ce0a06d6255644 op_count=0
+- shift3: [none] ARMinstructions.sinc:875
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67f6a164f84cd081 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:947
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=214668e7ff3c708d op_count=0
+- addr2shift: [none] ARMinstructions.sinc:948
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86e511ff47f16a34 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:949
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=acdf156e6db0403c op_count=0
+- addr2shift: [none] ARMinstructions.sinc:950
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=070092568a8eb070 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:951
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=887b62db9a6a0597 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:952
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=85e3e1c11cbd2c00 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:953
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f40447f86650ca2 op_count=0
+- addr2shift: [none] ARMinstructions.sinc:954
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fa21867281a8d6ee op_count=0
+- addrmode2: [none] ARMinstructions.sinc:958
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] ARMinstructions.sinc:961
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:964
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] ARMinstructions.sinc:967
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:970
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6a447925cfa236b5 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:971
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5468ee0d0a0227f7 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:972
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e239c470eb131f9 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:973
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cebb3a5910643b6b op_count=0
+- addrmode2: [none] ARMinstructions.sinc:975
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c3e39a0ead358460 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:976
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e50e3d95077b2a6 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:977
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d7b30a2b26981074 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:978
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=83a6ff844b74bbea op_count=0
+- addrmode2: [none] ARMinstructions.sinc:980
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e0cfb80b5c7e62d op_count=0
+- addrmode2: [none] ARMinstructions.sinc:981
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c261aa77b99f7f5f op_count=0
+- addrmode2: [none] ARMinstructions.sinc:982
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b050af989db711a1 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:983
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59b2c1bcb2166853 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:985
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0e0cfb80b5c7e62d op_count=0
+- addrmode2: [none] ARMinstructions.sinc:986
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c261aa77b99f7f5f op_count=0
+- addrmode2: [none] ARMinstructions.sinc:987
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b050af989db711a1 op_count=0
+- addrmode2: [none] ARMinstructions.sinc:988
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59b2c1bcb2166853 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:997
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] ARMinstructions.sinc:1000
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1003
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] ARMinstructions.sinc:1006
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1009
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1015
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1021
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1026
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1031
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1037
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1043
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1048
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1053
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1059
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1065
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode3: [none] ARMinstructions.sinc:1070
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc15: [none] ARMinstructions.sinc:1081
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03505d84ff175e8e op_count=0
+- linc15: [none] ARMinstructions.sinc:1082
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc14: [none] ARMinstructions.sinc:1083
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ae21cfd942b8fb6d op_count=0
+- linc14: [none] ARMinstructions.sinc:1084
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ae21cfd942b8fb6d op_count=0
+- linc14: [none] ARMinstructions.sinc:1085
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc13: [none] ARMinstructions.sinc:1086
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dabefaaf438b30f4 op_count=0
+- linc13: [none] ARMinstructions.sinc:1087
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dabefaaf438b30f4 op_count=0
+- linc13: [none] ARMinstructions.sinc:1088
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc12: [none] ARMinstructions.sinc:1089
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd046a0daa4720cb op_count=0
+- linc12: [none] ARMinstructions.sinc:1090
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd046a0daa4720cb op_count=0
+- linc12: [none] ARMinstructions.sinc:1091
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc11: [none] ARMinstructions.sinc:1092
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37561a840f79ef52 op_count=0
+- linc11: [none] ARMinstructions.sinc:1093
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37561a840f79ef52 op_count=0
+- linc11: [none] ARMinstructions.sinc:1094
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc10: [none] ARMinstructions.sinc:1095
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=510cff5f116365e1 op_count=0
+- linc10: [none] ARMinstructions.sinc:1096
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=510cff5f116365e1 op_count=0
+- linc10: [none] ARMinstructions.sinc:1097
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc9: [none] ARMinstructions.sinc:1098
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5780954a63904178 op_count=0
+- linc9: [none] ARMinstructions.sinc:1099
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5780954a63904178 op_count=0
+- linc9: [none] ARMinstructions.sinc:1100
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc8: [none] ARMinstructions.sinc:1101
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a941c781a37326df op_count=0
+- linc8: [none] ARMinstructions.sinc:1102
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a941c781a37326df op_count=0
+- linc8: [none] ARMinstructions.sinc:1103
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc7: [none] ARMinstructions.sinc:1104
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6ef4af349d3b5d6 op_count=0
+- linc7: [none] ARMinstructions.sinc:1105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6ef4af349d3b5d6 op_count=0
+- linc7: [none] ARMinstructions.sinc:1106
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc6: [none] ARMinstructions.sinc:1107
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f8a1250261a01d5 op_count=0
+- linc6: [none] ARMinstructions.sinc:1108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f8a1250261a01d5 op_count=0
+- linc6: [none] ARMinstructions.sinc:1109
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc5: [none] ARMinstructions.sinc:1110
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c3450996c30f4405 op_count=0
+- linc5: [none] ARMinstructions.sinc:1111
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c3450996c30f4405 op_count=0
+- linc5: [none] ARMinstructions.sinc:1112
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc4: [none] ARMinstructions.sinc:1113
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4180330f6f740f86 op_count=0
+- linc4: [none] ARMinstructions.sinc:1114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4180330f6f740f86 op_count=0
+- linc4: [none] ARMinstructions.sinc:1115
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc3: [none] ARMinstructions.sinc:1116
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b433086355fc0423 op_count=0
+- linc3: [none] ARMinstructions.sinc:1117
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b433086355fc0423 op_count=0
+- linc3: [none] ARMinstructions.sinc:1118
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc2: [none] ARMinstructions.sinc:1119
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=430a345c29253f4f op_count=0
+- linc2: [none] ARMinstructions.sinc:1120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=430a345c29253f4f op_count=0
+- linc2: [none] ARMinstructions.sinc:1121
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc1: [none] ARMinstructions.sinc:1122
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ea3e71ef270040a op_count=0
+- linc1: [none] ARMinstructions.sinc:1123
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ea3e71ef270040a op_count=0
+- linc1: [none] ARMinstructions.sinc:1124
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- linc0: [none] ARMinstructions.sinc:1125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6aa271290f2ab75 op_count=0
+- linc0: [none] ARMinstructions.sinc:1126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c6aa271290f2ab75 op_count=0
+- linc0: [none] ARMinstructions.sinc:1127
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldlist_inc: [none] ARMinstructions.sinc:1128
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d91f5f27e62aba46 op_count=0
+- sinc15: [none] ARMinstructions.sinc:1131
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72c74dfb2347d1fc op_count=0
+- sinc15: [none] ARMinstructions.sinc:1132
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc14: [none] ARMinstructions.sinc:1133
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4fc40765b82033ab op_count=0
+- sinc14: [none] ARMinstructions.sinc:1134
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4fc40765b82033ab op_count=0
+- sinc14: [none] ARMinstructions.sinc:1135
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc13: [none] ARMinstructions.sinc:1136
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=341a65e2739759c6 op_count=0
+- sinc13: [none] ARMinstructions.sinc:1137
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=341a65e2739759c6 op_count=0
+- sinc13: [none] ARMinstructions.sinc:1138
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc12: [none] ARMinstructions.sinc:1139
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=781af657f7f25fc5 op_count=0
+- sinc12: [none] ARMinstructions.sinc:1140
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=781af657f7f25fc5 op_count=0
+- sinc12: [none] ARMinstructions.sinc:1141
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc11: [none] ARMinstructions.sinc:1142
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=145afe4c7ed01520 op_count=0
+- sinc11: [none] ARMinstructions.sinc:1143
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=145afe4c7ed01520 op_count=0
+- sinc11: [none] ARMinstructions.sinc:1144
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc10: [none] ARMinstructions.sinc:1145
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bda8f0a4dc472d4f op_count=0
+- sinc10: [none] ARMinstructions.sinc:1146
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bda8f0a4dc472d4f op_count=0
+- sinc10: [none] ARMinstructions.sinc:1147
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc9: [none] ARMinstructions.sinc:1148
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dcfeb79414d5945a op_count=0
+- sinc9: [none] ARMinstructions.sinc:1149
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dcfeb79414d5945a op_count=0
+- sinc9: [none] ARMinstructions.sinc:1150
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc8: [none] ARMinstructions.sinc:1151
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b664fdaf24374069 op_count=0
+- sinc8: [none] ARMinstructions.sinc:1152
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b664fdaf24374069 op_count=0
+- sinc8: [none] ARMinstructions.sinc:1153
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc7: [none] ARMinstructions.sinc:1154
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c69a0bc02306034 op_count=0
+- sinc7: [none] ARMinstructions.sinc:1155
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c69a0bc02306034 op_count=0
+- sinc7: [none] ARMinstructions.sinc:1156
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc6: [none] ARMinstructions.sinc:1157
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2416be96ef03da3 op_count=0
+- sinc6: [none] ARMinstructions.sinc:1158
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2416be96ef03da3 op_count=0
+- sinc6: [none] ARMinstructions.sinc:1159
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc5: [none] ARMinstructions.sinc:1160
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f8861c44e461833d op_count=0
+- sinc5: [none] ARMinstructions.sinc:1161
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f8861c44e461833d op_count=0
+- sinc5: [none] ARMinstructions.sinc:1162
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc4: [none] ARMinstructions.sinc:1163
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=954ea6f86116ee7e op_count=0
+- sinc4: [none] ARMinstructions.sinc:1164
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=954ea6f86116ee7e op_count=0
+- sinc4: [none] ARMinstructions.sinc:1165
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc3: [none] ARMinstructions.sinc:1166
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=589515c311d19863 op_count=0
+- sinc3: [none] ARMinstructions.sinc:1167
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=589515c311d19863 op_count=0
+- sinc3: [none] ARMinstructions.sinc:1168
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc2: [none] ARMinstructions.sinc:1169
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1aceff05af89abb5 op_count=0
+- sinc2: [none] ARMinstructions.sinc:1170
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1aceff05af89abb5 op_count=0
+- sinc2: [none] ARMinstructions.sinc:1171
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc1: [none] ARMinstructions.sinc:1172
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2727f1bf7e483fcc op_count=0
+- sinc1: [none] ARMinstructions.sinc:1173
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2727f1bf7e483fcc op_count=0
+- sinc1: [none] ARMinstructions.sinc:1174
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sinc0: [none] ARMinstructions.sinc:1175
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6d7b6c427bd80bc1 op_count=0
+- sinc0: [none] ARMinstructions.sinc:1176
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6d7b6c427bd80bc1 op_count=0
+- sinc0: [none] ARMinstructions.sinc:1177
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- stlist_inc: [none] ARMinstructions.sinc:1178
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c882694cbf8d9c1 op_count=0
+- ldec15: [none] ARMinstructions.sinc:1182
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=86dbab44967a40b7 op_count=0
+- ldec15: [none] ARMinstructions.sinc:1183
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec14: [none] ARMinstructions.sinc:1184
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3b2cb2e6468b9f8 op_count=0
+- ldec14: [none] ARMinstructions.sinc:1185
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3b2cb2e6468b9f8 op_count=0
+- ldec14: [none] ARMinstructions.sinc:1186
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec13: [none] ARMinstructions.sinc:1187
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5879f028e99dff4d op_count=0
+- ldec13: [none] ARMinstructions.sinc:1188
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5879f028e99dff4d op_count=0
+- ldec13: [none] ARMinstructions.sinc:1189
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec12: [none] ARMinstructions.sinc:1190
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f3a0b47401f47269 op_count=0
+- ldec12: [none] ARMinstructions.sinc:1191
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f3a0b47401f47269 op_count=0
+- ldec12: [none] ARMinstructions.sinc:1192
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec11: [none] ARMinstructions.sinc:1193
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8301b6dd6b5e1c5c op_count=0
+- ldec11: [none] ARMinstructions.sinc:1194
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8301b6dd6b5e1c5c op_count=0
+- ldec11: [none] ARMinstructions.sinc:1195
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec10: [none] ARMinstructions.sinc:1196
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac224dca0124ef87 op_count=0
+- ldec10: [none] ARMinstructions.sinc:1197
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac224dca0124ef87 op_count=0
+- ldec10: [none] ARMinstructions.sinc:1198
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec9: [none] ARMinstructions.sinc:1199
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fbb96822ba19717 op_count=0
+- ldec9: [none] ARMinstructions.sinc:1200
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fbb96822ba19717 op_count=0
+- ldec9: [none] ARMinstructions.sinc:1201
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec8: [none] ARMinstructions.sinc:1202
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=311c8ec27e4bd8ec op_count=0
+- ldec8: [none] ARMinstructions.sinc:1203
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=311c8ec27e4bd8ec op_count=0
+- ldec8: [none] ARMinstructions.sinc:1204
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec7: [none] ARMinstructions.sinc:1205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e910434f9deb919d op_count=0
+- ldec7: [none] ARMinstructions.sinc:1206
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e910434f9deb919d op_count=0
+- ldec7: [none] ARMinstructions.sinc:1207
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec6: [none] ARMinstructions.sinc:1208
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4271b13af1978b8a op_count=0
+- ldec6: [none] ARMinstructions.sinc:1209
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4271b13af1978b8a op_count=0
+- ldec6: [none] ARMinstructions.sinc:1210
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec5: [none] ARMinstructions.sinc:1211
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3bfe934f9f6b7bdb op_count=0
+- ldec5: [none] ARMinstructions.sinc:1212
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3bfe934f9f6b7bdb op_count=0
+- ldec5: [none] ARMinstructions.sinc:1213
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec4: [none] ARMinstructions.sinc:1214
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c647e938171cbc0 op_count=0
+- ldec4: [none] ARMinstructions.sinc:1215
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c647e938171cbc0 op_count=0
+- ldec4: [none] ARMinstructions.sinc:1216
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec3: [none] ARMinstructions.sinc:1217
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4883d61f91b0ce51 op_count=0
+- ldec3: [none] ARMinstructions.sinc:1218
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4883d61f91b0ce51 op_count=0
+- ldec3: [none] ARMinstructions.sinc:1219
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec2: [none] ARMinstructions.sinc:1220
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9af076e14912b89e op_count=0
+- ldec2: [none] ARMinstructions.sinc:1221
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9af076e14912b89e op_count=0
+- ldec2: [none] ARMinstructions.sinc:1222
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec1: [none] ARMinstructions.sinc:1223
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=43f4940a0e40e5ef op_count=0
+- ldec1: [none] ARMinstructions.sinc:1224
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=43f4940a0e40e5ef op_count=0
+- ldec1: [none] ARMinstructions.sinc:1225
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldec0: [none] ARMinstructions.sinc:1226
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=18bfa151bf8f52a4 op_count=0
+- ldec0: [none] ARMinstructions.sinc:1227
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=18bfa151bf8f52a4 op_count=0
+- ldec0: [none] ARMinstructions.sinc:1228
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldlist_dec: [none] ARMinstructions.sinc:1229
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=065e8fb482820ae1 op_count=0
+- sdec15: [none] ARMinstructions.sinc:1232
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03af003095dff2bb op_count=0
+- sdec15: [none] ARMinstructions.sinc:1233
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec14: [none] ARMinstructions.sinc:1234
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f3543a0050f5ce0 op_count=0
+- sdec14: [none] ARMinstructions.sinc:1235
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f3543a0050f5ce0 op_count=0
+- sdec14: [none] ARMinstructions.sinc:1236
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec13: [none] ARMinstructions.sinc:1237
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2c675b02efaf431 op_count=0
+- sdec13: [none] ARMinstructions.sinc:1238
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2c675b02efaf431 op_count=0
+- sdec13: [none] ARMinstructions.sinc:1239
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec12: [none] ARMinstructions.sinc:1240
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73e26c80e138a22b op_count=0
+- sdec12: [none] ARMinstructions.sinc:1241
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73e26c80e138a22b op_count=0
+- sdec12: [none] ARMinstructions.sinc:1242
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec11: [none] ARMinstructions.sinc:1243
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f50d8f6a54c8afa op_count=0
+- sdec11: [none] ARMinstructions.sinc:1244
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f50d8f6a54c8afa op_count=0
+- sdec11: [none] ARMinstructions.sinc:1245
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec10: [none] ARMinstructions.sinc:1246
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1add54739ee0e955 op_count=0
+- sdec10: [none] ARMinstructions.sinc:1247
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1add54739ee0e955 op_count=0
+- sdec10: [none] ARMinstructions.sinc:1248
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec9: [none] ARMinstructions.sinc:1249
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=149df838c9b2688b op_count=0
+- sdec9: [none] ARMinstructions.sinc:1250
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=149df838c9b2688b op_count=0
+- sdec9: [none] ARMinstructions.sinc:1251
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec8: [none] ARMinstructions.sinc:1252
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ed686f24793fc30 op_count=0
+- sdec8: [none] ARMinstructions.sinc:1253
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ed686f24793fc30 op_count=0
+- sdec8: [none] ARMinstructions.sinc:1254
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec7: [none] ARMinstructions.sinc:1255
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28fcd94fbef43a01 op_count=0
+- sdec7: [none] ARMinstructions.sinc:1256
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28fcd94fbef43a01 op_count=0
+- sdec7: [none] ARMinstructions.sinc:1257
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec6: [none] ARMinstructions.sinc:1258
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77deda093cd161b6 op_count=0
+- sdec6: [none] ARMinstructions.sinc:1259
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77deda093cd161b6 op_count=0
+- sdec6: [none] ARMinstructions.sinc:1260
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec5: [none] ARMinstructions.sinc:1261
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1046324ee1f11597 op_count=0
+- sdec5: [none] ARMinstructions.sinc:1262
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1046324ee1f11597 op_count=0
+- sdec5: [none] ARMinstructions.sinc:1263
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec4: [none] ARMinstructions.sinc:1264
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=184a9bdd1a36c6ec op_count=0
+- sdec4: [none] ARMinstructions.sinc:1265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=184a9bdd1a36c6ec op_count=0
+- sdec4: [none] ARMinstructions.sinc:1266
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec3: [none] ARMinstructions.sinc:1267
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=246ed7455950cd9d op_count=0
+- sdec3: [none] ARMinstructions.sinc:1268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=246ed7455950cd9d op_count=0
+- sdec3: [none] ARMinstructions.sinc:1269
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec2: [none] ARMinstructions.sinc:1270
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5abefe8c40c3fcc2 op_count=0
+- sdec2: [none] ARMinstructions.sinc:1271
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5abefe8c40c3fcc2 op_count=0
+- sdec2: [none] ARMinstructions.sinc:1272
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec1: [none] ARMinstructions.sinc:1273
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ebfc013d37222bf3 op_count=0
+- sdec1: [none] ARMinstructions.sinc:1274
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ebfc013d37222bf3 op_count=0
+- sdec1: [none] ARMinstructions.sinc:1275
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sdec0: [none] ARMinstructions.sinc:1276
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=915a26f993511a58 op_count=0
+- sdec0: [none] ARMinstructions.sinc:1277
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=915a26f993511a58 op_count=0
+- sdec0: [none] ARMinstructions.sinc:1278
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- stlist_dec: [none] ARMinstructions.sinc:1280
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=60abe0aa07448035 op_count=0
+- reglist: [none] ARMinstructions.sinc:1285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dff8d847b8a4ba0b op_count=0
+- reglist: [none] ARMinstructions.sinc:1290
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dff8d847b8a4ba0b op_count=0
+- reglist: [none] ARMinstructions.sinc:1295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7a4a6e05776a140d op_count=0
+- reglist: [none] ARMinstructions.sinc:1300
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7a4a6e05776a140d op_count=0
+- reglist: [none] ARMinstructions.sinc:1305
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=690572a9fc5c1651 op_count=0
+- reglist: [none] ARMinstructions.sinc:1310
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=690572a9fc5c1651 op_count=0
+- reglist: [none] ARMinstructions.sinc:1315
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fba0e2db8ba4e464 op_count=0
+- reglist: [none] ARMinstructions.sinc:1320
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fba0e2db8ba4e464 op_count=0
+- reglist: [none] ARMinstructions.sinc:1325
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2db69a2560505a3 op_count=0
+- reglist: [none] ARMinstructions.sinc:1330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2db69a2560505a3 op_count=0
+- reglist: [none] ARMinstructions.sinc:1335
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e40e023cf86c665 op_count=0
+- reglist: [none] ARMinstructions.sinc:1340
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e40e023cf86c665 op_count=0
+- reglist: [none] ARMinstructions.sinc:1345
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed86002531a1aca3 op_count=0
+- reglist: [none] ARMinstructions.sinc:1350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed86002531a1aca3 op_count=0
+- reglist: [none] ARMinstructions.sinc:1355
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90f1a8ddbf5c7078 op_count=0
+- reglist: [none] ARMinstructions.sinc:1360
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90f1a8ddbf5c7078 op_count=0
+- reglist: [none] ARMinstructions.sinc:1365
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2900596f8f3c42e op_count=0
+- reglist: [none] ARMinstructions.sinc:1370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2900596f8f3c42e op_count=0
+- reglist: [none] ARMinstructions.sinc:1381
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73b86e44ddcbfd30 op_count=0
+- reglist: [none] ARMinstructions.sinc:1387
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73b86e44ddcbfd30 op_count=0
+- reglist: [none] ARMinstructions.sinc:1392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=309a514d887e9670 op_count=0
+- reglist: [none] ARMinstructions.sinc:1397
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=309a514d887e9670 op_count=0
+- reglist: [none] ARMinstructions.sinc:1402
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ccd8cc4b41fb1fa9 op_count=0
+- reglist: [none] ARMinstructions.sinc:1407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d3f5450335e495fe op_count=0
+- reglist: [none] ARMinstructions.sinc:1412
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d3f5450335e495fe op_count=0
+- reglist: [none] ARMinstructions.sinc:1417
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=79d054d9fbfa86e0 op_count=0
+- reglist: [none] ARMinstructions.sinc:1422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee9fdb8611813cfe op_count=0
+- reglist: [none] ARMinstructions.sinc:1427
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee9fdb8611813cfe op_count=0
+- reglist: [none] ARMinstructions.sinc:1432
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c912445d02a02715 op_count=0
+- mdir: [none] ARMinstructions.sinc:1438
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- mdir: [none] ARMinstructions.sinc:1439
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- mdir: [none] ARMinstructions.sinc:1440
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- mdir: [none] ARMinstructions.sinc:1441
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1446
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfd821186e8c638f op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1447
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=461a3c4575c4d863 op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a1352ea186aca82e op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1449
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=feef0b67ea29ad92 op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1450
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e98dcd3f832d6de5 op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1451
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=716106e4348489eb op_count=0
+- addrmode5: [none] ARMinstructions.sinc:1452
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f71faa7d5446d713 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1456
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1457
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=08b876ba75aaa9cc op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1458
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37abb1bf9494b844 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc1c99663b710014 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d84de17ff4e03d3c op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1461
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96eec81d0e4c402c op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29630ab3763a498c op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1463
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=557c06cb0423257c op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1464
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd4d69989d2240b4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1465
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=339ffe0dec2e22c4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1466
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c7459220845f5a4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1467
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89443874ebf446f4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1468
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f50bb13f45bc8e04 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1469
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e39829f9796fbed4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1470
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=80a28fac334a32f4 op_count=0
+- cpsrmask: [none] ARMinstructions.sinc:1471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=822d8ab7bfc29b04 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1475
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1476
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=08b876ba75aaa9cc op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1477
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37abb1bf9494b844 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1478
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cc1c99663b710014 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d84de17ff4e03d3c op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96eec81d0e4c402c op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1481
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29630ab3763a498c op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1482
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=557c06cb0423257c op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1483
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dd4d69989d2240b4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1484
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=339ffe0dec2e22c4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1485
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c7459220845f5a4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1486
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89443874ebf446f4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1487
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f50bb13f45bc8e04 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1488
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e39829f9796fbed4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1489
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=80a28fac334a32f4 op_count=0
+- spsrmask: [none] ARMinstructions.sinc:1490
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=822d8ab7bfc29b04 op_count=0
 - ^instruction [none] ARMinstructions.sinc:1533
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
@@ -32,6 +1082,22 @@ entry_id: ARM4_be
 - adc^COND^SBIT_CZNO [branch] ARMinstructions.sinc:1978
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=aa51352be76e6c38 op_count=0
+  with_stack: with : ARMcondCk=1
+- ArmPCRelImmed12: [none] ARMinstructions.sinc:1991
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- export [none] ARMinstructions.sinc:1994
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- ArmPCRelImmed12: [none] ARMinstructions.sinc:1997
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- export [none] ARMinstructions.sinc:2000
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : ARMcondCk=1
 - adr^COND [none] ARMinstructions.sinc:2007
   semantic_ops: <none>
@@ -213,13 +1279,21 @@ entry_id: ARM4_be
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=82f53565fab7c56f op_count=0
   with_stack: with : ARMcondCk=1
-- ldr^COND [call] ARMinstructions.sinc:2782
+- ldr^COND [none] ARMinstructions.sinc:2782
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=c275778ded358f4d op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : ARMcondCk=1
-- ldr^COND [call] ARMinstructions.sinc:2794
+- dest:4=*addrmode2; [none] ARMinstructions.sinc:2787
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=c275778ded358f4d op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- ldr^COND [none] ARMinstructions.sinc:2794
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : ARMcondCk=1
+- dest:4=*addrmode2; [none] ARMinstructions.sinc:2799
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : ARMcondCk=1
 - ldr^COND [branch] ARMinstructions.sinc:2807
   semantic_ops: <none>
@@ -475,7 +1549,7 @@ entry_id: ARM4_be
   with_stack: with : ARMcondCk=1
 - mov [none] ARMinstructions.sinc:3518
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=6719bdee4aec58f3 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : ARMcondCk=1
 - mov^COND^SBIT_CZNO [none] ARMinstructions.sinc:3526
   semantic_ops: <none>
@@ -499,7 +1573,7 @@ entry_id: ARM4_be
   with_stack: with : ARMcondCk=1
 - mov [none] ARMinstructions.sinc:3587
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=93f8d802977fdf1a op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : ARMcondCk=1
 - mrc^COND [none] ARMinstructions.sinc:3623
   semantic_ops: coproc_movefrom_Main_ID

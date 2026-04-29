@@ -6,7 +6,8 @@ use crate::services::cross_image::{apply_propagated_renames, collect_folder_prop
 use crate::state::AppState;
 use fission_core::format_addr;
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
+use fission_loader::loader::function_view::{canonical_functions_sorted, canonical_view_counts};
+use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,7 +52,9 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
                 joined.map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?
             }
             Err(_) => {
-                warn!("cross-image propagation timed out during open_file; skipping for responsiveness");
+                warn!(
+                    "cross-image propagation timed out during open_file; skipping for responsiveness"
+                );
                 Default::default()
             }
         }
@@ -120,6 +123,12 @@ pub async fn get_binary_info(state: State<'_, AppState>) -> CmdResult<Option<Bin
 
 /// Build a [`BinaryInfo`] DTO from a [`LoadedBinary`].
 pub(super) fn binary_to_info(binary: &fission_loader::loader::LoadedBinary) -> BinaryInfo {
+    let counts = canonical_view_counts(binary);
+    let bits = binary
+        .architecture
+        .as_ref()
+        .map(|arch| arch.bitness)
+        .unwrap_or(if binary.is_64bit { 64 } else { 32 });
     BinaryInfo {
         name: std::path::Path::new(&binary.path)
             .file_name()
@@ -127,20 +136,29 @@ pub(super) fn binary_to_info(binary: &fission_loader::loader::LoadedBinary) -> B
             .unwrap_or_default(),
         path: binary.path.clone(),
         arch: binary.arch_spec.clone(),
+        bits: u32::from(bits),
         format: binary.format.clone(),
         entry_point: format_addr(binary.entry_point),
         section_count: binary.sections.len(),
-        function_count: binary.functions.len(),
+        function_count: counts.functions,
+        import_count: counts.imports,
+        export_count: counts.exports,
         image_base: format_addr(binary.image_base),
     }
 }
 
 /// Return the category string for a function.
 fn function_category(f: &fission_loader::loader::FunctionInfo) -> &'static str {
-    if f.is_import {
+    if f.is_import || matches!(f.kind.as_deref(), Some("import")) {
         "import"
+    } else if matches!(f.kind.as_deref(), Some("undefined_external")) {
+        "external"
+    } else if f.is_thunk_like || matches!(f.kind.as_deref(), Some("import_thunk")) {
+        "thunk"
     } else if f.is_export {
         "export"
+    } else if matches!(f.kind.as_deref(), Some("debug_symbol")) {
+        "debug"
     } else {
         "internal"
     }
@@ -151,8 +169,7 @@ pub(crate) fn functions_to_dtos(
     binary: &fission_loader::loader::LoadedBinary,
     renames: &std::collections::HashMap<u64, String>,
 ) -> Vec<FunctionDto> {
-    binary
-        .functions
+    canonical_functions_sorted(binary)
         .iter()
         .map(|f| {
             let display_name = renames
@@ -163,6 +180,13 @@ pub(crate) fn functions_to_dtos(
                 address: format_addr(f.address),
                 name: display_name,
                 size: f.size,
+                is_import: f.is_import,
+                is_export: f.is_export,
+                origin: f.origin.clone(),
+                kind: f.kind.clone(),
+                source_section: f.source_section.clone(),
+                external_library: f.external_library.clone(),
+                is_thunk_like: f.is_thunk_like,
                 category: function_category(f).to_string(),
             }
         })

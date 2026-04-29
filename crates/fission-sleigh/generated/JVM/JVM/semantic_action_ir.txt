@@ -3,6 +3,24 @@ arch: JVM
 entry_spec: JVM.slaspec
 entry_id: JVM
 
+- Branch:addr [none] JVM.slaspec:204
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] JVM.slaspec:206
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Branch_w:addr [none] JVM.slaspec:209
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] JVM.slaspec:211
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Default:"default" [none] JVM.slaspec:214
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- export [none] JVM.slaspec:216
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - aaload [none] JVM.slaspec:222
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8c8f500dcfe91f5a op_count=0
@@ -29,7 +47,16 @@ entry_id: JVM
   semantic_template: status=unsupported_template action_hash=e562ceece5d1c815 op_count=0
 - anewarray [none] JVM.slaspec:286
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=f1f1ff260033ab3e op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _count [none] JVM.slaspec:288
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _arrayref [none] JVM.slaspec:289
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _ref: [none] JVM.slaspec:291
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - areturn [return] JVM.slaspec:296
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b62d5be8e1362d8f op_count=0
@@ -71,7 +98,10 @@ entry_id: JVM
   semantic_template: status=unsupported_template action_hash=650e350761a12ec8 op_count=0
 - checkcast [none] JVM.slaspec:418
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=ce1d433813273889 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _object:$(SIZE) [none] JVM.slaspec:430
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - d2f [none] JVM.slaspec:440
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d14a9aef63615486 op_count=0
@@ -250,11 +280,17 @@ entry_id: JVM
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=937b5e4987afa895 op_count=0
 - getfield [none] JVM.slaspec:992
-  semantic_ops: getFieldCallOther
-  semantic_template: status=unsupported_template action_hash=c00c42fe8dd51995 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- getFieldCallOther(index:2); [none] JVM.slaspec:994
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - getstatic [none] JVM.slaspec:998
-  semantic_ops: getStaticCallOther
-  semantic_template: status=unsupported_template action_hash=57471b7d6fe02c21 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- getStaticCallOther(index:2); [none] JVM.slaspec:1000
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - goto [branch] JVM.slaspec:1003
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=dd4254929c146b13 op_count=0
@@ -389,22 +425,46 @@ entry_id: JVM
   semantic_template: status=unsupported_template action_hash=b0f0aa16de0c54f3 op_count=0
 - instanceof [none] JVM.slaspec:1361
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=dec0e79e796f9eeb op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _object:$(SIZE) [none] JVM.slaspec:1363
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _res:1 [none] JVM.slaspec:1365
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _result:$(SIZE) [none] JVM.slaspec:1366
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - invokedynamic [none] JVM.slaspec:1371
-  semantic_ops: invokedynamicCallOther
-  semantic_template: status=unsupported_template action_hash=e1fdb656cda24ae0 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- invokedynamicCallOther(index:2); [none] JVM.slaspec:1373
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - invokeinterface [none] JVM.slaspec:1376
-  semantic_ops: invokeinterfaceCallOther
-  semantic_template: status=unsupported_template action_hash=f17894094fa12bb2 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- invokeinterfaceCallOther(index:2); [none] JVM.slaspec:1378
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - invokespecial [none] JVM.slaspec:1381
-  semantic_ops: invokespecialCallOther
-  semantic_template: status=unsupported_template action_hash=8b2b9fff68319e12 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- invokespecialCallOther(index:2); [none] JVM.slaspec:1383
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - invokestatic [none] JVM.slaspec:1386
-  semantic_ops: invokestaticCallOther
-  semantic_template: status=unsupported_template action_hash=8020b63ae844714f op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- invokestaticCallOther(index:2); [none] JVM.slaspec:1388
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - invokevirtual [none] JVM.slaspec:1391
-  semantic_ops: invokevirtualCallOther
-  semantic_template: status=unsupported_template action_hash=27198ea8de728006 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- invokevirtualCallOther(index:2); [none] JVM.slaspec:1393
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ior [none] JVM.slaspec:1397
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8ec6f2b393f743d2 op_count=0
@@ -484,11 +544,17 @@ entry_id: JVM
   semantic_ops: ldcCallOther
   semantic_template: status=unsupported_template action_hash=c2f77fdb0144e65d op_count=1
 - ldc_w [none] JVM.slaspec:1644
-  semantic_ops: ldc_wCallOther
-  semantic_template: status=unsupported_template action_hash=756d6805472102e2 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldc_wCallOther(index:2); [none] JVM.slaspec:1646
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ldc2_w [none] JVM.slaspec:1649
-  semantic_ops: ldc2_wCallOther
-  semantic_template: status=unsupported_template action_hash=0a3ba39c5153fe90 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ldc2_wCallOther(index:2); [none] JVM.slaspec:1651
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ldiv [none] JVM.slaspec:1654
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=29a9376637458ae8 op_count=0
@@ -513,10 +579,40 @@ entry_id: JVM
 - lneg [none] JVM.slaspec:1711
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=432f34f2127bcc3d op_count=0
+- LookupSwitch_match:match [none] JVM.slaspec:1725
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ^LookupSwitch_match [none] JVM.slaspec:1730
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ""LookupSwitch_match [none] JVM.slaspec:1735
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- padSwitch: [none] JVM.slaspec:1741
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bcc47643ce68a24 op_count=0
+- padSwitch: [none] JVM.slaspec:1742
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bcc47643ce68a24 op_count=0
+- padSwitch: [none] JVM.slaspec:1743
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bcc47643ce68a24 op_count=0
+- padSwitch: [none] JVM.slaspec:1744
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bcc47643ce68a24 op_count=0
+- dolookupswitch: [none] JVM.slaspec:1747
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:1749
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:1750
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:1751
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:1753
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - lookupswitch [none] JVM.slaspec:1757
@@ -577,11 +673,20 @@ entry_id: JVM
   semantic_ops: monitorexitOp
   semantic_template: status=unsupported_template action_hash=a3df4d9a9eda4aee op_count=1
 - multianewarray [none] JVM.slaspec:1912
-  semantic_ops: multianewarrayCallOther
-  semantic_template: status=unsupported_template action_hash=b148511f137cdd30 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- multianewarrayCallOther(index:2,dimensions:1); [none] JVM.slaspec:1914
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - new [none] JVM.slaspec:1917
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=67d57a4ae570ab89 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:1919
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _ref: [none] JVM.slaspec:1920
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - newarray [none] JVM.slaspec:1924
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8b5a0549aaec5752 op_count=0
@@ -595,11 +700,17 @@ entry_id: JVM
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7f724ef3db0d2b56 op_count=0
 - putfield [none] JVM.slaspec:1948
-  semantic_ops: putFieldCallOther
-  semantic_template: status=unsupported_template action_hash=025e1737a55519fc op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- putFieldCallOther(index:2); [none] JVM.slaspec:1950
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - putstatic [none] JVM.slaspec:1953
-  semantic_ops: putStaticCallOther
-  semantic_template: status=unsupported_template action_hash=4782edd911c92bee op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- putStaticCallOther(index:2); [none] JVM.slaspec:1955
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ret [branch] JVM.slaspec:1958
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2952e290c30e6870 op_count=0
@@ -614,14 +725,35 @@ entry_id: JVM
   semantic_template: status=unsupported_template action_hash=c5560ba4be2dbf0b op_count=0
 - sipush [none] JVM.slaspec:1995
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=7cc1bef439ad97f5 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _result:$(SIZE) [none] JVM.slaspec:1997
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - swap [none] JVM.slaspec:2001
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f298264affc3e3af op_count=0
+- Switch_offset:_offset [none] JVM.slaspec:2016
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ^Switch_offset [none] JVM.slaspec:2023
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - ""Switch_offset [none] JVM.slaspec:2028
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- dotableswitch: [none] JVM.slaspec:2032
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:2035
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:2036
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- local [none] JVM.slaspec:2037
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- switch_target [none] JVM.slaspec:2044
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - tableswitch [none] JVM.slaspec:2048
@@ -638,37 +770,97 @@ entry_id: JVM
   semantic_template: status=unsupported_template action_hash=5071f0eebe39ec29 op_count=0
 - wide_iload [none] JVM.slaspec:2066
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=746479b8b8537caa op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2069
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_fload [none] JVM.slaspec:2073
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=746479b8b8537caa op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2076
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_aload [none] JVM.slaspec:2080
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=746479b8b8537caa op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2083
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_lload [none] JVM.slaspec:2087
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=3a5c1e9cc4ff4ebe op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2090
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_dload [none] JVM.slaspec:2094
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=3a5c1e9cc4ff4ebe op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2097
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_istore [none] JVM.slaspec:2103
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=dc09b4b4a529e3c4 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2105
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(SIZE) [none] JVM.slaspec:2108
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_fstore [none] JVM.slaspec:2111
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=dc09b4b4a529e3c4 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2113
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(SIZE) [none] JVM.slaspec:2116
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_astore [none] JVM.slaspec:2119
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=dc09b4b4a529e3c4 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2121
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(SIZE) [none] JVM.slaspec:2124
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_lstore [none] JVM.slaspec:2127
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=10d2e7444ae7d37c op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2129
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(DOUBLE_SIZE) [none] JVM.slaspec:2132
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - wide_dstore [none] JVM.slaspec:2135
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=10d2e7444ae7d37c op_count=0
-- wide_ret [branch] JVM.slaspec:2144
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value [none] JVM.slaspec:2137
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=2952e290c30e6870 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(DOUBLE_SIZE) [none] JVM.slaspec:2140
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- wide_ret [none] JVM.slaspec:2144
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- _value:$(SIZE) [none] JVM.slaspec:2147
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - iinc_w [none] JVM.slaspec:2152
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=e08bf2d02569bc7d op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fullIndex: [none] JVM.slaspec:2154
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fullConstant: [none] JVM.slaspec:2155
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- intVal:$(SIZE) [none] JVM.slaspec:2156
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- *[localVariableArray]:$(SIZE) [none] JVM.slaspec:2157
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0

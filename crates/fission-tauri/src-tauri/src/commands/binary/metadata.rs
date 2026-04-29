@@ -4,6 +4,7 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use fission_core::UNKNOWN_LIBRARY;
+use fission_loader::loader::function_view::{canonical_exports_sorted, canonical_imports_sorted};
 use tauri::State;
 
 // ============================================================================
@@ -97,8 +98,8 @@ pub async fn get_imports(state: State<'_, AppState>) -> CmdResult<Vec<ImportDto>
         .as_ref()
         .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
-    let imports: Vec<ImportDto> = binary
-        .imports()
+    let imports: Vec<ImportDto> = canonical_imports_sorted(binary)
+        .into_iter()
         .map(|f| {
             let display_name = inner
                 .renamed_functions
@@ -106,8 +107,14 @@ pub async fn get_imports(state: State<'_, AppState>) -> CmdResult<Vec<ImportDto>
                 .cloned()
                 .unwrap_or_else(|| f.name.clone());
 
-            // Try to extract library name from the function name (e.g., "KERNEL32.dll!CreateFileW")
-            let (library, name) = if let Some(idx) = display_name.find('!') {
+            // Match CLI provenance first; fall back to legacy "DLL!symbol" names.
+            let (library, name) = if let Some(library) = f.external_library.clone() {
+                let name = display_name
+                    .split_once('!')
+                    .map(|(_, symbol)| symbol.to_string())
+                    .unwrap_or(display_name);
+                (library, name)
+            } else if let Some(idx) = display_name.find('!') {
                 (
                     display_name[..idx].to_string(),
                     display_name[idx + 1..].to_string(),
@@ -121,6 +128,11 @@ pub async fn get_imports(state: State<'_, AppState>) -> CmdResult<Vec<ImportDto>
                 name,
                 library,
                 ordinal: None,
+                origin: f.origin.clone(),
+                kind: f.kind.clone(),
+                source_section: f.source_section.clone(),
+                external_library: f.external_library.clone(),
+                is_thunk_like: f.is_thunk_like,
             }
         })
         .collect();
@@ -137,8 +149,8 @@ pub async fn get_exports(state: State<'_, AppState>) -> CmdResult<Vec<ExportDto>
         .as_ref()
         .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
-    let exports: Vec<ExportDto> = binary
-        .exports()
+    let exports: Vec<ExportDto> = canonical_exports_sorted(binary)
+        .into_iter()
         .map(|f| {
             let display_name = inner
                 .renamed_functions
@@ -150,6 +162,12 @@ pub async fn get_exports(state: State<'_, AppState>) -> CmdResult<Vec<ExportDto>
                 name: display_name,
                 ordinal: None,
                 forwarder: None,
+                size: f.size,
+                origin: f.origin.clone(),
+                kind: f.kind.clone(),
+                source_section: f.source_section.clone(),
+                external_library: f.external_library.clone(),
+                is_thunk_like: f.is_thunk_like,
             }
         })
         .collect();

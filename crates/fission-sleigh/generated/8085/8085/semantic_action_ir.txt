@@ -3,6 +3,45 @@ arch: 8085
 entry_spec: 8085.slaspec
 entry_id: 8085
 
+- Mem8: [none] 8085.slaspec:113
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- Mem16: [none] 8085.slaspec:114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d6c195e73ffb8c8 op_count=0
+- Addr16: [none] 8085.slaspec:116
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- RstAddr: [none] 8085.slaspec:118
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=493753ced878908f op_count=0
+- IOAddr8: [none] 8085.slaspec:120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a9c73ddb3d8f1bfc op_count=0
+- cc: [none] 8085.slaspec:122
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=566c499c42ecfe4d op_count=0
+- cc: [none] 8085.slaspec:123
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7253494a15bc8a5 op_count=0
+- cc: [none] 8085.slaspec:124
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f886ee5cb8c11aaf op_count=0
+- cc: [none] 8085.slaspec:125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91b3bcff320b5bc1 op_count=0
+- cc: [none] 8085.slaspec:126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c9d1bc4c5f22f7a7 op_count=0
+- cc: [none] 8085.slaspec:127
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37c44e810c78c5b7 op_count=0
+- cc: [none] 8085.slaspec:128
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=019def47e5c7d3da op_count=0
+- cc: [none] 8085.slaspec:129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=39e10f1e22139042 op_count=0
 - MOV [none] 8085.slaspec:133
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e7afa76e887ddfd2 op_count=0
@@ -207,13 +246,13 @@ entry_id: 8085
 - CALL [call] 8085.slaspec:512
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=042bb4eb493c2ea9 op_count=0
-- C^cc [mixed] 8085.slaspec:518
+- C^cc [call] 8085.slaspec:518
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7da320009c923ac3 op_count=0
 - RET [return] 8085.slaspec:525
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=271422edec045a5b op_count=0
-- R^cc [mixed] 8085.slaspec:531
+- R^cc [return] 8085.slaspec:531
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a63f3eb07fadb459 op_count=0
 - RST [call] 8085.slaspec:538

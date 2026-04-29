@@ -1,5 +1,5 @@
-use super::function_select::canonical_functions_sorted;
 use fission_loader::loader::LoadedBinary;
+use fission_loader::loader::function_view::canonical_functions_sorted;
 use std::io::{self, Write};
 
 pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Result<()> {

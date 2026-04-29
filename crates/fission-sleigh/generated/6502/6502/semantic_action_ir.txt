@@ -3,6 +3,75 @@ arch: 6502
 entry_spec: 6502.slaspec
 entry_id: 6502
 
+- REL: [none] 6502.slaspec:80
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be0177b77251948d op_count=0
+- OP1: [none] 6502.slaspec:83
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d04119c5b74c1cd0 op_count=0
+- OP1: [none] 6502.slaspec:85
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- OP1: [none] 6502.slaspec:87
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb03ddf5af66460d op_count=0
+- OP1: [none] 6502.slaspec:89
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- OP1: [none] 6502.slaspec:91
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59d03bc33bfd803e op_count=0
+- OP1: [none] 6502.slaspec:93
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9e44ddf32e1bafd op_count=0
+- OP1: [none] 6502.slaspec:95
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d040fa031875001 op_count=0
+- OP1: [none] 6502.slaspec:97
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9daf05be7c46251a op_count=0
+- OP2: [none] 6502.slaspec:100
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d04119c5b74c1cd0 op_count=0
+- OP2: [none] 6502.slaspec:102
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- OP2: [none] 6502.slaspec:103
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66f3a1f559764039 op_count=0
+- OP2: [none] 6502.slaspec:105
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- OP2: [none] 6502.slaspec:107
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb03ddf5af66460d op_count=0
+- OP2: [none] 6502.slaspec:109
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59d03bc33bfd803e op_count=0
+- OP2ST: [none] 6502.slaspec:111
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5436357944f6b845 op_count=0
+- OP2ST: [none] 6502.slaspec:112
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d55f0e1804a4404e op_count=0
+- OP2LD: [none] 6502.slaspec:114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5436357944f6b845 op_count=0
+- OP2LD: [none] 6502.slaspec:115
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d55f0e1804a4404e op_count=0
+- OP2LD: [none] 6502.slaspec:116
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9e44ddf32e1bafd op_count=0
+- ADDR8: [none] 6502.slaspec:119
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- ADDR16: [none] 6502.slaspec:120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- ADDRI: [none] 6502.slaspec:121
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90b8fd5c0f545e6a op_count=0
 - ADC [none] 6502.slaspec:127
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e1d27d637b2137f7 op_count=0

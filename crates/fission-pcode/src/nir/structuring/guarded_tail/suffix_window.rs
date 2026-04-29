@@ -543,9 +543,7 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         let target_addr = crate::nir::types::parse_call_target_address(target);
-        let import = fission_signatures::win_api::WIN_API_DB
-            .get(target)
-            .is_some();
+        let import = crate::nir::normalize::is_known_api_signature(target);
         let internal = !import && target_addr.is_some();
         let summary_available = import
             || Self::call_target_is_known_pure_helper(target)

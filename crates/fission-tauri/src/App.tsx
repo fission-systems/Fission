@@ -225,6 +225,13 @@ function App() {
                             address: result.address,
                             name: result.function_name || `sub_${result.address.slice(2)}`,
                             size: 0,
+                            is_import: false,
+                            is_export: false,
+                            origin: "gui-navigation",
+                            kind: "synthetic_navigation",
+                            source_section: null,
+                            external_library: null,
+                            is_thunk_like: false,
                             category: "internal",
                         });
                     }

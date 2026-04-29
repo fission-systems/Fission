@@ -3,7 +3,7 @@
 //! This module provides Rust structures for Ghidra's Pcode IR,
 //! enabling direct optimization at the Pcode level before C generation.
 
-use serde::{de::Error as _, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Error as _};
 
 /// Pcode operation code (opcode)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -615,20 +615,59 @@ impl PcodeOpcode {
 
         Some(match self {
             Self::Unknown => return None,
-            Self::Copy | Self::Cast | Self::IntZExt | Self::IntSExt | Self::Int2Comp
-            | Self::IntNegate | Self::BoolNegate | Self::FloatNeg | Self::FloatAbs
-            | Self::FloatSqrt | Self::FloatInt2Float | Self::FloatFloat2Float
-            | Self::FloatTrunc | Self::FloatCeil | Self::FloatFloor | Self::FloatRound
+            Self::Copy
+            | Self::Cast
+            | Self::IntZExt
+            | Self::IntSExt
+            | Self::Int2Comp
+            | Self::IntNegate
+            | Self::BoolNegate
+            | Self::FloatNeg
+            | Self::FloatAbs
+            | Self::FloatSqrt
+            | Self::FloatInt2Float
+            | Self::FloatFloat2Float
+            | Self::FloatTrunc
+            | Self::FloatCeil
+            | Self::FloatFloor
+            | Self::FloatRound
             | Self::PopCount => unary_data,
-            Self::IntEqual | Self::IntNotEqual | Self::IntSLess | Self::IntSLessEqual
-            | Self::IntLess | Self::IntLessEqual | Self::IntAdd | Self::IntSub
-            | Self::IntCarry | Self::IntSCarry | Self::IntSBorrow | Self::IntXor
-            | Self::IntAnd | Self::IntOr | Self::IntLeft | Self::IntRight
-            | Self::IntSRight | Self::IntMult | Self::IntDiv | Self::IntSDiv
-            | Self::IntRem | Self::IntSRem | Self::BoolXor | Self::BoolAnd
-            | Self::BoolOr | Self::FloatEqual | Self::FloatNotEqual | Self::FloatLess
-            | Self::FloatLessEqual | Self::FloatAdd | Self::FloatDiv | Self::FloatMult
-            | Self::FloatSub | Self::Piece | Self::SubPiece | Self::PtrSub => binary_data,
+            Self::IntEqual
+            | Self::IntNotEqual
+            | Self::IntSLess
+            | Self::IntSLessEqual
+            | Self::IntLess
+            | Self::IntLessEqual
+            | Self::IntAdd
+            | Self::IntSub
+            | Self::IntCarry
+            | Self::IntSCarry
+            | Self::IntSBorrow
+            | Self::IntXor
+            | Self::IntAnd
+            | Self::IntOr
+            | Self::IntLeft
+            | Self::IntRight
+            | Self::IntSRight
+            | Self::IntMult
+            | Self::IntDiv
+            | Self::IntSDiv
+            | Self::IntRem
+            | Self::IntSRem
+            | Self::BoolXor
+            | Self::BoolAnd
+            | Self::BoolOr
+            | Self::FloatEqual
+            | Self::FloatNotEqual
+            | Self::FloatLess
+            | Self::FloatLessEqual
+            | Self::FloatAdd
+            | Self::FloatDiv
+            | Self::FloatMult
+            | Self::FloatSub
+            | Self::Piece
+            | Self::SubPiece
+            | Self::PtrSub => binary_data,
             Self::Load => PcodeShapeContract {
                 output: Required,
                 inputs: Exact(2),
@@ -1198,11 +1237,7 @@ mod tests {
         assert!(!one.is_zero());
     }
 
-    fn op(
-        opcode: PcodeOpcode,
-        output: Option<Varnode>,
-        inputs: Vec<Varnode>,
-    ) -> PcodeOp {
+    fn op(opcode: PcodeOpcode, output: Option<Varnode>, inputs: Vec<Varnode>) -> PcodeOp {
         PcodeOp {
             seq_num: 0,
             opcode,
@@ -1291,9 +1326,13 @@ mod tests {
         };
         let rhs = Varnode::constant(1, 8);
 
-        op(PcodeOpcode::IntAdd, Some(out.clone()), vec![lhs.clone(), rhs.clone()])
-            .validate_shape()
-            .expect("valid int add shape");
+        op(
+            PcodeOpcode::IntAdd,
+            Some(out.clone()),
+            vec![lhs.clone(), rhs.clone()],
+        )
+        .validate_shape()
+        .expect("valid int add shape");
         op(PcodeOpcode::Copy, Some(out.clone()), vec![lhs.clone()])
             .validate_shape()
             .expect("valid copy shape");

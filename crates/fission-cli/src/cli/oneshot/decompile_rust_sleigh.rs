@@ -187,6 +187,7 @@ pub(crate) fn run_decompilation_rust_sleigh(
             size: 0,
             is_export: false,
             is_import: false,
+            ..Default::default()
         }];
         return run_with_functions(cli, binary, &synthetic, selection_accounting, init_start);
     }

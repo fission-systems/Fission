@@ -3,6 +3,666 @@ arch: 68000
 entry_spec: 68020.slaspec
 entry_id: 68020
 
+- ea_index: [none] 68000.sinc:375
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=526e871d077eb069 op_count=0
+- ea_index: [none] 68000.sinc:376
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5fdcdd8a9bbda9eb op_count=0
+- ea_index: [none] 68000.sinc:377
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=498abacb9455950e op_count=0
+- ea_index: [none] 68000.sinc:378
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=08048928ce9192ec op_count=0
+- breg: [none] 68000.sinc:381
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=496e6a52fcb9e4d7 op_count=0
+- breg: [none] 68000.sinc:382
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=669fe5a52f08153e op_count=0
+- fl_breg: [none] 68000.sinc:385
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- fl_breg: [none] 68000.sinc:386
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- fl_breg: [none] 68000.sinc:387
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=707e684d15d3a456 op_count=0
+- fl_breg: [none] 68000.sinc:388
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd09e68d5fed4172 op_count=0
+- cntreg: [none] 68000.sinc:391
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d43e9a356700cb97 op_count=0
+- cntreg: [none] 68000.sinc:392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bfd72a3f7f1aeb42 op_count=0
+- extw: [none] 68000.sinc:396
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1565a52ab260582a op_count=0
+- extw: [none] 68000.sinc:397
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] 68000.sinc:399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4f4096b317cd306 op_count=0
+- extw: [none] 68000.sinc:401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fbc9703aefcae6d4 op_count=0
+- extw: [none] 68000.sinc:402
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33398498d0529cb6 op_count=0
+- extw: [none] 68000.sinc:403
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90912c0a6b5d5370 op_count=0
+- extw: [none] 68000.sinc:405
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7cffff5e9c561a8a op_count=0
+- extw: [none] 68000.sinc:406
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0dc0a1c4e7cd405 op_count=0
+- extw: [none] 68000.sinc:407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ac58c836d241237 op_count=0
+- extw: [none] 68000.sinc:408
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=980d06ad83b0373d op_count=0
+- extw: [none] 68000.sinc:409
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8dc7331855ae971c op_count=0
+- extw: [none] 68000.sinc:410
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d94e88e6ce285ae6 op_count=0
+- extw: [none] 68000.sinc:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=48360899c2450fb7 op_count=0
+- extw: [none] 68000.sinc:412
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4776b8e8afce652a op_count=0
+- extw: [none] 68000.sinc:413
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aa1f5f7536b7a9e0 op_count=0
+- extw: [none] 68000.sinc:415
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=975aedb2eccecb87 op_count=0
+- extw: [none] 68000.sinc:416
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c920f674032f81d op_count=0
+- extw: [none] 68000.sinc:417
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32933ca70bbebd5b op_count=0
+- extw: [none] 68000.sinc:418
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=635c8733bcd87c16 op_count=0
+- extw: [none] 68000.sinc:419
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66320f615bc73464 op_count=0
+- extw: [none] 68000.sinc:420
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92ed82e0ca5c71fa op_count=0
+- extw: [none] 68000.sinc:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=566a209fa33ed750 op_count=0
+- extw: [none] 68000.sinc:422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b76cbc4f19c1b12 op_count=0
+- extw: [none] 68000.sinc:423
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9046e159d8e0a16c op_count=0
+- extw: [none] 68000.sinc:425
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9a1fc6b384938259 op_count=0
+- extw: [none] 68000.sinc:426
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c65125e937f57c80 op_count=0
+- extw: [none] 68000.sinc:427
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e97ba50c0d8c5806 op_count=0
+- extw: [none] 68000.sinc:429
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e3db096eee5a691e op_count=0
+- extw: [none] 68000.sinc:430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c7345eb34b9c363 op_count=0
+- extw: [none] 68000.sinc:431
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6a2c22c0b7a53c5 op_count=0
+- extw: [none] 68000.sinc:432
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4299c8f00490f2a1 op_count=0
+- extw: [none] 68000.sinc:433
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b1a315e7d0a5b452 op_count=0
+- extw: [none] 68000.sinc:434
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2dc449786c7bd25c op_count=0
+- extw: [none] 68000.sinc:435
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3ff727008b97753 op_count=0
+- extw: [none] 68000.sinc:436
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b959304a52164ea4 op_count=0
+- extw: [none] 68000.sinc:437
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4f21a4b10d75216a op_count=0
+- eal: [none] 68000.sinc:442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72c2a119746dc418 op_count=0
+- eal: [none] 68000.sinc:443
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+- eal: [none] 68000.sinc:444
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4d20983c4e3c4ea7 op_count=0
+- eal: [none] 68000.sinc:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=32bf628218416dc7 op_count=0
+- eal: [none] 68000.sinc:446
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d72f017f9d11a8b4 op_count=0
+- eal: [none] 68000.sinc:447
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7a8c76b76f360ea4 op_count=0
+- eal: [none] 68000.sinc:448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=963be1c4bb020de1 op_count=0
+- eal: [none] 68000.sinc:449
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1279aff84cb36b60 op_count=0
+- eal: [none] 68000.sinc:450
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=963be1c4bb020de1 op_count=0
+- eal: [none] 68000.sinc:451
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6512bef90e8d5181 op_count=0
+- eal: [none] 68000.sinc:452
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54b474f9058d30e7 op_count=0
+- eal: [none] 68000.sinc:453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94f3cb6cb3d90c40 op_count=0
+- eaw: [none] 68000.sinc:455
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f47e940d731bb75 op_count=0
+- eaw: [none] 68000.sinc:456
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=403fb717b018f3c4 op_count=0
+- eaw: [none] 68000.sinc:457
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92fe156eefda2035 op_count=0
+- eaw: [none] 68000.sinc:458
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=427878049d648e1f op_count=0
+- eaw: [none] 68000.sinc:459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=562d668f08828bf4 op_count=0
+- eaw: [none] 68000.sinc:460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e02a372f464c1f5a op_count=0
+- eaw: [none] 68000.sinc:461
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30b0c3499846b7eb op_count=0
+- eaw: [none] 68000.sinc:462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1a53f9fc7bf89efe op_count=0
+- eaw: [none] 68000.sinc:463
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30b0c3499846b7eb op_count=0
+- eaw: [none] 68000.sinc:464
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d85b057538f640df op_count=0
+- eaw: [none] 68000.sinc:465
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ea1acf754322c551 op_count=0
+- eaw: [none] 68000.sinc:466
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63ab2b4f3f9d8fb4 op_count=0
+- eab: [none] 68000.sinc:468
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f73e140d756e8c8 op_count=0
+- eab: [none] 68000.sinc:469
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=40652f17b038dbe9 op_count=0
+- eab: [none] 68000.sinc:470
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b91556236b66982a op_count=0
+- eab: [none] 68000.sinc:471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e51c622cdc4ee60 op_count=0
+- eab: [none] 68000.sinc:472
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3a78be338e609183 op_count=0
+- eab: [none] 68000.sinc:473
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c54c28d5fba28e7b op_count=0
+- eab: [none] 68000.sinc:474
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b9af07fb1a40618 op_count=0
+- eab: [none] 68000.sinc:475
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0c878fa0ea1cff45 op_count=0
+- eab: [none] 68000.sinc:476
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce4f4f41f49050b2 op_count=0
+- eab: [none] 68000.sinc:477
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f89d162213d0d89 op_count=0
+- eab: [none] 68000.sinc:478
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce4f4f41f49050b2 op_count=0
+- eab: [none] 68000.sinc:479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2b3b26120a88df60 op_count=0
+- eab: [none] 68000.sinc:480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b630012135ab23a op_count=0
+- eab: [none] 68000.sinc:481
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5af11269e0244d78 op_count=0
+- e2x: [none] 68000.sinc:489
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c35e2d3763dafb55 op_count=0
+- e2x: [none] 68000.sinc:490
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13eb5994384bde36 op_count=0
+- e2x: [none] 68000.sinc:491
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66f7c19e469024f3 op_count=0
+- e2x: [none] 68000.sinc:492
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e31c49e6dbcf7963 op_count=0
+- e2x: [none] 68000.sinc:493
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=01ce33f3c04d206a op_count=0
+- e2x: [none] 68000.sinc:494
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ebc2595deee51c16 op_count=0
+- e2x: [none] 68000.sinc:495
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=01ce33f3c04d206a op_count=0
+- e2x: [none] 68000.sinc:496
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90c5f9fd144e94bb op_count=0
+- e2x: [none] 68000.sinc:497
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=77ab41e0ab3d180b op_count=0
+- e2x: [none] 68000.sinc:498
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] 68000.sinc:500
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c4249b606071d28 op_count=0
+- e2d: [none] 68000.sinc:505
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4e6fadf859871c1e op_count=0
+- e2d: [none] 68000.sinc:506
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=07eb1c2d7a83ed4c op_count=0
+- e2d: [none] 68000.sinc:507
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fc0d228a4025b925 op_count=0
+- e2d: [none] 68000.sinc:508
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=85feaf15b8fffda7 op_count=0
+- e2d: [none] 68000.sinc:509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fad7f57965a56b95 op_count=0
+- e2d: [none] 68000.sinc:510
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b2ae28bf415dc54 op_count=0
+- e2d: [none] 68000.sinc:511
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fad7f57965a56b95 op_count=0
+- e2d: [none] 68000.sinc:512
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=29583136a8429d95 op_count=0
+- e2d: [none] 68000.sinc:513
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=179857369e15fdf3 op_count=0
+- e2d: [none] 68000.sinc:514
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fb88d71d89a005e5 op_count=0
+- e2l: [none] 68000.sinc:517
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b4318a51674e439 op_count=0
+- e2l: [none] 68000.sinc:518
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=669fe5a52f08153e op_count=0
+- e2l: [none] 68000.sinc:519
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be0c5a0dfb37f30a op_count=0
+- e2l: [none] 68000.sinc:520
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=196f2f0d5b40ec2c op_count=0
+- e2l: [none] 68000.sinc:521
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8b2c0ab102d0315 op_count=0
+- e2l: [none] 68000.sinc:522
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=830e8d58a0fccf3b op_count=0
+- e2l: [none] 68000.sinc:523
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=963be1c4bb020de1 op_count=0
+- e2l: [none] 68000.sinc:524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1279aff84cb36b60 op_count=0
+- e2l: [none] 68000.sinc:525
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=963be1c4bb020de1 op_count=0
+- e2l: [none] 68000.sinc:526
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6512bef90e8d5181 op_count=0
+- e2l: [none] 68000.sinc:527
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54b474f9058d30e7 op_count=0
+- e2l: [none] 68000.sinc:528
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94f3cb6cb3d90c40 op_count=0
+- e2w: [none] 68000.sinc:530
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=27366a852809b7d2 op_count=0
+- e2w: [none] 68000.sinc:531
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68e134aee9f77bcb op_count=0
+- e2w: [none] 68000.sinc:532
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eeebc4f8db324998 op_count=0
+- e2w: [none] 68000.sinc:533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4664a1b92eda2d2c op_count=0
+- e2w: [none] 68000.sinc:534
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fbea1cba92db815 op_count=0
+- e2w: [none] 68000.sinc:535
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4964a354e605a32d op_count=0
+- e2w: [none] 68000.sinc:536
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30b0c3499846b7eb op_count=0
+- e2w: [none] 68000.sinc:537
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1a53f9fc7bf89efe op_count=0
+- e2w: [none] 68000.sinc:538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30b0c3499846b7eb op_count=0
+- e2w: [none] 68000.sinc:539
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d85b057538f640df op_count=0
+- e2w: [none] 68000.sinc:540
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ea1acf754322c551 op_count=0
+- e2w: [none] 68000.sinc:541
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63ab2b4f3f9d8fb4 op_count=0
+- e2b: [none] 68000.sinc:545
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=275bea852829ad8f op_count=0
+- e2b: [none] 68000.sinc:546
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=690db4aeea1d9036 op_count=0
+- e2b: [none] 68000.sinc:547
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d7dc0ca5748d60d9 op_count=0
+- e2b: [none] 68000.sinc:548
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9163a39f4ba352db op_count=0
+- e2b: [none] 68000.sinc:549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=630dbdc04f45ec78 op_count=0
+- e2b: [none] 68000.sinc:550
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b85dccfb65fb0ea4 op_count=0
+- e2b: [none] 68000.sinc:551
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8437dc58728e571 op_count=0
+- e2b: [none] 68000.sinc:552
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9f06612deb598f22 op_count=0
+- e2b: [none] 68000.sinc:553
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce4f4f41f49050b2 op_count=0
+- e2b: [none] 68000.sinc:554
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1f89d162213d0d89 op_count=0
+- e2b: [none] 68000.sinc:555
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce4f4f41f49050b2 op_count=0
+- e2b: [none] 68000.sinc:556
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2b3b26120a88df60 op_count=0
+- e2b: [none] 68000.sinc:557
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b630012135ab23a op_count=0
+- e2b: [none] 68000.sinc:558
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5af11269e0244d78 op_count=0
+- eaptr: [none] 68000.sinc:562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+- eaptr: [none] 68000.sinc:563
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=932a05c6dd8041fc op_count=0
+- eaptr: [none] 68000.sinc:564
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5dacbe17bf6650a op_count=0
+- eaptr: [none] 68000.sinc:565
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=411a34aa360de4dc op_count=0
+- eaptr: [none] 68000.sinc:566
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5dacbe17bf6650a op_count=0
+- eaptr: [none] 68000.sinc:567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6cf256cbe1d4d1a op_count=0
+- eaptr: [none] 68000.sinc:568
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94f3cb6cb3d90c40 op_count=0
+- Ty: [none] 68000.sinc:571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=11a37c90eae7ceda op_count=0
+- Ty: [none] 68000.sinc:572
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=72c2a119746dc418 op_count=0
+- Tx: [none] 68000.sinc:573
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5440c49140dc00bd op_count=0
+- Tx: [none] 68000.sinc:574
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c302ac2ef931aef op_count=0
+- Tyw: [none] 68000.sinc:575
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=57d0a9e3bff9692a op_count=0
+- Tyw: [none] 68000.sinc:576
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f47e940d731bb75 op_count=0
+- Txw: [none] 68000.sinc:577
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=45a017c2e677510d op_count=0
+- Txw: [none] 68000.sinc:578
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6827753d16492240 op_count=0
+- Tyb: [none] 68000.sinc:579
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3e69cb07916f25be op_count=0
+- Tyb: [none] 68000.sinc:580
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f73e140d756e8c8 op_count=0
+- Txb: [none] 68000.sinc:581
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c274989843c405d9 op_count=0
+- Txb: [none] 68000.sinc:582
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67fb7d3d1623f4ed op_count=0
+- f_off: [none] 68000.sinc:585
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f57bcc7741e2453b op_count=0
+- f_off: [none] 68000.sinc:586
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c83cfa1b13dab391 op_count=0
+- f_wd: [none] 68000.sinc:587
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2d9b5746022f2f8d op_count=0
+- f_wd: [none] 68000.sinc:588
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f148b65bf6eb358d op_count=0
+- rreg: [none] 68000.sinc:590
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b78fae0d3c296d6 op_count=0
+- rreg: [none] 68000.sinc:591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e01c2de0bb2f65d1 op_count=0
+- regPlus: [none] 68000.sinc:593
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+- regxPlus: [none] 68000.sinc:594
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e01c2de0bb2f65d1 op_count=0
+- reg9Plus: [none] 68000.sinc:595
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=52e4afc2e171ac9c op_count=0
+- regParen: [none] 68000.sinc:596
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+- d32l: [none] 68000.sinc:597
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94f3cb6cb3d90c40 op_count=0
+- cc: [none] 68000.sinc:601
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a844b05aa42ad9a op_count=0
+- cc: [none] 68000.sinc:602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d019d0e89d27b27 op_count=0
+- cc: [none] 68000.sinc:603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6feecf732e097a3c op_count=0
+- cc: [none] 68000.sinc:604
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3b6cbf1ef5d55966 op_count=0
+- cc: [none] 68000.sinc:605
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a175c926fb24e657 op_count=0
+- cc: [none] 68000.sinc:606
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=782f07e70e46af09 op_count=0
+- cc: [none] 68000.sinc:607
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d9467e34867e9b78 op_count=0
+- cc: [none] 68000.sinc:608
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c64d00e73a910f32 op_count=0
+- cc: [none] 68000.sinc:609
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b46118fe7b4917cc op_count=0
+- cc: [none] 68000.sinc:610
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c70e4e773e8d95e op_count=0
+- cc: [none] 68000.sinc:611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89daafa626e73d74 op_count=0
+- cc: [none] 68000.sinc:612
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5e400ce6ff9a05e6 op_count=0
+- cc: [none] 68000.sinc:613
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d476a5dc91bb7a62 op_count=0
+- cc: [none] 68000.sinc:614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41692a7ba555e29e op_count=0
+- cc: [none] 68000.sinc:615
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d8d088f2487f2cb7 op_count=0
+- cc: [none] 68000.sinc:616
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd8d6a0e3e2c2fae op_count=0
+- const8: [none] 68000.sinc:618
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5af11269e0244d78 op_count=0
+- const16: [none] 68000.sinc:619
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=63ab2b4f3f9d8fb4 op_count=0
+- const32: [none] 68000.sinc:620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=94f3cb6cb3d90c40 op_count=0
+- ctlreg: [none] 68000.sinc:622
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28ff00203104c24e op_count=0
+- ctlreg: [none] 68000.sinc:623
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=092fa1b3d03872a1 op_count=0
+- ctlreg: [none] 68000.sinc:624
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c7e1530bb3dabdc op_count=0
+- ctlreg: [none] 68000.sinc:625
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8df5fe4a071f9272 op_count=0
+- ctlreg: [none] 68000.sinc:626
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2d939d70e1714e69 op_count=0
+- ctlreg: [none] 68000.sinc:627
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1c4e4b70d7acf21b op_count=0
+- ctlreg: [none] 68000.sinc:628
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=96eaa46bb732d794 op_count=0
+- ctlreg: [none] 68000.sinc:629
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2424447ea5c3e40 op_count=0
+- ctlreg: [none] 68000.sinc:630
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ccd9ae76b87abf5 op_count=0
+- ctlreg: [none] 68000.sinc:631
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=db23133ae07388b9 op_count=0
+- ctlreg: [none] 68000.sinc:632
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=db26933ae0769810 op_count=0
+- ctlreg: [none] 68000.sinc:633
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bbcc118610edc5a op_count=0
+- ctlreg: [none] 68000.sinc:634
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1bb93918610bbf6b op_count=0
+- ctlreg: [none] 68000.sinc:635
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=81d64d31693e5ee9 op_count=0
+- ctlreg: [none] 68000.sinc:636
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6436a2cc3b301f8 op_count=0
+- ctlreg: [none] 68000.sinc:637
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=251aec30b76afb27 op_count=0
+- ctlreg: [none] 68000.sinc:638
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d5fbbc2092ed4715 op_count=0
+- ctlreg: [none] 68000.sinc:639
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7f12d1a5db1880f op_count=0
+- ctlreg: [none] 68000.sinc:640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bcbbaffd1cfcf089 op_count=0
+- ctlreg: [none] 68000.sinc:641
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bcbf2ffd1cffffe0 op_count=0
+- ctlreg: [none] 68000.sinc:643
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=baad3e9d63fa6083 op_count=0
+- ctlreg: [none] 68000.sinc:644
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=051f636b6508af39 op_count=0
+- ctlreg: [none] 68000.sinc:645
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aef0dd5196fad93a op_count=0
+- addr8: [none] 68000.sinc:649
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67c41a652e5b92b7 op_count=0
+- addr16: [none] 68000.sinc:650
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67c41a652e5b92b7 op_count=0
+- addr32: [none] 68000.sinc:651
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=67c41a652e5b92b7 op_count=0
 - ^instruction [none] 68000.sinc:886
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
@@ -205,6 +865,10 @@ entry_id: 68020
 - bclr.l [none] 68000.sinc:1050
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=88c9ca9306563fda op_count=0
+  with_stack: with : extGUARD=1
+- bfOffWd: [none] 68000.sinc:1054
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d5cf7488ab52c6b9 op_count=0
   with_stack: with : extGUARD=1
 - bfchg [none] 68000.sinc:1055
   semantic_ops: <none>
@@ -426,6 +1090,30 @@ entry_id: 68020
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=66740a07161bb3a6 op_count=0
   with_stack: with : extGUARD=1
+- remyes: [none] 68000.sinc:1473
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- remyes: [none] 68000.sinc:1475
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- subdiv: [none] 68000.sinc:1482
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2a5b06481c7ef36b op_count=0
+  with_stack: with : extGUARD=1
+- subdiv: [none] 68000.sinc:1492
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15f3313baf28bd6c op_count=0
+  with_stack: with : extGUARD=1
+- subdiv: [none] 68000.sinc:1504
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=489002ae48e7fbf7 op_count=0
+  with_stack: with : extGUARD=1
+- subdiv: [none] 68000.sinc:1514
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=05de15fb512f37ed op_count=0
+  with_stack: with : extGUARD=1
 - div^remyes^".l" [none] 68000.sinc:1529
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=de4aa990e49a947d op_count=0
@@ -488,7 +1176,31 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - illegal [none] 68000.sinc:1555
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- addrpc16: [none] 68000.sinc:1558
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=67c41a652e5b92b7 op_count=0
+  with_stack: with : extGUARD=1
+- addrd16: [none] 68000.sinc:1559
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a5c082fe837b7cc1 op_count=0
+  with_stack: with : extGUARD=1
+- addrd32: [none] 68000.sinc:1560
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=956238fe7a7b5c27 op_count=0
+  with_stack: with : extGUARD=1
+- addrReg: [none] 68000.sinc:1561
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+  with_stack: with : extGUARD=1
+- addrRegD16: [none] 68000.sinc:1562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=07b0c2383633b9a8 op_count=0
+  with_stack: with : extGUARD=1
+- addrextw: [none] 68000.sinc:1563
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5dacbe17bf6650a op_count=0
   with_stack: with : extGUARD=1
 - jmp [branch] 68000.sinc:1565
   semantic_ops: <none>
@@ -642,6 +1354,818 @@ entry_id: 68020
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=92b30a5048f8731a op_count=0
   with_stack: with : extGUARD=1
+- r2mfwf: [none] 68000.sinc:1704
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=14210c7fbcfd489d op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwf: [none] 68000.sinc:1705
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwe: [none] 68000.sinc:1706
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc69bea8999661b4 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwe: [none] 68000.sinc:1707
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwd: [none] 68000.sinc:1708
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d1c30ea1800b9703 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwd: [none] 68000.sinc:1709
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwc: [none] 68000.sinc:1710
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=26d9ae9255b4e742 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwc: [none] 68000.sinc:1711
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwb: [none] 68000.sinc:1712
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7793290c3c014359 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwb: [none] 68000.sinc:1713
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwa: [none] 68000.sinc:1714
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4dd6bb1f35fcd4d0 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfwa: [none] 68000.sinc:1715
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw9: [none] 68000.sinc:1716
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=50f56252d225b9af op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw9: [none] 68000.sinc:1717
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw8: [none] 68000.sinc:1718
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2dc01a920260615e op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw8: [none] 68000.sinc:1719
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw7: [none] 68000.sinc:1720
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6583fa237a434486 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw7: [none] 68000.sinc:1721
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw6: [none] 68000.sinc:1722
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02daf2bc1d593157 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw6: [none] 68000.sinc:1723
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw5: [none] 68000.sinc:1724
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d204d74ec97f00d8 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw5: [none] 68000.sinc:1725
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw4: [none] 68000.sinc:1726
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=71d6408d0f257561 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw4: [none] 68000.sinc:1727
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw3: [none] 68000.sinc:1728
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3152f9797b79516a op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw3: [none] 68000.sinc:1729
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw2: [none] 68000.sinc:1730
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0352d65bf01aea6b op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw2: [none] 68000.sinc:1731
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw1: [none] 68000.sinc:1732
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ffb9410c26bdc5c op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw1: [none] 68000.sinc:1733
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw0: [none] 68000.sinc:1734
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ac187a8cf2eb5c27 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfw0: [none] 68000.sinc:1735
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d5f073f67cdab99d op_count=0
+  with_stack: with : extGUARD=1
+- r2mflf: [none] 68000.sinc:1739
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69dec900b3098862 op_count=0
+  with_stack: with : extGUARD=1
+- r2mflf: [none] 68000.sinc:1740
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfle: [none] 68000.sinc:1741
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fe9bcc028230f5a9 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfle: [none] 68000.sinc:1742
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfld: [none] 68000.sinc:1743
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=07af16e045706f3c op_count=0
+  with_stack: with : extGUARD=1
+- r2mfld: [none] 68000.sinc:1744
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mflc: [none] 68000.sinc:1745
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d618497ef1ed7e43 op_count=0
+  with_stack: with : extGUARD=1
+- r2mflc: [none] 68000.sinc:1746
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mflb: [none] 68000.sinc:1747
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0ca15d1d273e1fe6 op_count=0
+  with_stack: with : extGUARD=1
+- r2mflb: [none] 68000.sinc:1748
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfla: [none] 68000.sinc:1749
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9c873bb1b55315dd op_count=0
+  with_stack: with : extGUARD=1
+- r2mfla: [none] 68000.sinc:1750
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl9: [none] 68000.sinc:1751
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4b206ab3b8fdd720 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl9: [none] 68000.sinc:1752
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl8: [none] 68000.sinc:1753
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2871d9ef4a18357 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl8: [none] 68000.sinc:1754
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl7: [none] 68000.sinc:1755
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=387550a12051a9ef op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl7: [none] 68000.sinc:1756
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl6: [none] 68000.sinc:1757
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=864cc0ea21352298 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl6: [none] 68000.sinc:1758
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl5: [none] 68000.sinc:1759
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=729d6b55f55565d5 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl5: [none] 68000.sinc:1760
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl4: [none] 68000.sinc:1761
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2fef184222aef1fe op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl4: [none] 68000.sinc:1762
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl3: [none] 68000.sinc:1763
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ddcc0de03da3e99b op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl3: [none] 68000.sinc:1764
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl2: [none] 68000.sinc:1765
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d9a41d25e4887f94 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl2: [none] 68000.sinc:1766
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl1: [none] 68000.sinc:1767
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=34486de44dbb21e1 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl1: [none] 68000.sinc:1768
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl0: [none] 68000.sinc:1769
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ffa728d87e40f7a3 op_count=0
+  with_stack: with : extGUARD=1
+- r2mfl0: [none] 68000.sinc:1770
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0ad13b699c599c19 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwf: [none] 68000.sinc:1774
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d5ea81071663ab9 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwf: [none] 68000.sinc:1775
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwe: [none] 68000.sinc:1776
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=960fff106da50c8e op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwe: [none] 68000.sinc:1777
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwd: [none] 68000.sinc:1778
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af2c02107b9e3e37 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwd: [none] 68000.sinc:1779
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwc: [none] 68000.sinc:1780
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a476d91074f90d8c op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwc: [none] 68000.sinc:1781
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwb: [none] 68000.sinc:1782
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=79210c105c6bfb35 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwb: [none] 68000.sinc:1783
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwa: [none] 68000.sinc:1784
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=71d1e31058a9f38a op_count=0
+  with_stack: with : extGUARD=1
+- r2mbwa: [none] 68000.sinc:1785
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw9: [none] 68000.sinc:1786
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b5ad61066ffdbe3 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw9: [none] 68000.sinc:1787
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw8: [none] 68000.sinc:1788
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=83d5ad10631044c8 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw8: [none] 68000.sinc:1789
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw7: [none] 68000.sinc:1790
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7fc3ff8b19ca4b4 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw7: [none] 68000.sinc:1791
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw6: [none] 68000.sinc:1792
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02b0e8f8b840fbdf op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw6: [none] 68000.sinc:1793
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw5: [none] 68000.sinc:1794
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e927e5f8a9eaf856 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw5: [none] 68000.sinc:1795
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw4: [none] 68000.sinc:1796
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f0770ef8adad0001 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw4: [none] 68000.sinc:1797
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw3: [none] 68000.sinc:1798
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d75a93f89fb30270 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw3: [none] 68000.sinc:1799
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw2: [none] 68000.sinc:1800
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=de733cf8a346a12b op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw2: [none] 68000.sinc:1801
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw1: [none] 68000.sinc:1802
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c556c9f8954cb132 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw1: [none] 68000.sinc:1803
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw0: [none] 68000.sinc:1804
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c07b63b9ea13f613 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbw0: [none] 68000.sinc:1805
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=30fdec8ed347a8ad op_count=0
+  with_stack: with : extGUARD=1
+- r2mblf: [none] 68000.sinc:1809
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ae9ceb2726ceac0d op_count=0
+  with_stack: with : extGUARD=1
+- r2mblf: [none] 68000.sinc:1810
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mble: [none] 68000.sinc:1811
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3418ad26e10f3a75 op_count=0
+  with_stack: with : extGUARD=1
+- r2mble: [none] 68000.sinc:1812
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbld: [none] 68000.sinc:1813
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3422ad26e1178efa op_count=0
+  with_stack: with : extGUARD=1
+- r2mbld: [none] 68000.sinc:1814
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mblc: [none] 68000.sinc:1815
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=341f2526e114720b op_count=0
+  with_stack: with : extGUARD=1
+- r2mblc: [none] 68000.sinc:1816
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mblb: [none] 68000.sinc:1817
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=340e2526e105fed8 op_count=0
+  with_stack: with : extGUARD=1
+- r2mblb: [none] 68000.sinc:1818
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbla: [none] 68000.sinc:1819
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=340b2526e103c901 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbla: [none] 68000.sinc:1820
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl9: [none] 68000.sinc:1821
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=34152526e10c1d86 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl9: [none] 68000.sinc:1822
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl8: [none] 68000.sinc:1823
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3411ad26e1091bc7 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl8: [none] 68000.sinc:1824
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl7: [none] 68000.sinc:1825
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1affaa26d3183ea3 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl7: [none] 68000.sinc:1826
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl6: [none] 68000.sinc:1827
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1b033226d31b5b92 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl6: [none] 68000.sinc:1828
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl5: [none] 68000.sinc:1829
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1af93226d313070d op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl5: [none] 68000.sinc:1830
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl4: [none] 68000.sinc:1831
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1afc3226d3153ce4 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl4: [none] 68000.sinc:1832
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl3: [none] 68000.sinc:1833
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1af23226d30ce85f op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl3: [none] 68000.sinc:1834
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl2: [none] 68000.sinc:1835
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1af5aa26d30fea1e op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl2: [none] 68000.sinc:1836
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl1: [none] 68000.sinc:1837
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1aeb2a26d306bc19 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl1: [none] 68000.sinc:1838
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl0: [none] 68000.sinc:1839
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e698eb731489fcec op_count=0
+  with_stack: with : extGUARD=1
+- r2mbl0: [none] 68000.sinc:1840
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eaadcf085f03b321 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwf: [none] 68000.sinc:1844
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9dfd89a2ad77bc7d op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwf: [none] 68000.sinc:1845
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwe: [none] 68000.sinc:1846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3fdddbe448049008 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwe: [none] 68000.sinc:1847
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwd: [none] 68000.sinc:1848
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=537a6e6a7e0c510f op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwd: [none] 68000.sinc:1849
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwc: [none] 68000.sinc:1850
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2af7356f3010d31a op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwc: [none] 68000.sinc:1851
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwb: [none] 68000.sinc:1852
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=75abcea76baeb541 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwb: [none] 68000.sinc:1853
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwa: [none] 68000.sinc:1854
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9abbb1021cd08d3c op_count=0
+  with_stack: with : extGUARD=1
+- m2rfwa: [none] 68000.sinc:1855
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw9: [none] 68000.sinc:1856
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46f97083de9be863 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw9: [none] 68000.sinc:1857
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw8: [none] 68000.sinc:1858
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b105a2e1eb6d84fe op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw8: [none] 68000.sinc:1859
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw7: [none] 68000.sinc:1860
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dff082b1f34b1b06 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw7: [none] 68000.sinc:1861
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw6: [none] 68000.sinc:1862
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1e60977fbdaa418b op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw6: [none] 68000.sinc:1863
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw5: [none] 68000.sinc:1864
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a33ec73294ccb9c4 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw5: [none] 68000.sinc:1865
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw4: [none] 68000.sinc:1866
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d5c09f8426a59c9 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw4: [none] 68000.sinc:1867
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw3: [none] 68000.sinc:1868
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e4fc7c7a5d72cbc2 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw3: [none] 68000.sinc:1869
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw2: [none] 68000.sinc:1870
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=00e17454426d6137 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw2: [none] 68000.sinc:1871
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw1: [none] 68000.sinc:1872
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a79a121bd47243d0 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw1: [none] 68000.sinc:1873
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw0: [none] 68000.sinc:1874
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fc2ffc66a0c7e18 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfw0: [none] 68000.sinc:1875
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3db8cd46e8c22fd op_count=0
+  with_stack: with : extGUARD=1
+- m2rflf: [none] 68000.sinc:1880
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=588558141956b1c0 op_count=0
+  with_stack: with : extGUARD=1
+- m2rflf: [none] 68000.sinc:1881
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfle: [none] 68000.sinc:1882
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c9b58048ff646653 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfle: [none] 68000.sinc:1883
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfld: [none] 68000.sinc:1884
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c5f0a1fcad682f6 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfld: [none] 68000.sinc:1885
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rflc: [none] 68000.sinc:1886
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=49fe3a83bf8b3991 op_count=0
+  with_stack: with : extGUARD=1
+- m2rflc: [none] 68000.sinc:1887
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rflb: [none] 68000.sinc:1888
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bce4cb40368357e4 op_count=0
+  with_stack: with : extGUARD=1
+- m2rflb: [none] 68000.sinc:1889
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfla: [none] 68000.sinc:1890
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=048a1895553b8307 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfla: [none] 68000.sinc:1891
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl9: [none] 68000.sinc:1892
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2a40fc875ba0289a op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl9: [none] 68000.sinc:1893
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl8: [none] 68000.sinc:1894
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46af11b65908e225 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl8: [none] 68000.sinc:1895
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl7: [none] 68000.sinc:1896
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=537d50e91f39967d op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl7: [none] 68000.sinc:1897
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl6: [none] 68000.sinc:1898
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=018ebed558beddf2 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl6: [none] 68000.sinc:1899
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl5: [none] 68000.sinc:1900
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41c4af95ae76f21f op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl5: [none] 68000.sinc:1901
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl4: [none] 68000.sinc:1902
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f07149d570e161c op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl4: [none] 68000.sinc:1903
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl3: [none] 68000.sinc:1904
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=39e4f5dfe83c3029 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl3: [none] 68000.sinc:1905
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl2: [none] 68000.sinc:1906
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=84232bb95d07dc4e op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl2: [none] 68000.sinc:1907
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl1: [none] 68000.sinc:1908
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c23a2a1d771339ab op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl1: [none] 68000.sinc:1909
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl0: [none] 68000.sinc:1910
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0fc097c12100bb21 op_count=0
+  with_stack: with : extGUARD=1
+- m2rfl0: [none] 68000.sinc:1911
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=772252a02bf0b1f9 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1914
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1915
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1916
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=47d254195c368b73 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1917
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f139b0eedeb61d72 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1918
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad7facb60a62ce1 op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1919
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb8fb388ae2e5afc op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1920
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2d8045a99f87e58a op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1921
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c50c5767bc0bc5dd op_count=0
+  with_stack: with : extGUARD=1
+- movemOp: [none] 68000.sinc:1922
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad7facb60a62ce1 op_count=0
+  with_stack: with : extGUARD=1
+- movemWrt: [none] 68000.sinc:1924
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8c357924e36305e2 op_count=0
+  with_stack: with : extGUARD=1
+- movemWrt: [none] 68000.sinc:1925
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
 - movem.w [none] 68000.sinc:1927
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b065cd77117a7003 op_count=0
@@ -665,6 +2189,10 @@ entry_id: 68020
 - movem.l [none] 68000.sinc:1934
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c0cb4e013c33db72 op_count=0
+  with_stack: with : extGUARD=1
+- epw: [none] 68000.sinc:1937
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f139b0eedeb61d72 op_count=0
   with_stack: with : extGUARD=1
 - movep.w [none] 68000.sinc:1938
   semantic_ops: <none>
@@ -726,6 +2254,30 @@ entry_id: 68020
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=64ff0fb2e057e40f op_count=0
   with_stack: with : extGUARD=1
+- mulsize: [none] 68000.sinc:1968
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- mulsize: [none] 68000.sinc:1969
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- submul: [none] 68000.sinc:1971
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8023f9c92ffa7cc op_count=0
+  with_stack: with : extGUARD=1
+- submul: [none] 68000.sinc:1972
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dfb6f05b8cd72960 op_count=0
+  with_stack: with : extGUARD=1
+- submul: [none] 68000.sinc:1982
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8023f9c92ffa7cc op_count=0
+  with_stack: with : extGUARD=1
+- submul: [none] 68000.sinc:1983
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4ba8193f7b27dfb0 op_count=0
+  with_stack: with : extGUARD=1
 - mul^mulsize [none] 68000.sinc:1994
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8652e94a52de8a95 op_count=0
@@ -736,13 +2288,25 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - neg.b [none] 68000.sinc:2022
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2023
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=13dc5271a0ca67cf op_count=0
   with_stack: with : extGUARD=1
 - neg.w [none] 68000.sinc:2024
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2025
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f5853affd8d86300 op_count=0
   with_stack: with : extGUARD=1
 - neg.l [none] 68000.sinc:2026
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2027
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c5a6b2da29995bf4 op_count=0
   with_stack: with : extGUARD=1
@@ -1000,13 +2564,25 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - subx.b [none] 68000.sinc:2277
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2278
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=d394abef7cd6507b op_count=0
   with_stack: with : extGUARD=1
 - subx.w [none] 68000.sinc:2280
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2281
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9d35d3f34b19fee2 op_count=0
   with_stack: with : extGUARD=1
 - subx.l [none] 68000.sinc:2283
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2284
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fe462e3adec96f62 op_count=0
   with_stack: with : extGUARD=1
@@ -1061,6 +2637,194 @@ entry_id: 68020
 - unpk [none] 68000.sinc:2313
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=510ae1bf5f02e3b6 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2331
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a50fe2feb162dfce op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2332
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6a7c83c4e1a8ff4 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2333
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=650363339b62de31 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2334
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f2e6a18d6a201b1 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2335
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68c409c397c03f41 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2336
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d657799132132f8f op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2337
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d82d9a4ca057bf85 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f518ea3396dee17 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2339
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc4ad3efae54f847 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2340
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46e64e53b23e4023 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2341
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f5235a075fa20abd op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2342
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ff06ff7bd40d433 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2343
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92f31c7079981e81 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2344
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92f31c7079981e81 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=650363339b62de31 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f2e6a18d6a201b1 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68c409c397c03f41 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2349
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d657799132132f8f op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d82d9a4ca057bf85 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2351
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f2e6a18d6a201b1 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2352
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc4ad3efae54f847 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2353
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=183218c4f3dc0760 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f5235a075fa20abd op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2355
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ff06ff7bd40d433 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92f31c7079981e81 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2357
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=92f31c7079981e81 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2359
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d019d0e89d27b27 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2360
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a844b05aa42ad9a op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2361
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d019d0e89d27b27 op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2362
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a844b05aa42ad9a op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2363
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a50fe2feb162dfce op_count=0
+  with_stack: with : extGUARD=1
+- fcc: [none] 68000.sinc:2364
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a50fe2feb162dfce op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2380
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2381
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2382
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2383
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2384
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2385
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2386
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fprec: [none] 68000.sinc:2387
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2397
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0fbf599b00df8e9a op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2398
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5fc295a205a4b161 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7fe10c34385bbbe3 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2400
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ea8bf53410dfc25 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d78d68348c8a5e81 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2402
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d78d68348c8a5e81 op_count=0
+  with_stack: with : extGUARD=1
+- f_mem: [none] 68000.sinc:2403
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6f3d1f6cb824f99d op_count=0
   with_stack: with : extGUARD=1
 - fabs.^fprec [none] 68000.sinc:2405
   semantic_ops: <none>
@@ -1196,6 +2960,10 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - fintrz.^fprec [none] 68000.sinc:2511
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- [ [none] 68000.sinc:2512
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4888e43acc2b553d op_count=0
   with_stack: with : extGUARD=1
 - fintrz [none] 68000.sinc:2513
@@ -1274,6 +3042,14 @@ entry_id: 68020
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4e341ed963f0b4fd op_count=0
   with_stack: with : extGUARD=1
+- kfact: [none] 68000.sinc:2577
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ec100521de95d66 op_count=0
+  with_stack: with : extGUARD=1
+- kfact: [none] 68000.sinc:2578
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=12cbc8f6226d9ca2 op_count=0
+  with_stack: with : extGUARD=1
 - fmove.p [none] 68000.sinc:2580
   semantic_ops: kfactor
   semantic_template: status=unsupported_template action_hash=20ee452372652e2b op_count=1
@@ -1306,33 +3082,321 @@ entry_id: 68020
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=69b07afb8c24bc30 op_count=0
   with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2596
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=050a516bd5c06006 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2597
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c95a59ed2d52d971 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2598
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59f9bff9bd230dc8 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2599
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=466d8f46565ad1ee op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2600
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=62adf2f09547ff58 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2601
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7417fbe3ad090660 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=629d1cbe48a6f750 op_count=0
+  with_stack: with : extGUARD=1
+- romconst: [none] 68000.sinc:2603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c95a59ed2d52d971 op_count=0
+  with_stack: with : extGUARD=1
 - fmovecr.x [none] 68000.sinc:2605
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ae1bca49415ac7f1 op_count=0
   with_stack: with : extGUARD=1
+- m2fpF7: [none] 68000.sinc:2608
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a184b1ef13ec3153 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF7: [none] 68000.sinc:2609
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF6: [none] 68000.sinc:2610
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fc530c48be6eb7be op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF6: [none] 68000.sinc:2611
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF5: [none] 68000.sinc:2612
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a4349b309ada0519 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF5: [none] 68000.sinc:2613
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF4: [none] 68000.sinc:2614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c2c299af2f19e9dc op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF4: [none] 68000.sinc:2615
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF3: [none] 68000.sinc:2616
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6b948924c744c27 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF3: [none] 68000.sinc:2617
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF2: [none] 68000.sinc:2618
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5ec8338f05086892 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF2: [none] 68000.sinc:2619
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF1: [none] 68000.sinc:2620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3458afbd2c1cc2ad op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF1: [none] 68000.sinc:2621
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF0: [none] 68000.sinc:2622
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03e0427d347fb4dc op_count=0
+  with_stack: with : extGUARD=1
+- m2fpF0: [none] 68000.sinc:2623
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e281d6c83291d2b op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR7: [none] 68000.sinc:2626
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bb217c7daff8d5ae op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR7: [none] 68000.sinc:2627
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR6: [none] 68000.sinc:2628
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f9100060a0741ccb op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR6: [none] 68000.sinc:2629
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR5: [none] 68000.sinc:2630
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b27bf1a20eb71e58 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR5: [none] 68000.sinc:2631
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR4: [none] 68000.sinc:2632
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfd73eefc12068c5 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR4: [none] 68000.sinc:2633
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR3: [none] 68000.sinc:2634
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf3330739ccda902 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR3: [none] 68000.sinc:2635
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR2: [none] 68000.sinc:2636
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c79a708028c745f op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR2: [none] 68000.sinc:2637
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR1: [none] 68000.sinc:2638
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1273f692ef642bec op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR1: [none] 68000.sinc:2639
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR0: [none] 68000.sinc:2640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=62dd457324cbf1f3 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpR0: [none] 68000.sinc:2641
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=43f97aca29d85683 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF7: [none] 68000.sinc:2645
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e0ec2d6540d2d6bf op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF7: [none] 68000.sinc:2646
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF6: [none] 68000.sinc:2647
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c996fc466d69d1be op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF6: [none] 68000.sinc:2648
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF5: [none] 68000.sinc:2649
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=55d5504e5ecad0f5 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF5: [none] 68000.sinc:2650
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF4: [none] 68000.sinc:2651
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d6bf01ce315962b4 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF4: [none] 68000.sinc:2652
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF3: [none] 68000.sinc:2653
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3954f58ea0a909e3 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF3: [none] 68000.sinc:2654
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF2: [none] 68000.sinc:2655
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7d0bf2f65b1cc6b2 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF2: [none] 68000.sinc:2656
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF1: [none] 68000.sinc:2657
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2eb757da11d84599 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF1: [none] 68000.sinc:2658
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF0: [none] 68000.sinc:2659
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a1787dcca38febfc op_count=0
+  with_stack: with : extGUARD=1
+- fp2mF0: [none] 68000.sinc:2660
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=09b8098e9ec9f30f op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR7: [none] 68000.sinc:2663
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1de64def0ae31826 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR7: [none] 68000.sinc:2664
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR6: [none] 68000.sinc:2665
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1de355ef0ae0efe7 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR6: [none] 68000.sinc:2666
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR5: [none] 68000.sinc:2667
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ddfcdef0addd2f8 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR5: [none] 68000.sinc:2668
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR4: [none] 68000.sinc:2669
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ddc4def0adac3a1 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR4: [none] 68000.sinc:2670
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR3: [none] 68000.sinc:2671
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1df455ef0aef631a op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR3: [none] 68000.sinc:2672
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR2: [none] 68000.sinc:2673
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1df0cdef0aec462b op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR2: [none] 68000.sinc:2674
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR1: [none] 68000.sinc:2675
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ded55ef0ae9446c op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR1: [none] 68000.sinc:2676
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR0: [none] 68000.sinc:2677
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=93c153a780303bc7 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mR0: [none] 68000.sinc:2678
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d4b4c14319a355f op_count=0
+  with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2686
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=90f8a2206c365051 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2692
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=c169be01b4ddab28 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2697
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=76886bf196f84514 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2702
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=ebec420ed4741233 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2708
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=abb72e0d4ed99bce op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2714
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=4887204f86550c0a op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fmovem.x [none] 68000.sinc:2720
   semantic_ops: fmovem
@@ -1349,6 +3413,54 @@ entry_id: 68020
 - fmovem.x [none] 68000.sinc:2724
   semantic_ops: fmovem
   semantic_template: status=unsupported_template action_hash=54b9bbac2122bb2f op_count=1
+  with_stack: with : extGUARD=1
+- m2fpC2: [none] 68000.sinc:2727
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=85a70be78d7b7a0e op_count=0
+  with_stack: with : extGUARD=1
+- m2fpC2: [none] 68000.sinc:2728
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpC1: [none] 68000.sinc:2729
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=21cea9e17a9e991e op_count=0
+  with_stack: with : extGUARD=1
+- m2fpC1: [none] 68000.sinc:2730
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- m2fpC0: [none] 68000.sinc:2731
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bbc96d6ea3d8ee8a op_count=0
+  with_stack: with : extGUARD=1
+- m2fpC0: [none] 68000.sinc:2732
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=807755fc7fe1fdcf op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC2: [none] 68000.sinc:2735
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=31f6a60dccbf2a8c op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC2: [none] 68000.sinc:2736
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC1: [none] 68000.sinc:2737
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ab8fae9138750d1c op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC1: [none] 68000.sinc:2738
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC0: [none] 68000.sinc:2739
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1dd3edfd25b933b2 op_count=0
+  with_stack: with : extGUARD=1
+- fp2mC0: [none] 68000.sinc:2740
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c87cdc45e34787b op_count=0
   with_stack: with : extGUARD=1
 - fmovem.l [none] 68000.sinc:2742
   semantic_ops: <none>
@@ -1404,21 +3516,37 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - fs^fcc [none] 68000.sinc:2794
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=55d3bc3e4ab3e568 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : extGUARD=1
 - fsgldiv.^fprec [none] 68000.sinc:2798
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- [ [none] 68000.sinc:2799
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=da7d82308e9d81de op_count=0
   with_stack: with : extGUARD=1
 - fsgldiv [none] 68000.sinc:2800
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2801
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2475680c1a3c9ed0 op_count=0
   with_stack: with : extGUARD=1
 - fsglmul.^fprec [none] 68000.sinc:2805
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- [ [none] 68000.sinc:2806
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=1e6b635c3968135f op_count=0
   with_stack: with : extGUARD=1
 - fsglmul [none] 68000.sinc:2807
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2808
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=dd50cef52e4c4977 op_count=0
   with_stack: with : extGUARD=1
@@ -1431,10 +3559,18 @@ entry_id: 68020
   semantic_template: status=unsupported_template action_hash=b2b60b2021aa0e4b op_count=1
   with_stack: with : extGUARD=1
 - fsincos.^fprec [none] 68000.sinc:2815
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- [ [none] 68000.sinc:2816
   semantic_ops: cos, sin
   semantic_template: status=unsupported_template action_hash=76e02fc284e6e9a3 op_count=2
   with_stack: with : extGUARD=1
 - fsincos.x [none] 68000.sinc:2817
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2818
   semantic_ops: cos, sin
   semantic_template: status=unsupported_template action_hash=65396f525fb6c07b op_count=2
   with_stack: with : extGUARD=1
@@ -1500,9 +3636,17 @@ entry_id: 68020
   with_stack: with : extGUARD=1
 - ftst.^fprec [none] 68000.sinc:2876
   semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- [ [none] 68000.sinc:2877
+  semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b54e6fe7cc39e2b2 op_count=0
   with_stack: with : extGUARD=1
 - ftst.x [none] 68000.sinc:2878
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : extGUARD=1
+- <unknown> [none] 68000.sinc:2879
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4cb246ce74a2618a op_count=0
   with_stack: with : extGUARD=1

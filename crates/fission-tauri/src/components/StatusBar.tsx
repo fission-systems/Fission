@@ -28,11 +28,13 @@ export default function StatusBar({
                 {binaryInfo ? (
                     <>
                         <span className="status-bar__item">📄 {binaryInfo.name}</span>
-                        <span className="status-bar__item">{binaryInfo.format} · {binaryInfo.arch}</span>
+                        <span className="status-bar__item">{binaryInfo.format} · {binaryInfo.arch} · {binaryInfo.bits}-bit</span>
                         <span className="status-bar__item">Entry: {binaryInfo.entry_point}</span>
                         <span className="status-bar__item">
                             {functionCount} {functionCount === 1 ? "fn" : "fns"}
                         </span>
+                        <span className="status-bar__item">Imp {binaryInfo.import_count}</span>
+                        <span className="status-bar__item">Exp {binaryInfo.export_count}</span>
                         <span className="status-bar__item">§ {binaryInfo.section_count}</span>
                     </>
                 ) : (

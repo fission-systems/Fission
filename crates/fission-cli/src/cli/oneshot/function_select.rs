@@ -1,83 +1,12 @@
 use crate::cli::args::parse_hex_address;
+use fission_loader::loader::function_view::{
+    canonical_functions_sorted, is_runtime_wrapper_zero_size, prefer_function_name,
+};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::Path;
-
-fn is_generic_function_name(name: &str) -> bool {
-    name.starts_with("FUN_") || name.starts_with("sub_")
-}
-
-pub(crate) fn prefer_function_name(candidate: &str, current: &str) -> bool {
-    let candidate_is_sub = candidate.starts_with("sub_");
-    let current_is_sub = current.starts_with("sub_");
-    if candidate_is_sub != current_is_sub {
-        return !candidate_is_sub;
-    }
-    if is_generic_function_name(candidate) != is_generic_function_name(current) {
-        return !is_generic_function_name(candidate);
-    }
-    candidate.len() > current.len()
-}
-
-fn function_provenance_rank(func: &FunctionInfo) -> u8 {
-    if func.is_import || func.is_thunk_like {
-        return 0;
-    }
-    match func.kind.as_deref() {
-        Some("undefined_external" | "import" | "import_thunk") => 0,
-        Some("debug_symbol") => 2,
-        Some("entry" | "code") => 4,
-        _ if func.is_export => 5,
-        _ if is_generic_function_name(&func.name) => 1,
-        _ => 3,
-    }
-}
-
-fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a FunctionInfo> {
-    let mut deduped: Vec<&'a FunctionInfo> = Vec::with_capacity(functions.len());
-    for func in functions {
-        match deduped.last_mut() {
-            Some(current) if current.address == func.address => {
-                let candidate_rank = function_provenance_rank(func);
-                let current_rank = function_provenance_rank(current);
-                if candidate_rank > current_rank
-                    || (candidate_rank == current_rank
-                        && prefer_function_name(&func.name, &current.name))
-                {
-                    *current = func;
-                }
-            }
-            _ => deduped.push(func),
-        }
-    }
-    deduped
-}
-
-fn should_filter_internal_candidate(func: &FunctionInfo, covering_end: u64) -> bool {
-    if func.is_import
-        || func.is_thunk_like
-        || matches!(
-            func.kind.as_deref(),
-            Some("undefined_external" | "import" | "import_thunk" | "debug_symbol")
-        )
-    {
-        return true;
-    }
-    if func.is_export || func.address >= covering_end {
-        return false;
-    }
-    if !is_generic_function_name(&func.name) {
-        return false;
-    }
-    let extent_end = func.address.saturating_add(func.size.max(1));
-    extent_end <= covering_end
-}
-
-fn is_runtime_wrapper_zero_size(func: &FunctionInfo) -> bool {
-    func.size == 0 && func.name == "register_frame_ctor"
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BatchSelectionAccounting {
@@ -104,24 +33,6 @@ impl BatchSelectionAccounting {
 pub(crate) struct BatchFunctionSelection<'a> {
     pub(crate) functions: Vec<&'a FunctionInfo>,
     pub(crate) accounting: BatchSelectionAccounting,
-}
-
-pub(crate) fn canonical_functions_sorted<'a>(binary: &'a LoadedBinary) -> Vec<&'a FunctionInfo> {
-    let deduped = dedupe_exact_functions(binary.functions_sorted());
-    let mut filtered = Vec::with_capacity(deduped.len());
-    let mut covering_end = 0u64;
-
-    for func in deduped {
-        if should_filter_internal_candidate(func, covering_end) {
-            continue;
-        }
-        if !func.is_import && func.size > 0 {
-            covering_end = covering_end.max(func.address.saturating_add(func.size));
-        }
-        filtered.push(func);
-    }
-
-    filtered
 }
 
 pub(crate) fn select_batch_functions<'a>(

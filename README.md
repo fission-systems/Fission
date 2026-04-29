@@ -213,6 +213,27 @@ If you want comparative evaluation rather than a first manual CLI pass, use the
 canonical benchmark workflow in
 [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md).
 
+### Run the Desktop GUI
+
+The desktop application lives in [`crates/fission-tauri`](./crates/fission-tauri)
+and uses Tauri + Vite for the UI shell.
+
+```bash
+# Install GUI frontend dependencies once
+cd crates/fission-tauri
+npm install
+
+# Launch the desktop GUI in development mode
+npm run tauri -- dev
+```
+
+For a production desktop build:
+
+```bash
+cd crates/fission-tauri
+npm run tauri -- build
+```
+
 ### Run Quality Assurance
 
 Execute the main quality lane for regression testing:
@@ -227,8 +248,9 @@ cargo run -p fission-automation -- nir-check --lane nir
 # Release build (optimized)
 cargo build --release
 
-# Desktop GUI
-cargo build -p fission-tauri --release
+# Desktop GUI shell
+cd crates/fission-tauri
+npm run tauri -- build
 
 # Full test suite
 cargo test --all

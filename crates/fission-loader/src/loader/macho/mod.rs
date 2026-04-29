@@ -1,12 +1,11 @@
+use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
     DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
     extract_fixed_string,
 };
 use crate::prelude::*;
-use binrw::BinRead;
 use fission_core::architecture::select_macho_load_spec;
 use fission_core::constants::binary_format::*;
-use std::io::{Cursor, Seek, SeekFrom};
 
 pub mod apple;
 pub mod schema;
@@ -21,9 +20,7 @@ impl MachoLoader {
         if let Some(slice) = select_fat_slice(bytes) {
             return Self::parse(DataBuffer::Heap(bytes[slice].to_vec()), path);
         }
-        let mut cursor = Cursor::new(bytes);
-        let magic =
-            u32::read_be(&mut cursor).map_err(|e| err!(loader, "Invalid MachO Magic: {}", e))?;
+        let magic = ByteReader::big(bytes).u32(0)?;
 
         // Detect Props
         let (is_64, _is_swap) = match magic {
@@ -35,15 +32,12 @@ impl MachoLoader {
         };
 
         let endian = match magic {
-            MACHO_MAGIC_32_BE => binrw::Endian::Big,
-            MACHO_MAGIC_64_BE => binrw::Endian::Big,
-            MACHO_MAGIC_32_LE => binrw::Endian::Little,
-            MACHO_MAGIC_64_LE => binrw::Endian::Little,
+            MACHO_MAGIC_32_BE => Endian::Big,
+            MACHO_MAGIC_64_BE => Endian::Big,
+            MACHO_MAGIC_32_LE => Endian::Little,
+            MACHO_MAGIC_64_LE => Endian::Little,
             _ => return Err(err!(loader, "Unknown Magic")),
         };
-
-        // Reset and parse
-        cursor.set_position(0);
 
         if is_64 {
             Self::parse_64(data, path, endian)
@@ -52,11 +46,10 @@ impl MachoLoader {
         }
     }
 
-    fn parse_64(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+    fn parse_64(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
-        let mut reader = Cursor::new(bytes);
-        let header = MachHeader64::read_options(&mut reader, endian, ())
-            .map_err(|e| err!(loader, "MachO64 Header: {}", e))?;
+        let reader = ByteReader::new(bytes, endian);
+        let header = MachHeader64::parse(&reader)?;
 
         let is_64bit = true;
         let cputype = header.cputype;
@@ -75,18 +68,13 @@ impl MachoLoader {
         let mut function_starts_info: Option<(u32, u32)> = None;
 
         // First pass: collect segment/section info and load commands
+        let mut cursor = 32usize;
         for _ in 0..header.ncmds {
-            let cmd_start = reader.position();
-            let cmd_header = LoadCommand::read_options(&mut reader, endian, ())
-                .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?;
-
-            reader
-                .seek(SeekFrom::Start(cmd_start))
-                .map_err(|e| err!(loader, "Failed to seek to load command start: {}", e))?;
+            let cmd_start = cursor;
+            let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
 
             if cmd_header.cmd == LC_SEGMENT_64 {
-                let seg = SegmentCommand64::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read segment command: {}", e))?;
+                let seg = SegmentCommand64::parse(&reader, cmd_start)?;
                 let seg_name = extract_fixed_string(&seg.segname);
 
                 // Use __TEXT segment's vmaddr as image base (most reliable)
@@ -102,9 +90,10 @@ impl MachoLoader {
                 let seg_is_executable = (seg.initprot & 0x04) != 0;
 
                 // Process Sections
+                let mut section_offset = cmd_start + SegmentCommand64::SIZE;
                 for _ in 0..seg.nsects {
-                    let sect = Section64::read_options(&mut reader, endian, ())
-                        .map_err(|e| err!(loader, "Failed to read section: {}", e))?;
+                    let sect = Section64::parse(&reader, section_offset)?;
+                    section_offset += Section64::SIZE;
 
                     // S_ATTR_PURE_INSTRUCTIONS = 0x80000000
                     // S_ATTR_SOME_INSTRUCTIONS = 0x00000400
@@ -124,40 +113,31 @@ impl MachoLoader {
                     });
                 }
 
-                // Skip remaining padding of command if any
-                reader
-                    .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
-                    .map_err(|e| err!(loader, "Failed to skip segment command: {}", e))?;
+                cursor = cmd_start + cmd_header.cmdsize as usize;
                 continue;
             } else if cmd_header.cmd == LC_SYMTAB {
-                let symtab = SymtabCommand::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read symtab command: {}", e))?;
+                let symtab = SymtabCommand::parse(&reader, cmd_start)?;
                 symtab_info = Some(symtab.clone());
             } else if cmd_header.cmd == LC_DYSYMTAB {
-                let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read dysymtab command: {}", e))?;
+                let dysymtab = DysymtabCommand::parse(&reader, cmd_start)?;
                 dysymtab_info = Some(dysymtab);
             } else if cmd_header.cmd == LC_MAIN {
                 // Parse LC_MAIN for entry point
-                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read entry point command: {}", e))?;
+                let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 // entryoff is offset from __TEXT segment start
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
             } else if cmd_header.cmd == LC_FUNCTION_STARTS {
                 // GAP-8: Parse LC_FUNCTION_STARTS — ULEB128-encoded function addresses.
                 // Equivalent to Ghidra's MachoFunctionStartsAnalyzer which uses this
                 // table to discover all functions including unsymbolicated ones.
-                let lc = LinkeditDataCommand::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read LC_FUNCTION_STARTS: {}", e))?;
+                let lc = LinkeditDataCommand::parse(&reader, cmd_start)?;
                 if lc.datasize > 0 {
                     function_starts_info = Some((lc.dataoff, lc.datasize));
                 }
             }
 
             // Skip command
-            reader
-                .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
-                .map_err(|e| err!(loader, "Failed to skip load command: {}", e))?;
+            cursor = cmd_start + cmd_header.cmdsize as usize;
         }
 
         if image_base == u64::MAX {
@@ -261,7 +241,7 @@ impl MachoLoader {
         }
 
         LoadedBinaryBuilder::new(path, data)
-            .format("Mach-O 64 (binrw)")
+            .format("Mach-O 64")
             .architecture(architecture)
             .load_spec(load_spec)
             .entry_point(entry_point)
@@ -273,11 +253,10 @@ impl MachoLoader {
             .build()
     }
 
-    fn parse_32(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+    fn parse_32(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
-        let mut reader = Cursor::new(bytes);
-        let header = MachHeader32::read_options(&mut reader, endian, ())
-            .map_err(|e| err!(loader, "MachO32 Header: {}", e))?;
+        let reader = ByteReader::new(bytes, endian);
+        let header = MachHeader32::parse(&reader)?;
 
         let is_64bit = false;
         let cputype = header.cputype;
@@ -290,26 +269,23 @@ impl MachoLoader {
         let mut symtab_info: Option<SymtabCommand> = None;
         let mut dysymtab_info: Option<DysymtabCommand> = None;
 
+        let mut cursor = 28usize;
         for _ in 0..header.ncmds {
-            let cmd_start = reader.position();
-            let cmd_header = LoadCommand::read_options(&mut reader, endian, ())
-                .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?;
-            reader
-                .seek(SeekFrom::Start(cmd_start))
-                .map_err(|e| err!(loader, "Failed to seek to load command start: {}", e))?;
+            let cmd_start = cursor;
+            let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
 
             if cmd_header.cmd == LC_SEGMENT {
-                let seg = SegmentCommand32::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read segment command: {}", e))?;
+                let seg = SegmentCommand32::parse(&reader, cmd_start)?;
                 let seg_name = extract_fixed_string(&seg.segname);
                 if seg_name == "__TEXT" && seg.vmaddr != 0 {
                     text_segment_vmaddr = seg.vmaddr as u64;
                     image_base = image_base.min(seg.vmaddr as u64);
                 }
                 let seg_is_executable = (seg.initprot & 0x04) != 0;
+                let mut section_offset = cmd_start + SegmentCommand32::SIZE;
                 for _ in 0..seg.nsects {
-                    let sect = Section32::read_options(&mut reader, endian, ())
-                        .map_err(|e| err!(loader, "Failed to read section: {}", e))?;
+                    let sect = Section32::parse(&reader, section_offset)?;
+                    section_offset += Section32::SIZE;
                     let sect_has_instructions = (sect.flags & 0x80000400) != 0;
                     let is_executable = seg_is_executable || sect_has_instructions;
                     section_exec_map.push(is_executable);
@@ -325,24 +301,15 @@ impl MachoLoader {
                     });
                 }
             } else if cmd_header.cmd == LC_SYMTAB {
-                symtab_info = Some(
-                    SymtabCommand::read_options(&mut reader, endian, ())
-                        .map_err(|e| err!(loader, "Failed to read symtab command: {}", e))?,
-                );
+                symtab_info = Some(SymtabCommand::parse(&reader, cmd_start)?);
             } else if cmd_header.cmd == LC_DYSYMTAB {
-                dysymtab_info = Some(
-                    DysymtabCommand::read_options(&mut reader, endian, ())
-                        .map_err(|e| err!(loader, "Failed to read dysymtab command: {}", e))?,
-                );
+                dysymtab_info = Some(DysymtabCommand::parse(&reader, cmd_start)?);
             } else if cmd_header.cmd == LC_MAIN {
-                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ())
-                    .map_err(|e| err!(loader, "Failed to read entry point command: {}", e))?;
+                let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
             }
 
-            reader
-                .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
-                .map_err(|e| err!(loader, "Failed to skip load command: {}", e))?;
+            cursor = cmd_start + cmd_header.cmdsize as usize;
         }
 
         if image_base == u64::MAX {
@@ -375,7 +342,7 @@ impl MachoLoader {
         }
 
         LoadedBinaryBuilder::new(path, data)
-            .format("Mach-O 32 (binrw)")
+            .format("Mach-O 32")
             .architecture(architecture)
             .load_spec(load_spec)
             .entry_point(entry_point)
@@ -390,7 +357,7 @@ impl MachoLoader {
     fn parse_symbols_64(
         data: &[u8],
         symtab: &SymtabCommand,
-        endian: binrw::Endian,
+        endian: Endian,
         section_exec_map: &[bool],
         out: &mut Vec<FunctionInfo>,
     ) {
@@ -402,13 +369,13 @@ impl MachoLoader {
             return;
         }
 
-        let mut reader = Cursor::new(data);
-        reader.set_position(sym_off);
+        let reader = ByteReader::new(data, endian);
 
         // We can't easily iterate N times due to seek.
         // But symbols are contiguous Nlist64 structs.
-        for _ in 0..nsyms {
-            if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
+        for index in 0..nsyms {
+            let offset = sym_off as usize + index as usize * Nlist64::SIZE;
+            if let Ok(nlist) = Nlist64::parse(&reader, offset) {
                 // If n_type & N_STAB == 0 && (n_type & N_EXT)
                 // (n_type & N_TYPE) == N_SECT (0x0e)
                 let n_type = nlist.n_type & 0x0e;
@@ -462,7 +429,7 @@ impl MachoLoader {
         symtab: &SymtabCommand,
         dysymtab: &DysymtabCommand,
         sections: &[SectionInfo],
-        endian: binrw::Endian,
+        endian: Endian,
         stub_size: u64,
         iat_symbols: &mut std::collections::HashMap<u64, String>,
         functions: &mut Vec<FunctionInfo>,
@@ -475,7 +442,7 @@ impl MachoLoader {
             return;
         }
 
-        let mut reader = Cursor::new(data);
+        let reader = ByteReader::new(data, endian);
         let indirect_off = dysymtab.indirectsymoff as u64;
 
         if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
@@ -490,8 +457,7 @@ impl MachoLoader {
                 let stub_addr = stubs.virtual_address + (i * stub_size);
 
                 // Read indirect symbol table entry
-                reader.set_position(indirect_off + (i * 4));
-                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
                     if sym_idx < symtab.nsyms {
                         let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
@@ -521,8 +487,9 @@ impl MachoLoader {
                 let got_addr = got.virtual_address + (i * entry_size);
 
                 // Read indirect symbol table entry (offset by stubs count)
-                reader.set_position(indirect_off + ((stubs_count as u64 + i) * 4));
-                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                if let Ok(sym_idx) =
+                    reader.u32((indirect_off + (stubs_count as u64 + i) * 4) as usize)
+                {
                     if sym_idx < symtab.nsyms {
                         let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
@@ -540,14 +507,14 @@ impl MachoLoader {
     fn parse_symbols_32(
         data: &[u8],
         symtab: &SymtabCommand,
-        endian: binrw::Endian,
+        endian: Endian,
         section_exec_map: &[bool],
         out: &mut Vec<FunctionInfo>,
     ) {
-        let mut reader = Cursor::new(data);
-        reader.set_position(symtab.symoff as u64);
-        for _ in 0..symtab.nsyms {
-            let Ok(nlist) = Nlist32::read_options(&mut reader, endian, ()) else {
+        let reader = ByteReader::new(data, endian);
+        for index in 0..symtab.nsyms {
+            let offset = symtab.symoff as usize + index as usize * Nlist32::SIZE;
+            let Ok(nlist) = Nlist32::parse(&reader, offset) else {
                 break;
             };
             let n_type = nlist.n_type & 0x0e;
@@ -591,7 +558,7 @@ impl MachoLoader {
         symtab: &SymtabCommand,
         dysymtab: &DysymtabCommand,
         sections: &[SectionInfo],
-        endian: binrw::Endian,
+        endian: Endian,
         iat_symbols: &mut std::collections::HashMap<u64, String>,
         functions: &mut Vec<FunctionInfo>,
     ) {
@@ -609,14 +576,13 @@ impl MachoLoader {
         if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
             return;
         }
-        let mut reader = Cursor::new(data);
+        let reader = ByteReader::new(data, endian);
         if let Some(stubs) = stubs_section {
             let stub_size = 6u64;
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
             for i in 0..num_stubs {
                 let stub_addr = stubs.virtual_address + i * stub_size;
-                reader.set_position(indirect_off + i * 4);
-                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
                     if sym_idx < symtab.nsyms {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
@@ -635,8 +601,9 @@ impl MachoLoader {
                 .unwrap_or(0);
             for i in 0..num_entries {
                 let got_addr = got.virtual_address + i * entry_size;
-                reader.set_position(indirect_off + (stubs_count as u64 + i) * 4);
-                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                if let Ok(sym_idx) =
+                    reader.u32((indirect_off + (stubs_count as u64 + i) * 4) as usize)
+                {
                     if sym_idx < symtab.nsyms {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
@@ -653,13 +620,12 @@ impl MachoLoader {
         data: &[u8],
         symtab: &SymtabCommand,
         sym_idx: u32,
-        endian: binrw::Endian,
+        endian: Endian,
     ) -> String {
         let sym_off = symtab.symoff as u64 + (sym_idx as u64 * 16); // Nlist64 is 16 bytes
-        let mut reader = Cursor::new(data);
-        reader.set_position(sym_off);
+        let reader = ByteReader::new(data, endian);
 
-        if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
+        if let Ok(nlist) = Nlist64::parse(&reader, sym_off as usize) {
             let str_off = symtab.stroff as usize + nlist.n_strx as usize;
             if str_off < data.len() {
                 return extract_cstring(data, str_off);
@@ -672,13 +638,12 @@ impl MachoLoader {
         data: &[u8],
         symtab: &SymtabCommand,
         sym_idx: u32,
-        endian: binrw::Endian,
+        endian: Endian,
     ) -> String {
         let sym_off = symtab.symoff as u64 + (sym_idx as u64 * 12);
-        let mut reader = Cursor::new(data);
-        reader.set_position(sym_off);
+        let reader = ByteReader::new(data, endian);
 
-        if let Ok(nlist) = Nlist32::read_options(&mut reader, endian, ()) {
+        if let Ok(nlist) = Nlist32::parse(&reader, sym_off as usize) {
             let str_off = symtab.stroff as usize + nlist.n_strx as usize;
             if str_off < data.len() {
                 return extract_cstring(data, str_off);

@@ -29,16 +29,27 @@ The strict raw P-code policy remains unchanged:
 - Moved raw P-code function lifting and CFG block construction out of `runtime/mod.rs` into `runtime/function.rs`.
 - Kept public `build_cfg_blocks` re-export stable.
 - Preserved runtime shared types and decode contracts in `runtime/mod.rs`.
+- Follow-up runtime-centric split moved frontend construction, decode window handling,
+  function lifting orchestration, and diagnostics into `runtime/frontend.rs`,
+  `runtime/decode.rs`, `runtime/lift.rs`, and `runtime/diagnostics.rs`.
+- `runtime/mod.rs` remains the public facade and shared contract owner.
 
 ### Compiled-table Spine Boundary
 
 - Converted the compiled-table executor from a large include-style namespace into explicit owner modules:
   - `context`
+  - `strategy`
   - `selection`
   - `walker`
+  - `handles`
   - `display`
   - `template_eval`
   - `legacy_token_policy`
+- Native/common candidate dispatch is now routed through a `RuntimeDecodeStrategy`
+  owner instead of passing raw `Option<NativeBackend>` through selection and walker
+  layers.
+- Fixed/exported handle materialization was split into `handles`, leaving
+  `template_eval` focused on checked ConstructTpl execution and primitive emission.
 - Kept `legacy_token_policy` explicitly named as compatibility debt rather than a canonical architecture provider.
 - Preserved the public decode/lift entrypoints and fail-closed behavior.
 
@@ -75,8 +86,8 @@ generated_runtime_decodes_rip_relative_mov32_without_decode_no_match: ok
 Raw P-code feature gates:
 
 ```text
-python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --feature lea --output-dir benchmark/artifacts/raw_p_code_benchmark/refactor_arch_v2_lea
-python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --feature rip_relative_load --output-dir benchmark/artifacts/raw_p_code_benchmark/refactor_arch_v2_rip
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --feature lea --output-dir benchmark/artifacts/raw_p_code_benchmark/runtime_arch_refactor_lea
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --feature rip_relative_load --output-dir benchmark/artifacts/raw_p_code_benchmark/runtime_arch_refactor_rip
 ```
 
 Raw P-code results:
@@ -97,12 +108,12 @@ Performance evidence from the feature gates:
 
 ```text
 lea:
-  Fission/Ghidra wall-clock speedup: 0.6788591645843854x
+  Fission/Ghidra wall-clock speedup: 0.6735557615045383x
   average parity ratio: 1.0
   average similarity score: 1.0
 
 rip_relative_load:
-  Fission/Ghidra wall-clock speedup: 3.2134468695046023x
+  Fission/Ghidra wall-clock speedup: 3.20893447720115x
   average parity ratio: 1.0
   average similarity score: 1.0
 ```
@@ -111,10 +122,11 @@ rip_relative_load:
 
 - Generated artifacts under `crates/fission-sleigh/generated` were not intentionally staged for this wave.
 - Ghidra project DB artifacts under `benchmark/binary/*_ghidra` were not staged.
-- Benchmark output artifacts under `benchmark/artifacts/raw_p_code_benchmark/refactor_arch_v2_*` were generated validation evidence and are not part of the intended commit payload.
+- Benchmark output artifacts under `benchmark/artifacts/raw_p_code_benchmark/runtime_arch_refactor_*` were generated validation evidence and are not part of the intended commit payload.
 
 ## Remaining Work
 
 - `compiler/mod.rs` still contains some build/report orchestration. The next cleanup can move that into `compiler/build` and `compiler/report` once the current facade boundary is stable.
-- `runtime/mod.rs` can later be split further into `runtime/frontend`, `runtime/decode`, and `runtime/diagnostics`.
+- Runtime facade files can be made fully private/adapted for a future crate split once
+  the `frontend` / `decode` / `lift` / `diagnostics` boundaries stay stable.
 - `legacy_token_policy` remains transitional debt. It should shrink as display/template/walker ownership becomes fully spec-derived.

@@ -250,9 +250,13 @@ impl<'a> PreviewBuilder<'a> {
             apply_mir_blockgraph_admission_gate(original_admission, mir_blockgraph_enabled);
         let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
         let mir_blockgraph_irreducible_trial = mir_blockgraph_enabled
-            && matches!(original_admission, StructuringAdmissionReason::IrreducibleBudget)
+            && matches!(
+                original_admission,
+                StructuringAdmissionReason::IrreducibleBudget
+            )
             && matches!(admission, StructuringAdmissionReason::GraphCollapse);
-        let pre_trial_successors = mir_blockgraph_irreducible_trial.then(|| self.successors.clone());
+        let pre_trial_successors =
+            mir_blockgraph_irreducible_trial.then(|| self.successors.clone());
         let pre_trial_predecessors =
             mir_blockgraph_irreducible_trial.then(|| self.predecessors.clone());
         let pre_trial_virtual_block_map =

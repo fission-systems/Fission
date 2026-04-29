@@ -17,7 +17,7 @@ fn prepare_batch_decompiler(
     let gdt_path_owned = fission_core::PATHS
         .get_gdt_path(binary.is_64bit)
         .and_then(|p| p.to_str().map(String::from));
-    let signatures_json = serialize_win_api_signatures_json();
+    let signatures_json = serialize_api_signatures_json();
     let mut prepare_timings = PrepareTimings::default();
     let mut prepare_options = PrepareOptions {
         compiler_id: compiler_id.as_deref(),

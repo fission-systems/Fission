@@ -3,6 +3,126 @@ arch: 8051
 entry_spec: 80251.slaspec
 entry_id: 80251
 
+- CY: [none] 8051_main.sinc:507
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Areg: [none] 8051_main.sinc:509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- ABreg: [none] 8051_main.sinc:510
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=65443de7031c2faf op_count=0
+- DPTRreg: [none] 8051_main.sinc:511
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15ece937bae75508 op_count=0
+- ADPTR: [none] 8051_main.sinc:514
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=90cb682586698e30 op_count=0
+- APC: [none] 8051_main.sinc:523
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=914fc3bb90bc37b0 op_count=0
+- ATDPTR: [none] 8051_main.sinc:526
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d99d3fbdfdaec38 op_count=0
+- Ri: [none] 8051_main.sinc:536
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4a279d6785c03ef op_count=0
+- RiX: [none] 8051_main.sinc:544
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e5fb309f604af977 op_count=0
+- Data: [none] 8051_main.sinc:553
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ef4c0bd122e5b81c op_count=0
+- Data16: [none] 8051_main.sinc:554
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5cec7404dfd1c390 op_count=0
+- Direct: [none] 8051_main.sinc:560
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d2a43408054b6aa op_count=0
+- Direct: [none] 8051_main.sinc:566
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=38f555e91aadfdc1 op_count=0
+- Direct: [none] 8051_main.sinc:567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- Direct: [none] 8051_main.sinc:568
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- Direct: [none] 8051_main.sinc:569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- Direct: [none] 8051_main.sinc:570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2a887b39f3c90b0 op_count=0
+- Direct: [none] 8051_main.sinc:571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2b60fb39f480224 op_count=0
+- Direct: [none] 8051_main.sinc:576
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f6fd537f71c371e op_count=0
+- Direct2: [none] 8051_main.sinc:580
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e36f5f9a0fde8d9a op_count=0
+- Direct2: [none] 8051_main.sinc:586
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=76bffd18558becd7 op_count=0
+- Direct2: [none] 8051_main.sinc:587
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- Direct2: [none] 8051_main.sinc:588
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- Direct2: [none] 8051_main.sinc:589
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- Direct2: [none] 8051_main.sinc:590
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2a887b39f3c90b0 op_count=0
+- Direct2: [none] 8051_main.sinc:591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2b60fb39f480224 op_count=0
+- Direct2: [none] 8051_main.sinc:596
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f6fd537f71c371e op_count=0
+- BitAddr: [none] 8051_main.sinc:600
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr: [none] 8051_main.sinc:601
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr2: [none] 8051_main.sinc:602
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr2: [none] 8051_main.sinc:603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitByteAddr: [none] 8051_main.sinc:617
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68b8571ca0d36d4d op_count=0
+- BitByteAddr: [none] 8051_main.sinc:618
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- BitByteAddr: [none] 8051_main.sinc:619
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- BitByteAddr: [none] 8051_main.sinc:620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- BitByteAddr: [none] 8051_main.sinc:622
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0148eb3389f3fce op_count=0
+- Addr11: [none] 8051_main.sinc:630
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
+- Addr16: [none] 8051_main.sinc:631
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f73abbbc9550b90 op_count=0
+- Rel8: [none] 8051_main.sinc:640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
+- Rel16: [none] 8051_main.sinc:641
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
 - ^instruction [none] 8051_main.sinc:645
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
@@ -378,6 +498,81 @@ entry_id: 80251
 - XRL [none] 8051_main.sinc:916
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b5c96238bdd5b2af op_count=0
+- AtWRjb: [none] 80251.sinc:97
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8d028d26ce346692 op_count=0
+- AtWRjw: [none] 80251.sinc:98
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0f5c8038a2425795 op_count=0
+- AtDRkb: [none] 80251.sinc:101
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2d4906f2c94521a5 op_count=0
+- AtDRkw: [none] 80251.sinc:102
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4eac518f90c1062 op_count=0
+- AtDRkt: [none] 80251.sinc:103
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cd0d60fa5ee62563 op_count=0
+- AtWRj47Dis16b: [none] 80251.sinc:107
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=12b098b0e76cca20 op_count=0
+- AtWRj47Dis16w: [none] 80251.sinc:108
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfcc93d8fe8e653f op_count=0
+- AtWRj03Dis16b: [none] 80251.sinc:110
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=777cfa1d3891bad8 op_count=0
+- AtWRj03Dis16w: [none] 80251.sinc:111
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e30da7846fdd2797 op_count=0
+- AtDRk47Dis24b: [none] 80251.sinc:113
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=91fb880bcbdc85ca op_count=0
+- AtDRk47Dis24w: [none] 80251.sinc:114
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d085d5b39102b52d op_count=0
+- AtDRk03Dis24b: [none] 80251.sinc:116
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bda625f5f049c0da op_count=0
+- AtDRk03Dis24w: [none] 80251.sinc:117
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7baf426a9998e1fd op_count=0
+- Direct8w: [none] 80251.sinc:120
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e6ad424598cf9f69 op_count=0
+- Direct8w: [none] 80251.sinc:121
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02be576e3279082b op_count=0
+- Direct16b: [none] 80251.sinc:124
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ebe6c43f0889dc9 op_count=0
+- Direct16w: [none] 80251.sinc:125
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6bc47596d10d4ed8 op_count=0
+- Direct16d: [none] 80251.sinc:126
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=265dbd65421e4fc2 op_count=0
+- Data16x0: [none] 80251.sinc:128
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0cd38a7ed0a6626a op_count=0
+- Data16x1: [none] 80251.sinc:129
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- Addr24: [none] 80251.sinc:131
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=65ca4b43eb614c92 op_count=0
+- Short: [none] 80251.sinc:134
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=33cffac70d884f3d op_count=0
+- xBitByteAddr: [none] 80251.sinc:139
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5e4374227ea80ce5 op_count=0
+- xBitAddr: [none] 80251.sinc:141
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- xBitAddr2: [none] 80251.sinc:142
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
 - ADD [none] 80251.sinc:188
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=18b65a658839885e op_count=0

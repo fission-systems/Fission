@@ -41,5 +41,5 @@ pub use facts::{FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, lo
 #[cfg(feature = "native_decomp")]
 pub use prepare::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    serialize_win_api_signatures_json,
+    serialize_api_signatures_json,
 };

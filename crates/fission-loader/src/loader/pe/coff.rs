@@ -1,5 +1,4 @@
 use super::*;
-use std::io::Cursor;
 
 pub(super) fn parse_coff_symbols(
     loader: &PeLoaderImpl<'_>,
@@ -29,14 +28,11 @@ pub(super) fn parse_coff_symbols(
         0
     };
 
-    let mut cursor = Cursor::new(loader.data);
-    cursor.set_position(symbols_offset);
-
     let mut i = 0;
     while i < symbol_count {
-        let symbol_pos = cursor.position();
+        let symbol_pos = symbols_offset + (i as u64 * 18);
 
-        let symbol = match CoffSymbol::read_le(&mut cursor) {
+        let symbol = match loader.read_coff_symbol(symbol_pos) {
             Ok(s) => s,
             Err(_) => break,
         };
@@ -48,19 +44,13 @@ pub(super) fn parse_coff_symbols(
         if symbol.storage_class != storage_class::C_EXT
             && symbol.storage_class != storage_class::C_STAT
         {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
         if !is_function {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
@@ -77,27 +67,18 @@ pub(super) fn parse_coff_symbols(
         };
 
         if name.is_empty() {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         if symbol.section_number <= 0 {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         let section_idx = (symbol.section_number - 1) as usize;
         if section_idx >= loader.sections.len() {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
@@ -117,10 +98,7 @@ pub(super) fn parse_coff_symbols(
             is_thunk_like: false,
         });
 
-        if aux_count > 0 {
-            cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-            i += aux_count as u32;
-        }
+        i += aux_count as u32;
     }
 
     Ok(functions)
@@ -143,14 +121,11 @@ pub(super) fn parse_coff_data_symbols(
 
     let string_table_offset = symbols_end;
 
-    let mut cursor = Cursor::new(loader.data);
-    cursor.set_position(symbols_offset);
-
     let mut i = 0;
     while i < symbol_count {
-        let symbol_pos = cursor.position();
+        let symbol_pos = symbols_offset + (i as u64 * 18);
 
-        let symbol = match CoffSymbol::read_le(&mut cursor) {
+        let symbol = match loader.read_coff_symbol(symbol_pos) {
             Ok(s) => s,
             Err(_) => break,
         };
@@ -161,19 +136,13 @@ pub(super) fn parse_coff_data_symbols(
         if symbol.storage_class != storage_class::C_EXT
             && symbol.storage_class != storage_class::C_STAT
         {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
         if is_function {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
@@ -191,27 +160,18 @@ pub(super) fn parse_coff_data_symbols(
 
         let name = name.trim();
         if name.is_empty() || !should_collect_global_symbol(name) {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         if symbol.section_number <= 0 {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         let section_idx = (symbol.section_number - 1) as usize;
         if section_idx >= loader.sections.len() {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
@@ -220,19 +180,13 @@ pub(super) fn parse_coff_data_symbols(
 
         let normalized = normalize_global_symbol_name(name);
         if normalized.is_empty() {
-            if aux_count > 0 {
-                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-                i += aux_count as u32;
-            }
+            i += aux_count as u32;
             continue;
         }
 
         symbols.insert(data_addr, normalized);
 
-        if aux_count > 0 {
-            cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
-            i += aux_count as u32;
-        }
+        i += aux_count as u32;
     }
 
     Ok(symbols)

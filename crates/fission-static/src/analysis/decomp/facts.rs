@@ -2,7 +2,6 @@ use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
-use fission_signatures::SIGNATURE_DB;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,28 +125,13 @@ impl FactStore {
         store
     }
 
-    /// Run the built-in byte-pattern signature database against all known functions
-    /// and ingest any matches as `StrongFid` name facts.
+    /// Run exact Ghidra-style FID matching when sufficient decoded instruction
+    /// metadata is available.
     ///
-    /// This is called once per binary load inside `from_binary`, so the scan cost
-    /// is paid only when constructing a `FactStore`, not on every per-function call.
+    /// The previous prologue byte-pattern matcher is intentionally not used here:
+    /// approximate pattern hits must not be promoted to `StrongFid`.
     fn ingest_signature_matches(&mut self, binary: &LoadedBinary) {
-        let raw = binary.inner().data.as_slice();
-        if raw.is_empty() {
-            return;
-        }
-        let func_list: Vec<(u64, String)> = binary
-            .functions
-            .iter()
-            .map(|f| (f.address, f.name.clone()))
-            .collect();
-        if func_list.is_empty() {
-            return;
-        }
-        let matches = SIGNATURE_DB.identify_functions_in_binary(raw, &func_list, binary.image_base);
-        for (addr, name) in matches {
-            self.ingest_name_fact(addr, name, FactProvenance::StrongFid);
-        }
+        let _ = binary;
     }
 
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {

@@ -1,5 +1,5 @@
 use super::PostProcessor;
-use fission_signatures::WIN_API_DB;
+use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::win_types::WindowsStructures;
 use regex::{Captures, Regex};
 use std::borrow::Cow;
@@ -44,7 +44,10 @@ fn build_struct_promotion_rules() -> Vec<StructPromotionRule> {
     let structures = WindowsStructures::new();
     let mut rules = Vec::new();
 
-    for sig in WIN_API_DB.iter() {
+    let Ok(signatures) = SIGNATURE_RESOURCES.api_signatures() else {
+        return rules;
+    };
+    for sig in signatures {
         for (param_index, param) in sig.params.iter().enumerate() {
             let Some(struct_name) = resolve_struct_name(&param.type_name, &structures) else {
                 continue;

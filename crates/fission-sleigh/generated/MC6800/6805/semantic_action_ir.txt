@@ -3,6 +3,45 @@ arch: MC6800
 entry_spec: 6805.slaspec
 entry_id: 6805
 
+- REL: [none] 6805.slaspec:38
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be0177b77251948d op_count=0
+- OP1: [none] 6805.slaspec:40
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d04119c5b74c1cd0 op_count=0
+- OP1: [none] 6805.slaspec:41
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- OP1: [none] 6805.slaspec:42
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- OP1: [none] 6805.slaspec:43
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59d03bc33bfd803e op_count=0
+- OP1: [none] 6805.slaspec:44
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5add199e345574b7 op_count=0
+- OP1: [none] 6805.slaspec:45
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f4c5f7d7c2bbc9ab op_count=0
+- ADDR: [none] 6805.slaspec:47
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- ADDR: [none] 6805.slaspec:48
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=437565651ba268cf op_count=0
+- ADDRI: [none] 6805.slaspec:49
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59d03bc33bfd803e op_count=0
+- ADDRI: [none] 6805.slaspec:50
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5add199e345574b7 op_count=0
+- ADDRI: [none] 6805.slaspec:51
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f4c5f7d7c2bbc9ab op_count=0
+- DIRECT: [none] 6805.slaspec:54
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
 - ADC [none] 6805.slaspec:56
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=650bfb6b3ced2a75 op_count=0

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import statistics
 import time
 from pathlib import Path
@@ -41,10 +42,26 @@ DEFAULT_OUTPUT_DIR = (
     / "full_benchmark"
     / "compare_legacy_preview"
 )
-DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build"
+DEFAULT_GHIDRA_DIRS = (
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra_12.0.4_PUBLIC",
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT_DIR / "ghidra_12.0.4_PUBLIC",
+    ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
+)
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
 DEFAULT_CORPUS_FILE = SCRIPT_DIR / "corpora" / "preview_quality_corpus.json"
+
+
+def default_ghidra_dir() -> Path:
+    for env_name in ("FISSION_GHIDRA_DIR", "GHIDRA_INSTALL_DIR"):
+        env_dir = os.environ.get(env_name)
+        if env_dir:
+            return Path(env_dir)
+    for candidate in DEFAULT_GHIDRA_DIRS:
+        if candidate.exists():
+            return candidate
+    return DEFAULT_GHIDRA_DIRS[0]
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,7 +106,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ghidra-dir",
         type=Path,
-        default=DEFAULT_GHIDRA_DIR,
+        default=default_ghidra_dir(),
         help="Path to Ghidra installation directory",
     )
     parser.add_argument(

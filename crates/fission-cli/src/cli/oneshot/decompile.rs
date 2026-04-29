@@ -16,7 +16,7 @@ use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_pcode::{NirBuildStats, NirHintStats, PcodeFunction, PcodeOpcode};
 use fission_static::analysis::decomp::{
     FactStore, PrepareOptions, PrepareTimings, log_type_diag, prepare_native_decompiler_for_binary,
-    serialize_win_api_signatures_json,
+    serialize_api_signatures_json,
 };
 use serde::{Deserialize, Serialize};
 use std::any::Any;

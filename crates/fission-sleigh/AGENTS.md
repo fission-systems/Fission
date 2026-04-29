@@ -45,16 +45,22 @@ crates/fission-sleigh/
 │   │   └── equivalence.rs     # Compiler-only bucketed equivalence report
 │   └── runtime/
 │       ├── mod.rs             # Public runtime facade, decode contracts, shared types
+│       ├── frontend.rs        # Frontend construction, registry selection, native backend loading
+│       ├── decode.rs          # Instruction/window decode contract handling
+│       ├── lift.rs            # Instruction-to-function lifting orchestration
+│       ├── diagnostics.rs     # Runtime trace/debug env ownership
 │       ├── function.rs        # Raw p-code function lifting and CFG block construction
 │       └── spine/             # Ghidra-style common runtime owners and compiled-table execution
 │           └── compiled_table/ # Compiled-table decode/lift split by owner
 │               ├── mod.rs     # Public decode entrypoints
 │               ├── context.rs # Instruction/context bits
+│               ├── strategy.rs # Native/common candidate strategy policy
 │               ├── selection.rs # Decision traversal and terminal verification
 │               ├── walker.rs  # ParserWalker-style binding
+│               ├── handles.rs # Fixed/exported handle materialization
 │               ├── token.rs   # Legacy shared-token cursor compatibility debt
 │               ├── display.rs # Display rendering
-│               ├── lift.rs    # Template execution/emitter adapter
+│               ├── template_eval.rs # ConstructTpl execution/emitter adapter
 │               └── tests.rs   # Runtime tests
 └── specs/
    └── languages/             # Local Sleigh spec set used for language resolution
@@ -112,10 +118,15 @@ crate:
   generated JSON compatibility.
 - `compiler::sla` owns packed `.sla` decoding and maps only into compiler IR types.
   It must not depend on runtime modules.
-- `runtime::function` owns function lifting and CFG reconstruction.
+- `runtime::frontend` owns frontend construction, registry selection, and native
+  backend loading.
+- `runtime::decode` owns instruction/window decode contract handling.
+- `runtime::lift` owns instruction-to-function lifting orchestration.
+- `runtime::diagnostics` owns runtime trace/debug env handling.
+- `runtime::function` owns CFG reconstruction.
 - `runtime::spine::compiled_table` is split by owner. `context`, `selection`,
-  `walker`, `display`, `template_eval`, and `legacy_token_policy` should not grow
-  cross-cutting orchestration logic.
+  `strategy`, `walker`, `handles`, `display`, `template_eval`, and
+  `legacy_token_policy` should not grow cross-cutting orchestration logic.
 
 Future crate split boundary:
 

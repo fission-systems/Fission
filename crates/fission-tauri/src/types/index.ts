@@ -5,18 +5,30 @@ export interface BinaryInfo {
     name: string;
     path: string;
     arch: string;
+    bits: number;
     format: string;
     entry_point: string;
     section_count: number;
     function_count: number;
+    import_count: number;
+    export_count: number;
     image_base: string;
 }
+
+export type FunctionCategory = "import" | "export" | "internal" | "thunk" | "external" | "debug";
 
 export interface FunctionDto {
     address: string;
     name: string;
     size: number;
-    category: "import" | "export" | "internal";
+    is_import: boolean;
+    is_export: boolean;
+    origin: string | null;
+    kind: string | null;
+    source_section: string | null;
+    external_library: string | null;
+    is_thunk_like: boolean;
+    category: FunctionCategory;
 }
 
 export interface DecompileResult {
@@ -47,6 +59,11 @@ export interface ImportDto {
     name: string;
     library: string;
     ordinal: number | null;
+    origin: string | null;
+    kind: string | null;
+    source_section: string | null;
+    external_library: string | null;
+    is_thunk_like: boolean;
 }
 
 export interface SectionDto {
@@ -128,6 +145,12 @@ export interface ExportDto {
     name: string;
     ordinal: number | null;
     forwarder: string | null;
+    size: number;
+    origin: string | null;
+    kind: string | null;
+    source_section: string | null;
+    external_library: string | null;
+    is_thunk_like: boolean;
 }
 
 // Record of a byte patch applied to the in-memory binary

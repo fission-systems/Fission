@@ -47,6 +47,46 @@ It consumes canonical semantic policy from `fission-pcode`. It does not redefine
 
 It does not own decompiler semantics, region legality, or postprocess policy.
 
+### `fission-loader`
+
+`fission-loader` owns binary format loading and metadata provenance. Its
+canonical pipeline follows the Ghidra Loader owner chain:
+
+1. `detect`: identify PE executable, COFF object, ELF, Mach-O, or Mach-O fat.
+2. `probe/load-spec`: select architecture and load specification from format metadata.
+3. `map`: build file-offset/RVA/VA memory blocks and permissions.
+4. `symbols`: classify code/data, imports, exports, thunks, undefined externals, and debug-only symbols.
+5. `finalize`: build `LoadedBinary`, `FunctionInfo`, imports, exports, and canonical function views.
+
+PE/COFF/ELF/Mach-O parsing is Fission-owned through bounds-checked byte readers.
+`object` is not a loader decision owner; it may be used only as fixture/debug
+inspection support. `gimli` and `pdb` remain specialized DWARF/PDB metadata
+readers rather than primary binary loaders.
+
+Ghidra loader family coverage is staged. The implemented priority group is
+`PeLoader`, `CoffLoader`/`MSCoffLoader`, `ElfLoader`, `MachoLoader`,
+`BinaryLoader` (explicit raw hint only), `IntelHexLoader`, `MotorolaHexLoader`,
+`MzLoader`/`NeLoader`, and `UnixAoutLoader`. Lower-priority or separate-wave
+families are `DyldCacheLoader`, `PefLoader`, `SomLoader`, `OmfLoader`,
+`Omf51Loader`, `DbgLoader`, `DefLoader`, `MapLoader`, `GdtLoader`, `GzfLoader`,
+and XML/debug helper loaders. Known but unsupported families must fail closed
+with a typed loader message such as `UnsupportedLoaderFamily(<name>)`. Raw binary
+loading is never an automatic fallback for unknown bytes because that would hide
+malformed or unsupported formats.
+
+Loader provenance is a public contract shared by CLI and GUI surfaces.
+`FunctionInfo.origin`, `kind`, `is_import`, `is_export`, `is_thunk_like`,
+`external_library`, and `source_section` classify whether a record is code,
+entry, export, true import, import thunk, undefined external, debug-only symbol,
+or data-derived metadata. User-facing and decompile-seed function lists must go
+through `loader::function_view`; CLI and GUI must not reconstruct independent
+function/import/export filtering rules.
+
+Language/runtime analyzers live outside format parsing. `loader/analyzers`
+contains post-load enrichment such as C++ RTTI, Go pclntab/type metadata, and
+Rust vtable scanning. These analyzers may add functions or inferred types, but
+they do not own format detection, load-spec selection, or memory mapping.
+
 ## Structuring Model
 
 The active structuring path is a hard-cutover Ghidra-style CFG owner model.

@@ -3,6 +3,273 @@ arch: HCS12
 entry_spec: HC12.slaspec
 entry_id: HC12
 
+- opr16a: [none] HCS_HC12.sinc:434
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e7cada8d24e578e5 op_count=0
+- opr8a: [none] HCS_HC12.sinc:437
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eece8818a435f9d8 op_count=0
+- opr8a_8: [none] HCS_HC12.sinc:439
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6ad2efb9060ca844 op_count=0
+- opr8a_16: [none] HCS_HC12.sinc:440
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9a7b47e9da806bc5 op_count=0
+- opr16a_8: [none] HCS_HC12.sinc:442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b4036e6f7de030b4 op_count=0
+- opr16a_16: [none] HCS_HC12.sinc:443
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d89cd83d1a1683c5 op_count=0
+- iopr8i: [none] HCS_HC12.sinc:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d29a2769a2e3ac01 op_count=0
+- iopr16i: [none] HCS_HC12.sinc:446
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=60e3b1912c185a2b op_count=0
+- msk8: [none] HCS_HC12.sinc:447
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d29a2769a2e3ac01 op_count=0
+- IDX_a: [none] HCS_HC12.sinc:467
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2d71f863e5d4e5b0 op_count=0
+- IDX_b: [none] HCS_HC12.sinc:471
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:472
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=36b04b777db0f328 op_count=0
+- IDX_c: [none] HCS_HC12.sinc:479
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3df554eae4f2131c op_count=0
+- IDX_d: [none] HCS_HC12.sinc:483
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:484
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3df554eae4f2131c op_count=0
+- IDX_e: [none] HCS_HC12.sinc:487
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:488
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54d11699a874a5a2 op_count=0
+- IDX_f: [none] HCS_HC12.sinc:491
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:492
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=54d11699a874a5a2 op_count=0
+- IDX_g: [none] HCS_HC12.sinc:497
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:498
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c554dddd21a120e2 op_count=0
+- IDX_g: [none] HCS_HC12.sinc:499
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:500
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ff3dd18cf7bd404 op_count=0
+- IDX_h: [none] HCS_HC12.sinc:503
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:504
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7dac2881f792019f op_count=0
+- IDX_h: [none] HCS_HC12.sinc:505
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:506
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5f30f3025370f729 op_count=0
+- IDX_i: [none] HCS_HC12.sinc:515
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:516
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f081928986f2847 op_count=0
+- IDX_i_PCRel: [none] HCS_HC12.sinc:518
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2eb6e4dfc4b7128a op_count=0
+- IDX_i: [none] HCS_HC12.sinc:519
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- IDX_k: [none] HCS_HC12.sinc:529
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:530
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed86cabf64c14fea op_count=0
+- IDX_k_PCRel: [none] HCS_HC12.sinc:532
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2eb6e4dfc4b7128a op_count=0
+- IDX_k: [none] HCS_HC12.sinc:533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d01b475cee1b32ea op_count=0
+- IDX_l: [none] HCS_HC12.sinc:544
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:545
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd7f90083dd88d64 op_count=0
+- IDX_l_PCRel: [none] HCS_HC12.sinc:547
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2eb6e4dfc4b7128a op_count=0
+- IDX_l: [none] HCS_HC12.sinc:548
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:549
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3789b0a80d24ad6d op_count=0
+- IDX_m: [none] HCS_HC12.sinc:558
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:559
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a8390a67fb760e51 op_count=0
+- IDX_m: [none] HCS_HC12.sinc:561
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- <unknown> [none] HCS_HC12.sinc:562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8eab70e2f052e5bf op_count=0
+- indexed3: [none] HCS_HC12.sinc:569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=200b744c32dbf669 op_count=0
+- indexed3: [none] HCS_HC12.sinc:570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2015744c32e44aee op_count=0
+- indexed3: [none] HCS_HC12.sinc:571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2011fc4c32e1492f op_count=0
+- indexed3: [none] HCS_HC12.sinc:572
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201c7c4c32ea7734 op_count=0
+- indexed3: [none] HCS_HC12.sinc:573
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2018fc4c32e767dd op_count=0
+- indexed3: [none] HCS_HC12.sinc:574
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2022fc4c32efbc62 op_count=0
+- indexed3: [none] HCS_HC12.sinc:575
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201f744c32ec9f73 op_count=0
+- indexed3: [none] HCS_HC12.sinc:576
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff3744c32c76488 op_count=0
+- indexed3: [none] HCS_HC12.sinc:577
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1feff44c32c45531 op_count=0
+- indexed3: [none] HCS_HC12.sinc:578
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff6fc4c32ca8177 op_count=0
+- indexed5: [none] HCS_HC12.sinc:603
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=200b744c32dbf669 op_count=0
+- indexed5: [none] HCS_HC12.sinc:604
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2015744c32e44aee op_count=0
+- indexed5: [none] HCS_HC12.sinc:605
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2011fc4c32e1492f op_count=0
+- indexed5: [none] HCS_HC12.sinc:606
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201c7c4c32ea7734 op_count=0
+- indexed5: [none] HCS_HC12.sinc:607
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2018fc4c32e767dd op_count=0
+- indexed5: [none] HCS_HC12.sinc:608
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2022fc4c32efbc62 op_count=0
+- indexed5: [none] HCS_HC12.sinc:609
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201f744c32ec9f73 op_count=0
+- indexed5: [none] HCS_HC12.sinc:610
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff3744c32c76488 op_count=0
+- indexed5: [none] HCS_HC12.sinc:611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1feff44c32c45531 op_count=0
+- indexed5: [none] HCS_HC12.sinc:612
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff6fc4c32ca8177 op_count=0
+- indexed5: [none] HCS_HC12.sinc:613
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2000fc4c32d2d5fc op_count=0
+- indexed5: [none] HCS_HC12.sinc:614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ffd7c4c32cfc6a5 op_count=0
+- indexed1: [none] HCS_HC12.sinc:619
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=200b744c32dbf669 op_count=0
+- indexed1: [none] HCS_HC12.sinc:620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2015744c32e44aee op_count=0
+- indexed1: [none] HCS_HC12.sinc:621
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2011fc4c32e1492f op_count=0
+- indexed1: [none] HCS_HC12.sinc:622
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201c7c4c32ea7734 op_count=0
+- indexed1: [none] HCS_HC12.sinc:623
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2018fc4c32e767dd op_count=0
+- indexed1: [none] HCS_HC12.sinc:624
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2022fc4c32efbc62 op_count=0
+- indexed1: [none] HCS_HC12.sinc:625
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=201f744c32ec9f73 op_count=0
+- indexed1: [none] HCS_HC12.sinc:626
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff3744c32c76488 op_count=0
+- indexed1_1: [none] HCS_HC12.sinc:640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=36d242c182d79ed5 op_count=0
+- indexed2_1: [none] HCS_HC12.sinc:654
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=26143923b4b14c38 op_count=0
+- indexed0_3: [none] HCS_HC12.sinc:666
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f39165ad464bb075 op_count=0
+- indexed1_3: [none] HCS_HC12.sinc:676
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ef96849564cf12b op_count=0
+- indexedA_5: [none] HCS_HC12.sinc:696
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20a97385183ce1fe op_count=0
+- indexed1_5: [none] HCS_HC12.sinc:715
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7ee4e849563b6ea1 op_count=0
+- indexed2_5: [none] HCS_HC12.sinc:734
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20a97385183ce1fe op_count=0
+- rel8: [none] HCS_HC12.sinc:747
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4439685f01a5db4e op_count=0
+- rel9: [none] HCS_HC12.sinc:750
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4439685f01a5db4e op_count=0
+- rel16: [none] HCS_HC12.sinc:753
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4439685f01a5db4e op_count=0
+- op2_opr16a_8: [none] HCS_HC12.sinc:756
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8688d65dfa6bec56 op_count=0
+- op2_opr16a_16: [none] HCS_HC12.sinc:757
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=43efc5b0a8761689 op_count=0
+- op2_indexed1_1: [none] HCS_HC12.sinc:762
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=09c5fc68fc64dbca op_count=0
+- op2_indexed2_1: [none] HCS_HC12.sinc:768
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dae97450ef0e0d51 op_count=0
 - ^instruction [none] HCS_HC12.sinc:930
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
@@ -279,6 +546,10 @@ entry_id: HC12
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4808f38df05f575d op_count=0
   with_stack: with : XGATE=0
+- SkipNextInstr: [none] HCS_HC12.sinc:1964
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6da184ec83e1d0c5 op_count=0
+  with_stack: with : XGATE=0
 - BRN [branch] HCS_HC12.sinc:1966
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ae9ba824ef59d57b op_count=0
@@ -415,17 +686,45 @@ entry_id: HC12
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4704675d304758f3 op_count=0
   with_stack: with : XGATE=0
-- CPS [branch] HCS_HC12.sinc:2634
+- SkipNext2Bytes: [none] HCS_HC12.sinc:2632
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=b97591615a71627a op_count=0
+  semantic_template: status=unsupported_template action_hash=6da184ec83e1d0c5 op_count=0
+  with_stack: with : XGATE=0
+- CPS [none] HCS_HC12.sinc:2634
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- local [none] HCS_HC12.sinc:2636
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- local [none] HCS_HC12.sinc:2637
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- tmp:2 [none] HCS_HC12.sinc:2638
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - CPS [none] HCS_HC12.sinc:2646
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8db80b2bcd6799df op_count=0
   with_stack: with : XGATE=0
-- CPS [branch] HCS_HC12.sinc:2656
+- CPS [none] HCS_HC12.sinc:2656
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=609d1f8667de70b3 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- local [none] HCS_HC12.sinc:2658
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- local [none] HCS_HC12.sinc:2659
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- tmp:2 [none] HCS_HC12.sinc:2661
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - CPS [none] HCS_HC12.sinc:2669
   semantic_ops: <none>
@@ -823,17 +1122,25 @@ entry_id: HC12
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f34876826e3162e0 op_count=0
   with_stack: with : XGATE=0
+- GPaged: [none] HCS_HC12.sinc:3826
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
+- GPaged: [none] HCS_HC12.sinc:3827
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+  with_stack: with : XGATE=0
 - ^GPaged^"LDAA" [none] HCS_HC12.sinc:3829
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=6fdaa46614059f08 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDAA" [none] HCS_HC12.sinc:3838
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=c2d59d850c6a235d op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDAA" [none] HCS_HC12.sinc:3847
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=1c28d7e2b46598cd op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LDAB [none] HCS_HC12.sinc:3856
   semantic_ops: <none>
@@ -841,15 +1148,15 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"LDAB" [none] HCS_HC12.sinc:3864
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=13c0f120528580e5 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDAB" [none] HCS_HC12.sinc:3873
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=d04e8e25ed7fe0b6 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDAB" [none] HCS_HC12.sinc:3882
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=134aeb5162f59222 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LDD [none] HCS_HC12.sinc:3891
   semantic_ops: <none>
@@ -857,31 +1164,31 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"LDD" [none] HCS_HC12.sinc:3899
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=cc99ff5255687956 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDD" [none] HCS_HC12.sinc:3908
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=f29f28dbf9ce1ea7 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDD" [none] HCS_HC12.sinc:3917
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=ecf4009b679c1259 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LDS [none] HCS_HC12.sinc:3929
   semantic_ops: LoadStack
   semantic_template: status=unsupported_template action_hash=33d03c4c234aa234 op_count=1
   with_stack: with : XGATE=0
 - ^GPaged^"LDS" [none] HCS_HC12.sinc:3937
-  semantic_ops: LoadStack
-  semantic_template: status=unsupported_template action_hash=53b9bfc93d2fbdd0 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDS" [none] HCS_HC12.sinc:3946
-  semantic_ops: LoadStack
-  semantic_template: status=unsupported_template action_hash=368da0e8103e8315 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDS" [none] HCS_HC12.sinc:3955
-  semantic_ops: LoadStack
-  semantic_template: status=unsupported_template action_hash=03a2f844d8650ee5 op_count=1
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LDX [none] HCS_HC12.sinc:3964
   semantic_ops: <none>
@@ -889,15 +1196,15 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"LDX" [none] HCS_HC12.sinc:3972
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=aa6d46c813fd6c3b op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDX" [none] HCS_HC12.sinc:3981
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=0cab5506967eac14 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDX" [none] HCS_HC12.sinc:3990
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=b1a46cbfca6143e8 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LDY [none] HCS_HC12.sinc:3999
   semantic_ops: <none>
@@ -905,15 +1212,15 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"LDY" [none] HCS_HC12.sinc:4007
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=3126c7e762cb5ca8 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDY" [none] HCS_HC12.sinc:4016
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=f2ca4b30dbd2e4c1 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"LDY" [none] HCS_HC12.sinc:4025
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=96c0edd9ff0e3a43 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - LEAS [none] HCS_HC12.sinc:4034
   semantic_ops: <none>
@@ -1225,39 +1532,39 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"STAA" [none] HCS_HC12.sinc:5238
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=f7d728b9c560dc28 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STAA" [none] HCS_HC12.sinc:5247
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=f8dafeec2961486d op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STAA" [none] HCS_HC12.sinc:5256
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=83ed6e0c94fe02fd op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STAB" [none] HCS_HC12.sinc:5265
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=7566dcdb2dfe7319 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STAB" [none] HCS_HC12.sinc:5274
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=1366f21cfe8ecfbc op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STAB" [none] HCS_HC12.sinc:5283
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=0a7a9680b460340c op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STD" [none] HCS_HC12.sinc:5292
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=4e289bc6e5b24150 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STD" [none] HCS_HC12.sinc:5301
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=eab4cbe1a7ac1b0b op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STD" [none] HCS_HC12.sinc:5310
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=b4966001c735004f op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - STOP [conditional_branch] HCS_HC12.sinc:5319
   semantic_ops: stop
@@ -1265,39 +1572,39 @@ entry_id: HC12
   with_stack: with : XGATE=0
 - ^GPaged^"STS" [none] HCS_HC12.sinc:5333
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=016750e4a730746b op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STS" [none] HCS_HC12.sinc:5342
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=18881e3e7dcf9f7a op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STS" [none] HCS_HC12.sinc:5351
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=aad3d865aa9f69fe op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STX" [none] HCS_HC12.sinc:5360
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=d0714dbe0349ff51 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STX" [none] HCS_HC12.sinc:5369
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=32da589bcc91587c op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STX" [none] HCS_HC12.sinc:5378
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=a724ba0d176b1a90 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STY" [none] HCS_HC12.sinc:5387
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=492ef446f3b96038 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STY" [none] HCS_HC12.sinc:5396
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=964122d4f7fcdbbd op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - ^GPaged^"STY" [none] HCS_HC12.sinc:5405
   semantic_ops: <none>
-  semantic_template: status=unsupported_template action_hash=def287f1f22ea721 op_count=0
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
   with_stack: with : XGATE=0
 - SUBA [none] HCS_HC12.sinc:5414
   semantic_ops: <none>

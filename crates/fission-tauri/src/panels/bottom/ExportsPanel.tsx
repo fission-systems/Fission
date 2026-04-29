@@ -38,6 +38,9 @@ export default function ExportsPanel({ binaryLoaded, onExportClick }: ExportsPan
                         <th>Address</th>
                         <th>Ordinal</th>
                         <th>Name</th>
+                        <th>Size</th>
+                        <th>Kind</th>
+                        <th>Origin</th>
                         <th>Forwarder</th>
                     </tr>
                 </thead>
@@ -51,6 +54,9 @@ export default function ExportsPanel({ binaryLoaded, onExportClick }: ExportsPan
                             <td className="data-table__addr">{exp.address}</td>
                             <td className="data-table__enc">{exp.ordinal != null ? exp.ordinal : "—"}</td>
                             <td className="data-table__name">{exp.name}</td>
+                            <td className="data-table__enc">{exp.size}</td>
+                            <td className="data-table__enc">{exp.kind ?? "export"}</td>
+                            <td className="data-table__enc">{exp.origin ?? "—"}</td>
                             <td className="data-table__lib">{exp.forwarder ?? "—"}</td>
                         </tr>
                     ))}

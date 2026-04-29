@@ -3,6 +3,120 @@ arch: 8051
 entry_spec: mx51.slaspec
 entry_id: mx51
 
+- CY: [none] 8051_main.sinc:507
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Areg: [none] 8051_main.sinc:509
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- ABreg: [none] 8051_main.sinc:510
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=65443de7031c2faf op_count=0
+- DPTRreg: [none] 8051_main.sinc:511
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15ece937bae75508 op_count=0
+- ADPTR: [none] 8051_main.sinc:520
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2022710382ff1938 op_count=0
+- APC: [none] 8051_main.sinc:523
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=914fc3bb90bc37b0 op_count=0
+- ATDPTR: [none] 8051_main.sinc:532
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=533ec0f96694afce op_count=0
+- Ri: [none] 8051_main.sinc:538
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=766777e236f90029 op_count=0
+- RiX: [none] 8051_main.sinc:550
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d4a279d6785c03ef op_count=0
+- Data: [none] 8051_main.sinc:553
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ef4c0bd122e5b81c op_count=0
+- Data16: [none] 8051_main.sinc:554
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5cec7404dfd1c390 op_count=0
+- Direct: [none] 8051_main.sinc:562
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf621707bf7cedc3 op_count=0
+- Direct: [none] 8051_main.sinc:566
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=38f555e91aadfdc1 op_count=0
+- Direct: [none] 8051_main.sinc:567
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- Direct: [none] 8051_main.sinc:568
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- Direct: [none] 8051_main.sinc:569
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- Direct: [none] 8051_main.sinc:570
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2a887b39f3c90b0 op_count=0
+- Direct: [none] 8051_main.sinc:571
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2b60fb39f480224 op_count=0
+- Direct2: [none] 8051_main.sinc:582
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=091249ee121da4ab op_count=0
+- Direct2: [none] 8051_main.sinc:586
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=76bffd18558becd7 op_count=0
+- Direct2: [none] 8051_main.sinc:587
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- Direct2: [none] 8051_main.sinc:588
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- Direct2: [none] 8051_main.sinc:589
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- Direct2: [none] 8051_main.sinc:590
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2a887b39f3c90b0 op_count=0
+- Direct2: [none] 8051_main.sinc:591
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b2b60fb39f480224 op_count=0
+- BitAddr: [none] 8051_main.sinc:611
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr: [none] 8051_main.sinc:612
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr2: [none] 8051_main.sinc:613
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitAddr2: [none] 8051_main.sinc:614
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=89c19d4891ccef9d op_count=0
+- BitByteAddr: [none] 8051_main.sinc:617
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=68b8571ca0d36d4d op_count=0
+- BitByteAddr: [none] 8051_main.sinc:618
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=374d6c8a4d5faa67 op_count=0
+- BitByteAddr: [none] 8051_main.sinc:619
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fda1f5597e94be op_count=0
+- BitByteAddr: [none] 8051_main.sinc:620
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6eb09d1a10550992 op_count=0
+- BitByteAddr: [none] 8051_main.sinc:624
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a13004a4c2204077 op_count=0
+- Addr11: [none] 8051_main.sinc:630
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
+- Addr16: [none] 8051_main.sinc:631
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3f73abbbc9550b90 op_count=0
+- Rel8: [none] 8051_main.sinc:640
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
+- Rel16: [none] 8051_main.sinc:641
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a038ffa71001ce1 op_count=0
 - ACALL [call] 8051_main.sinc:652
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6dfd4af09a2cd84e op_count=0
@@ -375,6 +489,72 @@ entry_id: mx51
 - XRL [none] 8051_main.sinc:916
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b5c96238bdd5b2af op_count=0
+- PRi: [none] mx51.sinc:26
+  semantic_ops: endian_swap
+  semantic_template: status=unsupported_template action_hash=8d869dfdd98eabb7 op_count=1
+- eptrReg: [none] mx51.sinc:53
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=45185544f5dc1ebf op_count=0
+- APlusEptr: [none] mx51.sinc:54
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=040142ced09633c4 op_count=0
+- ecallImmAddr: [none] mx51.sinc:55
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c915865299b7f48 op_count=0
+- add_with_pr_const: [none] mx51.sinc:56
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cbf5fd69c5e34263 op_count=0
+- add_with_pr_const: [none] mx51.sinc:57
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=525540cf48be6fe5 op_count=0
+- EDirect: [none] mx51.sinc:59
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf621707bf7cedc3 op_count=0
+- EDirect: [none] mx51.sinc:60
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9e277bb2b84eaf96 op_count=0
+- EDirect: [none] mx51.sinc:61
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e1751ae5b494ff1 op_count=0
+- EDirect: [none] mx51.sinc:62
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e1ad1ae5b4c5f48 op_count=0
+- EDirect: [none] mx51.sinc:63
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e24d9ae5b54c165 op_count=0
+- EDirect2: [none] mx51.sinc:65
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=091249ee121da4ab op_count=0
+- EDirect2: [none] mx51.sinc:66
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0be555af2dce4c6e op_count=0
+- EDirect2: [none] mx51.sinc:67
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e1751ae5b494ff1 op_count=0
+- EDirect2: [none] mx51.sinc:68
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e1ad1ae5b4c5f48 op_count=0
+- EDirect2: [none] mx51.sinc:69
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7e24d9ae5b54c165 op_count=0
+- EBitAddr: [none] mx51.sinc:73
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af50c097ec2533c6 op_count=0
+- EBitAddr: [none] mx51.sinc:74
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af50c097ec2533c6 op_count=0
+- EBitAddr2: [none] mx51.sinc:75
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af50c097ec2533c6 op_count=0
+- EBitAddr2: [none] mx51.sinc:76
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af50c097ec2533c6 op_count=0
+- EBitByteAddr: [none] mx51.sinc:78
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d014add11598ba7e op_count=0
+- EBitByteAddr: [none] mx51.sinc:79
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a13004a4c2204077 op_count=0
 - inc [none] mx51.sinc:84
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0aa811aad66beda7 op_count=0

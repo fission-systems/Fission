@@ -298,6 +298,7 @@ mod tests {
                 size: 0,
                 is_export: false,
                 is_import: false,
+                ..Default::default()
             })
             .build()
             .expect("build test binary");
@@ -489,6 +490,7 @@ mod tests {
                     size: 0,
                     is_export: false,
                     is_import: false,
+                    ..Default::default()
                 })
                 .build()
                 .expect("build test binary");

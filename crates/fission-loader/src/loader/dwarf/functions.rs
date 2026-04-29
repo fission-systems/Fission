@@ -67,7 +67,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         // Note: func_depth > 0 guarantees current_func is Some
                         let Some(func) = current_func.as_mut() else {
                             // This should never happen if func_depth tracking is correct
-                            log::warn!("Inconsistent DWARF function depth tracking");
+                            tracing::warn!("Inconsistent DWARF function depth tracking");
                             continue;
                         };
                         match entry.tag() {

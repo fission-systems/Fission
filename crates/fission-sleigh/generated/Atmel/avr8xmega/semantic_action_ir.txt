@@ -3,12 +3,63 @@ arch: Atmel
 entry_spec: avr8xmega.slaspec
 entry_id: avr8xmega
 
+- RrFull: [none] avr8.sinc:330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5c3227f4aa4645c0 op_count=0
+- RrFull: [none] avr8.sinc:331
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b44e4eb6354ca713 op_count=0
+- op1RrPair: [none] avr8.sinc:334
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1ff89a9567e6b965 op_count=0
+- op1RrPair: [none] avr8.sinc:335
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=644ca93cc9a4b418 op_count=0
 - ^instruction [none] avr8.sinc:441
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
 - ^instruction [conditional_branch] avr8.sinc:442
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=72c34b0ffdd284ec op_count=0
+- K8: [none] avr8.sinc:448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc35d70355cd6fb0 op_count=0
+- rel7addr: [none] avr8.sinc:459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf7e70ee9429c65e op_count=0
+- rel7dst: [none] avr8.sinc:463
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=70a8b6c4c5eaf41b op_count=0
+- rel12addr: [none] avr8.sinc:467
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf7e70ee9429c65e op_count=0
+- rel12dst: [none] avr8.sinc:471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f554ed932b05345 op_count=0
+- abs22addr: [none] avr8.sinc:475
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc99e364a1bc3425 op_count=0
+- abs22dst: [none] avr8.sinc:479
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7783c076fd8f7441 op_count=0
+- next16memPtrVal1: [none] avr8.sinc:483
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e29995979e940c0 op_count=0
+- K6: [none] avr8.sinc:498
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc35d70355cd6fb0 op_count=0
+- K7addr: [none] avr8.sinc:501
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ec5095b97546049 op_count=0
+- Aio6: [none] avr8.sinc:512
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ec5095b97546049 op_count=0
+- Aio5: [none] avr8.sinc:513
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8ec5095b97546049 op_count=0
+- q6: [none] avr8.sinc:515
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dc35d70355cd6fb0 op_count=0
 - adc [none] avr8.sinc:562
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=563be8c40660b014 op_count=0
@@ -111,6 +162,9 @@ entry_id: avr8xmega
 - elpm [none] avr8.sinc:776
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f5c16561188c9f65 op_count=0
+- ElpmPlus: [none] avr8.sinc:782
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - elpm [none] avr8.sinc:783
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c25170ea10d80dee op_count=0
@@ -165,12 +219,21 @@ entry_id: avr8xmega
 - ld [none] avr8.sinc:869
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=61cf8ed2e5a5b21e op_count=0
+- LdPlus: [none] avr8.sinc:875
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=523ff20f82cba0d9 op_count=0
 - ld [none] avr8.sinc:876
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0d0db8534fafada8 op_count=0
+- LdPredec: [none] avr8.sinc:881
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b99c7614e7b8faf5 op_count=0
 - ld [none] avr8.sinc:883
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=397e74d8d2197f08 op_count=0
+- LddYZq: [none] avr8.sinc:891
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=26a3ef1b6e72afaf op_count=0
 - ldd [none] avr8.sinc:892
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=347f1a174874113a op_count=0
@@ -186,6 +249,9 @@ entry_id: avr8xmega
 - lpm [none] avr8.sinc:936
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=40eb62be6a179ec0 op_count=0
+- LpmPlus: [none] avr8.sinc:942
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - lpm [none] avr8.sinc:943
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c964e83eaef84540 op_count=0
@@ -288,6 +354,9 @@ entry_id: avr8xmega
 - spm [none] avr8.sinc:1124
   semantic_ops: store_program_mem
   semantic_template: status=unsupported_template action_hash=b61d6ef5dc5477e9 op_count=1
+- SpmPlus: [none] avr8.sinc:1131
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - spm [none] avr8.sinc:1132
   semantic_ops: store_program_mem
   semantic_template: status=unsupported_template action_hash=5ef877c91edaee6a op_count=1
@@ -297,12 +366,21 @@ entry_id: avr8xmega
 - st [none] avr8.sinc:1145
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=58981c0c19ff7d6e op_count=0
+- StPlus: [none] avr8.sinc:1151
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=523ff20f82cba0d9 op_count=0
 - st [none] avr8.sinc:1152
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=563571a01bebe1b1 op_count=0
+- StPredec: [none] avr8.sinc:1157
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b99c7614e7b8faf5 op_count=0
 - st [none] avr8.sinc:1159
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=66458adde778d6a9 op_count=0
+- StdYZq: [none] avr8.sinc:1167
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=26a3ef1b6e72afaf op_count=0
 - std [none] avr8.sinc:1168
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a5372f963ea432c7 op_count=0

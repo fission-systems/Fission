@@ -12,10 +12,13 @@ pub struct BinaryInfo {
     pub name: String,
     pub path: String,
     pub arch: String,
+    pub bits: u32,
     pub format: String,
     pub entry_point: String,
     pub section_count: usize,
     pub function_count: usize,
+    pub import_count: usize,
+    pub export_count: usize,
     pub image_base: String,
 }
 
@@ -25,7 +28,14 @@ pub struct FunctionDto {
     pub address: String,
     pub name: String,
     pub size: u64,
-    /// Category: "import", "export", or "internal"
+    pub is_import: bool,
+    pub is_export: bool,
+    pub origin: Option<String>,
+    pub kind: Option<String>,
+    pub source_section: Option<String>,
+    pub external_library: Option<String>,
+    pub is_thunk_like: bool,
+    /// Category: "import", "export", "thunk", "external", "debug", or "internal"
     pub category: String,
 }
 
@@ -66,6 +76,11 @@ pub struct ImportDto {
     pub name: String,
     pub library: String,
     pub ordinal: Option<u32>,
+    pub origin: Option<String>,
+    pub kind: Option<String>,
+    pub source_section: Option<String>,
+    pub external_library: Option<String>,
+    pub is_thunk_like: bool,
 }
 
 /// Export table entry.
@@ -75,6 +90,12 @@ pub struct ExportDto {
     pub name: String,
     pub ordinal: Option<u32>,
     pub forwarder: Option<String>,
+    pub size: u64,
+    pub origin: Option<String>,
+    pub kind: Option<String>,
+    pub source_section: Option<String>,
+    pub external_library: Option<String>,
+    pub is_thunk_like: bool,
 }
 
 /// Section information.

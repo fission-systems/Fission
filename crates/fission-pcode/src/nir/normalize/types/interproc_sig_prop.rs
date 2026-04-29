@@ -20,10 +20,10 @@ use super::super::wave_stats::{
     add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
 };
 use super::{
-    callsite_type_prop::win_type_name_to_nir, summarize_wrapper_hir_function,
+    callsite_type_prop::{api_signature, is_known_api_signature, win_type_name_to_nir},
+    summarize_wrapper_hir_function,
     summary_soundness_for_wrapper,
 };
-use fission_signatures::win_api::WIN_API_DB;
 
 fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
@@ -32,7 +32,7 @@ fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
 }
 
 fn summary_seed(target: &str) -> CallTargetRef {
-    if WIN_API_DB.get(target).is_some() {
+    if is_known_api_signature(target) {
         return CallTargetRef {
             address: parse_call_target_address(target),
             symbol: target.to_string(),
@@ -103,7 +103,7 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
 }
 
 fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize {
-    let Some(sig) = WIN_API_DB.get(callee) else {
+    let Some(sig) = api_signature(callee) else {
         return 0;
     };
     let mut refinements = 0usize;

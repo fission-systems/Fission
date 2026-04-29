@@ -3,6 +3,120 @@ arch: 8048
 entry_spec: 8048.slaspec
 entry_id: 8048
 
+- Psw: [none] 8048.slaspec:242
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- ExtInt: [none] 8048.slaspec:243
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- TCntInt: [none] 8048.slaspec:244
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Clk: [none] 8048.slaspec:245
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Tmr: [none] 8048.slaspec:246
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Cnt: [none] 8048.slaspec:247
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- TmrCnt: [none] 8048.slaspec:248
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- Rn: [none] 8048.slaspec:251
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=215068e7ff44c512 op_count=0
+- Rind: [none] 8048.slaspec:254
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=213860e7ff302599 op_count=0
+- Ri: [none] 8048.slaspec:265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aada8617e09df60e op_count=0
+- RiX: [none] 8048.slaspec:268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c724dacc496bf0bc op_count=0
+- PData: [none] 8048.slaspec:271
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fd8ed447f6a15e9b op_count=0
+- P3Data: [none] 8048.slaspec:274
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f94106723c5ba288 op_count=0
+- AddrInd: [none] 8048.slaspec:277
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=17c5c22aeebf35e4 op_count=0
+- Ab: [none] 8048.slaspec:280
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dcb16e60d4f1cab7 op_count=0
+- Data: [none] 8048.slaspec:283
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ef4c0bd122e5b81c op_count=0
+- Imm: [none] 8048.slaspec:286
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cfae1cc0533b4fa6 op_count=0
+- Addr8: [none] 8048.slaspec:289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bfc9c0ad552d6c4f op_count=0
+- Addr12: [none] 8048.slaspec:292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bfc9c0ad552d6c4f op_count=0
+- Bus: [none] 8048.slaspec:295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=64865005afa2468e op_count=0
+- Pp: [none] 8048.slaspec:298
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c42f1889d3310e40 op_count=0
+- Xpp: [none] 8048.slaspec:301
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8279d0db3452928b op_count=0
+- Cc: [none] 8048.slaspec:305
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=66fa29f5597b92ff op_count=0
+- Cc: [none] 8048.slaspec:308
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2165ce7259ce0c4 op_count=0
+- Cc: [none] 8048.slaspec:311
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a212dce72599d16d op_count=0
+- Cc: [none] 8048.slaspec:314
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bf9c23de0303f629 op_count=0
+- Cc: [none] 8048.slaspec:317
+  semantic_ops: getExtInt
+  semantic_template: status=unsupported_template action_hash=9a5669a53ba9c633 op_count=1
+- Cc: [none] 8048.slaspec:320
+  semantic_ops: getT0
+  semantic_template: status=unsupported_template action_hash=6a8337b10698e923 op_count=1
+- Cc: [none] 8048.slaspec:323
+  semantic_ops: getT1
+  semantic_template: status=unsupported_template action_hash=4f32dce9efd26eaa op_count=1
+- Cc: [none] 8048.slaspec:326
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=db3dc1355ddfc7e4 op_count=0
+- Cc: [none] 8048.slaspec:329
+  semantic_ops: getTF
+  semantic_template: status=unsupported_template action_hash=7a59c113684a4002 op_count=1
+- Cc: [none] 8048.slaspec:332
+  semantic_ops: getT0
+  semantic_template: status=unsupported_template action_hash=f6d43dae9633862c op_count=1
+- Cc: [none] 8048.slaspec:335
+  semantic_ops: getT1
+  semantic_template: status=unsupported_template action_hash=3a938426d3441ab9 op_count=1
+- Cc: [none] 8048.slaspec:338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=20a9f4cd1960c000 op_count=0
+- Rni: [none] 8048.slaspec:344
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b4748e7618bb8b2 op_count=0
+- Rni: [none] 8048.slaspec:347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b2fc0e76177f2b9 op_count=0
+- RniI: [none] 8048.slaspec:350
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b6e2722ac14bb2e5 op_count=0
+- RniI: [none] 8048.slaspec:353
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a2dff648696a672f op_count=0
 - ADD [none] 8048.slaspec:358
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7a56648b297230c7 op_count=0

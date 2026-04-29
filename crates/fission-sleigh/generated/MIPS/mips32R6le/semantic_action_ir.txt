@@ -3,6 +3,171 @@ arch: MIPS
 entry_spec: mips32R6le.slaspec
 entry_id: mips32R6le
 
+- RD0: [none] mips.sinc:845
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d24304ef916db67b op_count=0
+- RD0: [none] mips.sinc:846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2468cef9170d36a op_count=0
+- RD0: [none] mips.sinc:847
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d23c0cef9167a565 op_count=0
+- RD0: [none] mips.sinc:848
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d23f8cef916ab4bc op_count=0
+- RD0: [none] mips.sinc:849
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d2358cef91626037 op_count=0
+- RD0: [none] mips.sinc:850
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d23904ef916561f6 op_count=0
+- RD0: [none] mips.sinc:851
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d22e84ef915c33f1 op_count=0
+- RD0: [none] mips.sinc:852
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d23204ef915f4348 op_count=0
+- RD: [none] mips.sinc:854
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=212e68e7ff27deac op_count=0
+- RDsrc: [none] mips.sinc:855
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=212e68e7ff27deac op_count=0
+- RDsrc: [none] mips.sinc:856
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RS: [none] mips.sinc:858
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=215a68e7ff4d1997 op_count=0
+- RSsrc: [none] mips.sinc:859
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=215a68e7ff4d1997 op_count=0
+- RSsrc: [none] mips.sinc:860
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RT: [none] mips.sinc:862
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2164e8e7ff56479c op_count=0
+- RTsrc: [none] mips.sinc:863
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2164e8e7ff56479c op_count=0
+- RTsrc: [none] mips.sinc:864
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c18779aca518a216 op_count=0
+- RD32: [none] mips.sinc:866
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0df705b81cfdde5b op_count=0
+- RS32src: [none] mips.sinc:867
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1351fe234c67ce84 op_count=0
+- RS32src: [none] mips.sinc:868
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- RT32: [none] mips.sinc:869
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=218a863e1c43aa4b op_count=0
+- RT32src: [none] mips.sinc:870
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=218a863e1c43aa4b op_count=0
+- RT32src: [none] mips.sinc:871
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d129d0e89e0ee5a op_count=0
+- OFF_BASE: [none] mips.sinc:895
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7af40baef24c571 op_count=0
+- INDEX_BASE: [none] mips.sinc:896
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=decf40dc7ce8d4a8 op_count=0
+- OFF_BASER6: [none] mips.sinc:898
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7af40baef24c571 op_count=0
+- OFF_BASER6: [none] mips.sinc:899
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=60c265443f612f3a op_count=0
+- S18L3: [none] mips.sinc:901
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- S19L2: [none] mips.sinc:902
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- S16L16: [none] mips.sinc:903
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- S16L32: [none] mips.sinc:904
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad66b9892499d642 op_count=0
+- S16L48: [none] mips.sinc:905
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad66b9892499d642 op_count=0
+- SAV: [none] mips.sinc:906
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- Rel16: [none] mips.sinc:908
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel21: [none] mips.sinc:909
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel26: [none] mips.sinc:910
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Abs26: [none] mips.sinc:911
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- InsSize: [none] mips.sinc:913
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f414175f16ee0e94 op_count=0
+- ExtSize: [none] mips.sinc:914
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f414175f16ee0e94 op_count=0
+- fmt1: [none] mips.sinc:940
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt1: [none] mips.sinc:941
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt1: [none] mips.sinc:942
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt2: [none] mips.sinc:944
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt2: [none] mips.sinc:945
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt3: [none] mips.sinc:947
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt3: [none] mips.sinc:948
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt3: [none] mips.sinc:949
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt4: [none] mips.sinc:951
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt4: [none] mips.sinc:952
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt4: [none] mips.sinc:953
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt5: [none] mips.sinc:955
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt5: [none] mips.sinc:956
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt5: [none] mips.sinc:957
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt6: [none] mips.sinc:960
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- fmt6: [none] mips.sinc:961
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
 - add [none] mips32Instructions.sinc:17
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6fe29bacba696860 op_count=0
@@ -423,10 +588,10 @@ entry_id: mips32R6le
 - beql [conditional_branch] mips32Instructions.sinc:926
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=fcc88081bbd5d95a op_count=0
-- bgezal [mixed] mips32Instructions.sinc:932
+- bgezal [call] mips32Instructions.sinc:932
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=a2661d06e93c47ed op_count=0
-- bgezall [mixed] mips32Instructions.sinc:941
+- bgezall [call] mips32Instructions.sinc:941
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=313c833925e977be op_count=0
 - bgezl [conditional_branch] mips32Instructions.sinc:948
@@ -438,10 +603,10 @@ entry_id: mips32R6le
 - blezl [conditional_branch] mips32Instructions.sinc:960
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=e0b2010d8fa3715a op_count=0
-- bltzal [mixed] mips32Instructions.sinc:966
+- bltzal [call] mips32Instructions.sinc:966
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6b5031870099ab16 op_count=0
-- bltzall [mixed] mips32Instructions.sinc:974
+- bltzall [call] mips32Instructions.sinc:974
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=87dd79425f69fa79 op_count=0
 - bltzl [conditional_branch] mips32Instructions.sinc:981
@@ -624,10 +789,10 @@ entry_id: mips32R6le
 - bad1 [none] mips32Instructions.sinc:1471
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
-- blezalc [mixed] mips32Instructions.sinc:1472
+- blezalc [call] mips32Instructions.sinc:1472
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7b075dcec7b0d871 op_count=0
-- bgezalc [mixed] mips32Instructions.sinc:1478
+- bgezalc [call] mips32Instructions.sinc:1478
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3e758315b295976b op_count=0
 - bgeuc [conditional_branch] mips32Instructions.sinc:1484
@@ -636,16 +801,16 @@ entry_id: mips32R6le
 - bad2 [none] mips32Instructions.sinc:1488
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
-- bgtzalc [mixed] mips32Instructions.sinc:1489
+- bgtzalc [call] mips32Instructions.sinc:1489
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f920fb90a0517820 op_count=0
-- bltzalc [mixed] mips32Instructions.sinc:1495
+- bltzalc [call] mips32Instructions.sinc:1495
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=48ec8b80944cc92a op_count=0
 - bltuc [conditional_branch] mips32Instructions.sinc:1501
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=043f945564596848 op_count=0
-- beqzalc [mixed] mips32Instructions.sinc:1506
+- beqzalc [call] mips32Instructions.sinc:1506
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=7b075dcec7b0d871 op_count=0
 - beqc [conditional_branch] mips32Instructions.sinc:1512
@@ -654,7 +819,7 @@ entry_id: mips32R6le
 - bovc [conditional_branch] mips32Instructions.sinc:1516
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=4cbeab879ccbb610 op_count=0
-- bnezalc [mixed] mips32Instructions.sinc:1527
+- bnezalc [call] mips32Instructions.sinc:1527
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c0bdee3173fca360 op_count=0
 - bnec [conditional_branch] mips32Instructions.sinc:1533
@@ -777,6 +942,216 @@ entry_id: mips32R6le
 - sigrie [none] mips32Instructions.sinc:1752
   semantic_ops: signalReservedInstruction
   semantic_template: status=unsupported_template action_hash=4ed469238d1eabe3 op_count=1
+- rsRa: [none] mips32Instructions.sinc:1756
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rsRa: [none] mips32Instructions.sinc:1757
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3665395441d01da9 op_count=0
+- svRa: [none] mips32Instructions.sinc:1762
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- svRa: [none] mips32Instructions.sinc:1763
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c41fc730c7d6eb75 op_count=0
+- rs_statReg: [none] mips32Instructions.sinc:1768
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_statReg: [none] mips32Instructions.sinc:1769
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d99dadb45086567c op_count=0
+- rs_statReg: [none] mips32Instructions.sinc:1773
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a28f1f4b78ab6f23 op_count=0
+- rs_statReg: [none] mips32Instructions.sinc:1779
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=914cfade4e873ee9 op_count=0
+- rs_statReg: [none] mips32Instructions.sinc:1787
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dfd1c17f045fe2a0 op_count=0
+- rsStat: [none] mips32Instructions.sinc:1798
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rsStat: [none] mips32Instructions.sinc:1799
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b8bd628a45748556 op_count=0
+- sv_statReg: [none] mips32Instructions.sinc:1804
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_statReg: [none] mips32Instructions.sinc:1805
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59be261a8973bcc4 op_count=0
+- sv_statReg: [none] mips32Instructions.sinc:1809
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f3a1353079b29c83 op_count=0
+- sv_statReg: [none] mips32Instructions.sinc:1815
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8c0a5c7c178b093 op_count=0
+- sv_statReg: [none] mips32Instructions.sinc:1823
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e5a33f8acd59934 op_count=0
+- svStat: [none] mips32Instructions.sinc:1834
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- svStat: [none] mips32Instructions.sinc:1835
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b3b62d705809bdf0 op_count=0
+- sv_areg1: [none] mips32Instructions.sinc:1839
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_areg1: [none] mips32Instructions.sinc:1840
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cbfe1f53377c25f7 op_count=0
+- sv_areg2: [none] mips32Instructions.sinc:1845
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d8e3a3de5e4c592 op_count=0
+- sv_areg2: [none] mips32Instructions.sinc:1846
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c6400bc9e79580f op_count=0
+- sv_areg3: [none] mips32Instructions.sinc:1853
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d843a3de5dc710d op_count=0
+- sv_areg3: [none] mips32Instructions.sinc:1854
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0d97c121c4d6a26 op_count=0
+- sv_areg4: [none] mips32Instructions.sinc:1863
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d873a3de5dea6e4 op_count=0
+- sv_areg4: [none] mips32Instructions.sinc:1864
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53938a875521659b op_count=0
+- svAregs: [none] mips32Instructions.sinc:1875
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- svAregs: [none] mips32Instructions.sinc:1876
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d7d3a3de5d6525f op_count=0
+- rs_s0: [none] mips32Instructions.sinc:1880
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s0: [none] mips32Instructions.sinc:1881
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2836e96da19878a8 op_count=0
+- rs_s1: [none] mips32Instructions.sinc:1883
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s1: [none] mips32Instructions.sinc:1884
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=feefce7b15ae2e47 op_count=0
+- rs_s8: [none] mips32Instructions.sinc:1886
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s8: [none] mips32Instructions.sinc:1887
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e42ba0c1f7b12370 op_count=0
+- rs_s7: [none] mips32Instructions.sinc:1889
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s7: [none] mips32Instructions.sinc:1890
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=505467d9be3502b3 op_count=0
+- rs_s6: [none] mips32Instructions.sinc:1892
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s6: [none] mips32Instructions.sinc:1893
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=62101caca9e8c60f op_count=0
+- rs_s5: [none] mips32Instructions.sinc:1895
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s5: [none] mips32Instructions.sinc:1896
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5f3899322389e57 op_count=0
+- rs_s4: [none] mips32Instructions.sinc:1898
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s4: [none] mips32Instructions.sinc:1899
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=212adb70f0980a4b op_count=0
+- rs_s3: [none] mips32Instructions.sinc:1901
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s3: [none] mips32Instructions.sinc:1902
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4c44fca8249a9b13 op_count=0
+- rs_s2: [none] mips32Instructions.sinc:1904
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rs_s2: [none] mips32Instructions.sinc:1905
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4af2f18adcc0c837 op_count=0
+- rsXsregs: [none] mips32Instructions.sinc:1907
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- rsXsregs: [none] mips32Instructions.sinc:1908
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=823fa4ddd733df06 op_count=0
+- sv_s0: [none] mips32Instructions.sinc:1914
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s0: [none] mips32Instructions.sinc:1915
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6bf550574b38ee0e op_count=0
+- sv_s1: [none] mips32Instructions.sinc:1917
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s1: [none] mips32Instructions.sinc:1918
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=74980157501b29cd op_count=0
+- sv_s8: [none] mips32Instructions.sinc:1920
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s8: [none] mips32Instructions.sinc:1921
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b031185771919506 op_count=0
+- sv_s7: [none] mips32Instructions.sinc:1923
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s7: [none] mips32Instructions.sinc:1924
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19d3d649980149d7 op_count=0
+- sv_s6: [none] mips32Instructions.sinc:1926
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s6: [none] mips32Instructions.sinc:1927
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e459faa33410039 op_count=0
+- sv_s5: [none] mips32Instructions.sinc:1929
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s5: [none] mips32Instructions.sinc:1930
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2129d03c9160b82f op_count=0
+- sv_s4: [none] mips32Instructions.sinc:1932
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s4: [none] mips32Instructions.sinc:1933
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=eca24e2822e3ac0d op_count=0
+- sv_s3: [none] mips32Instructions.sinc:1935
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s3: [none] mips32Instructions.sinc:1936
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=73a2400318f3284f op_count=0
+- sv_s2: [none] mips32Instructions.sinc:1938
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- sv_s2: [none] mips32Instructions.sinc:1939
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0ad05b2a84c2971 op_count=0
+- svXsregs: [none] mips32Instructions.sinc:1941
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- svXsregs: [none] mips32Instructions.sinc:1942
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2dc8a98350a7c3c0 op_count=0
+- svFramesize: [none] mips32Instructions.sinc:1948
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- svFramesize: [none] mips32Instructions.sinc:1949
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
 - save [none] mips32Instructions.sinc:1952
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=bb171882367f5375 op_count=0
@@ -834,7 +1209,7 @@ entry_id: mips32R6le
 - cvt.d.L [none] mipsfloat.sinc:107
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=cfc8ccaf5a627256 op_count=0
-- cvt.l.S [mixed] mipsfloat.sinc:113
+- cvt.l.S [return] mipsfloat.sinc:113
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0fe58b367fbba367 op_count=0
 - cvt.l.D [conditional_branch] mipsfloat.sinc:127
@@ -858,7 +1233,7 @@ entry_id: mips32R6le
 - cvt.s.pu [none] mipsfloat.sinc:160
   semantic_ops: mipsFloatPS
   semantic_template: status=unsupported_template action_hash=d3f4a0885ae71d8d op_count=1
-- cvt.w.S [mixed] mipsfloat.sinc:165
+- cvt.w.S [return] mipsfloat.sinc:165
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=89f3953617fbefc5 op_count=0
 - cvt.w.D [conditional_branch] mipsfloat.sinc:178
@@ -1404,10 +1779,10 @@ entry_id: mips32R6le
 - cmp.sule.D [none] mipsfloat.sinc:1136
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3a5f58dc1f1d9fc1 op_count=0
-- rint.S [mixed] mipsfloat.sinc:1141
+- rint.S [return] mipsfloat.sinc:1141
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=12a226cd3adc23df op_count=0
-- rint.D [mixed] mipsfloat.sinc:1153
+- rint.D [return] mipsfloat.sinc:1153
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9800c06941eb52c7 op_count=0
 - min.S [none] mipsfloat.sinc:1164
@@ -1458,12 +1833,342 @@ entry_id: mips32R6le
 - selnez.D [none] mipsfloat.sinc:1240
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ed2604ab898a7f5a op_count=0
+- RZ: [none] mips16.sinc:199
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- RX: [none] mips16.sinc:203
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fcc588c9fd3a389f op_count=0
+- RX32: [none] mips16.sinc:204
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bd5f13394980c3c2 op_count=0
+- RY32: [none] mips16.sinc:205
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c7b4b4394fd478d1 op_count=0
+- RZ32: [none] mips16.sinc:206
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ab3239393ef75240 op_count=0
+- Abs26_m16: [none] mips16.sinc:220
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel16_m16: [none] mips16.sinc:221
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel16_m16: [none] mips16.sinc:222
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- CRel16_m16: [none] mips16.sinc:224
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- CRel16_m16: [none] mips16.sinc:225
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
 - ^instruction [none] mips16.sinc:227
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
 - ^instruction [none] mips16.sinc:228
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9fda0572f3f69a20 op_count=0
+- EXT_I: [none] mips16.sinc:230
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_IS0: [none] mips16.sinc:231
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_IS1: [none] mips16.sinc:232
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_RI: [none] mips16.sinc:233
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_RRIA: [none] mips16.sinc:234
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_RRIA: [none] mips16.sinc:235
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41419421c7a7f2e7 op_count=0
+- EXT_IS8: [none] mips16.sinc:237
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_IS8: [none] mips16.sinc:238
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6e19f39a865e91e2 op_count=0
+- EXT_IS8L3: [none] mips16.sinc:239
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_IU8: [none] mips16.sinc:241
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_IU8: [none] mips16.sinc:242
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_LIU8: [none] mips16.sinc:244
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_LIU8: [none] mips16.sinc:245
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9ea717f880d29820 op_count=0
+- EXT_SHIFT: [none] mips16.sinc:247
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8b3e02aaf5637246 op_count=0
+- EXT_SHIFT: [none] mips16.sinc:248
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- EXT_SHIFT: [none] mips16.sinc:249
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c0ccf63b3be157d op_count=0
+- EXT_SET: [none] mips16.sinc:251
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_SET: [none] mips16.sinc:252
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=238e0d5fc5b7f3be op_count=0
+- OFF_M16: [none] mips16.sinc:254
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ace888dcf758889 op_count=0
+- OFF_M16: [none] mips16.sinc:255
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9d2f9eb1ac9b1b73 op_count=0
+- OFF_M16S0: [none] mips16.sinc:256
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ace888dcf758889 op_count=0
+- OFF_M16S0: [none] mips16.sinc:257
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=632a28c874683742 op_count=0
+- OFF_M16S1: [none] mips16.sinc:258
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3ace888dcf758889 op_count=0
+- OFF_M16S1: [none] mips16.sinc:259
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f2709ace6e154647 op_count=0
+- OFF_M16PC: [none] mips16.sinc:261
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d43f6dd8110bbb71 op_count=0
+- OFF_M16PC: [none] mips16.sinc:262
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=589cda1dbccd38eb op_count=0
+- OFF_M16SP: [none] mips16.sinc:264
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e554b3cd7591be9d op_count=0
+- OFF_M16SP: [none] mips16.sinc:265
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15fe4c954a73ab2d op_count=0
+- EXT_FRAME: [none] mips16.sinc:267
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_FRAME: [none] mips16.sinc:268
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- REGRS_STAT: [none] mips16.sinc:270
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_STAT: [none] mips16.sinc:271
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d99dadb45086567c op_count=0
+- REGRS_STAT: [none] mips16.sinc:275
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a28f1f4b78ab6f23 op_count=0
+- REGRS_STAT: [none] mips16.sinc:281
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=914cfade4e873ee9 op_count=0
+- REGRS_STAT: [none] mips16.sinc:289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dfd1c17f045fe2a0 op_count=0
+- REST_STAT: [none] mips16.sinc:300
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REST_STAT: [none] mips16.sinc:301
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dbed5e254d9086a6 op_count=0
+- REGSV_STAT: [none] mips16.sinc:306
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_STAT: [none] mips16.sinc:307
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=59be261a8973bcc4 op_count=0
+- REGSV_STAT: [none] mips16.sinc:311
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f3a1353079b29c83 op_count=0
+- REGSV_STAT: [none] mips16.sinc:317
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c8c0a5c7c178b093 op_count=0
+- REGSV_STAT: [none] mips16.sinc:325
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8e5a33f8acd59934 op_count=0
+- SAVE_STAT: [none] mips16.sinc:336
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SAVE_STAT: [none] mips16.sinc:337
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a6fd0368bcafef2c op_count=0
+- REGSV_BLD1: [none] mips16.sinc:341
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_BLD1: [none] mips16.sinc:342
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=cbfe1f53377c25f7 op_count=0
+- REGSV_BLD2: [none] mips16.sinc:347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02a92ceb73b249c5 op_count=0
+- REGSV_BLD2: [none] mips16.sinc:348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6c6400bc9e79580f op_count=0
+- REGSV_BLD3: [none] mips16.sinc:355
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02b32ceb73ba9e4a op_count=0
+- REGSV_BLD3: [none] mips16.sinc:356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d0d97c121c4d6a26 op_count=0
+- REGSV_BLD4: [none] mips16.sinc:365
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=02b024eb73b85adb op_count=0
+- REGSV_BLD4: [none] mips16.sinc:366
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=53938a875521659b op_count=0
+- SAVE_ARG: [none] mips16.sinc:377
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SAVE_ARG: [none] mips16.sinc:378
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=029f24eb73a9e7a8 op_count=0
+- REGRS_S0: [none] mips16.sinc:382
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S0: [none] mips16.sinc:383
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2836e96da19878a8 op_count=0
+- REGRS_S1: [none] mips16.sinc:385
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S1: [none] mips16.sinc:386
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=feefce7b15ae2e47 op_count=0
+- REGRS_S8: [none] mips16.sinc:388
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S8: [none] mips16.sinc:389
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e42ba0c1f7b12370 op_count=0
+- REGRS_S7: [none] mips16.sinc:391
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S7: [none] mips16.sinc:392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ed77d696c951d9fb op_count=0
+- REGRS_S6: [none] mips16.sinc:394
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S6: [none] mips16.sinc:395
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6810354850047a67 op_count=0
+- REGRS_S5: [none] mips16.sinc:397
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S5: [none] mips16.sinc:398
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=19fd7eea9fedc1cf op_count=0
+- REGRS_S4: [none] mips16.sinc:400
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S4: [none] mips16.sinc:401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4f1305df53306443 op_count=0
+- REGRS_S3: [none] mips16.sinc:403
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S3: [none] mips16.sinc:404
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a289f2ea6503c94b op_count=0
+- REGRS_S2: [none] mips16.sinc:406
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGRS_S2: [none] mips16.sinc:407
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=956780be32e57d6f op_count=0
+- REST_SREG: [none] mips16.sinc:409
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REST_SREG: [none] mips16.sinc:410
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ee8515abe19ad662 op_count=0
+- REGSV_S0: [none] mips16.sinc:417
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S0: [none] mips16.sinc:418
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6bf550574b38ee0e op_count=0
+- REGSV_S1: [none] mips16.sinc:420
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S1: [none] mips16.sinc:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=74980157501b29cd op_count=0
+- REGSV_S8: [none] mips16.sinc:423
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S8: [none] mips16.sinc:424
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b031185771919506 op_count=0
+- REGSV_S7: [none] mips16.sinc:426
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S7: [none] mips16.sinc:427
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1d884fc53593840f op_count=0
+- REGSV_S6: [none] mips16.sinc:429
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S6: [none] mips16.sinc:430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=48db9d2ad8776b01 op_count=0
+- REGSV_S5: [none] mips16.sinc:432
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S5: [none] mips16.sinc:433
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=46f36c33d2380db7 op_count=0
+- REGSV_S4: [none] mips16.sinc:435
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S4: [none] mips16.sinc:436
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5a6693cf419344d5 op_count=0
+- REGSV_S3: [none] mips16.sinc:438
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S3: [none] mips16.sinc:439
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2cf0fbc4750edd57 op_count=0
+- REGSV_S2: [none] mips16.sinc:441
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REGSV_S2: [none] mips16.sinc:442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=13ecd54d52c02699 op_count=0
+- SAVE_SREG: [none] mips16.sinc:444
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SAVE_SREG: [none] mips16.sinc:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4f5019f164c25630 op_count=0
+- REST_RA: [none] mips16.sinc:452
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- REST_RA: [none] mips16.sinc:453
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3665395441d01da9 op_count=0
+- SAVE_RA: [none] mips16.sinc:458
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SAVE_RA: [none] mips16.sinc:459
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=03cb0879112c8d0a op_count=0
+- REST_TOP: [none] mips16.sinc:464
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8644178894e481ef op_count=0
+- SAVE_TOP: [none] mips16.sinc:477
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f62a45335096d64e op_count=0
 - addiu [none] mips16.sinc:492
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9e44acc2e9474df6 op_count=0
@@ -1680,6 +2385,9 @@ entry_id: mips32R6le
 - zeh [none] mips16.sinc:860
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=0aee34e7ea7ded3f op_count=0
+- E2_REGOFF: [none] mips16.sinc:879
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=41d77333d419140e op_count=0
 - addiu [none] mips16.sinc:882
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=aa647707c6bef747 op_count=0
@@ -1749,6 +2457,30 @@ entry_id: mips32R6le
 - lwr [none] mips16.sinc:1001
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=84944d3c53e37943 op_count=0
+- m16_RD0: [none] mips16.sinc:1014
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aef3e2ec25e841ae op_count=0
+- m16_RD0: [none] mips16.sinc:1015
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aef06aec25e53fef op_count=0
+- m16_RD0: [none] mips16.sinc:1016
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aeece2ec25e22300 op_count=0
+- m16_RD0: [none] mips16.sinc:1017
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aee9e2ec25dfed29 op_count=0
+- m16_RD0: [none] mips16.sinc:1018
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=af016aec25f3b322 op_count=0
+- m16_RD0: [none] mips16.sinc:1019
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aefde2ec25f09633 op_count=0
+- m16_RD0: [none] mips16.sinc:1020
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aefaeaec25ee6df4 op_count=0
+- m16_RD0: [none] mips16.sinc:1021
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=aef76aec25eb5e9d op_count=0
 - mfc0 [none] mips16.sinc:1023
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6d213f14f639b80b op_count=0
@@ -1806,6 +2538,495 @@ entry_id: mips32R6le
 - xori [none] mips16.sinc:1129
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ae6b06c214d62d27 op_count=0
+- RD5L: [none] mipsmicro.sinc:271
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6344e2b27b0df710 op_count=0
+- RD5L: [none] mipsmicro.sinc:272
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=070092568a8eb070 op_count=0
+- RD7R1: [none] mipsmicro.sinc:274
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d32ff4fc245798f1 op_count=0
+- RD7R1: [none] mipsmicro.sinc:275
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d34474fc24691b7b op_count=0
+- RSEXTL: [none] mipsmicro.sinc:277
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0718509fecb71d41 op_count=0
+- RSEXTL: [none] mipsmicro.sinc:278
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=070092568a8eb070 op_count=0
+- RS0L: [none] mipsmicro.sinc:280
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0b00550a0e738f4e op_count=0
+- RS0L: [none] mipsmicro.sinc:281
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=070092568a8eb070 op_count=0
+- RS4L: [none] mipsmicro.sinc:282
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=a511224709963340 op_count=0
+- RS0R4: [none] mipsmicro.sinc:284
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f2069fbc79061e3 op_count=0
+- RS0R4: [none] mipsmicro.sinc:285
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f12f1fbc7850b9f op_count=0
+- RS0R5: [none] mipsmicro.sinc:286
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bc79a70527902ab1 op_count=0
+- RS0R5: [none] mipsmicro.sinc:287
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RS0R5: [none] mipsmicro.sinc:288
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bc8aaf05279eab7c op_count=0
+- RS0R5: [none] mipsmicro.sinc:289
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RS1R7L: [none] mipsmicro.sinc:291
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c5e4d870b96dc7cd op_count=0
+- RS1R7L: [none] mipsmicro.sinc:292
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=767adc40161774ff op_count=0
+- RT4L: [none] mipsmicro.sinc:294
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=6718abb38fd9c621 op_count=0
+- RT5L: [none] mipsmicro.sinc:295
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f00a22d29012e060 op_count=0
+- RT5L: [none] mipsmicro.sinc:296
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=070092568a8eb070 op_count=0
+- RT3R7: [none] mipsmicro.sinc:299
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=48396cfbd5875db5 op_count=0
+- RT3R7: [none] mipsmicro.sinc:300
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=482be4fbd57bec41 op_count=0
+- RST7R5: [none] mipsmicro.sinc:302
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2f0f69fbc781eeb0 op_count=0
+- RST7R5: [none] mipsmicro.sinc:303
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e13271eb808eb43f op_count=0
+- RST7R5: [none] mipsmicro.sinc:304
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RT5RD5: [none] mipsmicro.sinc:307
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8a6f9d676adafb28 op_count=0
+- RT5RD5: [none] mipsmicro.sinc:308
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RT5RD5: [none] mipsmicro.sinc:309
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=7f0affc0cfc46fc5 op_count=0
+- RT5RD5: [none] mipsmicro.sinc:310
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RS0RT5: [none] mipsmicro.sinc:312
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bc79a70527902ab1 op_count=0
+- RS0RT5: [none] mipsmicro.sinc:313
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- RS0RT5: [none] mipsmicro.sinc:314
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=e13271eb808eb43f op_count=0
+- RS0RT5: [none] mipsmicro.sinc:315
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- ENCRS: [none] mipsmicro.sinc:317
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c89f2053c22c2565 op_count=0
+- ENCRS: [none] mipsmicro.sinc:318
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- ENCRS: [none] mipsmicro.sinc:319
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=42ed00cc507fbf49 op_count=0
+- ENCRS: [none] mipsmicro.sinc:320
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2929c0ef796b6b6a op_count=0
+- Abs26_mic1: [none] mipsmicro.sinc:322
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Abs26_mic2: [none] mipsmicro.sinc:323
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel26_mic: [none] mipsmicro.sinc:324
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel21_mic: [none] mipsmicro.sinc:325
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel16_mic: [none] mipsmicro.sinc:326
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel10_mic: [none] mipsmicro.sinc:327
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- Rel7_mic: [none] mipsmicro.sinc:328
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=15b1e78e3063a6f0 op_count=0
+- EXT_CODE3: [none] mipsmicro.sinc:330
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE3: [none] mipsmicro.sinc:331
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE3: [none] mipsmicro.sinc:332
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:334
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:335
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:336
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:337
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:338
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:339
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:340
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:341
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:342
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:343
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:344
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:345
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:346
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:347
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:348
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4A: [none] mipsmicro.sinc:349
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4B: [none] mipsmicro.sinc:351
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4B: [none] mipsmicro.sinc:352
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4C: [none] mipsmicro.sinc:354
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4D: [none] mipsmicro.sinc:356
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4E: [none] mipsmicro.sinc:358
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE4E: [none] mipsmicro.sinc:359
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE5R6: [none] mipsmicro.sinc:360
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE5: [none] mipsmicro.sinc:363
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE7: [none] mipsmicro.sinc:365
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE7: [none] mipsmicro.sinc:366
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE7A: [none] mipsmicro.sinc:368
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9: [none] mipsmicro.sinc:370
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9: [none] mipsmicro.sinc:371
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9: [none] mipsmicro.sinc:372
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9: [none] mipsmicro.sinc:373
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9: [none] mipsmicro.sinc:374
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE9E: [none] mipsmicro.sinc:376
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE12: [none] mipsmicro.sinc:377
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_CODE16: [none] mipsmicro.sinc:379
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_MS16: [none] mipsmicro.sinc:381
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e563fe59e467b48 op_count=0
+- EXT_MS18: [none] mipsmicro.sinc:382
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MS19: [none] mipsmicro.sinc:384
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MS32: [none] mipsmicro.sinc:386
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MS48: [none] mipsmicro.sinc:387
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad66b9892499d642 op_count=0
+- EXT_MS64: [none] mipsmicro.sinc:388
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ad66b9892499d642 op_count=0
+- EXT_MSPC: [none] mipsmicro.sinc:390
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MSPC: [none] mipsmicro.sinc:392
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MU23: [none] mipsmicro.sinc:394
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1cf7e0d837881c56 op_count=0
+- EXT_MU6: [none] mipsmicro.sinc:396
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- EXT_SA: [none] mipsmicro.sinc:398
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- EXT_SA: [none] mipsmicro.sinc:399
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- EXT_SA9: [none] mipsmicro.sinc:401
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- DIDISP: [none] mipsmicro.sinc:403
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- DIDISP: [none] mipsmicro.sinc:404
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- RTIMP: [none] mipsmicro.sinc:406
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- RTIMP: [none] mipsmicro.sinc:407
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SIZEP: [none] mipsmicro.sinc:409
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- SIZEPLG: [none] mipsmicro.sinc:410
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- SIZEQ: [none] mipsmicro.sinc:411
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- SIZEQLG: [none] mipsmicro.sinc:412
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- POSHI: [none] mipsmicro.sinc:413
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- CPSEL: [none] mipsmicro.sinc:415
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- CPSEL: [none] mipsmicro.sinc:416
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STYPE: [none] mipsmicro.sinc:418
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STYPE: [none] mipsmicro.sinc:419
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- SDB16: [none] mipsmicro.sinc:421
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=c19e29419e57e037 op_count=0
+- SDB16: [none] mipsmicro.sinc:422
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=bed69998a1f5ebaf op_count=0
+- SA32: [none] mipsmicro.sinc:424
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=dca1785a9031d8bf op_count=0
+- COP2CC: [none] mipsmicro.sinc:426
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- COP2CC: [none] mipsmicro.sinc:427
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S8: [none] mipsmicro.sinc:429
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S8: [none] mipsmicro.sinc:430
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=4ea09a9556c8fa8e op_count=0
+- LOAD_S7: [none] mipsmicro.sinc:432
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S7: [none] mipsmicro.sinc:433
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b733b7515400a93a op_count=0
+- LOAD_S6: [none] mipsmicro.sinc:435
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S6: [none] mipsmicro.sinc:436
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=69fa2070258d69cc op_count=0
+- LOAD_S5: [none] mipsmicro.sinc:438
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S5: [none] mipsmicro.sinc:439
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ded9fb1026b6e4a2 op_count=0
+- LOAD_S4: [none] mipsmicro.sinc:441
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S4: [none] mipsmicro.sinc:442
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2c590b2768af18a0 op_count=0
+- LOAD_S3: [none] mipsmicro.sinc:444
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S3: [none] mipsmicro.sinc:445
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b614a34cd3c7ba1a op_count=0
+- LOAD_S2: [none] mipsmicro.sinc:447
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S2: [none] mipsmicro.sinc:448
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=708c1047ff4cedec op_count=0
+- LOAD_S1: [none] mipsmicro.sinc:450
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S1: [none] mipsmicro.sinc:451
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=b621830e925d7662 op_count=0
+- LOAD_S0: [none] mipsmicro.sinc:453
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_S0: [none] mipsmicro.sinc:454
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=d25f8a4338198a08 op_count=0
+- LOAD_SREG: [none] mipsmicro.sinc:456
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_SREG: [none] mipsmicro.sinc:457
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=28af6b12c701f9da op_count=0
+- LOAD_RA: [none] mipsmicro.sinc:459
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- LOAD_RA: [none] mipsmicro.sinc:460
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=982aa3bb0cf2045c op_count=0
+- LOAD_TOP: [none] mipsmicro.sinc:462
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=37fbf332ac16e2ca op_count=0
+- LOAD_TOP16: [none] mipsmicro.sinc:471
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b87431e94a623fa op_count=0
+- LOAD_TOP16: [none] mipsmicro.sinc:480
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=9b87431e94a623fa op_count=0
+- STORE_S8: [none] mipsmicro.sinc:491
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S8: [none] mipsmicro.sinc:492
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=ce07ecaf6ebece56 op_count=0
+- STORE_S7: [none] mipsmicro.sinc:494
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S7: [none] mipsmicro.sinc:495
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=406934a6284ad121 op_count=0
+- STORE_S6: [none] mipsmicro.sinc:497
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S6: [none] mipsmicro.sinc:498
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=2e311ffd21072a2d op_count=0
+- STORE_S5: [none] mipsmicro.sinc:500
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S5: [none] mipsmicro.sinc:501
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5b977e4b7bea734d op_count=0
+- STORE_S4: [none] mipsmicro.sinc:503
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S4: [none] mipsmicro.sinc:504
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=8fc00fef72148fc9 op_count=0
+- STORE_S3: [none] mipsmicro.sinc:506
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S3: [none] mipsmicro.sinc:507
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=07f8e72727c78709 op_count=0
+- STORE_S2: [none] mipsmicro.sinc:509
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S2: [none] mipsmicro.sinc:510
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=3cb6d95d5d83195d op_count=0
+- STORE_S1: [none] mipsmicro.sinc:512
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S1: [none] mipsmicro.sinc:513
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=fe3c92a7284a0aed op_count=0
+- STORE_S0: [none] mipsmicro.sinc:515
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_S0: [none] mipsmicro.sinc:516
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=f7c6354fbdd7c341 op_count=0
+- STORE_SREG: [none] mipsmicro.sinc:518
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_SREG: [none] mipsmicro.sinc:519
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=be92629c47b0507d op_count=0
+- STORE_RA: [none] mipsmicro.sinc:521
+  semantic_ops: <none>
+  semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
+- STORE_RA: [none] mipsmicro.sinc:522
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=5780c2229fcf001c op_count=0
+- STORE_TOP: [none] mipsmicro.sinc:524
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=1dc326c54ec26e10 op_count=0
+- STORE_TOP16: [none] mipsmicro.sinc:533
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0aa0bc126be63681 op_count=0
+- STORE_TOP16: [none] mipsmicro.sinc:542
+  semantic_ops: <none>
+  semantic_template: status=unsupported_template action_hash=0aa0bc126be63681 op_count=0
 - abs.S [none] mipsmicro.sinc:558
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=6979e4e0ec0c66c9 op_count=0
@@ -1908,7 +3129,7 @@ entry_id: mips32R6le
 - cvt.d.L [none] mipsmicro.sinc:732
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=ba8596074884bd3a op_count=0
-- cvt.l.S [mixed] mipsmicro.sinc:736
+- cvt.l.S [return] mipsmicro.sinc:736
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=eaa4f917f3bd9f57 op_count=0
 - cvt.l.D [conditional_branch] mipsmicro.sinc:749
@@ -1923,7 +3144,7 @@ entry_id: mips32R6le
 - cvt.s.L [none] mipsmicro.sinc:771
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=3b403dec50ad7fa0 op_count=0
-- cvt.w.S [mixed] mipsmicro.sinc:776
+- cvt.w.S [return] mipsmicro.sinc:776
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9e206218ca95e119 op_count=0
 - cvt.w.D [conditional_branch] mipsmicro.sinc:790
@@ -2166,7 +3387,7 @@ entry_id: mips32R6le
 - round.w.S [none] mipsmicro.sinc:1249
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=509726d3b6c9aad6 op_count=0
-- round.w.D [mixed] mipsmicro.sinc:1254
+- round.w.D [return] mipsmicro.sinc:1254
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=077e4c385c700a31 op_count=0
 - rsqrt.S [none] mipsmicro.sinc:1260
@@ -2904,10 +4125,10 @@ entry_id: mips32R6le
 - bad1 [none] mipsmicro.sinc:3096
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
-- blezalc [mixed] mipsmicro.sinc:3097
+- blezalc [call] mipsmicro.sinc:3097
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=2ed92c664417522f op_count=0
-- bgezalc [mixed] mipsmicro.sinc:3103
+- bgezalc [call] mipsmicro.sinc:3103
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=cbf943868601010d op_count=0
 - bgeuc [conditional_branch] mipsmicro.sinc:3109
@@ -2916,16 +4137,16 @@ entry_id: mips32R6le
 - bad2 [none] mipsmicro.sinc:3113
   semantic_ops: <none>
   semantic_template: status=empty action_hash=cbf29ce484222325 op_count=0
-- bgtzalc [mixed] mipsmicro.sinc:3114
+- bgtzalc [call] mipsmicro.sinc:3114
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c4b1473f599713b0 op_count=0
-- bltzalc [mixed] mipsmicro.sinc:3120
+- bltzalc [call] mipsmicro.sinc:3120
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=8ae6ebf7299eed5e op_count=0
 - bltuc [conditional_branch] mipsmicro.sinc:3125
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=b9aab2ba4abf2b45 op_count=0
-- beqzalc [mixed] mipsmicro.sinc:3130
+- beqzalc [call] mipsmicro.sinc:3130
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=c3d59340c5f8d1ca op_count=0
 - beqc [conditional_branch] mipsmicro.sinc:3136
@@ -2934,7 +4155,7 @@ entry_id: mips32R6le
 - bovc [conditional_branch] mipsmicro.sinc:3140
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=167d740cce9d51b9 op_count=0
-- bnezalc [mixed] mipsmicro.sinc:3152
+- bnezalc [call] mipsmicro.sinc:3152
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=f8859e0638b3627e op_count=0
 - bnec [conditional_branch] mipsmicro.sinc:3158
@@ -3228,10 +4449,10 @@ entry_id: mips32R6le
 - rdhwr [none] mipsmicro.sinc:3699
   semantic_ops: getHWRegister
   semantic_template: status=unsupported_template action_hash=552a6499c51d9837 op_count=1
-- rint.S [mixed] mipsmicro.sinc:3703
+- rint.S [return] mipsmicro.sinc:3703
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=9984be276177ced3 op_count=0
-- rint.D [mixed] mipsmicro.sinc:3717
+- rint.D [return] mipsmicro.sinc:3717
   semantic_ops: <none>
   semantic_template: status=unsupported_template action_hash=75a346744a7ce773 op_count=0
 - scx [none] mipsmicro.sinc:3728

@@ -62,6 +62,7 @@ mod tests {
                 size: 3,
                 is_export: true,
                 is_import: false,
+                ..Default::default()
             }],
             sections: vec![],
             is_64bit: true,

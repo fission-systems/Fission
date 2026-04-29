@@ -8,15 +8,15 @@ pub use fission_core::architecture::{
 };
 pub use fission_core::common::types::{FunctionInfo, SectionInfo};
 
-#[path = "types_builder.rs"]
+#[path = "types/builder.rs"]
 mod builder_methods;
-#[path = "types_discovery.rs"]
+#[path = "types/discovery.rs"]
 mod discovery;
-#[path = "types_patching.rs"]
+#[path = "types/patching.rs"]
 mod patching;
-#[path = "types_query.rs"]
+#[path = "types/query.rs"]
 mod query;
-#[path = "types_string_utils.rs"]
+#[path = "types/string_utils.rs"]
 mod string_utils;
 pub use string_utils::{extract_cstring, extract_fixed_string};
 

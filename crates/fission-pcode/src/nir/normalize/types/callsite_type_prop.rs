@@ -12,7 +12,7 @@ use super::super::wave_stats::{
 ///
 /// 1. Walk every `HirStmt::Assign { rhs: Call { target, args } }` and
 ///    `HirStmt::Expr(Call { target, args })`.
-/// 2. Look up `target` in `fission_signatures::win_api::WIN_API_DB`.
+/// 2. Look up `target` in the `utils/signatures` API type provider.
 /// 3. For the return value: if there is a receiver binding (the lhs `Var` of
 ///    the Assign), update `NirBinding.ty` to the resolved return type.
 /// 4. For each argument: if the argument is a `Var(x)` and the corresponding
@@ -45,7 +45,7 @@ use super::super::wave_stats::{
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
 use crate::nir::var_rename::rename_vars_in_stmts;
-use fission_signatures::win_api::WIN_API_DB;
+use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES};
 use std::collections::{HashMap, HashSet};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -183,6 +183,17 @@ pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
         _ => return None,
     };
     Some(nir)
+}
+
+pub(crate) fn is_known_api_signature(name: &str) -> bool {
+    api_signature(name).is_some()
+}
+
+pub(crate) fn api_signature(name: &str) -> Option<&'static ApiSignature> {
+    SIGNATURE_RESOURCES
+        .api_signatures()
+        .ok()?
+        .find(|signature| signature.name == name)
 }
 
 /// Return the NirType implied by the API signature's return type string.
@@ -430,7 +441,7 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
 
 /// Apply call-site type propagation to a function.
 ///
-/// Collects all `Call` expressions, looks up each target in `WIN_API_DB`, and
+/// Collects all `Call` expressions, looks up each target in the API type provider, and
 /// updates argument/receiver bindings with the resolved types.
 ///
 /// Returns `true` if any binding type was updated.
@@ -451,9 +462,7 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
             .callee_summaries
             .get(callee)
             .or_else(|| func.callee_summaries.get(resolved_callee));
-        let Some(sig) = WIN_API_DB
-            .get(resolved_callee)
-            .or_else(|| WIN_API_DB.get(callee))
+        let Some(sig) = api_signature(resolved_callee).or_else(|| api_signature(callee))
         else {
             if let Some(summary) = summary {
                 let mut refined_here = false;

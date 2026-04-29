@@ -1,10 +1,9 @@
+use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
     DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
-use binrw::BinRead;
 use fission_core::architecture::select_elf_load_spec;
-use std::io::{Cursor, Seek, SeekFrom};
 
 pub mod schema;
 use schema::*;
@@ -32,12 +31,7 @@ const ELF_EXTERNAL_IMAGE_BASE: u64 = 0xffff_2000_0000_0000;
 impl ElfLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
-        // We use a temporary cursor here so the borrow of `data` ends immediately
-        let ident = {
-            let bytes = data.as_slice();
-            let mut cursor = Cursor::new(bytes);
-            ElfIdent::read_le(&mut cursor).map_err(|e| err!(loader, "Invalid ELF Ident: {}", e))?
-        }; // cursor dropped here
+        let ident = ElfIdent::parse(data.as_slice())?;
 
         let is_64 = ident.class == 2;
         let is_little = ident.endian == 1; // 1=Little, 2=Big
@@ -48,9 +42,9 @@ impl ElfLoader {
                 data,
                 path,
                 if is_little {
-                    binrw::Endian::Little
+                    Endian::Little
                 } else {
-                    binrw::Endian::Big
+                    Endian::Big
                 },
             )
         } else {
@@ -58,20 +52,19 @@ impl ElfLoader {
                 data,
                 path,
                 if is_little {
-                    binrw::Endian::Little
+                    Endian::Little
                 } else {
-                    binrw::Endian::Big
+                    Endian::Big
                 },
             )
         }
     }
 
-    fn parse_64(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+    fn parse_64(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
-        let mut reader = Cursor::new(bytes);
+        let reader = ByteReader::new(bytes, endian);
         // Read Header
-        let header = Elf64Header::read_options(&mut reader, endian, ())
-            .map_err(|e| err!(loader, "ELF64 Header: {}", e))?;
+        let header = Elf64Header::parse(bytes, &reader)?;
 
         let is_64bit = true;
         let entry_point = header.entry;
@@ -88,16 +81,18 @@ impl ElfLoader {
 
         // Parse Sections
         if header.shoff != 0 && header.shnum > 0 {
-            reader
-                .seek(SeekFrom::Start(header.shoff))
-                .map_err(|_| err!(loader, "Seek error"))?;
-
             let mut shdrs = Vec::new();
-            for _ in 0..header.shnum {
-                shdrs.push(
-                    Elf64Shdr::read_options(&mut reader, endian, ())
-                        .map_err(|_| err!(loader, "Failed to read ELF64 section header"))?,
-                );
+            let section_header_size = if header.shentsize > 0 {
+                header.shentsize as usize
+            } else {
+                Elf64Shdr::SIZE
+            };
+            for index in 0..header.shnum as usize {
+                let offset = header
+                    .shoff
+                    .saturating_add((index * section_header_size) as u64)
+                    as usize;
+                shdrs.push(Elf64Shdr::parse(&reader, offset)?);
             }
 
             let section_addresses = if is_relocatable {
@@ -200,7 +195,7 @@ impl ElfLoader {
         }
 
         LoadedBinaryBuilder::new(path, data)
-            .format("ELF64 (binrw)")
+            .format("ELF64")
             .architecture(architecture)
             .load_spec(load_spec)
             .entry_point(entry_point)
@@ -211,12 +206,11 @@ impl ElfLoader {
             .build()
     }
 
-    fn parse_32(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+    fn parse_32(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
-        let mut reader = Cursor::new(bytes);
+        let reader = ByteReader::new(bytes, endian);
         // Read Header
-        let header = Elf32Header::read_options(&mut reader, endian, ())
-            .map_err(|e| err!(loader, "ELF32 Header: {}", e))?;
+        let header = Elf32Header::parse(bytes, &reader)?;
 
         let is_64bit = false;
         let entry_point = header.entry as u64;
@@ -233,16 +227,18 @@ impl ElfLoader {
 
         // Parse Sections
         if header.shoff != 0 && header.shnum > 0 {
-            reader
-                .seek(SeekFrom::Start(header.shoff as u64))
-                .map_err(|_| err!(loader, "Seek error"))?;
-
             let mut shdrs = Vec::new();
-            for _ in 0..header.shnum {
-                shdrs.push(
-                    Elf32Shdr::read_options(&mut reader, endian, ())
-                        .map_err(|_| err!(loader, "Failed to read ELF32 section header"))?,
-                );
+            let section_header_size = if header.shentsize > 0 {
+                header.shentsize as usize
+            } else {
+                Elf32Shdr::SIZE
+            };
+            for index in 0..header.shnum as usize {
+                let offset = header
+                    .shoff
+                    .saturating_add((index * section_header_size) as u32)
+                    as usize;
+                shdrs.push(Elf32Shdr::parse(&reader, offset)?);
             }
 
             let section_addresses = if is_relocatable {
@@ -344,7 +340,7 @@ impl ElfLoader {
         }
 
         LoadedBinaryBuilder::new(path, data)
-            .format("ELF32 (binrw)")
+            .format("ELF32")
             .architecture(architecture)
             .load_spec(load_spec)
             .entry_point(entry_point)
@@ -367,7 +363,7 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
-        endian: binrw::Endian,
+        endian: Endian,
     ) {
         // Resolve the symbol string table from the linked section header
         let strtab = if strtab_shndx < shdrs.len() {
@@ -400,10 +396,11 @@ impl ElfLoader {
             return;
         }
 
-        let mut reader = Cursor::new(&full_data[sym_start..sym_end]);
-        for _ in 0..count {
-            let sym = match Elf64Sym::read_options(&mut reader, endian, ()) {
-                Ok(s) => s,
+        let reader = ByteReader::new(full_data, endian);
+        for index in 0..count {
+            let offset = sym_start + index * entry_size;
+            let sym = match Elf64Sym::parse(&reader, offset) {
+                Ok(sym) => sym,
                 Err(_) => break,
             };
 
@@ -496,7 +493,7 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
-        endian: binrw::Endian,
+        endian: Endian,
     ) {
         let strtab = if strtab_shndx < shdrs.len() {
             let sh = &shdrs[strtab_shndx];
@@ -528,10 +525,11 @@ impl ElfLoader {
             return;
         }
 
-        let mut reader = Cursor::new(&full_data[sym_start..sym_end]);
-        for _ in 0..count {
-            let sym = match Elf32Sym::read_options(&mut reader, endian, ()) {
-                Ok(s) => s,
+        let reader = ByteReader::new(full_data, endian);
+        for index in 0..count {
+            let offset = sym_start + index * entry_size;
+            let sym = match Elf32Sym::parse(&reader, offset) {
+                Ok(sym) => sym,
                 Err(_) => break,
             };
 
@@ -624,37 +622,43 @@ fn push_unique_function(out: &mut Vec<FunctionInfo>, function: FunctionInfo) {
     out.push(function);
 }
 
-fn read_program_headers_64(
-    bytes: &[u8],
-    header: &Elf64Header,
-    endian: binrw::Endian,
-) -> Vec<Elf64Phdr> {
+fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -> Vec<Elf64Phdr> {
     if header.phoff == 0 || header.phnum == 0 {
         return Vec::new();
     }
-    let mut reader = Cursor::new(bytes);
-    if reader.seek(SeekFrom::Start(header.phoff)).is_err() {
-        return Vec::new();
-    }
+    let reader = ByteReader::new(bytes, endian);
+    let entry_size = if header.phentsize > 0 {
+        header.phentsize as usize
+    } else {
+        Elf64Phdr::SIZE
+    };
     (0..header.phnum)
-        .filter_map(|_| Elf64Phdr::read_options(&mut reader, endian, ()).ok())
+        .filter_map(|index| {
+            let offset = header
+                .phoff
+                .saturating_add(index as u64 * entry_size as u64) as usize;
+            Elf64Phdr::parse(&reader, offset).ok()
+        })
         .collect()
 }
 
-fn read_program_headers_32(
-    bytes: &[u8],
-    header: &Elf32Header,
-    endian: binrw::Endian,
-) -> Vec<Elf32Phdr> {
+fn read_program_headers_32(bytes: &[u8], header: &Elf32Header, endian: Endian) -> Vec<Elf32Phdr> {
     if header.phoff == 0 || header.phnum == 0 {
         return Vec::new();
     }
-    let mut reader = Cursor::new(bytes);
-    if reader.seek(SeekFrom::Start(header.phoff as u64)).is_err() {
-        return Vec::new();
-    }
+    let reader = ByteReader::new(bytes, endian);
+    let entry_size = if header.phentsize > 0 {
+        header.phentsize as usize
+    } else {
+        Elf32Phdr::SIZE
+    };
     (0..header.phnum)
-        .filter_map(|_| Elf32Phdr::read_options(&mut reader, endian, ()).ok())
+        .filter_map(|index| {
+            let offset = header
+                .phoff
+                .saturating_add(index as u32 * entry_size as u32) as usize;
+            Elf32Phdr::parse(&reader, offset).ok()
+        })
         .collect()
 }
 

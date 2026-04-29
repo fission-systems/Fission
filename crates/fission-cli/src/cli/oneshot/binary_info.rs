@@ -1,3 +1,6 @@
+use fission_loader::loader::function_view::{
+    canonical_exports_sorted, canonical_imports_sorted, canonical_view_counts,
+};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::io::{self, Write};
 
@@ -21,6 +24,7 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
         .unwrap_or_else(|| ("unknown".to_string(), if binary.is_64bit { 64 } else { 32 }));
 
     if json {
+        let counts = canonical_view_counts(binary);
         writeln!(
             stdout,
             "{}",
@@ -32,9 +36,9 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
                 "entry": format!("0x{:x}", binary.entry_point),
                 "image_base": format!("0x{:x}", binary.image_base),
                 "sections": binary.sections.len(),
-                "functions": binary.functions.len(),
-                "imports": binary.imports().count(),
-                "exports": binary.exports().count(),
+                "functions": counts.functions,
+                "imports": counts.imports,
+                "exports": counts.exports,
             }))
             .map_err(|e| io::Error::new(
                 io::ErrorKind::Other,
@@ -82,14 +86,14 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
             stdout,
             "║ Sections:   {:<10} Functions: {:<10} IAT: {:<7} ║",
             binary.sections.len(),
-            binary.functions.len(),
+            canonical_view_counts(binary).functions,
             binary.iat_symbols.len()
         )?;
         writeln!(
             stdout,
             "║ Imports:    {:<10} Exports:   {:<24} ║",
-            binary.imports().count(),
-            binary.exports().count()
+            canonical_view_counts(binary).imports,
+            canonical_view_counts(binary).exports
         )?;
         writeln!(
             stdout,
@@ -166,7 +170,7 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
 
 pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let imports: Vec<&FunctionInfo> = binary.imports().collect();
+    let imports: Vec<&FunctionInfo> = canonical_imports_sorted(binary);
 
     if json {
         let funcs: Vec<serde_json::Value> = imports
@@ -204,7 +208,7 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
 
 pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let exports: Vec<&FunctionInfo> = binary.exports().collect();
+    let exports: Vec<&FunctionInfo> = canonical_exports_sorted(binary);
 
     if json {
         let funcs: Vec<serde_json::Value> = exports

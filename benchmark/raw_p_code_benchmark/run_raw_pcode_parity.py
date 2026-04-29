@@ -80,6 +80,63 @@ def finalize_performance_summary(totals: dict[str, float]) -> dict[str, Any]:
     return summary
 
 
+def enforce_perfect_canonical_gate(
+    aggregate: dict[str, Any],
+    *,
+    expected_full_match: int | None,
+) -> list[str]:
+    """Return gate failures for the canonical x86-64 raw p-code parity lane.
+
+    This gate intentionally ignores rows already classified as
+    both_decode_error_or_padding. Those rows stay visible in bucket totals, but
+    they are not semantic parity rows. Everything else must be a full match
+    sourced from decoded .sla ConstructTpl execution.
+    """
+    failures: list[str] = []
+    buckets = aggregate.get("bucket_totals", {})
+    invariants = aggregate.get("invariant_totals", {})
+    similarity = aggregate.get("similarity_summary", {})
+    template_sources = aggregate.get("template_source_totals", {})
+
+    if similarity.get("average_similarity_score") != 1.0:
+        failures.append(
+            "average_similarity_score must be 1.0 "
+            f"(got {similarity.get('average_similarity_score')!r})"
+        )
+    if similarity.get("average_parity_ratio") != 1.0:
+        failures.append(
+            "average_parity_ratio must be 1.0 "
+            f"(got {similarity.get('average_parity_ratio')!r})"
+        )
+    if expected_full_match is not None and buckets.get("full_match", 0) != expected_full_match:
+        failures.append(
+            f"full_match must be {expected_full_match} "
+            f"(got {buckets.get('full_match', 0)})"
+        )
+
+    for key in ("compat_emitter_used", "fake_placeholder_op", "invalid_pcode_shape"):
+        if int(invariants.get(key, 0)) != 0:
+            failures.append(f"{key} must be 0 (got {invariants.get(key)})")
+
+    allowed_nonsemantic = {"full_match", "both_decode_error_or_padding", "ghidra_decode_error"}
+    for bucket, count in sorted(buckets.items()):
+        if bucket not in allowed_nonsemantic and int(count) != 0:
+            failures.append(f"semantic mismatch bucket {bucket} must be 0 (got {count})")
+
+    unexpected_sources = {
+        source: count
+        for source, count in template_sources.items()
+        if source != "sla_construct_tpl" and int(count) != 0
+    }
+    if unexpected_sources:
+        failures.append(
+            "successful rows must use only sla_construct_tpl template source "
+            f"(unexpected {unexpected_sources})"
+        )
+
+    return failures
+
+
 def run_one(
     *,
     binary: Path,
@@ -295,6 +352,34 @@ def run_manifest(args: argparse.Namespace) -> int:
         "feature_count": len(aggregate["feature_totals"]),
         "group_count": len(aggregate["group_totals"]),
     }, indent=2, sort_keys=True))
+    if args.require_perfect_canonical:
+        failures = enforce_perfect_canonical_gate(
+            aggregate,
+            expected_full_match=args.expected_full_match,
+        )
+        if failures:
+            print(
+                json.dumps(
+                    {
+                        "perfect_canonical_gate": "failed",
+                        "failures": failures,
+                        "report": str(aggregate_path),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 1
+        print(
+            json.dumps(
+                {
+                    "perfect_canonical_gate": "passed",
+                    "report": str(aggregate_path),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
     return 0
 
 
@@ -314,6 +399,21 @@ def main() -> int:
     parser.add_argument("--no-analyze", action="store_true")
     parser.add_argument("--disassemble-missing", action="store_true")
     parser.add_argument("--fission-release", action="store_true")
+    parser.add_argument(
+        "--require-perfect-canonical",
+        action="store_true",
+        help=(
+            "Fail if the aggregate canonical raw p-code gate is not exact: "
+            "similarity/parity 1.0, invariant counts 0, no semantic mismatch "
+            "buckets, and only sla_construct_tpl success sources."
+        ),
+    )
+    parser.add_argument(
+        "--expected-full-match",
+        type=int,
+        default=None,
+        help="Optional exact full_match count required by --require-perfect-canonical.",
+    )
     args = parser.parse_args()
 
     if args.manifest:

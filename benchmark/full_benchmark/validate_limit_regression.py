@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -20,9 +21,25 @@ def find_repo_root() -> Path:
 
 ROOT_DIR = find_repo_root()
 BENCH_SCRIPT = ROOT_DIR / "benchmark" / "full_benchmark" / "full_decomp_benchmark.py"
-DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build"
+DEFAULT_GHIDRA_DIRS = (
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra_12.0.4_PUBLIC",
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT_DIR / "ghidra_12.0.4_PUBLIC",
+    ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
+)
 DEFAULT_BINARY = ROOT_DIR / "samples" / "windows" / "x64" / "test_control_flow_x64_O0.exe"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "debug" / "fission_cli"
+
+
+def default_ghidra_dir() -> Path:
+    for env_name in ("FISSION_GHIDRA_DIR", "GHIDRA_INSTALL_DIR"):
+        env_dir = os.environ.get(env_name)
+        if env_dir:
+            return Path(env_dir)
+    for candidate in DEFAULT_GHIDRA_DIRS:
+        if candidate.exists():
+            return candidate
+    return DEFAULT_GHIDRA_DIRS[0]
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("binary", type=Path, nargs="?", default=DEFAULT_BINARY)
     parser.add_argument("--fission-bin", type=Path, default=DEFAULT_FISSION_BIN)
-    parser.add_argument("--ghidra-dir", type=Path, default=DEFAULT_GHIDRA_DIR)
+    parser.add_argument("--ghidra-dir", type=Path, default=default_ghidra_dir())
     parser.add_argument(
         "--limits",
         default="2,20",

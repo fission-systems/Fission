@@ -5,6 +5,7 @@ use crate::error::{CmdError, CmdResult};
 use crate::services::runtime_decode::{decode_window_for_binary, hex_bytes, mnemonic_type};
 use crate::state::AppState;
 use fission_core::parse_address;
+use fission_loader::loader::function_view::canonical_functions_sorted;
 use tauri::State;
 
 // ============================================================================
@@ -66,9 +67,8 @@ pub async fn get_listing_chunk(
         .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
     // Build function address → display name map
-    let func_names: HashMap<u64, String> = binary
-        .functions
-        .iter()
+    let func_names: HashMap<u64, String> = canonical_functions_sorted(binary)
+        .into_iter()
         .map(|f| {
             let name = inner
                 .renamed_functions

@@ -485,7 +485,7 @@ fn run_parallel_decompilation<'a>(
         Vec::new()
     };
 
-    let signatures_json = serialize_win_api_signatures_json();
+    let signatures_json = serialize_api_signatures_json();
 
     let rest_buckets: Vec<_> = buckets.into_iter().skip(1).collect();
     let rest_results: Vec<Vec<DecompEntry>> = rest_buckets
@@ -753,6 +753,7 @@ pub(crate) fn run_decompilation(
                     size: 0,
                     is_export: false,
                     is_import: false,
+                    ..Default::default()
                 };
                 let one = [&synthetic];
                 return run_rust_sleigh_decompilation(
@@ -809,7 +810,7 @@ pub(crate) fn run_decompilation(
         let gdt_path_owned = fission_core::PATHS
             .get_gdt_path(binary.is_64bit)
             .and_then(|p| p.to_str().map(String::from));
-        let signatures_json = serialize_win_api_signatures_json();
+        let signatures_json = serialize_api_signatures_json();
         let mut options = PrepareOptions {
             verbose: cli.verbose,
             compiler_id: compiler_id.as_deref(),

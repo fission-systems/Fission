@@ -1,23 +1,25 @@
 //! Binary Loader Module
 //!
-//! Parses PE/ELF/Mach-O executables using parsers.
+//! Parses PE/ELF/Mach-O/COFF binaries using Fission-owned loader contracts.
 
 use crate::prelude::*;
-use fission_core::constants::binary_format::*;
 use std::path::Path;
 
+pub mod analyzers;
 pub mod coff;
-pub mod cpp;
 pub mod demangle;
 pub mod dwarf;
 pub mod elf;
-pub mod golang;
+pub mod formats;
+pub mod function_view;
 pub mod macho;
 pub mod pdb_sidecar;
 pub mod pe;
-pub mod rust;
+pub mod pipeline;
+pub mod reader;
 pub mod strings;
 pub mod types;
+pub use analyzers::{cpp, golang, rust};
 pub use types::*;
 
 impl LoadedBinary {
@@ -46,67 +48,10 @@ impl LoadedBinary {
 
     /// Auto-detect binary format and parse
     fn auto_detect_and_parse(data: DataBuffer, path: String) -> Result<Self> {
-        let bytes = data.as_slice();
-        // Try to detect format by magic bytes
-        if bytes.len() < 4 {
-            return Err(FissionError::loader("Binary too small"));
-        }
+        let mut binary = pipeline::LoaderPipeline::load(data, path)?;
+        let format = binary.format.clone();
 
-        let format = if bytes.len() > 0x3C + 4 {
-            let pe_offset =
-                u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
-            if pe_offset < bytes.len() - 4 && &bytes[pe_offset..pe_offset + 2] == b"PE" {
-                "PE"
-            } else if bytes.starts_with(b"\x7fELF") {
-                "ELF"
-            } else if coff::CoffLoader::looks_like_coff_object(bytes) {
-                "COFF"
-            } else {
-                let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                if matches!(
-                    magic,
-                    MACHO_MAGIC_32_BE
-                        | MACHO_MAGIC_64_BE
-                        | MACHO_MAGIC_32_LE
-                        | MACHO_MAGIC_64_LE
-                        | MACHO_FAT_MAGIC
-                        | MACHO_FAT_CIGAM
-                ) {
-                    "Mach-O"
-                } else {
-                    "Unknown"
-                }
-            }
-        } else if bytes.starts_with(b"\x7fELF") {
-            "ELF"
-        } else if coff::CoffLoader::looks_like_coff_object(bytes) {
-            "COFF"
-        } else {
-            let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            if matches!(
-                magic,
-                MACHO_MAGIC_32_BE
-                    | MACHO_MAGIC_64_BE
-                    | MACHO_MAGIC_32_LE
-                    | MACHO_MAGIC_64_LE
-                    | MACHO_FAT_MAGIC
-                    | MACHO_FAT_CIGAM
-            ) {
-                "Mach-O"
-            } else {
-                "Unknown"
-            }
-        };
-
-        let mut binary = match format {
-            "PE" => pe::PeLoader::parse(data, path)?,
-            "ELF" => elf::ElfLoader::parse(data, path)?,
-            "Mach-O" => macho::MachoLoader::parse(data, path)?,
-            "COFF" => coff::CoffLoader::parse(data, path)?,
-            _ => return Err(FissionError::loader("Unknown binary format")),
-        };
-
-        if format == "PE" && binary.inner().pdb_debug_info.is_some() {
+        if format.starts_with("PE") && binary.inner().pdb_debug_info.is_some() {
             if let Err(err) = pdb_sidecar::ingest_pdb_function_facts(&mut binary) {
                 tracing::debug!("[Loader] focused PDB function ingestion skipped: {err}");
             }
@@ -169,7 +114,7 @@ impl LoadedBinary {
         }
 
         // Apple (ObjC/Swift) Analysis
-        if format == "Mach-O" {
+        if format.starts_with("Mach-O") {
             // ObjC function analysis
             {
                 let analyzer = macho::apple::AppleAnalyzer::new(&binary);

@@ -3,6 +3,22 @@
   "entry_spec": "m8c.slaspec",
   "entry_id": "m8c",
   "pattern_nodes": [
+    {"node_id": "m8c.slaspec:138#26cd70e36edaf8d5", "mnemonic": "regAorX:", "source": "m8c.slaspec:138", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:139#dc1455f25b81a3fc", "mnemonic": "regAorX:", "source": "m8c.slaspec:139", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:140#c2511cfa3a34c0a2", "mnemonic": "Addr8:", "source": "m8c.slaspec:140", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:141#8047faed78a806cd", "mnemonic": "SAddr8:", "source": "m8c.slaspec:141", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:142#81a00dbbf46dc3c1", "mnemonic": "XAddr8:", "source": "m8c.slaspec:142", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:143#81a00cbbf46dc20e", "mnemonic": "XAddr8:", "source": "m8c.slaspec:143", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:144#1f10e5ba8a5dea82", "mnemonic": "Addr8Incr:", "source": "m8c.slaspec:144", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:146#334df182ea19e939", "mnemonic": "RAddr8:", "source": "m8c.slaspec:146", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:147#334df082ea19e786", "mnemonic": "RAddr8:", "source": "m8c.slaspec:147", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:148#2a5518b417cf747e", "mnemonic": "RXAddr8:", "source": "m8c.slaspec:148", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:149#2a5519b417cf7631", "mnemonic": "RXAddr8:", "source": "m8c.slaspec:149", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:151#43a2a11c28f4f111", "mnemonic": "Imm8:", "source": "m8c.slaspec:151", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:153#42be12aeb9157361", "mnemonic": "Addr16:", "source": "m8c.slaspec:153", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:154#1702b2ef78aae91b", "mnemonic": "RelAddr:", "source": "m8c.slaspec:154", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:155#7a5265805d0a6865", "mnemonic": "CallAddr:", "source": "m8c.slaspec:155", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:156#5818c4ece95f3a97", "mnemonic": "IndexAddr:", "source": "m8c.slaspec:156", "with_depth": 0, "control_flow": "none"},
     {"node_id": "m8c.slaspec:162#d48500f69f1a71db", "mnemonic": "ADC", "source": "m8c.slaspec:162", "with_depth": 0, "control_flow": "none"},
     {"node_id": "m8c.slaspec:168#94af60b596608f40", "mnemonic": "ADC", "source": "m8c.slaspec:168", "with_depth": 0, "control_flow": "none"},
     {"node_id": "m8c.slaspec:174#e198a877e51a3581", "mnemonic": "ADC", "source": "m8c.slaspec:174", "with_depth": 0, "control_flow": "none"},
@@ -135,6 +151,7 @@
     {"node_id": "m8c.slaspec:949#ce6cb17d53830b54", "mnemonic": "XOR", "source": "m8c.slaspec:949", "with_depth": 0, "control_flow": "none"},
     {"node_id": "m8c.slaspec:956#9525b95117a6cd99", "mnemonic": "XOR", "source": "m8c.slaspec:956", "with_depth": 0, "control_flow": "none"},
     {"node_id": "m8c.slaspec:963#4563c3f9d8fa9c35", "mnemonic": "XOR", "source": "m8c.slaspec:963", "with_depth": 0, "control_flow": "none"},
-    {"node_id": "m8c.slaspec:970#32590751cb15987a", "mnemonic": "XOR", "source": "m8c.slaspec:970", "with_depth": 0, "control_flow": "none"}
+    {"node_id": "m8c.slaspec:970#32590751cb15987a", "mnemonic": "XOR", "source": "m8c.slaspec:970", "with_depth": 0, "control_flow": "none"},
+    {"node_id": "m8c.slaspec:973#aeedcf26d5f9cfd2", "mnemonic": "tmp:1", "source": "m8c.slaspec:973", "with_depth": 0, "control_flow": "none"}
   ]
 }

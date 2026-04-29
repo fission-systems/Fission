@@ -7,7 +7,103 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-20 (latest)
+## 2026-04-29 (latest)
+
+### `fission-sleigh` Ghidra compiled `ConstructTpl` execution cutover investigation
+
+This wave pushed `fission-sleigh` further away from handwritten raw P-code synthesis and toward a Ghidra-shaped compiled-template execution model. The goal was to make raw P-code success structurally depend on decoded `.sla` `ConstructTpl` payloads instead of mnemonic-family lowering, compatibility semantic ops, or `BoundOperand`-driven manual memory/register synthesis.
+
+Key architectural changes explored:
+
+- `CompiledConstructorTemplate` was reshaped around Ghidra-style template payload fields:
+  - `num_labels`
+  - `result`
+  - `ops`
+- `CompiledConstructTpl` was moved toward a direct compiled-template container instead of a semantic-op compatibility carrier.
+- `CompiledTemplateSource` was reduced toward `SpecDerived` as the only admissible raw P-code success source.
+- Runtime template evaluation was tightened so checked P-code emission happens through the common template executor, not mnemonic-specific emitters.
+- `.sla` constructor template decoding was expanded to preserve packed constructor label/result/op-template information.
+- `.sla` constructor id handling was corrected to preserve packed constructor identity instead of re-numbering constructors by Fission iteration order.
+
+Important negative result:
+
+- The stricter cutover exposed that Fission still does not fully match Ghidra's packed decision-tree / constructor-id / terminal-pattern binding semantics.
+- In the x86-64 smoke path, the `.sla` decision traversal can still land on the wrong constructor family for inputs such as `48 b8 ...`, showing that packed decision leaf binding is not yet 1:1 with Ghidra.
+- Because of that, this wave was not promoted as a passing raw P-code parity change and should not be treated as a release-quality compatibility improvement.
+
+Validation status:
+
+```text
+cargo test -p fission-sleigh -- --test-threads=1
+```
+
+did not pass after the strict template cutover attempt. The remaining failures are concentrated in:
+
+- checked-in generated artifact drift after the schema change
+- x86-64 generated-runtime decode tests that now fail closed instead of falling back to compatibility lowering
+- `.sla` decision-tree constructor selection mismatches
+- incomplete exact `HandleTpl` / subconstructor materialization for several x86 rows
+
+Policy retained:
+
+- approximate raw P-code remains disallowed
+- compatibility-lowered P-code must not count as success
+- unsupported templates should fail closed with typed errors
+- generated Ghidra project DB artifacts under benchmark binary directories remain non-commit material
+
+Follow-up owner:
+
+- Complete Ghidra-compatible packed decision-tree decoding and constructor ordinal binding before attempting another raw P-code parity promotion.
+- Only after constructor selection is correct should `HandleTpl.fix`, `ParserWalker` subconstructor traversal, and checked `PcodeEmit` parity be promoted against the canonical raw P-code benchmark.
+
+## 2026-04-28
+
+### `fission-sleigh` runtime-centric architecture refactor
+
+This wave reorganized `fission-sleigh` around clearer runtime and compiler ownership while preserving the existing raw P-code correctness contract. It was a no-semantic-change refactor intended to prepare the codebase for a later Ghidra compiled-template cutover and eventual crate split.
+
+Runtime structure changes:
+
+- `runtime/mod.rs` was narrowed toward a public facade and shared contract owner.
+- Runtime frontend construction, decode window handling, lift orchestration, and diagnostics were split into dedicated modules.
+- Native/common dispatch was moved behind an explicit decode-strategy boundary.
+- The compiled-table spine was separated into clearer owners:
+  - context
+  - selection
+  - strategy
+  - walker
+  - handles
+  - display
+  - template evaluation
+  - legacy token policy
+
+Compiler structure changes:
+
+- Compiler discovery and policy logic were separated from the public compiler facade.
+- Ghidra install discovery was routed through a resolver instead of hardcoded local paths.
+- Runtime candidate policy was moved toward manifest-derived metadata rather than architecture-name branches.
+
+Validation highlights:
+
+- `cargo check -p fission-sleigh`
+- targeted x86-64 LEA and RIP-relative runtime tests
+- `cargo build --release -p fission-cli`
+- raw P-code feature gates for `lea` and `rip_relative_load`
+
+Raw P-code feature gates stayed green for the targeted rows:
+
+| Feature | Result | `compat_emitter_used` | `fake_placeholder_op` | `invalid_pcode_shape` |
+|---|---|---:|---:|---:|
+| `lea` | `full_match` | 0 | 0 | 0 |
+| `rip_relative_load` | `full_match` | 0 | 0 | 0 |
+
+Remaining work:
+
+- remove the remaining `legacy_token_policy` debt after display/template/walker ownership is fully spec-derived
+- complete the Ghidra `ConstructTpl` execution cutover without reintroducing approximate P-code
+- keep native backends as candidate accelerators only until terminal verification and common template execution are parity-safe
+
+## 2026-04-20
 
 ### `0x140008090` temp-only representative lifecycle repartition
 

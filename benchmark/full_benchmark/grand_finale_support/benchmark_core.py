@@ -92,7 +92,9 @@ def find_repo_root() -> Path:
 ROOT_DIR = find_repo_root()
 DEFAULT_RESULTS_DIR = ROOT_DIR / "benchmark" / "artifacts" / "full_benchmark"
 DEFAULT_GHIDRA_DIRS = (
+    ROOT_DIR / "vendor" / "ghidra" / "ghidra_12.0.4_PUBLIC",
     ROOT_DIR / "vendor" / "ghidra" / "ghidra-Ghidra_12.0.4_build",
+    ROOT_DIR / "ghidra_12.0.4_PUBLIC",
     ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
 )
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
@@ -2508,9 +2510,10 @@ def resolve_ghidra_dir(cli_value: Path | None) -> Path:
     if cli_value is not None:
         candidates.append(cli_value.expanduser().resolve())
 
-    env_dir = os.environ.get("GHIDRA_INSTALL_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir).expanduser().resolve())
+    for env_name in ("FISSION_GHIDRA_DIR", "GHIDRA_INSTALL_DIR"):
+        env_dir = os.environ.get(env_name)
+        if env_dir:
+            candidates.append(Path(env_dir).expanduser().resolve())
 
     candidates.extend(path.resolve() for path in DEFAULT_GHIDRA_DIRS)
 

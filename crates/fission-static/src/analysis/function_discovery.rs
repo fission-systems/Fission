@@ -143,6 +143,7 @@ pub fn discover_functions_with_runtime(
                 size: 0,
                 is_export: false,
                 is_import: false,
+                ..Default::default()
             });
         }
         binary.functions.sort_by_key(|function| function.address);
@@ -153,9 +154,7 @@ pub fn discover_functions_with_runtime(
     report
 }
 
-fn runtime_load_spec_for(
-    binary: &LoadedBinary,
-) -> Option<&fission_loader::loader::BinaryLoadSpec> {
+fn runtime_load_spec_for(binary: &LoadedBinary) -> Option<&fission_loader::loader::BinaryLoadSpec> {
     binary.load_spec()
 }
 

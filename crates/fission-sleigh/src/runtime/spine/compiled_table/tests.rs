@@ -368,3 +368,36 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
     }
 }
+
+#[test]
+fn canonical_template_executor_has_no_compatibility_success_entrypoints() {
+    let template_eval = include_str!("template_eval.rs");
+    for forbidden in [
+        "NativeFission",
+        "CompatibilityLowered",
+        "emit_compat",
+        "semantic_ops_for_kind",
+        "classify_construct_tpl_kind",
+    ] {
+        assert!(
+            !template_eval.contains(forbidden),
+            "canonical template executor must not expose compatibility p-code success path: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn canonical_template_executor_does_not_materialize_from_bound_operand_helpers() {
+    let template_eval = include_str!("template_eval.rs");
+    for forbidden in [
+        "fixed_handle_for_bound_operand",
+        "CompiledVarnodeTpl::EffectiveAddress",
+        "CompiledVarnodeTpl::FixedRegister",
+        "CompiledVarnodeTpl::Flag",
+    ] {
+        assert!(
+            !template_eval.contains(forbidden),
+            "template execution must resolve .sla VarnodeTpl/HandleTpl, not manual operand helpers: {forbidden}"
+        );
+    }
+}
