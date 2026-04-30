@@ -470,11 +470,9 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         fn output_base_reg(builder: &PreviewBuilder<'_>, output: &Varnode) -> StackAddressBaseReg {
             let name = match output.space_id {
-                UNIQUE_SPACE_ID => {
-                    crate::arch::x86::unique_x86_register_name(output.offset, output.size)
-                }
+                UNIQUE_SPACE_ID => unique_register_name(output.offset, output.size),
                 REGISTER_SPACE_ID if !builder.options.is_64bit => {
-                    crate::nir::support::x86_register_name(output.offset, output.size)
+                    crate::nir::support::register_name_32(output.offset, output.size)
                 }
                 REGISTER_SPACE_ID => Some(crate::nir::support::register_name(
                     output.offset,

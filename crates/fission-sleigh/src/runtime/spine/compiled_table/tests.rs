@@ -391,6 +391,7 @@ fn canonical_template_executor_does_not_materialize_from_bound_operand_helpers()
     let template_eval = include_str!("template_eval.rs");
     for forbidden in [
         "fixed_handle_for_bound_operand",
+        "BoundOperand",
         "CompiledVarnodeTpl::EffectiveAddress",
         "CompiledVarnodeTpl::FixedRegister",
         "CompiledVarnodeTpl::Flag",

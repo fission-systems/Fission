@@ -64,22 +64,7 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit {
             return Vec::new();
         }
-        vec![
-            Varnode {
-                space_id: REGISTER_SPACE_ID,
-                offset: 0x00,
-                size: self.options.pointer_size,
-                is_constant: false,
-                constant_val: 0,
-            },
-            Varnode {
-                space_id: UNIQUE_SPACE_ID,
-                offset: crate::arch::x86::X86_REG_BASE,
-                size: self.options.pointer_size,
-                is_constant: false,
-                constant_val: 0,
-            },
-        ]
+        primary_return_registers(self.options.pointer_size).to_vec()
     }
 
     fn call_result_is_observed(

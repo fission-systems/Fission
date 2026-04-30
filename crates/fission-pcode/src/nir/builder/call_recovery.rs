@@ -16,8 +16,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(param);
         }
         if vn.space_id == UNIQUE_SPACE_ID {
-            return crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
-                .map(str::to_string);
+            return unique_register_name(vn.offset, vn.size).map(str::to_string);
         }
         if vn.space_id == REGISTER_SPACE_ID {
             return Some(register_name(vn.offset, vn.size).to_string());
@@ -39,7 +38,7 @@ impl<'a> PreviewBuilder<'a> {
         let reg_name = if vn.space_id == REGISTER_SPACE_ID {
             register_name(vn.offset, vn.size)
         } else if vn.space_id == UNIQUE_SPACE_ID {
-            crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).unwrap_or("")
+            unique_register_name(vn.offset, vn.size).unwrap_or("")
         } else {
             ""
         };

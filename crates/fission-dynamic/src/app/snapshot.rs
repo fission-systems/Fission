@@ -53,7 +53,7 @@ mod tests {
             path: "test.bin".into(),
             hash: "dummy_hash".into(),
             data: Arc::new(DataBuffer::Heap(vec![0x90, 0x90, 0xC3])),
-            arch_spec: "x86:LE:64:default".into(),
+            arch_spec: "unknown".into(),
             entry_point: 0x1000,
             image_base: 0x0,
             functions: vec![FunctionInfo {

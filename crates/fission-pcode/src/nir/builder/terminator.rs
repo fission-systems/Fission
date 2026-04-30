@@ -169,7 +169,7 @@ impl<'a> PreviewBuilder<'a> {
                                 }
                             };
                             let recovered_cond = this
-                                .try_recover_x86_branch_condition(&op.inputs[1])?
+                                .try_recover_branch_condition(&op.inputs[1])?
                                 .filter(|expr| !Self::branch_cond_too_complex(expr));
                             let cond = recovered_cond
                                 .map(Ok)
@@ -485,7 +485,7 @@ impl<'a> PreviewBuilder<'a> {
         Ok(lowered)
     }
 
-    fn try_recover_x86_branch_condition(
+    fn try_recover_branch_condition(
         &mut self,
         vn: &Varnode,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
@@ -493,9 +493,9 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let recovery_budget = X86_BRANCH_RECOVERY_BUDGET_MIN
-            .max(self.pcode.blocks.len() * X86_BRANCH_RECOVERY_BUDGET_PER_BLOCK)
-            .min(X86_BRANCH_RECOVERY_BUDGET_MAX);
+        let recovery_budget = BRANCH_CONDITION_RECOVERY_BUDGET_MIN
+            .max(self.pcode.blocks.len() * BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK)
+            .min(BRANCH_CONDITION_RECOVERY_BUDGET_MAX);
         if self.x86_branch_recovery_attempts >= recovery_budget {
             return Ok(None);
         }
@@ -1614,7 +1614,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut current = vn.clone();
         let mut visited: Vec<VarnodeKey> = Vec::new();
-        for _ in 0..X86_PASSTHROUGH_PEEL_MAX_STEPS {
+        for _ in 0..PASSTHROUGH_PEEL_MAX_STEPS {
             let Some((_, op)) = self.lookup_def_site(&current) else {
                 break;
             };

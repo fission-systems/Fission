@@ -19,23 +19,27 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
         "compiled frontend should preserve decoded .sla ConstructTpl ops"
     );
     assert!(!compiled.pattern_nodes.is_empty());
-    assert!(compiled
-        .subtables
-        .values()
-        .flat_map(|subtable| subtable.constructors.iter())
-        .any(|item| item.mnemonic.eq_ignore_ascii_case("RET")));
+    assert!(
+        compiled
+            .subtables
+            .values()
+            .flat_map(|subtable| subtable.constructors.iter())
+            .any(|item| item.mnemonic.eq_ignore_ascii_case("RET"))
+    );
     assert!(!compiled.language_layout.address_spaces.is_empty());
     assert!(!compiled.language_layout.registers.is_empty());
     assert!(!compiled.language_layout.display_templates.is_empty());
     assert!(!compiled.construct_templates.is_empty());
-    assert!(compiled
-        .subtables
-        .get("instruction")
-        .unwrap()
-        .decision_tree
-        .nodes
-        .iter()
-        .any(|node| matches!(node.probe, CompiledDecisionProbe::ContextBitSlice { .. })));
+    assert!(
+        compiled
+            .subtables
+            .get("instruction")
+            .unwrap()
+            .decision_tree
+            .nodes
+            .iter()
+            .any(|node| matches!(node.probe, CompiledDecisionProbe::ContextBitSlice { .. }))
+    );
 }
 
 #[test]

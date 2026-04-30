@@ -44,6 +44,9 @@ mod tests {
     #[test]
     fn spec_derived_template_rejects_compatibility_varnode() {
         let state = RuntimeConstructState {
+            subtable_id: 0,
+            constructor_id: 0,
+            constructor_slot: 0,
             mnemonic: "mov".to_string(),
             construct_tpl_kind: CompiledConstructTplKind::Mov,
             constructor_template: CompiledConstructorTemplate {
@@ -84,6 +87,9 @@ mod tests {
     #[test]
     fn spec_derived_empty_template_is_zero_op_success() {
         let state = RuntimeConstructState {
+            subtable_id: 0,
+            constructor_id: 0,
+            constructor_slot: 0,
             mnemonic: "nop".to_string(),
             construct_tpl_kind: CompiledConstructTplKind::Nop,
             constructor_template: CompiledConstructorTemplate {

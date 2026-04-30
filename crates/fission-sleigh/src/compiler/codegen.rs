@@ -89,7 +89,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
 
             match node.probe {
                 crate::compiler::ir::CompiledDecisionProbe::Terminal => {
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!(
                             "    eprintln!(\"Trace node {}: Terminal matched constructor ID {}\");\n",
                             i, idx
@@ -122,7 +122,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                             edge.value, safe_table_name, edge.next_node_index
                         ));
                     }
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!("        _ => {},\n", idx));
                     } else {
                         output.push_str("        _ => -1,\n");
@@ -149,7 +149,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                             edge.value, safe_table_name, edge.next_node_index
                         ));
                     }
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!("        _ => {},\n", idx));
                     } else {
                         output.push_str("        _ => -1,\n");
@@ -186,7 +186,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                             edge.value, safe_table_name, edge.next_node_index
                         ));
                     }
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!("        _ => {},\n", idx));
                     } else {
                         output.push_str("        _ => -1,\n");
@@ -214,7 +214,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                             edge.value, safe_table_name, edge.next_node_index
                         ));
                     }
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!("        _ => {},\n", idx));
                     } else {
                         output.push_str("        _ => -1,\n");
@@ -222,7 +222,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                     output.push_str("    }\n");
                 }
                 _ => {
-                    if let Some(&idx) = node.leaf_constructor_indexes.first() {
+                    if let Some(idx) = native_terminal_constructor_index(subtable, node) {
                         output.push_str(&format!("    {}\n", idx));
                     } else {
                         output.push_str("    -1\n");
@@ -233,6 +233,27 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
         }
     }
     output
+}
+
+fn native_terminal_constructor_index(
+    subtable: &crate::compiler::CompiledSubtableDefinition,
+    node: &crate::compiler::CompiledDecisionNode,
+) -> Option<usize> {
+    node.leaf_entries
+        .first()
+        .and_then(|entry| {
+            subtable
+                .constructors_by_sla_id
+                .get(&entry.constructor_id)
+                .copied()
+                .or_else(|| {
+                    subtable
+                        .constructors
+                        .iter()
+                        .position(|constructor| constructor.constructor_id == entry.constructor_id)
+                })
+        })
+        .or_else(|| node.leaf_constructor_indexes.first().copied())
 }
 
 pub fn write_generated_artifacts(root: &Path, artifacts: &GeneratedArtifactSet) -> Result<()> {
@@ -295,11 +316,24 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
     let executable_lines = all_executables
         .iter()
         .map(|ctor| {
+            let sla_subtable_id = ctor
+                .sla_identity
+                .as_ref()
+                .map(|identity| identity.subtable_id)
+                .unwrap_or(0);
+            let sla_constructor_slot = ctor
+                .sla_identity
+                .as_ref()
+                .map(|identity| identity.constructor_slot)
+                .unwrap_or(0);
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"sla_subtable_id\": {}, \"sla_constructor_id\": {}, \"sla_constructor_slot\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(&ctor.display),
+                sla_subtable_id,
+                ctor.constructor_id,
+                sla_constructor_slot,
                 ctor.signature_hash,
                 ctor.minimum_length,
                 render_matcher(&ctor.matcher),
@@ -371,8 +405,11 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         .subtables
         .get("instruction")
         .expect("missing 'instruction' subtable");
+    let native_subtable_count = compiled.subtables.len();
+    let native_constructor_count = all_executables.len();
+    let native_decision_node_count = total_decision_nodes;
     format!(
-        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"arch\": {},\n  \"entry_spec\": {},\n  \"entry_id\": {},\n  \"definition_count\": {},\n  \"macro_count\": {},\n  \"constructor_count\": {},\n  \"executable_constructor_count\": {},\n  \"decision_node_count\": {},\n  \"root_node_index\": {},\n  \"pcodeop_count\": {},\n  \"address_space_count\": {},\n  \"register_count\": {},\n  \"token_field_count\": {},\n  \"context_field_count\": {},\n  \"subtable_count\": {},\n  \"construct_template_count\": {},\n  \"sla_native_subtable_count\": {},\n  \"sla_native_constructor_count\": {},\n  \"sla_native_decision_node_count\": {},\n  \"address_spaces\": {},\n  \"registers\": {},\n  \"token_fields\": {},\n  \"context_fields\": {},\n  \"subtables\": {},\n  \"definitions\": [\n{}\n  ],\n  \"constructors\": [\n{}\n  ],\n  \"decision_nodes\": [],\n  \"executable_constructors\": [\n{}\n  ]\n}}\n",
         json_string(&compiled.arch),
         json_string(&compiled.entry_spec),
         json_string(&compiled.entry_id),
@@ -389,6 +426,9 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         compiled.language_layout.context_fields.len(),
         compiled.language_layout.subtables.len(),
         compiled.construct_templates.len(),
+        native_subtable_count,
+        native_constructor_count,
+        native_decision_node_count,
         address_spaces,
         registers,
         token_fields,
@@ -593,22 +633,37 @@ fn render_matcher(matcher: &crate::compiler::CompiledPatternMatcher) -> String {
 fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> String {
     match probe {
         crate::compiler::CompiledDecisionProbe::Terminal => json_string("terminal"),
-        crate::compiler::CompiledDecisionProbe::InstructionBitSlice { offset, mask, shift } => format!(
+        crate::compiler::CompiledDecisionProbe::InstructionBitSlice {
+            offset,
+            mask,
+            shift,
+        } => format!(
             "{{\"kind\": \"instruction_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
         ),
-        crate::compiler::CompiledDecisionProbe::ContextBitSlice { offset, mask, shift } => format!(
+        crate::compiler::CompiledDecisionProbe::ContextBitSlice {
+            offset,
+            mask,
+            shift,
+        } => format!(
             "{{\"kind\": \"context_bit_slice\", \"offset\": {offset}, \"mask\": {mask}, \"shift\": {shift}}}"
         ),
-        crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits { start_bit, bit_size } => format!(
+        crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits {
+            start_bit,
+            bit_size,
+        } => format!(
             "{{\"kind\": \"sla_instruction_bits\", \"start_bit\": {start_bit}, \"bit_size\": {bit_size}}}"
         ),
-        crate::compiler::ir::CompiledDecisionProbe::SlaContextBits { start_bit, bit_size } => format!(
+        crate::compiler::ir::CompiledDecisionProbe::SlaContextBits {
+            start_bit,
+            bit_size,
+        } => format!(
             "{{\"kind\": \"sla_context_bits\", \"start_bit\": {start_bit}, \"bit_size\": {bit_size}}}"
         ),
         crate::compiler::CompiledDecisionProbe::TokenFieldRef(field) => format!(
             "{{\"kind\": \"token_field_ref\", \"field\": {}}}",
             json_string(match field {
-                crate::compiler::CompiledTokenFieldRef::InstructionWidthProfile => "instruction_width_profile",
+                crate::compiler::CompiledTokenFieldRef::InstructionWidthProfile =>
+                    "instruction_width_profile",
                 crate::compiler::CompiledTokenFieldRef::AddressingForm => "addressing_form",
                 crate::compiler::CompiledTokenFieldRef::RegisterSelector => "register_selector",
             })
@@ -936,7 +991,8 @@ fn render_const_template(template: &crate::compiler::CompiledConstTpl) -> String
                 crate::compiler::CompiledHandleSelector::Size => "size",
                 crate::compiler::CompiledHandleSelector::OffsetPlus => "offset_plus",
             }),
-            plus.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string())
+            plus.map(|value| value.to_string())
+                .unwrap_or_else(|| "null".to_string())
         ),
         crate::compiler::CompiledConstTpl::Integer { value, size } => {
             format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")

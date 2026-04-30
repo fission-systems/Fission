@@ -1,6 +1,10 @@
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSubtableDefinition {
     pub name: String,
+    #[serde(default)]
+    pub sla_subtable_id: u32,
+    #[serde(default)]
+    pub constructors_by_sla_id: BTreeMap<u32, usize>,
     pub constructors: Vec<CompiledExecutableConstructor>,
     pub decision_tree: CompiledDecisionTree,
 }
@@ -155,6 +159,8 @@ pub struct CompiledExecutableConstructor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSlaConstructorIdentity {
+    #[serde(default)]
+    pub subtable_id: u32,
     pub subtable_name: String,
     pub constructor_id: u32,
     pub constructor_slot: usize,
@@ -241,6 +247,10 @@ pub struct CompiledDecisionEdge {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledDecisionLeafEntry {
+    #[serde(default)]
+    pub subtable_id: u32,
+    #[serde(default)]
+    pub constructor_id: u32,
     pub constructor_index: usize,
     pub pattern: CompiledDisjointPattern,
 }
@@ -285,14 +295,8 @@ pub enum PatternConstraint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledPatternMatcher {
     ExactBytes(Vec<u8>),
-    RowCc {
-        prefix: Vec<u8>,
-        row: u8,
-    },
-    RowPage {
-        row: u8,
-        page: u8,
-    },
+    RowCc { prefix: Vec<u8>, row: u8 },
+    RowPage { row: u8, page: u8 },
     BitConstraints(Vec<PatternConstraint>),
 }
 
@@ -440,7 +444,9 @@ pub struct CompiledHandleTemplate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandDecodeStep {
     ConsumeTokenFields,
-    DecodeOperand { operand_index: usize },
+    DecodeOperand {
+        operand_index: usize,
+    },
     DescendSubtable {
         table_name: String,
         replace_current: bool,
@@ -467,16 +473,45 @@ pub enum CompiledPatternExpression {
         byte_end: u32,
         shift: i32,
     },
-    OperandValue { index: usize },
-    Add(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    Sub(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    Mul(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    Div(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    LeftShift(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    RightShift(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    And(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    Or(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
-    Xor(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>),
+    OperandValue {
+        index: usize,
+    },
+    Add(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    Sub(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    Mul(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    Div(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    LeftShift(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    RightShift(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    And(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    Or(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
+    Xor(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ),
     Negate(Box<CompiledPatternExpression>),
     Not(Box<CompiledPatternExpression>),
 }

@@ -3,12 +3,12 @@ use super::*;
 pub(crate) const UNIQUE_SPACE_ID: u64 = 3;
 pub(crate) const REGISTER_SPACE_ID: u64 = 1;
 
-pub(crate) const X86_TRY_LOWER_IF_BUDGET_MS: f64 = 10.0;
-pub(crate) const X86_TRY_LOWER_IF_SUBCALL_LIMIT: usize = 512;
-pub(crate) const X86_BRANCH_RECOVERY_BUDGET_MIN: usize = 48;
-pub(crate) const X86_BRANCH_RECOVERY_BUDGET_PER_BLOCK: usize = 4;
-pub(crate) const X86_BRANCH_RECOVERY_BUDGET_MAX: usize = 1024;
-pub(crate) const X86_PASSTHROUGH_PEEL_MAX_STEPS: usize = 48;
+pub(crate) const CONDITION_RECOVERY_BUDGET_MS: f64 = 10.0;
+pub(crate) const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MIN: usize = 48;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK: usize = 4;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MAX: usize = 1024;
+pub(crate) const PASSTHROUGH_PEEL_MAX_STEPS: usize = 48;
 pub(crate) const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -416,7 +416,36 @@ pub(crate) fn register_name(offset: u64, _size: u32) -> &'static str {
     x64_ghidra_reg_name(offset).unwrap_or("reg")
 }
 
-pub(crate) fn x86_register_name(offset: u64, size: u32) -> Option<&'static str> {
+pub(crate) fn unique_register_name(offset: u64, size: u32) -> Option<&'static str> {
+    crate::arch::x86::unique_x86_register_name(offset, size)
+}
+
+pub(crate) fn is_primary_return_register(vn: &Varnode) -> bool {
+    (vn.space_id == REGISTER_SPACE_ID && vn.offset == 0x00)
+        || (vn.space_id == UNIQUE_SPACE_ID
+            && unique_register_name(vn.offset, vn.size) == Some("rax"))
+}
+
+pub(crate) fn primary_return_registers(pointer_size: u32) -> [Varnode; 2] {
+    [
+        Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x00,
+            size: pointer_size,
+            is_constant: false,
+            constant_val: 0,
+        },
+        Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset: crate::arch::x86::X86_REG_BASE,
+            size: pointer_size,
+            is_constant: false,
+            constant_val: 0,
+        },
+    ]
+}
+
+pub(crate) fn register_name_32(offset: u64, size: u32) -> Option<&'static str> {
     match (offset, size) {
         (0x00, 4) => Some("eax"),
         (0x04, 4) => Some("ecx"),

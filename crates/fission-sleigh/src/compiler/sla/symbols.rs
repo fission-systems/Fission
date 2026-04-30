@@ -20,6 +20,7 @@ pub struct CompiledSlaTemplateLibrary {
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
     pub constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>>,
     pub subtables: BTreeMap<String, CompiledSlaSubtable>,
+    pub native: SlaLanguage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +139,15 @@ fn decode_operand_symbols(
             .rev()
             .find_map(|child| decode_pattern_expression(child).ok())
             .filter(|expr| !pattern_expression_references_operand(expr, hand_index));
-        let (subtable_name, display_kind, fallback_token_field, pattern_expression, varnode_list, value_map, fixed_varnode) = operand
+        let (
+            subtable_name,
+            display_kind,
+            fallback_token_field,
+            pattern_expression,
+            varnode_list,
+            value_map,
+            fixed_varnode,
+        ) = operand
             .attr_unsigned(sla_format::ATTR_SUBSYM)
             .and_then(|value| display_symbols.get(&(value as u32)))
             .map(|symbol| match symbol {
@@ -169,7 +178,10 @@ fn decode_operand_symbols(
                     None,
                     None,
                 ),
-                DecodedDisplaySymbol::ValueMap { token_field, values } => (
+                DecodedDisplaySymbol::ValueMap {
+                    token_field,
+                    values,
+                } => (
                     None,
                     decoded_display_kind(symbol),
                     token_field.clone(),
@@ -178,7 +190,10 @@ fn decode_operand_symbols(
                     Some(values.clone()),
                     None,
                 ),
-                DecodedDisplaySymbol::VarnodeList { entries, token_field } => (
+                DecodedDisplaySymbol::VarnodeList {
+                    entries,
+                    token_field,
+                } => (
                     None,
                     decoded_display_kind(symbol),
                     token_field.clone(),
@@ -197,7 +212,15 @@ fn decode_operand_symbols(
                     Some(varnode.clone()),
                 ),
             })
-            .unwrap_or((None, CompiledDisplayOperandKind::Generic, None, direct_pattern_expression.clone(), None, None, None));
+            .unwrap_or((
+                None,
+                CompiledDisplayOperandKind::Generic,
+                None,
+                direct_pattern_expression.clone(),
+                None,
+                None,
+                None,
+            ));
         let token_field = operand
             .children
             .iter()
@@ -221,7 +244,6 @@ fn decode_operand_symbols(
     }
     Ok(out)
 }
-
 
 fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
     Ok(DecodedTokenField {
@@ -286,15 +308,18 @@ fn compiled_operand_spec_for_symbol(
             values: values.clone(),
         });
     }
-    symbol.token_field.as_ref().map(|field| CompiledOperandSpec::SlaTokenField {
-        big_endian: field.big_endian,
-        sign_bit: field.sign_bit,
-        bit_start: field.bit_start,
-        bit_end: field.bit_end,
-        byte_start: field.byte_start,
-        byte_end: field.byte_end,
-        shift: field.shift,
-    })
+    symbol
+        .token_field
+        .as_ref()
+        .map(|field| CompiledOperandSpec::SlaTokenField {
+            big_endian: field.big_endian,
+            sign_bit: field.sign_bit,
+            bit_start: field.bit_start,
+            bit_end: field.bit_end,
+            byte_start: field.byte_start,
+            byte_end: field.byte_end,
+            shift: field.shift,
+        })
 }
 
 fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
@@ -324,7 +349,11 @@ fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
 }
 
 fn decode_pattern_expression(element: &PackedElement) -> Result<CompiledPatternExpression> {
-    let mut binary = |ctor: fn(Box<CompiledPatternExpression>, Box<CompiledPatternExpression>) -> CompiledPatternExpression| -> Result<CompiledPatternExpression> {
+    let mut binary = |ctor: fn(
+        Box<CompiledPatternExpression>,
+        Box<CompiledPatternExpression>,
+    ) -> CompiledPatternExpression|
+     -> Result<CompiledPatternExpression> {
         if element.children.len() != 2 {
             bail!("pattern expression {} expected two children", element.id);
         }
@@ -396,7 +425,10 @@ fn decode_pattern_expression(element: &PackedElement) -> Result<CompiledPatternE
     }
 }
 
-fn pattern_expression_references_operand(expr: &CompiledPatternExpression, operand_index: usize) -> bool {
+fn pattern_expression_references_operand(
+    expr: &CompiledPatternExpression,
+    operand_index: usize,
+) -> bool {
     match expr {
         CompiledPatternExpression::OperandValue { index } => *index == operand_index,
         CompiledPatternExpression::Add(lhs, rhs)

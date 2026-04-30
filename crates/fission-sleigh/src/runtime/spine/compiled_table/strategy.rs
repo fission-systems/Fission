@@ -60,12 +60,26 @@ fn native_backend_allowed(
     table_name: &str,
     ctx: &CompiledInstructionContext<'_>,
 ) -> bool {
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_legacy_shared_tokens() {
-        return true;
-    }
     let Some(subtable) = compiled.subtables.get(table_name) else {
         return false;
     };
+    if subtable.sla_subtable_id != 0
+        || subtable
+            .decision_tree
+            .nodes
+            .iter()
+            .any(|node| !node.leaf_entries.is_empty())
+    {
+        // Native backends currently return a constructor slot only.  Ghidra
+        // .sla identity requires terminal DisjointPattern verification and
+        // subtable/constructor-id lookup before a constructor is final.  Until
+        // codegen emits the same checked terminal verifier, native remains an
+        // acceleration target for legacy tables only.
+        return false;
+    }
+    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() {
+        return true;
+    }
     !subtable
         .decision_tree
         .nodes

@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
-use super::token::{tokenize_line, Token, TokenKind, TokenizedLine};
+use super::token::{Token, TokenKind, TokenizedLine, tokenize_line};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludeManifestEntry {
@@ -467,14 +467,18 @@ mod tests {
                 .map(|item| item.relative_path.as_str()),
             Some("x86-64.slaspec")
         );
-        assert!(expanded
-            .include_manifest
-            .iter()
-            .any(|item| item.relative_path == "x86.slaspec"));
-        assert!(expanded
-            .include_manifest
-            .iter()
-            .any(|item| item.relative_path == "ia.sinc"));
+        assert!(
+            expanded
+                .include_manifest
+                .iter()
+                .any(|item| item.relative_path == "x86.slaspec")
+        );
+        assert!(
+            expanded
+                .include_manifest
+                .iter()
+                .any(|item| item.relative_path == "ia.sinc")
+        );
         assert!(expanded.defines.contains_key("IA64"));
         assert!(!expanded.lines.is_empty());
     }

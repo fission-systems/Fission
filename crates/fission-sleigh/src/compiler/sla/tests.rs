@@ -1,6 +1,6 @@
 use super::*;
-use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use flate2::write::ZlibEncoder;
 use std::io::Write;
 
 fn packaged_sla_path(processor: &str, name: &str) -> Option<PathBuf> {
@@ -46,6 +46,23 @@ fn decodes_real_x86_64_sla_construct_templates() {
     assert!(!library.source_files.is_empty());
     assert!(!library.spaces.is_empty());
     assert!(!library.constructors_by_source.is_empty());
+    assert!(!library.native.subtables.is_empty());
+    let instruction = library
+        .native
+        .subtables
+        .get("instruction")
+        .expect("native instruction subtable");
+    assert!(
+        instruction.decision_tree.is_some(),
+        "native instruction subtable must preserve decision root"
+    );
+    assert!(
+        instruction
+            .constructors
+            .iter()
+            .any(|ctor| !ctor.construct_tpl.ops.is_empty() || ctor.construct_tpl.result.is_some()),
+        "native constructors must preserve decoded ConstructTpl payloads"
+    );
 }
 
 #[test]
@@ -76,6 +93,66 @@ fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
             .iter()
             .map(|ctor| (&ctor.id, &ctor.source_key, &ctor.display_template.display))
             .collect::<Vec<_>>()
+    );
+    let native_subtable = library
+        .native
+        .subtables
+        .get("Rm_GPR64")
+        .expect("native Rm_GPR64 subtable");
+    assert_eq!(
+        native_subtable.constructors.len(),
+        subtable.constructors.len()
+    );
+    assert!(
+        native_subtable
+            .constructors
+            .iter()
+            .all(|ctor| ctor.subtable_name == "Rm_GPR64"),
+        "native constructors must carry subtable identity"
+    );
+}
+
+#[test]
+fn native_decision_terminal_pairs_use_sla_constructor_identity() {
+    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    }
+    let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
+    let instruction = library
+        .native
+        .subtables
+        .get("instruction")
+        .expect("native instruction subtable");
+    let tree = instruction
+        .decision_tree
+        .as_ref()
+        .expect("native instruction decision tree");
+    let terminal_pairs = tree
+        .nodes
+        .iter()
+        .flat_map(|node| &node.terminal_pairs)
+        .collect::<Vec<_>>();
+    assert!(
+        !terminal_pairs.is_empty(),
+        "native decision tree must preserve terminal constructor pairs"
+    );
+    assert!(
+        terminal_pairs
+            .iter()
+            .all(|pair| pair.subtable_id == instruction.id),
+        "terminal pairs must be keyed by .sla subtable identity"
+    );
+    assert!(
+        terminal_pairs.iter().any(|pair| {
+            instruction
+                .constructors
+                .iter()
+                .any(|ctor| ctor.constructor_id == pair.constructor_id)
+        }),
+        "terminal constructor ids must resolve within the same native subtable"
     );
 }
 

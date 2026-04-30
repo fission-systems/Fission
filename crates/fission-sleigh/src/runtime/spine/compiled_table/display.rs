@@ -2,8 +2,16 @@ pub(super) fn display_value_for_exported_handle(
     exported: &RuntimeHandle,
     sub_state: &RuntimeConstructState,
 ) -> BoundOperand {
+    let exported_value = exported
+        .debug_value
+        .clone()
+        .unwrap_or_else(|| bound_operand_from_fixed_handle(&exported.fixed).unwrap_or(BoundOperand::Immediate {
+            value: 0,
+            encoded_size: 0,
+            signed: false,
+        }));
     let exported_is_direct_memory = matches!(
-        exported.value,
+        exported_value,
         BoundOperand::Memory {
             base: None,
             index: None,
@@ -17,7 +25,7 @@ pub(super) fn display_value_for_exported_handle(
             return rip_relative_operand.clone();
         }
         if let Some(relative_target) = first_relative_target(sub_state) {
-            if let BoundOperand::Memory { size, .. } = exported.value {
+            if let BoundOperand::Memory { size, .. } = exported_value {
                 return BoundOperand::Memory {
                     base: None,
                     index: None,
@@ -30,7 +38,7 @@ pub(super) fn display_value_for_exported_handle(
             }
         }
     }
-    exported.value.clone()
+    exported_value
 }
 
 pub(super) fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
@@ -165,7 +173,15 @@ pub(super) fn render_operand_display(state: &RuntimeConstructState, operand_inde
         .display_operands
         .get(operand_index)
         .map(|operand| &operand.kind);
-    format_operand_with_display_kind(&handle.value, display_kind)
+    let value = handle
+        .debug_value
+        .clone()
+        .unwrap_or_else(|| bound_operand_from_fixed_handle(&handle.fixed).unwrap_or(BoundOperand::Immediate {
+            value: 0,
+            encoded_size: 0,
+            signed: false,
+        }));
+    format_operand_with_display_kind(&value, display_kind)
 }
 
 pub(super) fn jcc_mnemonic(cc: u8) -> Option<&'static str> {

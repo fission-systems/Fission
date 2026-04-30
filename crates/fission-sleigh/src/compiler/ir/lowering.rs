@@ -25,7 +25,10 @@ pub fn compile_frontend(
     let (default_context, default_context_known_mask) =
         infer_default_context_from_pspec(entry_spec, &collector.field_info)?;
     collector.default_context = default_context;
-    eprintln!("Inferred Default Context for {}: 0x{:016x}", arch, collector.default_context);
+    eprintln!(
+        "Inferred Default Context for {}: 0x{:016x}",
+        arch, collector.default_context
+    );
 
     let language_layout = collector.language_layout();
     let construct_templates = collector.construct_templates();
@@ -52,6 +55,8 @@ pub fn compile_frontend(
             name.clone(),
             CompiledSubtableDefinition {
                 name: name.clone(),
+                sla_subtable_id: 0,
+                constructors_by_sla_id: constructors_by_sla_id(&sorted_constructors),
                 constructors: sorted_constructors,
                 decision_tree,
             },
@@ -60,16 +65,21 @@ pub fn compile_frontend(
 
     // Ensure "instruction" subtable exists as it's the primary entry point
     if !subtables.contains_key("instruction") {
-        subtables.insert("instruction".to_string(), CompiledSubtableDefinition {
-            name: "instruction".to_string(),
-            constructors: Vec::new(),
-            decision_tree: CompiledDecisionTree {
-                root_node_index: 0,
-                nodes: Vec::new(),
-                decision_node_count: 0,
-                root_buckets: Vec::new(),
+        subtables.insert(
+            "instruction".to_string(),
+            CompiledSubtableDefinition {
+                name: "instruction".to_string(),
+                sla_subtable_id: 0,
+                constructors_by_sla_id: BTreeMap::new(),
+                constructors: Vec::new(),
+                decision_tree: CompiledDecisionTree {
+                    root_node_index: 0,
+                    nodes: Vec::new(),
+                    decision_node_count: 0,
+                    root_buckets: Vec::new(),
+                },
             },
-        });
+        );
     }
 
     Ok(CompiledFrontend {
@@ -251,20 +261,32 @@ pub fn apply_sla_construct_templates(
             updated += 1;
         }
 
-        let decision_tree = sla_subtable.decision_tree.clone().unwrap_or_else(|| {
-            CompiledDecisionTree {
-                root_node_index: 0,
-                nodes: Vec::new(),
-                decision_node_count: 0,
-                root_buckets: Vec::new(),
-            }
-        });
+        let decision_tree =
+            sla_subtable
+                .decision_tree
+                .clone()
+                .unwrap_or_else(|| CompiledDecisionTree {
+                    root_node_index: 0,
+                    nodes: Vec::new(),
+                    decision_node_count: 0,
+                    root_buckets: Vec::new(),
+                });
 
-        compiled.subtables.insert(name.clone(), CompiledSubtableDefinition {
-            name: name.clone(),
-            constructors: executable_constructors,
-            decision_tree,
-        });
+        compiled.subtables.insert(
+            name.clone(),
+            CompiledSubtableDefinition {
+                name: name.clone(),
+                sla_subtable_id: sla_subtable
+                    .constructors
+                    .iter()
+                    .map(|constructor| constructor.subtable_id)
+                    .next()
+                    .unwrap_or(0),
+                constructors_by_sla_id: constructors_by_sla_id(&executable_constructors),
+                constructors: executable_constructors,
+                decision_tree,
+            },
+        );
     }
 
     // 3. Populate construct_templates list for the runtime emitter
@@ -281,6 +303,28 @@ pub fn apply_sla_construct_templates(
         .collect();
 
     updated
+}
+
+pub fn build_frontend_from_sla_native_model(
+    compiled: &mut CompiledFrontend,
+    library: &CompiledSlaTemplateLibrary,
+) -> usize {
+    apply_sla_construct_templates(compiled, library)
+}
+
+fn constructors_by_sla_id(
+    constructors: &[CompiledExecutableConstructor],
+) -> BTreeMap<u32, usize> {
+    constructors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, constructor)| {
+            constructor
+                .sla_identity
+                .as_ref()
+                .map(|identity| (identity.constructor_id, index))
+        })
+        .collect()
 }
 
 fn executable_constructor_from_sla_template(
@@ -318,6 +362,7 @@ fn executable_constructor_from_sla_template(
     CompiledExecutableConstructor {
         constructor_id: sla_template.id,
         sla_identity: Some(CompiledSlaConstructorIdentity {
+            subtable_id: sla_template.subtable_id,
             subtable_name: subtable_name.to_string(),
             constructor_id: sla_template.id,
             constructor_slot: sla_template.constructor_slot,
@@ -362,7 +407,8 @@ fn executable_constructor_from_sla_template(
             template_source: CompiledTemplateSource::SpecDerived,
         },
         runtime_ready: !decode_failed,
-        unsupported_template_kind: decode_failed.then(|| "sla_constructor_decode_failed".to_string()),
+        unsupported_template_kind: decode_failed
+            .then(|| "sla_constructor_decode_failed".to_string()),
     }
 }
 
@@ -581,14 +627,22 @@ impl Collector {
         }
     }
 
-    fn record_constructor(&mut self, constructor: &AstConstructor, with_stack: &[WithContextFrame]) {
+    fn record_constructor(
+        &mut self,
+        constructor: &AstConstructor,
+        with_stack: &[WithContextFrame],
+    ) {
         // Hierarchical subtable name extraction
         let mut table_name = "instruction".to_string();
         for frame in with_stack {
             let header = frame.header.trim();
             if let Some(pos) = header.find(':') {
                 let name = header[..pos].trim();
-                if !name.is_empty() && name.len() <= 64 && !name.contains(' ') && !name.contains('=') {
+                if !name.is_empty()
+                    && name.len() <= 64
+                    && !name.contains(' ')
+                    && !name.contains('=')
+                {
                     table_name = name.to_string();
                 }
             }
@@ -603,14 +657,22 @@ impl Collector {
         let mnemonic = constructor_mnemonic(&constructor.signature);
         let source = format!(
             "{}:{}",
-            constructor.file.file_name().and_then(|name| name.to_str()).unwrap_or("<unknown>"),
+            constructor
+                .file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("<unknown>"),
             constructor.line_number
         );
         let control_flow = classify_control_flow(&constructor.body);
         let semantic_ops = constructor_semantic_ops(&constructor.body, &self.pcode_ops);
         let signature_hash = stable_hash(&constructor.signature);
         let semantic_template = CompiledSemanticTemplate {
-            status: if constructor.body.trim().is_empty() { "empty".to_string() } else { "unsupported_template".to_string() },
+            status: if constructor.body.trim().is_empty() {
+                "empty".to_string()
+            } else {
+                "unsupported_template".to_string()
+            },
             action_hash: stable_hash(&constructor.body),
             op_count: semantic_ops.len(),
         };
@@ -639,7 +701,10 @@ impl Collector {
             control_flow,
             pattern_signature: constructor.signature.clone(),
             semantic_template,
-            with_stack: with_stack.iter().map(|frame| frame.header.clone()).collect(),
+            with_stack: with_stack
+                .iter()
+                .map(|frame| frame.header.clone())
+                .collect(),
             semantic_ops,
             signature_hash,
             context_changes: context_changes.clone(),
@@ -654,7 +719,10 @@ impl Collector {
         ) {
             let mut executable = executable;
             executable.constructor_id = u32::MAX; // To be set by apply_sla
-            self.subtable_executables.entry(table_name).or_default().push(executable);
+            self.subtable_executables
+                .entry(table_name)
+                .or_default()
+                .push(executable);
         }
     }
 
@@ -666,7 +734,9 @@ impl Collector {
         signature_hash: u64,
         context_changes: Vec<CompiledContextOp>,
     ) -> Option<CompiledExecutableConstructor> {
-        if !runtime_signature_is_supported(signature) { return None; }
+        if !runtime_signature_is_supported(signature) {
+            return None;
+        }
         let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
         let construct_tpl_kind = classify_display_construct_kind(&normalized_mnemonic);
         let matcher = self
@@ -692,7 +762,15 @@ impl Collector {
         );
 
         let constructor_template = CompiledConstructorTemplate {
-            handles: operand_specs.iter().cloned().enumerate().map(|(operand_index, spec)| CompiledHandleTemplate { operand_index, spec }).collect(),
+            handles: operand_specs
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(operand_index, spec)| CompiledHandleTemplate {
+                    operand_index,
+                    spec,
+                })
+                .collect(),
             decode_steps,
             num_labels: 0,
             result: None,
@@ -737,19 +815,31 @@ impl Collector {
     fn parse_opcode_matcher(&self, signature: &str) -> Option<CompiledPatternMatcher> {
         let (pattern_part, _context_block) = if let Some(is_pos) = signature.find(" is ") {
             let rest = &signature[is_pos + 4..];
-            if let Some(bracket_pos) = rest.find('[') { (&rest[..bracket_pos], Some(&rest[bracket_pos..])) } else { (rest, None) }
-        } else { (signature, None) };
+            if let Some(bracket_pos) = rest.find('[') {
+                (&rest[..bracket_pos], Some(&rest[bracket_pos..]))
+            } else {
+                (rest, None)
+            }
+        } else {
+            (signature, None)
+        };
 
         let mut constraints = Vec::new();
         for part in pattern_part.split(['&', ';', '\n']) {
             let part = part.trim();
-            if part.is_empty() { continue; }
+            if part.is_empty() {
+                continue;
+            }
             if let Some((name, value_str)) = part.split_once('=') {
                 let name = name.trim();
                 let value_str = value_str.trim();
-                let value = if value_str.starts_with("0x") { u64::from_str_radix(&value_str[2..], 16).unwrap_or(0) }
-                            else if value_str.starts_with("0b") { u64::from_str_radix(&value_str[2..], 2).unwrap_or(0) }
-                            else { value_str.parse::<u64>().unwrap_or(0) };
+                let value = if value_str.starts_with("0x") {
+                    u64::from_str_radix(&value_str[2..], 16).unwrap_or(0)
+                } else if value_str.starts_with("0b") {
+                    u64::from_str_radix(&value_str[2..], 2).unwrap_or(0)
+                } else {
+                    value_str.parse::<u64>().unwrap_or(0)
+                };
 
                 if let Some(info) = self.field_info.get(name) {
                     let field_mask = if info.bit_width >= 64 {
@@ -760,12 +850,26 @@ impl Collector {
                     let mask = field_mask.checked_shl(info.bit_offset).unwrap_or(0);
                     let shifted_value = value.checked_shl(info.bit_offset).unwrap_or(0) & mask;
                     match info.kind {
-                        FieldKind::Instruction => constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: shifted_value }),
-                        FieldKind::Context => constraints.push(PatternConstraint::Context { offset: 0, mask, value: shifted_value }),
+                        FieldKind::Instruction => {
+                            constraints.push(PatternConstraint::Instruction {
+                                offset: 0,
+                                mask,
+                                value: shifted_value,
+                            })
+                        }
+                        FieldKind::Context => constraints.push(PatternConstraint::Context {
+                            offset: 0,
+                            mask,
+                            value: shifted_value,
+                        }),
                     }
                 } else if name.starts_with("b_") {
                     if let Ok(bits) = name[2..].parse::<u32>() {
-                        let (s, e) = if name.len() <= 4 { (bits / 100, bits % 100) } else { (bits, bits) };
+                        let (s, e) = if name.len() <= 4 {
+                            (bits / 100, bits % 100)
+                        } else {
+                            (bits, bits)
+                        };
                         let (start_bit, end_bit) = if s > e { (s, e) } else { (e, s) };
                         let width = start_bit - end_bit + 1;
                         let field_mask = if width >= 64 {
@@ -775,7 +879,11 @@ impl Collector {
                         };
                         let mask = field_mask.checked_shl(end_bit).unwrap_or(0);
                         let shifted_value = value.checked_shl(end_bit).unwrap_or(0) & mask;
-                        constraints.push(PatternConstraint::Instruction { offset: 0, mask, value: shifted_value });
+                        constraints.push(PatternConstraint::Instruction {
+                            offset: 0,
+                            mask,
+                            value: shifted_value,
+                        });
                     }
                 }
             } else {
@@ -786,23 +894,43 @@ impl Collector {
                         let mask = 1u64 << info.bit_offset;
                         let value = if is_negated { 0 } else { mask };
                         match info.kind {
-                            FieldKind::Instruction => constraints.push(PatternConstraint::Instruction { offset: 0, mask, value }),
-                            FieldKind::Context => constraints.push(PatternConstraint::Context { offset: 0, mask, value }),
+                            FieldKind::Instruction => {
+                                constraints.push(PatternConstraint::Instruction {
+                                    offset: 0,
+                                    mask,
+                                    value,
+                                })
+                            }
+                            FieldKind::Context => constraints.push(PatternConstraint::Context {
+                                offset: 0,
+                                mask,
+                                value,
+                            }),
                         }
                     }
                 }
             }
         }
-        if !constraints.is_empty() { return Some(CompiledPatternMatcher::BitConstraints(constraints)); }
+        if !constraints.is_empty() {
+            return Some(CompiledPatternMatcher::BitConstraints(constraints));
+        }
         let bytes = parse_byte_sequence(signature);
-        if !bytes.is_empty() { return Some(CompiledPatternMatcher::ExactBytes(bytes)); }
-        if signature.contains(" is ") { return Some(CompiledPatternMatcher::BitConstraints(vec![])); }
+        if !bytes.is_empty() {
+            return Some(CompiledPatternMatcher::ExactBytes(bytes));
+        }
+        if signature.contains(" is ") {
+            return Some(CompiledPatternMatcher::BitConstraints(vec![]));
+        }
         None
     }
 
     fn parse_define_bits(&mut self, statement: &str, kind_str: &str) {
         let trimmed = strip_comments(statement).trim();
-        let kind = match kind_str { "token" => FieldKind::Instruction, "context" => FieldKind::Context, _ => return };
+        let kind = match kind_str {
+            "token" => FieldKind::Instruction,
+            "context" => FieldKind::Context,
+            _ => return,
+        };
         let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
         let start_pos = if trimmed[..first_line_end].contains('(') {
             if let Some(pos) = trimmed.find(')') {
@@ -818,17 +946,36 @@ impl Collector {
             let left = fields_str[..pos].trim();
             let name = if let Some(last) = left.split_whitespace().last() {
                 let n = last.trim_end_matches('=').trim();
-                if n.is_empty() { left.split_whitespace().rev().nth(1).unwrap_or("") } else { n }
-            } else { "" };
-            if name.is_empty() || name == "endian" { continue; }
-            let right = &fields_str[pos+1..];
+                if n.is_empty() {
+                    left.split_whitespace().rev().nth(1).unwrap_or("")
+                } else {
+                    n
+                }
+            } else {
+                ""
+            };
+            if name.is_empty() || name == "endian" {
+                continue;
+            }
+            let right = &fields_str[pos + 1..];
             if let Some(end_pos) = right.find(')') {
                 let range_part = &right[..end_pos];
                 if let Some((start_str, end_str)) = range_part.split_once(',') {
                     let start = start_str.trim().parse::<u32>().unwrap_or(0);
                     let end = end_str.trim().parse::<u32>().unwrap_or(0);
-                    let (bit_offset, bit_width) = if start <= end { (start, end - start + 1) } else { (end, start - end + 1) };
-                    self.field_info.insert(name.to_string(), FieldBitRange { bit_offset, bit_width, kind });
+                    let (bit_offset, bit_width) = if start <= end {
+                        (start, end - start + 1)
+                    } else {
+                        (end, start - end + 1)
+                    };
+                    self.field_info.insert(
+                        name.to_string(),
+                        FieldBitRange {
+                            bit_offset,
+                            bit_width,
+                            kind,
+                        },
+                    );
                 }
             }
         }
@@ -866,35 +1013,66 @@ fn native_matcher_minimum_length(matcher: &CompiledPatternMatcher) -> usize {
 fn strip_comments(raw: &str) -> &str {
     let mut in_string = false;
     for (idx, ch) in raw.char_indices() {
-        if ch == '"' { in_string = !in_string; }
-        else if ch == '#' && !in_string { return &raw[..idx]; }
+        if ch == '"' {
+            in_string = !in_string;
+        } else if ch == '#' && !in_string {
+            return &raw[..idx];
+        }
     }
     raw
 }
 
 fn constructor_mnemonic(signature: &str) -> String {
-    signature.trim_start_matches(':').split_whitespace().next().unwrap_or("<unknown>").trim_end_matches(',').to_string()
+    signature
+        .trim_start_matches(':')
+        .split_whitespace()
+        .next()
+        .unwrap_or("<unknown>")
+        .trim_end_matches(',')
+        .to_string()
 }
 
 fn macro_name(signature: &str) -> String {
-    signature.strip_prefix("macro ").unwrap_or(signature).split('(').next().unwrap_or("<unknown>").trim().to_string()
+    signature
+        .strip_prefix("macro ")
+        .unwrap_or(signature)
+        .split('(')
+        .next()
+        .unwrap_or("<unknown>")
+        .trim()
+        .to_string()
 }
 
 fn definition_name(statement: &str) -> String {
-    statement.split_whitespace().nth(2).unwrap_or("<unknown>").trim_matches(|ch| ch == ';' || ch == ':' || ch == '(' || ch == ')').to_string()
+    statement
+        .split_whitespace()
+        .nth(2)
+        .unwrap_or("<unknown>")
+        .trim_matches(|ch| ch == ';' || ch == ':' || ch == '(' || ch == ')')
+        .to_string()
 }
 
 fn classify_control_flow(body: &str) -> ControlFlowClass {
     let lower = body.to_ascii_lowercase();
-    if lower.contains("call ") { ControlFlowClass::Call }
-    else if lower.contains("return") { ControlFlowClass::Return }
-    else if lower.contains("cbranch") || lower.contains("if ") { ControlFlowClass::ConditionalBranch }
-    else if lower.contains("goto ") || lower.contains("branch") { ControlFlowClass::Branch }
-    else { ControlFlowClass::None }
+    if lower.contains("call ") {
+        ControlFlowClass::Call
+    } else if lower.contains("return") {
+        ControlFlowClass::Return
+    } else if lower.contains("cbranch") || lower.contains("if ") {
+        ControlFlowClass::ConditionalBranch
+    } else if lower.contains("goto ") || lower.contains("branch") {
+        ControlFlowClass::Branch
+    } else {
+        ControlFlowClass::None
+    }
 }
 
 fn constructor_semantic_ops(body: &str, defined_pcode_ops: &BTreeSet<String>) -> Vec<String> {
-    defined_pcode_ops.iter().filter(|op| body.contains(&format!("{op}("))).cloned().collect()
+    defined_pcode_ops
+        .iter()
+        .filter(|op| body.contains(&format!("{op}(")))
+        .cloned()
+        .collect()
 }
 
 fn stable_hash(text: &str) -> u64 {
@@ -909,20 +1087,40 @@ fn stable_hash(text: &str) -> u64 {
 fn build_decision_tree(constructors: &[CompiledExecutableConstructor]) -> CompiledDecisionTree {
     let constructor_indexes = (0..constructors.len()).collect::<Vec<_>>();
     let mut nodes = Vec::new();
-    let root_node_index = build_bucket_node(constructors, &constructor_indexes, &decision_probes_for_constructors(constructors), &mut nodes);
+    let root_node_index = build_bucket_node(
+        constructors,
+        &constructor_indexes,
+        &decision_probes_for_constructors(constructors),
+        &mut nodes,
+    );
     let decision_node_count = nodes.len();
-    CompiledDecisionTree { root_node_index, root_buckets: Vec::new(), nodes, decision_node_count }
+    CompiledDecisionTree {
+        root_node_index,
+        root_buckets: Vec::new(),
+        nodes,
+        decision_node_count,
+    }
 }
 
-fn decision_probes_for_constructors(constructors: &[CompiledExecutableConstructor]) -> Vec<CompiledDecisionProbe> {
+fn decision_probes_for_constructors(
+    constructors: &[CompiledExecutableConstructor],
+) -> Vec<CompiledDecisionProbe> {
     let mut probes = Vec::new();
     for offset in 0..4 {
         for bit in 0..8 {
-            probes.push(CompiledDecisionProbe::InstructionBitSlice { offset: offset as u8, mask: 1 << bit, shift: bit as u8 });
+            probes.push(CompiledDecisionProbe::InstructionBitSlice {
+                offset: offset as u8,
+                mask: 1 << bit,
+                shift: bit as u8,
+            });
         }
     }
     for bit in 0..8 {
-        probes.push(CompiledDecisionProbe::ContextBitSlice { offset: 0, mask: 1 << bit, shift: bit as u8 });
+        probes.push(CompiledDecisionProbe::ContextBitSlice {
+            offset: 0,
+            mask: 1 << bit,
+            shift: bit as u8,
+        });
     }
     probes
 }
@@ -930,22 +1128,46 @@ fn decision_probes_for_constructors(constructors: &[CompiledExecutableConstructo
 fn pattern_matcher_probe_len(matcher: &CompiledPatternMatcher) -> usize {
     match matcher {
         CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledPatternMatcher::BitConstraints(constraints) => constraints.iter().filter_map(|c| if let PatternConstraint::Instruction { offset, .. } = c { Some(*offset as usize + 1) } else { None }).max().unwrap_or(0),
+        CompiledPatternMatcher::BitConstraints(constraints) => constraints
+            .iter()
+            .filter_map(|c| {
+                if let PatternConstraint::Instruction { offset, .. } = c {
+                    Some(*offset as usize + 1)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0),
         _ => 1,
     }
 }
 
-fn build_bucket_node(constructors: &[CompiledExecutableConstructor], indexes: &[usize], probes: &[CompiledDecisionProbe], nodes: &mut Vec<CompiledDecisionNode>) -> usize {
-    if indexes.len() <= 1 || probes.is_empty() { return push_leaf_node(constructors, indexes, nodes); }
+fn build_bucket_node(
+    constructors: &[CompiledExecutableConstructor],
+    indexes: &[usize],
+    probes: &[CompiledDecisionProbe],
+    nodes: &mut Vec<CompiledDecisionNode>,
+) -> usize {
+    if indexes.len() <= 1 || probes.is_empty() {
+        return push_leaf_node(constructors, indexes, nodes);
+    }
     for (pos, probe) in probes.iter().enumerate() {
         let mut groups = BTreeMap::<u8, Vec<usize>>::new();
         let mut wildcard = Vec::new();
         for &idx in indexes {
             let values = decision_feature_values(&constructors[idx], *probe);
-            if values.is_empty() { wildcard.push(idx); }
-            else { for v in values { groups.entry(v).or_default().push(idx); } }
+            if values.is_empty() {
+                wildcard.push(idx);
+            } else {
+                for v in values {
+                    groups.entry(v).or_default().push(idx);
+                }
+            }
         }
-        if groups.len() <= 1 { continue; }
+        if groups.len() <= 1 {
+            continue;
+        }
         let node_index = nodes.len();
         nodes.push(CompiledDecisionNode {
             probe: *probe,
@@ -957,8 +1179,17 @@ fn build_bucket_node(constructors: &[CompiledExecutableConstructor], indexes: &[
         for (value, mut specific) in groups {
             let mut branch_indexes = wildcard.clone();
             branch_indexes.append(&mut specific);
-            branch_indexes.sort_unstable(); branch_indexes.dedup();
-            branches.push(CompiledDecisionEdge { value, next_node_index: build_bucket_node(constructors, &branch_indexes, &probes[pos+1..], nodes) });
+            branch_indexes.sort_unstable();
+            branch_indexes.dedup();
+            branches.push(CompiledDecisionEdge {
+                value,
+                next_node_index: build_bucket_node(
+                    constructors,
+                    &branch_indexes,
+                    &probes[pos + 1..],
+                    nodes,
+                ),
+            });
         }
         nodes[node_index].branches = branches;
         return node_index;
@@ -966,7 +1197,11 @@ fn build_bucket_node(constructors: &[CompiledExecutableConstructor], indexes: &[
     push_leaf_node(constructors, indexes, nodes)
 }
 
-fn push_leaf_node(constructors: &[CompiledExecutableConstructor], indexes: &[usize], nodes: &mut Vec<CompiledDecisionNode>) -> usize {
+fn push_leaf_node(
+    constructors: &[CompiledExecutableConstructor],
+    indexes: &[usize],
+    nodes: &mut Vec<CompiledDecisionNode>,
+) -> usize {
     let mut sorted = indexes.to_vec();
     sorted.sort_by_key(|&idx| std::cmp::Reverse(decision_specificity(&constructors[idx])));
     let node_index = nodes.len();
@@ -979,25 +1214,54 @@ fn push_leaf_node(constructors: &[CompiledExecutableConstructor], indexes: &[usi
     node_index
 }
 
-fn decision_feature_values(ctor: &CompiledExecutableConstructor, probe: CompiledDecisionProbe) -> Vec<u8> {
+fn decision_feature_values(
+    ctor: &CompiledExecutableConstructor,
+    probe: CompiledDecisionProbe,
+) -> Vec<u8> {
     match probe {
-        CompiledDecisionProbe::InstructionBitSlice { offset, mask, shift } => instruction_probe_values(&ctor.matcher, offset as usize).into_iter().map(|v| (v & mask) >> shift).collect(),
-        CompiledDecisionProbe::ContextBitSlice { offset, mask, shift } => context_probe_values(&ctor.matcher, offset as usize).into_iter().map(|v| ((v & u64::from(mask)) >> shift) as u8).collect(),
-        CompiledDecisionProbe::SlaInstructionBits { .. } | CompiledDecisionProbe::SlaContextBits { .. } => Vec::new(),
+        CompiledDecisionProbe::InstructionBitSlice {
+            offset,
+            mask,
+            shift,
+        } => instruction_probe_values(&ctor.matcher, offset as usize)
+            .into_iter()
+            .map(|v| (v & mask) >> shift)
+            .collect(),
+        CompiledDecisionProbe::ContextBitSlice {
+            offset,
+            mask,
+            shift,
+        } => context_probe_values(&ctor.matcher, offset as usize)
+            .into_iter()
+            .map(|v| ((v & u64::from(mask)) >> shift) as u8)
+            .collect(),
+        CompiledDecisionProbe::SlaInstructionBits { .. }
+        | CompiledDecisionProbe::SlaContextBits { .. } => Vec::new(),
         _ => Vec::new(),
     }
 }
 
 fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<u8> {
     match matcher {
-        CompiledPatternMatcher::ExactBytes(bytes) => bytes.get(offset).copied().into_iter().collect(),
+        CompiledPatternMatcher::ExactBytes(bytes) => {
+            bytes.get(offset).copied().into_iter().collect()
+        }
         CompiledPatternMatcher::BitConstraints(constraints) => {
-            let mut val = 0u8; let mut found = false;
+            let mut val = 0u8;
+            let mut found = false;
             for c in constraints {
-                if let PatternConstraint::Instruction { offset: c_off, mask, value } = c {
+                if let PatternConstraint::Instruction {
+                    offset: c_off,
+                    mask,
+                    value,
+                } = c
+                {
                     if offset >= *c_off as usize && offset < *c_off as usize + 8 {
                         let shift = (offset - *c_off as usize) * 8;
-                        if (mask >> shift) & 0xff != 0 { val |= ((value >> shift) & 0xff) as u8; found = true; }
+                        if (mask >> shift) & 0xff != 0 {
+                            val |= ((value >> shift) & 0xff) as u8;
+                            found = true;
+                        }
                     }
                 }
             }
@@ -1009,15 +1273,39 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
 
 fn context_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<u64> {
     if let CompiledPatternMatcher::BitConstraints(constraints) = matcher {
-        constraints.iter().filter_map(|c| if let PatternConstraint::Context { offset: c_off, value, .. } = c { if offset == *c_off as usize { Some(*value) } else { None } } else { None }).collect()
-    } else { Vec::new() }
+        constraints
+            .iter()
+            .filter_map(|c| {
+                if let PatternConstraint::Context {
+                    offset: c_off,
+                    value,
+                    ..
+                } = c
+                {
+                    if offset == *c_off as usize {
+                        Some(*value)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
 }
 
 fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
     let mut score = 0usize;
-    if constructor.mnemonic.starts_with('^') { score = score.saturating_sub(500); }
+    if constructor.mnemonic.starts_with('^') {
+        score = score.saturating_sub(500);
+    }
     if let CompiledPatternMatcher::BitConstraints(ref constraints) = constructor.matcher {
-        if !constraints.is_empty() { score += 1000; }
+        if !constraints.is_empty() {
+            score += 1000;
+        }
     }
     score += constructor.opsize_variants.len().min(1) * 2;
     score += constructor.operand_reg_values.len().min(1) * 3;
@@ -1029,8 +1317,12 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         CompiledPatternMatcher::BitConstraints(constraints) => {
             for constraint in constraints {
                 match constraint {
-                    PatternConstraint::Instruction { mask, .. } => { score += (mask.count_ones() as usize) * 10; }
-                    PatternConstraint::Context { mask, .. } => { score += (mask.count_ones() as usize) * 10; }
+                    PatternConstraint::Instruction { mask, .. } => {
+                        score += (mask.count_ones() as usize) * 10;
+                    }
+                    PatternConstraint::Context { mask, .. } => {
+                        score += (mask.count_ones() as usize) * 10;
+                    }
                 }
             }
         }
@@ -1054,12 +1346,23 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
 
 fn normalize_executable_mnemonic(mnemonic: &str) -> String {
     let trimmed = mnemonic.trim();
-    if trimmed.eq_ignore_ascii_case("J^cc") { return "J^CC".to_string(); }
-    if trimmed.eq_ignore_ascii_case("SET^cc") { return "SET^CC".to_string(); }
-    trimmed.split('^').next().unwrap_or(trimmed).trim().to_string()
+    if trimmed.eq_ignore_ascii_case("J^cc") {
+        return "J^CC".to_string();
+    }
+    if trimmed.eq_ignore_ascii_case("SET^cc") {
+        return "SET^CC".to_string();
+    }
+    trimmed
+        .split('^')
+        .next()
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string()
 }
 
-fn runtime_signature_is_supported(_signature: &str) -> bool { true }
+fn runtime_signature_is_supported(_signature: &str) -> bool {
+    true
+}
 
 fn classify_display_construct_kind(mnemonic: &str) -> CompiledConstructTplKind {
     match mnemonic.to_ascii_uppercase().as_str() {
@@ -1105,30 +1408,77 @@ fn parse_operand_specs(
     construct_tpl_kind: CompiledConstructTplKind,
 ) -> Result<Vec<CompiledOperandSpec>> {
     let first_line = signature.lines().next().unwrap_or(signature);
-    let head = if let Some(pos) = first_line.find(" is ") { &first_line[..pos] }
-               else if let Some(pos) = first_line.find("is ") { &first_line[..pos] }
-               else { first_line };
+    let head = if let Some(pos) = first_line.find(" is ") {
+        &first_line[..pos]
+    } else if let Some(pos) = first_line.find("is ") {
+        &first_line[..pos]
+    } else {
+        first_line
+    };
     let head = head.trim().trim_start_matches(':');
-    let operand_part = head.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
-    if operand_part.is_empty() { return Ok(Vec::new()); }
+    let operand_part = head
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if operand_part.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut specs = Vec::new();
     for raw_token in operand_part.split(',') {
         let token = raw_token.trim().trim_matches(|ch| ch == '(' || ch == ')');
-        if token.is_empty() { continue; }
-        if let Some(size) = relative_size(token) { specs.push(CompiledOperandSpec::Relative { size }); continue; }
-        if let Some((size, signed)) = immediate_size(token) { specs.push(CompiledOperandSpec::Immediate { size, signed }); continue; }
-        if let Some(size) = fixed_accumulator_size(token) { specs.push(CompiledOperandSpec::FixedRegister { reg: CompiledFixedRegister::Accumulator, size }); continue; }
-        if let Some(size) = register_size_token(token) { specs.push(CompiledOperandSpec::TokenFieldExtraction { bit_offset: 0, bit_width: size * 8, sign_extend: false }); continue; }
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(size) = relative_size(token) {
+            specs.push(CompiledOperandSpec::Relative { size });
+            continue;
+        }
+        if let Some((size, signed)) = immediate_size(token) {
+            specs.push(CompiledOperandSpec::Immediate { size, signed });
+            continue;
+        }
+        if let Some(size) = fixed_accumulator_size(token) {
+            specs.push(CompiledOperandSpec::FixedRegister {
+                reg: CompiledFixedRegister::Accumulator,
+                size,
+            });
+            continue;
+        }
+        if let Some(size) = register_size_token(token) {
+            specs.push(CompiledOperandSpec::TokenFieldExtraction {
+                bit_offset: 0,
+                bit_width: size * 8,
+                sign_extend: false,
+            });
+            continue;
+        }
         let token = token.trim();
-        if !token.is_empty() && token.len() <= 64 && token.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            specs.push(CompiledOperandSpec::SubtableEvaluation { table_name: token.to_string() });
+        if !token.is_empty()
+            && token.len() <= 64
+            && token.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            specs.push(CompiledOperandSpec::SubtableEvaluation {
+                table_name: token.to_string(),
+            });
         } else {
-            specs.push(CompiledOperandSpec::Immediate { size: 0, signed: false });
+            specs.push(CompiledOperandSpec::Immediate {
+                size: 0,
+                signed: false,
+            });
         }
     }
-    if specs.is_empty() && !operand_part.is_empty() { return Ok(vec![CompiledOperandSpec::SubtableEvaluation { table_name: "unknown".to_string() }]); }
-    if specs.is_empty() && operand_part.is_empty() { return Ok(Vec::new()); }
-    if matches!(construct_tpl_kind, CompiledConstructTplKind::Setcc) && specs.len() != 1 { return Err(anyhow!("setcc expects one operand")); }
+    if specs.is_empty() && !operand_part.is_empty() {
+        return Ok(vec![CompiledOperandSpec::SubtableEvaluation {
+            table_name: "unknown".to_string(),
+        }]);
+    }
+    if specs.is_empty() && operand_part.is_empty() {
+        return Ok(Vec::new());
+    }
+    if matches!(construct_tpl_kind, CompiledConstructTplKind::Setcc) && specs.len() != 1 {
+        return Err(anyhow!("setcc expects one operand"));
+    }
     Ok(specs)
 }
 
@@ -1140,13 +1490,12 @@ fn parse_hidden_subtables(
         return Vec::new();
     };
     let rest = &signature[is_pos + 4..];
-    let pattern_part = rest
-        .split(['[', '{'])
-        .next()
-        .unwrap_or(rest);
+    let pattern_part = rest.split(['[', '{']).next().unwrap_or(rest);
     let mut subtables = Vec::new();
     for raw_token in pattern_part.split('&') {
-        let token = raw_token.trim().trim_matches(|ch| ch == '(' || ch == ')' || ch == '^');
+        let token = raw_token
+            .trim()
+            .trim_matches(|ch| ch == '(' || ch == ')' || ch == '^');
         if token.is_empty()
             || token.contains('=')
             || token.chars().any(|ch| ch.is_ascii_whitespace())
@@ -1211,7 +1560,10 @@ fn parse_context_changes(
 
 fn parse_context_literal(text: &str) -> Option<u64> {
     let trimmed = text.trim();
-    if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
         u64::from_str_radix(hex, 16).ok()
     } else if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
         trimmed.parse::<u64>().ok()
@@ -1225,8 +1577,13 @@ fn parse_byte_sequence(signature: &str) -> Vec<u8> {
     let mut start = 0usize;
     while let Some(pos) = signature[start..].find("byte=0x") {
         let begin = start + pos + "byte=0x".len();
-        let hex = signature[begin..].chars().take_while(|ch| ch.is_ascii_hexdigit()).collect::<String>();
-        if let Ok(byte) = u8::from_str_radix(&hex, 16) { bytes.push(byte); }
+        let hex = signature[begin..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_hexdigit())
+            .collect::<String>();
+        if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+            bytes.push(byte);
+        }
         start = begin + hex.len();
     }
     bytes
@@ -1236,11 +1593,20 @@ fn parse_single_value(signature: &str, key: &str) -> Option<u8> {
     let mut search_start = 0usize;
     while let Some(pos) = signature[search_start..].find(key) {
         let absolute = search_start + pos;
-        let has_token_boundary = absolute == 0 || signature[..absolute].chars().next_back().is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
+        let has_token_boundary = absolute == 0
+            || signature[..absolute]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
         let value_start = absolute + key.len();
         if has_token_boundary {
-            let digits = signature[value_start..].chars().take_while(|ch| ch.is_ascii_digit()).collect::<String>();
-            if let Ok(value) = digits.parse() { return Some(value); }
+            let digits = signature[value_start..]
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect::<String>();
+            if let Ok(value) = digits.parse() {
+                return Some(value);
+            }
         }
         search_start = value_start;
     }
@@ -1248,40 +1614,136 @@ fn parse_single_value(signature: &str, key: &str) -> Option<u8> {
 }
 
 fn parse_value_list(signature: &str, key: &str) -> Vec<u8> {
-    if let Some(single) = parse_single_value(signature, key) { return vec![single]; }
-    let Some(start) = signature.find(key) else { return Vec::new(); };
+    if let Some(single) = parse_single_value(signature, key) {
+        return vec![single];
+    }
+    let Some(start) = signature.find(key) else {
+        return Vec::new();
+    };
     let rest = &signature[start + key.len()..];
-    if !rest.starts_with('(') { return Vec::new(); }
-    let Some(end) = rest.find(')') else { return Vec::new(); };
-    rest[1..end].split('|').filter_map(|value| value.trim().parse().ok()).collect()
+    if !rest.starts_with('(') {
+        return Vec::new();
+    }
+    let Some(end) = rest.find(')') else {
+        return Vec::new();
+    };
+    rest[1..end]
+        .split('|')
+        .filter_map(|value| value.trim().parse().ok())
+        .collect()
 }
 
 fn parse_opsize_variants(signature: &str) -> Vec<u8> {
-    if signature.contains("(opsize=1 | opsize=2)") { return vec![1, 2]; }
-    if let Some(opsize) = parse_single_value(signature, "opsize=") { return vec![opsize]; }
+    if signature.contains("(opsize=1 | opsize=2)") {
+        return vec![1, 2];
+    }
+    if let Some(opsize) = parse_single_value(signature, "opsize=") {
+        return vec![opsize];
+    }
     Vec::new()
 }
 
-fn unsupported_template_reason(signature: &str, construct_tpl_kind: CompiledConstructTplKind, operand_specs: &[CompiledOperandSpec]) -> Option<String> {
-    if let Some(reason) = unsupported_check_constraint_reason(signature) { return Some(reason); }
-    if signature.contains("currentCS") || signature.contains("rexRprefix=") || signature.contains("creg") || signature.contains("debugreg") || signature.contains("xmmmod=") || signature.contains("ymmmod=") || signature.contains("zmm") || signature.contains("bnd") || signature.contains("moffs") { return Some("unsupported_runtime_constraint".to_string()); }
+fn unsupported_template_reason(
+    signature: &str,
+    construct_tpl_kind: CompiledConstructTplKind,
+    operand_specs: &[CompiledOperandSpec],
+) -> Option<String> {
+    if let Some(reason) = unsupported_check_constraint_reason(signature) {
+        return Some(reason);
+    }
+    if signature.contains("currentCS")
+        || signature.contains("rexRprefix=")
+        || signature.contains("creg")
+        || signature.contains("debugreg")
+        || signature.contains("xmmmod=")
+        || signature.contains("ymmmod=")
+        || signature.contains("zmm")
+        || signature.contains("bnd")
+        || signature.contains("moffs")
+    {
+        return Some("unsupported_runtime_constraint".to_string());
+    }
     match construct_tpl_kind {
         CompiledConstructTplKind::Unsupported => Some("unsupported_template_kind".to_string()),
-        _ => if operand_specs.len() > 2 && !matches!(construct_tpl_kind, CompiledConstructTplKind::StackStore | CompiledConstructTplKind::StackLoad) { Some("unsupported_operand_arity".to_string()) } else { None }
+        _ => {
+            if operand_specs.len() > 2
+                && !matches!(
+                    construct_tpl_kind,
+                    CompiledConstructTplKind::StackStore | CompiledConstructTplKind::StackLoad
+                )
+            {
+                Some("unsupported_operand_arity".to_string())
+            } else {
+                None
+            }
+        }
     }
 }
 
 fn unsupported_check_constraint_reason(signature: &str) -> Option<String> {
     for token in signature.split(|ch: char| ch.is_whitespace() || ch == '&' || ch == ';') {
         let trimmed = token.trim_matches(|ch| ch == '(' || ch == ')' || ch == ',');
-        if !trimmed.starts_with("check_") { continue; }
-        if matches!(trimmed, "check_Reg32_dest" | "check_Rmr32_dest" | "check_rm32_dest" | "check_EAX_dest") { continue; }
+        if !trimmed.starts_with("check_") {
+            continue;
+        }
+        if matches!(
+            trimmed,
+            "check_Reg32_dest" | "check_Rmr32_dest" | "check_rm32_dest" | "check_EAX_dest"
+        ) {
+            continue;
+        }
         return Some("unsupported_runtime_constraint".to_string());
     }
     None
 }
 
-fn relative_size(token: &str) -> Option<u32> { if !token.starts_with("rel") { return None; } register_size_token(token) }
-fn immediate_size(token: &str) -> Option<(u32, bool)> { if !(token.starts_with("imm") || token.starts_with("simm")) { return None; } let signed = token.starts_with("simm"); let digits = token.chars().skip_while(|ch| !ch.is_ascii_digit()).take_while(|ch| ch.is_ascii_digit()).collect::<String>(); let bits = digits.parse::<u32>().ok()?; Some(((bits / 8).max(1), signed)) }
-fn fixed_accumulator_size(token: &str) -> Option<u32> { match token { "AL" => Some(1), "AX" => Some(2), "EAX" => Some(4), "RAX" => Some(8), _ => None } }
-fn register_size_token(token: &str) -> Option<u32> { let digits = token.chars().rev().take_while(|ch| ch.is_ascii_digit()).collect::<String>().chars().rev().collect::<String>(); if digits.is_empty() { match token { "AL" => Some(1), "AX" => Some(2), "EAX" => Some(4), "RAX" => Some(8), "FS" | "GS" | "CS" | "SS" | "DS" | "ES" => Some(2), _ => None } } else { digits.parse::<u32>().ok().map(|bits| (bits / 8).max(1)) } }
+fn relative_size(token: &str) -> Option<u32> {
+    if !token.starts_with("rel") {
+        return None;
+    }
+    register_size_token(token)
+}
+fn immediate_size(token: &str) -> Option<(u32, bool)> {
+    if !(token.starts_with("imm") || token.starts_with("simm")) {
+        return None;
+    }
+    let signed = token.starts_with("simm");
+    let digits = token
+        .chars()
+        .skip_while(|ch| !ch.is_ascii_digit())
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    let bits = digits.parse::<u32>().ok()?;
+    Some(((bits / 8).max(1), signed))
+}
+fn fixed_accumulator_size(token: &str) -> Option<u32> {
+    match token {
+        "AL" => Some(1),
+        "AX" => Some(2),
+        "EAX" => Some(4),
+        "RAX" => Some(8),
+        _ => None,
+    }
+}
+fn register_size_token(token: &str) -> Option<u32> {
+    let digits = token
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    if digits.is_empty() {
+        match token {
+            "AL" => Some(1),
+            "AX" => Some(2),
+            "EAX" => Some(4),
+            "RAX" => Some(8),
+            "FS" | "GS" | "CS" | "SS" | "DS" | "ES" => Some(2),
+            _ => None,
+        }
+    } else {
+        digits.parse::<u32>().ok().map(|bits| (bits / 8).max(1))
+    }
+}

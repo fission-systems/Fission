@@ -82,7 +82,7 @@ impl<'a> PreviewBuilder<'a> {
             };
         }
         if ptr.space_id == UNIQUE_SPACE_ID
-            && let Some(name) = crate::arch::x86::unique_x86_register_name(ptr.offset, ptr.size)
+            && let Some(name) = unique_register_name(ptr.offset, ptr.size)
         {
             return match name {
                 "rsp" | "esp" => Some((StackBase::Rsp, 0)),

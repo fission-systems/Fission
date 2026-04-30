@@ -5,7 +5,7 @@ mod equivalence;
 mod ir;
 mod policy;
 mod preprocessor;
-mod sla;
+pub mod sla;
 mod token;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,7 +13,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use policy::{canonical_processor_name, compatibility_aliases_for, is_executable_candidate_entry};
 use serde::{Deserialize, Serialize};
 
@@ -22,13 +22,14 @@ pub use ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
 use discovery::generated_output_root_for_entry_spec;
 pub use discovery::{
-    entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
-    generated_root_for_entry_spec, ghidra_language_manifest_path, infer_arch_from_entry_spec,
-    resolve_ghidra_install_paths, sleigh_build_cache_root, spec_root_for_arch, GhidraInstallPaths,
+    GhidraInstallPaths, entry_id_from_path, entry_spec_from_path, generated_root,
+    generated_root_for_arch, generated_root_for_entry_spec, ghidra_language_manifest_path,
+    infer_arch_from_entry_spec, resolve_ghidra_install_paths, sleigh_build_cache_root,
+    spec_root_for_arch,
 };
 pub use equivalence::{
-    build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
-    RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
+    EquivalenceMismatchKind, RuntimeParityFixture, RuntimeParityRecord, RuntimeParityReport,
+    RuntimeParityVarnodeShape, build_runtime_fixture_report,
 };
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
@@ -44,13 +45,15 @@ pub use ir::{
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
     CompiledSemanticTemplate, CompiledSlaConstructorIdentity, CompiledSlaDecodeStatus,
     CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable,
-    CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef, CompiledVarnodeTpl,
-    ControlFlowClass, PatternConstraint,
+    CompiledSubtableDefinition, CompiledTemplateSource, CompiledTokenField,
+    CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
 };
-pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
+pub use preprocessor::{ExpandedSpec, IncludeManifestEntry, PreprocessedLine, expand_entry_spec};
 pub use sla::{
-    load_compiled_sla, load_construct_templates_from_sla, CompiledSlaArtifact,
-    CompiledSlaConstructorTemplate, CompiledSlaTemplateLibrary, GHIDRA_SLA_MAGIC,
+    CompiledSlaArtifact, CompiledSlaConstructorTemplate, CompiledSlaTemplateLibrary,
+    GHIDRA_SLA_MAGIC, SlaConstructTpl, SlaConstructor, SlaDecisionNode, SlaDecisionPair,
+    SlaDecisionTree, SlaDisjointPattern, SlaLanguage, SlaOperandSymbol, SlaSubtable,
+    load_compiled_sla, load_construct_templates_from_sla, load_native_language_from_sla,
 };
 pub use token::{Token, TokenKind, TokenizedLine};
 
@@ -467,7 +470,7 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
         let library = sla::load_construct_templates_from_sla(&sla_path)
             .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
-        ir::apply_sla_construct_templates(&mut compiled, &library);
+        ir::build_frontend_from_sla_native_model(&mut compiled, &library);
     }
     Ok(compiled)
 }
@@ -762,10 +765,12 @@ mod tests {
         assert_eq!(compiled.arch, "x86");
         assert_eq!(compiled.entry_spec, "x86-64.slaspec");
         assert!(compiled.include_manifest.len() >= 3);
-        assert!(compiled
-            .subtables
-            .values()
-            .any(|subtable| !subtable.constructors.is_empty()));
+        assert!(
+            compiled
+                .subtables
+                .values()
+                .any(|subtable| !subtable.constructors.is_empty())
+        );
         assert!(!compiled.construct_templates.is_empty());
         assert!(!compiled.definitions.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
@@ -803,10 +808,12 @@ mod tests {
             .find(|entry| entry.processor == "x86" && entry.entry_id == "x86-64")
             .expect("x86-64 manifest entry");
         assert_eq!(x86_64.runtime_status, "executable_candidate");
-        assert!(x86_64
-            .language_ids
-            .iter()
-            .any(|id| id == "x86:LE:64:default"));
+        assert!(
+            x86_64
+                .language_ids
+                .iter()
+                .any(|id| id == "x86:LE:64:default")
+        );
         let aarch64 = manifest
             .entries
             .iter()

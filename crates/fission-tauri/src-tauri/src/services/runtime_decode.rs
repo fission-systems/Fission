@@ -5,8 +5,13 @@ use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, RuntimeSleigh
 pub(crate) fn runtime_frontend_for_binary(
     binary: &LoadedBinary,
 ) -> CmdResult<RuntimeSleighFrontend> {
-    let language = if binary.is_64bit { "x86-64" } else { "x86" };
-    RuntimeSleighFrontend::new_for_language(language).map_err(CmdError::other)
+    let load_spec = binary.load_spec().ok_or_else(|| {
+        CmdError::other(format!(
+            "LoadSpecNotFound: cannot select SLEIGH runtime for {} without loader-selected load spec",
+            binary.path
+        ))
+    })?;
+    RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(CmdError::other)
 }
 
 pub(crate) fn decode_window_for_binary(

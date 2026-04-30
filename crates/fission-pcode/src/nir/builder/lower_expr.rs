@@ -345,13 +345,13 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(param));
             }
             if vn.space_id == UNIQUE_SPACE_ID
-                && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                && let Some(name) = unique_register_name(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
             if !self.options.is_64bit
                 && vn.space_id == REGISTER_SPACE_ID
-                && let Some(name) = x86_register_name(vn.offset, vn.size)
+                && let Some(name) = register_name_32(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
@@ -360,7 +360,7 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let stack_reg_name = match vn.space_id {
-            UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(vn.offset, vn.size),
+            UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
             REGISTER_SPACE_ID => Some(register_name(vn.offset, vn.size)),
             _ => None,
         };
@@ -375,9 +375,7 @@ impl<'a> PreviewBuilder<'a> {
                     op.opcode,
                     PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
                 )
-                && ((vn.space_id == REGISTER_SPACE_ID && vn.offset == 0x00)
-                    || (vn.space_id == UNIQUE_SPACE_ID
-                        && vn.offset == crate::arch::x86::X86_REG_BASE))
+                && is_primary_return_register(vn)
                 && let Some((site, _)) = def_site
                 && let Some(name) = self.call_result_bindings.get(&site)
             {
@@ -390,7 +388,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         if !visiting.insert(key.clone()) {
             let cycle_name = if vn.space_id == UNIQUE_SPACE_ID {
-                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                unique_register_name(vn.offset, vn.size)
                     .map_or_else(|| format!("tmp_{:x}", vn.offset), ToString::to_string)
             } else {
                 format!("tmp_{:x}", vn.offset)

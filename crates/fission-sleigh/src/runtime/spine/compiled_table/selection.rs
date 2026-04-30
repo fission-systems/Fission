@@ -4,13 +4,12 @@ pub(super) fn candidate_selections<'a>(
     ctx: &CompiledInstructionContext<'_>,
     address: u64,
 ) -> Result<Vec<RuntimeSelection<'a>>> {
-    let instruction_table = compiled
-        .subtables
-        .get("instruction")
-        .ok_or_else(|| RuntimeSleighError::UnsupportedPcodeTemplate {
+    let instruction_table = compiled.subtables.get("instruction").ok_or_else(|| {
+        RuntimeSleighError::UnsupportedPcodeTemplate {
             language: compiled.entry_id.clone(),
             reason: "selection_no_instruction_root".to_string(),
-        })?;
+        }
+    })?;
     let primary = if let Some(native) = strategy.native_for_table(compiled, "instruction", ctx) {
         let constructor_index = native
             .decode_match("instruction", ctx.bytes, ctx.context_register)?
@@ -25,6 +24,17 @@ pub(super) fn candidate_selections<'a>(
         RuntimeSelection {
             constructor,
             constructor_index,
+            subtable_id: constructor
+                .sla_identity
+                .as_ref()
+                .map(|identity| identity.subtable_id)
+                .unwrap_or(0),
+            constructor_id: constructor.constructor_id,
+            constructor_slot: constructor
+                .sla_identity
+                .as_ref()
+                .map(|identity| identity.constructor_slot)
+                .unwrap_or(constructor_index),
             trace: spine::RuntimeMatchTrace {
                 root_bucket: "native".to_string(),
                 probes: Vec::new(),
@@ -52,7 +62,10 @@ pub(super) fn select_constructor<'a>(
     let subtable = compiled.subtables.get(table_name)?;
     spine::select_constructor(
         compiled,
-        [(table_name.to_string(), subtable.decision_tree.root_node_index)],
+        [(
+            table_name.to_string(),
+            subtable.decision_tree.root_node_index,
+        )],
         || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
     )
@@ -92,32 +105,37 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 offset,
                 mask,
                 shift,
-            } => {
-                possible_context_probe_values(
-                    self.ctx.context_register,
-                    self.ctx.context_known_mask,
-                    u32::from(offset),
-                    8,
-                )?
-                .into_iter()
-                .map(|value| ((value & u64::from(mask)) >> shift) as u8)
-                .collect()
-            }
+            } => possible_context_probe_values(
+                self.ctx.context_register,
+                self.ctx.context_known_mask,
+                u32::from(offset),
+                8,
+            )?
+            .into_iter()
+            .map(|value| ((value & u64::from(mask)) >> shift) as u8)
+            .collect(),
             CompiledDecisionProbe::ContextFieldRef(_) => vec![0],
             CompiledDecisionProbe::TokenFieldRef(
                 CompiledTokenFieldRef::InstructionWidthProfile,
             ) => vec![self.ctx.instruction_width_profile],
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                    .map(|bundle| bundle.operand_mode)
-                    .unwrap_or(0)]
+                vec![
+                    ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                        .map(|bundle| bundle.operand_mode)
+                        .unwrap_or(0),
+                ]
             }
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                    .map(|bundle| bundle.reg)
-                    .unwrap_or(0)]
+                vec![
+                    ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                        .map(|bundle| bundle.reg)
+                        .unwrap_or(0),
+                ]
             }
-            CompiledDecisionProbe::SlaInstructionBits { start_bit, bit_size } => {
+            CompiledDecisionProbe::SlaInstructionBits {
+                start_bit,
+                bit_size,
+            } => {
                 let byte_offset = start_bit / 8;
                 let bit_offset = start_bit % 8;
                 let byte_cnt = (bit_offset + bit_size + 7) / 8;
@@ -138,7 +156,10 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 let shift = (8 * byte_cnt) - bit_offset - bit_size;
                 vec![((word >> shift) & ((1u64 << bit_size) - 1)) as u8]
             }
-            CompiledDecisionProbe::SlaContextBits { start_bit, bit_size } => {
+            CompiledDecisionProbe::SlaContextBits {
+                start_bit,
+                bit_size,
+            } => {
                 vec![packed_context_bits(self.ctx.context_register, start_bit, bit_size)? as u8]
             }
             CompiledDecisionProbe::TerminalPatternCheck => vec![0],
@@ -190,8 +211,13 @@ pub(super) fn possible_context_probe_values(
     } else {
         (1u64 << bit_size) - 1
     };
-    let known = u64::from(packed_context_bits(context_known_mask, start_bit, bit_size)?);
-    let known_value = u64::from(packed_context_bits(context_register, start_bit, bit_size)?) & known;
+    let known = u64::from(packed_context_bits(
+        context_known_mask,
+        start_bit,
+        bit_size,
+    )?);
+    let known_value =
+        u64::from(packed_context_bits(context_register, start_bit, bit_size)?) & known;
     let unknown_positions = (0..bit_size)
         .filter(|bit| ((known >> bit) & 1) == 0)
         .collect::<Vec<_>>();
@@ -268,7 +294,11 @@ pub(super) fn constructor_matches(
         CompiledPatternMatcher::BitConstraints(constraints) => {
             for constraint in constraints {
                 match constraint {
-                    crate::compiler::PatternConstraint::Instruction { offset, mask, value } => {
+                    crate::compiler::PatternConstraint::Instruction {
+                        offset,
+                        mask,
+                        value,
+                    } => {
                         let mut inst_val = 0u64;
                         for i in 0..8 {
                             if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i) {
@@ -279,7 +309,11 @@ pub(super) fn constructor_matches(
                             bail!("instruction bit constraint mismatch");
                         }
                     }
-                    crate::compiler::PatternConstraint::Context { offset, mask, value } => {
+                    crate::compiler::PatternConstraint::Context {
+                        offset,
+                        mask,
+                        value,
+                    } => {
                         let val = (ctx.context_register >> offset) & mask;
                         if val != *value {
                             bail!("context bit constraint mismatch");
@@ -292,14 +326,12 @@ pub(super) fn constructor_matches(
 
     let requires_token_bundle = constructor.mod_constraint.is_some()
         || !constructor.operand_reg_values.is_empty()
-        || constructor.operand_specs.iter().any(|spec| {
-            matches!(
-                spec,
-                CompiledOperandSpec::TokenFieldExtraction { .. }
-            )
-        });
+        || constructor
+            .operand_specs
+            .iter()
+            .any(|spec| matches!(spec, CompiledOperandSpec::TokenFieldExtraction { .. }));
     if requires_token_bundle {
-        let token_fields = parse_token_fields(ctx, ctx.cursor + opcode_len)?;
+        let token_fields = decode_shared_token_fields(ctx, ctx.cursor + opcode_len)?;
         if let Some(expected) = constructor.mod_constraint {
             if token_fields.operand_mode != expected {
                 bail!("mod mismatch");
@@ -310,8 +342,7 @@ pub(super) fn constructor_matches(
         {
             bail!("operand_reg mismatch");
         }
-        if false && token_fields.operand_mode == 3
-        {
+        if false && token_fields.operand_mode == 3 {
             bail!("memory-only token field mismatch");
         }
     }
@@ -323,9 +354,7 @@ pub(super) fn disjoint_pattern_instruction_byte_len(pattern: &CompiledDisjointPa
     match pattern {
         CompiledDisjointPattern::Instruction(block) => pattern_block_byte_len(block),
         CompiledDisjointPattern::Context(_) => 0,
-        CompiledDisjointPattern::Combine { instruction, .. } => {
-            pattern_block_byte_len(instruction)
-        }
+        CompiledDisjointPattern::Combine { instruction, .. } => pattern_block_byte_len(instruction),
         CompiledDisjointPattern::Or(patterns) => patterns
             .iter()
             .map(disjoint_pattern_instruction_byte_len)

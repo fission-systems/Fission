@@ -1,4 +1,6 @@
-use super::support::{StackBase, register_name_with_param, x64_ghidra_reg_name};
+use super::support::{
+    StackBase, register_name_with_param, unique_register_name, x64_ghidra_reg_name,
+};
 use super::{CallingConvention, NirBindingOrigin, REGISTER_SPACE_ID, UNIQUE_SPACE_ID, Varnode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -239,7 +241,7 @@ impl AbiProvider for WindowsX64AbiProvider {
                 .and_then(|(_, index)| index);
         }
         if vn.space_id == UNIQUE_SPACE_ID
-            && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+            && let Some(name) = unique_register_name(vn.offset, vn.size)
         {
             return self.param_slot_for_name(name);
         }

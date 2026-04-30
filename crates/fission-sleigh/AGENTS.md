@@ -10,7 +10,7 @@ Scope: crates/fission-sleigh
 Current ownership:
 
 - language/spec path resolution (`specs/languages/<Processor>/**/*.slaspec`)
-- compiler-only Sleigh front-end generation (`src/compiler/`, `generated/<Processor>/<entry-id>/`)
+- compiler-only Sleigh front-end generation (`src/compiler/`, `target/fission-sleigh/generated/<Processor>/<entry-id>/`)
 - compiled runtime registry and decode/lift contracts (`src/runtime/`)
 - typed fail-closed runtime errors while generated p-code execution is incomplete
 - p-code CFG block reconstruction consumed by NIR rendering
@@ -71,15 +71,15 @@ crates/fission-sleigh/
        ├── RISCV/
        ├── ...
        └── x86/
-└── generated/
-   ├── compiler_manifest.json # All checked-in .slaspec variant report
+└── target/fission-sleigh/generated/
+   ├── compiler_manifest.json # Build-cache .slaspec variant report
    ├── AARCH64/
    ├── ARM/
    ├── MIPS/
    ├── PowerPC/
    ├── RISCV/
    ├── ...
-   └── x86/                   # Repo-tracked compiler-only output by entry variant
+   └── x86/                   # Build-cache compiler-only output by entry variant
 ```
 
 ## Ownership Rules

@@ -13,7 +13,7 @@ impl LoadedBinaryBuilder {
             path,
             hash,
             data,
-            arch_spec: "x86:LE:64:default".to_string(),
+            arch_spec: "unknown".to_string(),
             load_spec: None,
             architecture: None,
             entry_point: 0,

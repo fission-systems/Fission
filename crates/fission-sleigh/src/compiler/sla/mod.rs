@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use fission_pcode::PcodeOpcode;
 use flate2::read::ZlibDecoder;
 
@@ -21,6 +21,7 @@ pub const GHIDRA_SLA_FORMAT_VERSION: u8 = 4;
 
 include!("symbols.rs");
 include!("display.rs");
+include!("native.rs");
 include!("templates.rs");
 include!("packed.rs");
 
@@ -38,6 +39,10 @@ pub fn load_construct_templates_from_sla(
 ) -> Result<CompiledSlaTemplateLibrary> {
     let artifact = load_compiled_sla(path)?;
     decode_construct_templates(&artifact)
+}
+
+pub fn load_native_language_from_sla(path: impl AsRef<Path>) -> Result<SlaLanguage> {
+    Ok(load_construct_templates_from_sla(path)?.native)
 }
 
 fn decode_compiled_sla(path: PathBuf, bytes: &[u8]) -> Result<CompiledSlaArtifact> {

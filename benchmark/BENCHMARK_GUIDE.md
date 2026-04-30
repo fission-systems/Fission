@@ -35,6 +35,54 @@ Recommended loop:
 3. parity corpus benchmark for Ghidra-reference work
 4. release corpus benchmark only for promotion candidates
 
+## Real-World Sample Automation
+
+CLI-first sample automation lives under [`scripts/corpus/`](/Users/sjkim1127/Fission/scripts/corpus)
+and [`scripts/benchmark/`](/Users/sjkim1127/Fission/scripts/benchmark). The pipeline is intentionally
+split so it can be run locally or in CI without a browser session:
+
+```bash
+# 1. Collect/hash local samples and emit a full-benchmark-compatible manifest.
+python3 scripts/corpus/hash_and_manifest.py \
+  --input benchmark/binary/x86-64/window/small/binary \
+  --copy-to benchmark/binary/realworld/local \
+  --repo-relative \
+  --output benchmark/config/benchmark_corpus/realworld_local.json
+
+# Optional: download URLs listed one per line before hashing.
+python3 scripts/corpus/hash_and_manifest.py \
+  --url-list /path/to/urls.txt \
+  --copy-to benchmark/binary/realworld/downloaded \
+  --repo-relative \
+  --output benchmark/config/benchmark_corpus/realworld_downloaded.json
+
+# 2. Run loader-only smoke over the manifest.
+python3 scripts/benchmark/run_loader_smoke.py \
+  --manifest benchmark/config/benchmark_corpus/realworld_local.json \
+  --fission-bin target/release/fission_cli \
+  --output-dir benchmark/artifacts/realworld_suite/loader_smoke_latest
+
+# 3. Orchestrate loader smoke plus optional raw p-code and full benchmark lanes.
+python3 scripts/benchmark/run_realworld_suite.py \
+  --build-cli \
+  --loader-manifest benchmark/config/benchmark_corpus/realworld_local.json \
+  --raw-pcode-manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --full-corpus-manifest benchmark/config/benchmark_corpus/realworld_local.json \
+  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --fission-release \
+  --output-dir benchmark/artifacts/realworld_suite/latest
+
+# 4. Diff any two JSON reports from loader/raw/full/suite runs.
+python3 scripts/benchmark/compare_reports.py \
+  --baseline benchmark/artifacts/realworld_suite/baseline/loader_smoke_report.json \
+  --current benchmark/artifacts/realworld_suite/latest/loader_smoke/loader_smoke_report.json \
+  --output-dir benchmark/artifacts/realworld_suite/latest/diff
+```
+
+Downloaded samples are not automatically trusted. The manifest records SHA-256,
+size, source provenance, and a magic-byte format guess; loader semantics still
+come from Fission parsers and typed loader failures, not benchmark-side repair.
+
 ## Canonical Paths
 
 Config roots:

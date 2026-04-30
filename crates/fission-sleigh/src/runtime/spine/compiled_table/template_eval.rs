@@ -98,8 +98,7 @@ impl CompiledTableEmitter {
                     .first()
                     .ok_or_else(|| anyhow!("BRANCH template requires one input"))?;
                 let target = self.read_template_varnode(target_tpl, state, 8)?;
-                let is_indirect = matches!(target_tpl, CompiledVarnodeTpl::Handle { operand_index }
-                    if !matches!(state.operands.get(*operand_index), Some(BoundOperand::Relative { .. })));
+                let is_indirect = !target.is_constant && target.space_id != 3;
                 if is_indirect {
                     self.emitter.emit_branch_ind(target, mnemonic)
                 } else {
@@ -404,29 +403,6 @@ impl CompiledTableEmitter {
             }
             CompiledVarnodeTpl::ConditionPredicate => {
                 bail!("ConditionPredicate is display/compatibility-only and cannot emit raw P-code")
-            }
-            CompiledVarnodeTpl::Handle { operand_index } => {
-                let handle = state
-                    .handles
-                    .get(*operand_index)
-                    .ok_or_else(|| anyhow!("missing operand index {}", operand_index))?;
-                if matches!(
-                    handle.value,
-                    crate::runtime::spine::construct::BoundOperand::Memory { .. }
-                ) {
-                    bail!("Handle used for memory operand - expected EffectiveAddress");
-                }
-                let varnode = varnode_from_fixed_handle(&handle.fixed)?;
-                if expected_size > 0
-                    && varnode.size != expected_size
-                    && !matches!(
-                        handle.value,
-                        crate::runtime::spine::construct::BoundOperand::Relative { .. }
-                    )
-                {
-                    bail!("Handle size mismatch");
-                }
-                Ok(varnode)
             }
             _ => bail!(
                 "compiled-table executor rejects compatibility varnode template: {:?}",

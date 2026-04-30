@@ -1,11 +1,6 @@
 The file common_symbols_win32.txt contains the symbols that were considered common when generating the
 .fidb files for Windows 32-bit system code.
 
-Similarly, common_symbols_gcc_x64.txt and common_symbols_gcc_x86.txt contain common symbols for
-GCC/MinGW compiled binaries on x86-64 and x86 respectively.
-
-## Building Windows MSVC FID Databases
-
 The main entry point for building adding libraries to a .fidb file is the dialog
       Tools -> Function ID -> "Populate FidDb from programs ...".
 This takes on optional file parameter called "Common Symbols File".  The .fidb files currently being

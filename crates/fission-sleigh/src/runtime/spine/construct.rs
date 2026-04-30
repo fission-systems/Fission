@@ -8,6 +8,9 @@ use super::RuntimeMatchTrace;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct RuntimeConstructState {
+    pub subtable_id: u32,
+    pub constructor_id: u32,
+    pub constructor_slot: usize,
     pub mnemonic: String,
     pub construct_tpl_kind: CompiledConstructTplKind,
     pub constructor_template: CompiledConstructorTemplate,
@@ -37,8 +40,8 @@ pub struct RuntimeConstructNode {
 pub struct RuntimeHandle {
     pub operand_index: usize,
     pub spec: CompiledOperandSpec,
-    pub value: BoundOperand,
     pub fixed: RuntimeFixedHandle,
+    pub debug_value: Option<BoundOperand>,
     pub subtable_state: Option<Box<RuntimeConstructState>>,
 }
 

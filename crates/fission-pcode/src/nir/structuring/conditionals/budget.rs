@@ -26,7 +26,8 @@ impl IfLoweringBudget {
         }
         self.subcalls += 1;
         let elapsed_ms = self.start.elapsed().as_secs_f64() * 1000.0;
-        if self.subcalls > X86_TRY_LOWER_IF_SUBCALL_LIMIT || elapsed_ms > X86_TRY_LOWER_IF_BUDGET_MS
+        if self.subcalls > CONDITION_RECOVERY_SUBCALL_LIMIT
+            || elapsed_ms > CONDITION_RECOVERY_BUDGET_MS
         {
             self.tripped = true;
             if structuring_diag_enabled() {

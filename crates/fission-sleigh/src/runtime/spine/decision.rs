@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::compiler::{
     CompiledDecisionLeafEntry, CompiledDecisionProbe, CompiledDisjointPattern,
     CompiledExecutableConstructor, CompiledFrontend, CompiledPatternBlock,
+    CompiledSubtableDefinition,
 };
 
 pub trait DecisionProbeEvaluator {
@@ -15,6 +16,9 @@ pub trait DecisionProbeEvaluator {
 pub struct RuntimeSelection<'a> {
     pub constructor: &'a CompiledExecutableConstructor,
     pub constructor_index: usize,
+    pub subtable_id: u32,
+    pub constructor_id: u32,
+    pub constructor_slot: usize,
     pub trace: RuntimeMatchTrace,
 }
 
@@ -46,8 +50,8 @@ where
         let subtable = compiled.subtables.get(&table_name)?;
         let mut evaluator = evaluator_factory();
         if let Some(selection) = walk_decision_tree(
+            subtable,
             &subtable.decision_tree,
-            &subtable.constructors,
             root_node_index,
             &mut evaluator,
             &mut constructor_matches,
@@ -65,8 +69,8 @@ where
 }
 
 fn walk_decision_tree<'a, E, M>(
+    subtable: &'a CompiledSubtableDefinition,
     decision_tree: &'a crate::compiler::CompiledDecisionTree,
-    constructors: &'a [CompiledExecutableConstructor],
     node_index: usize,
     evaluator: &mut E,
     constructor_matches: &mut M,
@@ -92,10 +96,15 @@ where
             let trace_terminal = std::env::var_os("FISSION_TRACE_TERMINAL_VERIFY").is_some();
             let mut matched_any_pattern = false;
             let leaf_entries: Vec<CompiledDecisionLeafEntry> = if node.leaf_entries.is_empty() {
+                if subtable.sla_subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty() {
+                    return None;
+                }
                 node.leaf_constructor_indexes
                     .iter()
                     .copied()
                     .map(|constructor_index| CompiledDecisionLeafEntry {
+                        subtable_id: 0,
+                        constructor_id: constructor_index as u32,
                         constructor_index,
                         pattern: always_true_instruction_pattern(),
                     })
@@ -104,46 +113,71 @@ where
                 node.leaf_entries.clone()
             };
             for entry in &leaf_entries {
+                let Some((constructor_index, constructor)) =
+                    resolve_leaf_constructor(subtable, entry)
+                else {
+                    continue;
+                };
                 let matched = disjoint_pattern_matches(evaluator, &entry.pattern);
                 if trace_terminal {
-                    if let Some(constructor) = constructors.get(entry.constructor_index) {
-                        eprintln!(
-                            "[terminal-verify] ctor={} mnemonic={} source={} matched={} pattern={:?}",
-                            entry.constructor_index,
-                            constructor.mnemonic,
-                            constructor.source,
-                            matched,
-                            entry.pattern
-                        );
-                    }
+                    eprintln!(
+                        "[terminal-verify] ctor={} sla_subtable={} sla_ctor={} mnemonic={} source={} matched={} pattern={:?}",
+                        constructor_index,
+                        entry.subtable_id,
+                        entry.constructor_id,
+                        constructor.mnemonic,
+                        constructor.source,
+                        matched,
+                        entry.pattern
+                    );
                 }
                 if !matched {
                     continue;
                 }
                 matched_any_pattern = true;
-                let constructor = constructors.get(entry.constructor_index)?;
                 if constructor_matches(constructor).is_ok() {
                     if constructor.runtime_ready {
                         trace.matched_leaf_pattern = Some(entry.pattern.clone());
                         return Some(RuntimeSelection {
                             constructor,
-                            constructor_index: entry.constructor_index,
+                            constructor_index,
+                            subtable_id: entry.subtable_id,
+                            constructor_id: entry.constructor_id,
+                            constructor_slot: constructor
+                                .sla_identity
+                                .as_ref()
+                                .map(|identity| identity.constructor_slot)
+                                .unwrap_or(constructor_index),
                             trace,
                         });
                     }
                     if unsupported_fallback.is_none() {
-                        unsupported_fallback = Some((constructor, entry.constructor_index));
+                        unsupported_fallback = Some((
+                            constructor,
+                            constructor_index,
+                            entry.subtable_id,
+                            entry.constructor_id,
+                        ));
                     }
                 }
             }
             if !matched_any_pattern {
                 return None;
             }
-            unsupported_fallback.map(|(constructor, constructor_index)| RuntimeSelection {
-                constructor,
-                constructor_index,
-                trace,
-            })
+            unsupported_fallback.map(
+                |(constructor, constructor_index, subtable_id, constructor_id)| RuntimeSelection {
+                    constructor,
+                    constructor_index,
+                    subtable_id,
+                    constructor_id,
+                    constructor_slot: constructor
+                        .sla_identity
+                        .as_ref()
+                        .map(|identity| identity.constructor_slot)
+                        .unwrap_or(constructor_index),
+                    trace,
+                },
+            )
         }
         probe => {
             let values = evaluator.probe_values(probe).ok()?;
@@ -178,8 +212,8 @@ where
                 let mut branch_trace = trace.clone();
                 branch_trace.probes.push(RuntimeMatchProbe { probe, value });
                 if let Some(selection) = walk_decision_tree(
+                    subtable,
                     decision_tree,
-                    constructors,
                     edge.next_node_index,
                     evaluator,
                     constructor_matches,
@@ -191,6 +225,37 @@ where
             None
         }
     }
+}
+
+fn resolve_leaf_constructor<'a>(
+    subtable: &'a CompiledSubtableDefinition,
+    entry: &CompiledDecisionLeafEntry,
+) -> Option<(usize, &'a CompiledExecutableConstructor)> {
+    let constructor_index = if entry.subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty()
+    {
+        if entry.subtable_id != 0
+            && subtable.sla_subtable_id != 0
+            && entry.subtable_id != subtable.sla_subtable_id
+        {
+            return None;
+        }
+        subtable
+            .constructors_by_sla_id
+            .get(&entry.constructor_id)
+            .copied()
+            .or_else(|| {
+                subtable
+                    .constructors
+                    .iter()
+                    .position(|constructor| constructor.constructor_id == entry.constructor_id)
+            })?
+    } else {
+        entry.constructor_index
+    };
+    subtable
+        .constructors
+        .get(constructor_index)
+        .map(|constructor| (constructor_index, constructor))
 }
 
 fn always_true_instruction_pattern() -> CompiledDisjointPattern {

@@ -17,21 +17,21 @@ pub(super) struct TokenFieldBundle {
 // not a new architecture provider/helper module.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CompiledTokenCursorPolicy {
-    legacy_shared_tokens: bool,
+    shared_token_cursor: bool,
 }
 
 impl CompiledTokenCursorPolicy {
     pub(super) fn for_frontend(compiled: &CompiledFrontend) -> Self {
         Self {
-            legacy_shared_tokens: compiled.subtables.contains_key("Rmr64")
+            shared_token_cursor: compiled.subtables.contains_key("Rmr64")
                 && compiled.subtables.contains_key("addr64")
                 && compiled.subtables.contains_key("Reg64")
                 && compiled.subtables.contains_key("cc"),
         }
     }
 
-    pub(super) fn uses_legacy_shared_tokens(self) -> bool {
-        self.legacy_shared_tokens
+    pub(super) fn uses_shared_token_cursor(self) -> bool {
+        self.shared_token_cursor
     }
 }
 
@@ -40,7 +40,7 @@ pub(super) fn ensure_token_fields<'a>(
     cached_token_fields: &'a mut Option<TokenFieldBundle>,
 ) -> Result<&'a TokenFieldBundle> {
     if cached_token_fields.is_none() {
-        *cached_token_fields = Some(parse_token_fields(
+        *cached_token_fields = Some(decode_shared_token_fields(
             ctx,
             ctx.cursor + opcode_len_from_context(ctx)?,
         )?);
@@ -54,7 +54,9 @@ pub(super) fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> R
     opcode_len_from_cursor(ctx, ctx.cursor)
 }
 
-pub(super) fn opcode_len_from_instruction_start(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
+pub(super) fn opcode_len_from_instruction_start(
+    ctx: &CompiledInstructionContext<'_>,
+) -> Result<usize> {
     opcode_len_from_cursor(ctx, ctx.instruction_cursor)
 }
 
@@ -77,10 +79,13 @@ pub(super) fn opcode_token_cursor_from_context(ctx: &CompiledInstructionContext<
     offset + opcode_bytes.saturating_sub(1)
 }
 
-pub(super) fn opcode_cursor_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> usize {
+pub(super) fn opcode_cursor_from_cursor(
+    ctx: &CompiledInstructionContext<'_>,
+    cursor: usize,
+) -> usize {
     let mut offset = cursor;
     while let Some(byte) = ctx.bytes.get(offset).copied() {
-        if is_legacy_instruction_prefix(byte) {
+        if is_instruction_prefix_byte(byte) {
             offset += 1;
             continue;
         }
@@ -89,7 +94,10 @@ pub(super) fn opcode_cursor_from_cursor(ctx: &CompiledInstructionContext<'_>, cu
     offset
 }
 
-pub(super) fn opcode_len_from_cursor(ctx: &CompiledInstructionContext<'_>, cursor: usize) -> Result<usize> {
+pub(super) fn opcode_len_from_cursor(
+    ctx: &CompiledInstructionContext<'_>,
+    cursor: usize,
+) -> Result<usize> {
     let offset = opcode_cursor_from_cursor(ctx, cursor);
     let opcode = *ctx
         .bytes
@@ -107,14 +115,14 @@ pub(super) fn opcode_len_from_cursor(ctx: &CompiledInstructionContext<'_>, curso
     Ok(offset.saturating_sub(cursor) + opcode_bytes)
 }
 
-pub(super) fn is_legacy_instruction_prefix(byte: u8) -> bool {
+pub(super) fn is_instruction_prefix_byte(byte: u8) -> bool {
     matches!(
         byte,
         0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x66 | 0x67 | 0xf0 | 0xf2 | 0xf3
     ) || (0x40..=0x4f).contains(&byte)
 }
 
-pub(super) fn parse_token_fields(
+pub(super) fn decode_shared_token_fields(
     ctx: &CompiledInstructionContext<'_>,
     offset: usize,
 ) -> Result<TokenFieldBundle> {
@@ -221,12 +229,11 @@ pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
     }
 }
 
-
 pub(super) fn constructor_consumes_sequential_operand_bytes(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
 ) -> bool {
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_legacy_shared_tokens()
+    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor()
         && constructor
             .constructor_template
             .handles
@@ -253,7 +260,7 @@ pub(super) fn constructor_has_shared_token_operand(
             matches!(
                 &handle.spec,
                 CompiledOperandSpec::SubtableEvaluation { table_name }
-                    if legacy_shared_token_policy_shared_token_subtable(table_name)
+                    if shared_token_cursor_policy_shared_token_subtable(table_name)
             )
         })
 }
@@ -263,10 +270,10 @@ pub(super) fn subtable_consumes_sequential_bytes(
     table_name: &str,
     depth: usize,
 ) -> bool {
-    if legacy_shared_token_policy_zero_width_subtable(table_name) {
+    if shared_token_cursor_policy_zero_width_subtable(table_name) {
         return false;
     }
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_legacy_shared_tokens() {
+    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() {
         return true;
     }
     if depth > 8 {
@@ -275,16 +282,9 @@ pub(super) fn subtable_consumes_sequential_bytes(
     let Some(subtable) = compiled.subtables.get(table_name) else {
         return false;
     };
-    subtable
-        .constructors
-        .iter()
-        .any(|constructor| {
-            constructor_consumes_sequential_operand_bytes_with_depth(
-                compiled,
-                constructor,
-                depth + 1,
-            )
-        })
+    subtable.constructors.iter().any(|constructor| {
+        constructor_consumes_sequential_operand_bytes_with_depth(compiled, constructor, depth + 1)
+    })
 }
 
 pub(super) fn constructor_consumes_sequential_operand_bytes_with_depth(
@@ -310,9 +310,9 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         | CompiledOperandSpec::Immediate { .. }
         | CompiledOperandSpec::Relative { .. } => true,
         CompiledOperandSpec::SubtableEvaluation { table_name }
-            if CompiledTokenCursorPolicy::for_frontend(compiled).uses_legacy_shared_tokens() =>
+            if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() =>
         {
-            !legacy_shared_token_policy_zero_width_subtable(table_name)
+            !shared_token_cursor_policy_zero_width_subtable(table_name)
         }
         CompiledOperandSpec::SubtableEvaluation { table_name } => {
             subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
@@ -321,7 +321,7 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
     }
 }
 
-pub(super) fn legacy_shared_token_policy_zero_width_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_zero_width_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
         "xrelease"
@@ -341,19 +341,19 @@ pub(super) fn legacy_shared_token_policy_zero_width_subtable(table_name: &str) -
     )
 }
 
-pub(super) fn legacy_shared_token_policy_register_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_register_subtable(table_name: &str) -> bool {
     matches!(table_name, "Reg8" | "Reg16" | "Reg32" | "Reg64")
 }
 
-pub(super) fn legacy_shared_token_policy_sib_token_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_sib_token_subtable(table_name: &str) -> bool {
     matches!(table_name, "Base" | "Base64" | "Index" | "Index64" | "ss")
 }
 
-pub(super) fn legacy_shared_token_policy_opcode_token_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_opcode_token_subtable(table_name: &str) -> bool {
     matches!(table_name, "cc")
 }
 
-pub(super) fn legacy_shared_token_policy_modrm_token_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_modrm_token_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
         "Reg8"
@@ -373,20 +373,20 @@ pub(super) fn legacy_shared_token_policy_modrm_token_subtable(table_name: &str) 
     )
 }
 
-pub(super) fn legacy_shared_token_policy_opcode_row_modrm_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_opcode_row_modrm_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
         "Rmr8" | "Rmr16" | "Rmr32" | "Rmr64" | "CRmr8" | "CRmr16" | "CRmr32"
     )
 }
 
-pub(super) fn legacy_shared_token_policy_sla_field_advances_cursor(table_name: &str) -> bool {
-    !legacy_shared_token_policy_modrm_token_subtable(table_name)
-        && !legacy_shared_token_policy_sib_token_subtable(table_name)
-        && !legacy_shared_token_policy_opcode_token_subtable(table_name)
+pub(super) fn shared_token_cursor_policy_sla_field_advances_cursor(table_name: &str) -> bool {
+    !shared_token_cursor_policy_modrm_token_subtable(table_name)
+        && !shared_token_cursor_policy_sib_token_subtable(table_name)
+        && !shared_token_cursor_policy_opcode_token_subtable(table_name)
 }
 
-pub(super) fn legacy_shared_token_policy_modrm_trailing_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_modrm_trailing_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
         "simm8_16"
@@ -412,11 +412,11 @@ pub(super) fn legacy_shared_token_policy_modrm_trailing_subtable(table_name: &st
     )
 }
 
-pub(super) fn legacy_shared_token_policy_relative_trailing_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_relative_trailing_subtable(table_name: &str) -> bool {
     table_name.starts_with("pcRelSimm") || table_name.starts_with("rel")
 }
 
-pub(super) fn legacy_shared_token_policy_shared_token_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_shared_token_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
         "addr16"
@@ -438,7 +438,7 @@ pub(super) fn legacy_shared_token_policy_shared_token_subtable(table_name: &str)
     )
 }
 
-pub(super) fn legacy_shared_token_policy_modrm_operand_wrapper_subtable(table_name: &str) -> bool {
+pub(super) fn shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name: &str) -> bool {
     matches!(table_name, "rm8" | "rm16" | "rm32" | "rm64")
 }
 
@@ -469,15 +469,7 @@ pub(super) fn read_sla_token_field(
     shift: i32,
 ) -> Result<u64> {
     read_sla_token_field_at(
-        ctx,
-        ctx.cursor,
-        big_endian,
-        sign_bit,
-        bit_start,
-        bit_end,
-        byte_start,
-        byte_end,
-        shift,
+        ctx, ctx.cursor, big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift,
     )
 }
 
@@ -527,7 +519,9 @@ pub(super) fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> usize
         CompiledPatternMatcher::BitConstraints(constraints) => constraints
             .iter()
             .filter_map(|c| match c {
-                crate::compiler::PatternConstraint::Instruction { offset, .. } => Some(*offset as usize + 1),
+                crate::compiler::PatternConstraint::Instruction { offset, .. } => {
+                    Some(*offset as usize + 1)
+                }
                 _ => None,
             })
             .max()

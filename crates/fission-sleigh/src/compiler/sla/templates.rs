@@ -22,7 +22,11 @@ fn decode_construct_templates(
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
-    if let Some(sym_tab) = root.descendants_with_id(sla_format::ELEM_SYMBOL_TABLE).into_iter().next() {
+    if let Some(sym_tab) = root
+        .descendants_with_id(sla_format::ELEM_SYMBOL_TABLE)
+        .into_iter()
+        .next()
+    {
         for head in &sym_tab.children {
             if let Some(id) = head.attr_unsigned(sla_format::ATTR_ID) {
                 if let Some(name) = head.attr_string(sla_format::ATTR_NAME) {
@@ -39,7 +43,9 @@ fn decode_construct_templates(
     let mut subtables = BTreeMap::new();
     let mut subtable_names_by_id = BTreeMap::new();
     for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        let id = subtable_sym.attr_unsigned(sla_format::ATTR_ID).unwrap_or(u64::MAX) as u32;
+        let id = subtable_sym
+            .attr_unsigned(sla_format::ATTR_ID)
+            .unwrap_or(u64::MAX) as u32;
         let name = subtable_sym
             .attr_string(sla_format::ATTR_NAME)
             .map(|s| s.to_string())
@@ -54,19 +60,20 @@ fn decode_construct_templates(
 
     // Helper to parse a constructor
     let trace_sla_parse = std::env::var_os("FISSION_TRACE_SLA_PARSE").is_some();
-    let mut parse_constructor =
-        |subtable_id: u32,
-         subtable_name: &str,
-         constructor: &PackedElement,
-         local_index: usize|
-         -> Option<CompiledSlaConstructorTemplate> {
+    let mut parse_constructor = |subtable_id: u32,
+                                 subtable_name: &str,
+                                 constructor: &PackedElement,
+                                 local_index: usize|
+     -> Option<CompiledSlaConstructorTemplate> {
         // Ghidra SubtableSymbol.decode() assigns constructor ids by local
         // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
         // through sub.getConstructor(id). The constructor element's own ATTR_ID
         // is not the terminal selection index.
         let id = local_index as u32;
         let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);
-        let line = constructor.attr_unsigned(sla_format::ATTR_LINE).unwrap_or(0);
+        let line = constructor
+            .attr_unsigned(sla_format::ATTR_LINE)
+            .unwrap_or(0);
         let minimum_length = constructor
             .attr_unsigned(sla_format::ATTR_LENGTH)
             .unwrap_or(0) as u32;
@@ -122,7 +129,9 @@ fn decode_construct_templates(
         for child in &constructor.children {
             match child.id {
                 sla_format::ELEM_OPER => {
-                    let Some(symbol_id) = child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32) else {
+                    let Some(symbol_id) =
+                        child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32)
+                    else {
                         if trace_sla_parse {
                             eprintln!(
                                 "[sla-parse] oper missing symbol id subtable={subtable_name} slot={local_index} source_key={source_key}"
@@ -138,10 +147,9 @@ fn decode_construct_templates(
                         }
                         return None;
                     };
-                    let Some(spec) = compiled_operand_spec_for_symbol(
-                        operand_symbol,
-                        &subtable_names_by_id,
-                    ) else {
+                    let Some(spec) =
+                        compiled_operand_spec_for_symbol(operand_symbol, &subtable_names_by_id)
+                    else {
                         if trace_sla_parse {
                             eprintln!(
                                 "[sla-parse] unsupported operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id} symbol={operand_symbol:?}"
@@ -149,10 +157,7 @@ fn decode_construct_templates(
                         }
                         return None;
                     };
-                    operand_specs_by_index.insert(
-                        operand_symbol.hand_index,
-                        spec,
-                    );
+                    operand_specs_by_index.insert(operand_symbol.hand_index, spec);
                     display_operands_by_index.insert(
                         operand_symbol.hand_index,
                         CompiledDisplayOperand {
@@ -162,7 +167,8 @@ fn decode_construct_templates(
                     );
                 }
                 sla_format::ELEM_OPPRINT => {
-                    if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize) {
+                    if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize)
+                    {
                         opprint_indices.push(index);
                         display_pieces.push(CompiledDisplayPiece::OperandRef(index));
                     }
@@ -192,12 +198,12 @@ fn decode_construct_templates(
                 return None;
             };
             operand_specs.push(spec);
-            display_operands.push(
-                display_operands_by_index.remove(&slot).unwrap_or(CompiledDisplayOperand {
+            display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
+                CompiledDisplayOperand {
                     operand_index: slot,
                     kind: CompiledDisplayOperandKind::Generic,
-                }),
-            );
+                },
+            ));
         }
 
         let has_print_literals = display_pieces
@@ -208,14 +214,16 @@ fn decode_construct_templates(
                 flowthru_operand_index = Some(*index);
             }
         }
-        let first_whitespace = display_pieces.iter().position(|piece| {
-            matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' '))
-        });
+        let first_whitespace = display_pieces.iter().position(
+            |piece| matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' ')),
+        );
         let display_text = display_pieces
             .iter()
             .map(|piece| match piece {
                 CompiledDisplayPiece::Literal(lit) => lit.clone(),
-                CompiledDisplayPiece::OperandRef(index) => format!("\\n{}", operand_piece_label(*index)),
+                CompiledDisplayPiece::OperandRef(index) => {
+                    format!("\\n{}", operand_piece_label(*index))
+                }
             })
             .collect::<String>();
 
@@ -266,8 +274,11 @@ fn decode_construct_templates(
 
     // 2. Pass Two: Process subtable symbols and their content
     for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        let id = subtable_sym.attr_unsigned(sla_format::ATTR_ID).unwrap_or(u64::MAX) as u32;
-        let name = subtable_sym.attr_string(sla_format::ATTR_NAME)
+        let id = subtable_sym
+            .attr_unsigned(sla_format::ATTR_ID)
+            .unwrap_or(u64::MAX) as u32;
+        let name = subtable_sym
+            .attr_string(sla_format::ATTR_NAME)
             .map(|s| s.to_string())
             .or_else(|| symbol_names.get(&id).cloned())
             .unwrap_or_else(|| format!("unknown_subtable_{id}"));
@@ -319,9 +330,9 @@ fn decode_construct_templates(
 
         for child in &subtable_sym.children {
             if child.id == sla_format::ELEM_DECISION {
-                decision_tree = decode_decision_tree(child).ok();
+                decision_tree = decode_decision_tree(id, child).ok();
             } else if child.id == sla_format::ELEM_DECISION {
-                decision_tree = decode_decision_tree(child).ok();
+                decision_tree = decode_decision_tree(id, child).ok();
             }
         }
 
@@ -332,8 +343,8 @@ fn decode_construct_templates(
             .unwrap_or(0);
         let mut subtable_constructors = Vec::with_capacity(constructor_count);
         for slot in 0..constructor_count {
-            subtable_constructors.push(
-                constructors_by_index.remove(&slot).unwrap_or(CompiledSlaConstructorTemplate {
+            subtable_constructors.push(constructors_by_index.remove(&slot).unwrap_or(
+                CompiledSlaConstructorTemplate {
                     id: slot as u32,
                     subtable_id: id,
                     subtable_name: name.clone(),
@@ -355,45 +366,65 @@ fn decode_construct_templates(
                         result: None,
                         ops: Vec::new(),
                     },
-                }),
-            );
+                },
+            ));
         }
 
         for tpl in &subtable_constructors {
-            constructors_by_source.entry(tpl.source_key.clone()).or_default().push(tpl.clone());
+            constructors_by_source
+                .entry(tpl.source_key.clone())
+                .or_default()
+                .push(tpl.clone());
         }
 
-        subtables.insert(name.clone(), CompiledSlaSubtable {
-            name,
-            constructors: subtable_constructors,
-            decision_tree,
-        });
+        subtables.insert(
+            name.clone(),
+            CompiledSlaSubtable {
+                name,
+                constructors: subtable_constructors,
+                decision_tree,
+            },
+        );
     }
 
     if let Some(inst_table) = subtables.get_mut("instruction") {
         if let Some(tree) = &inst_table.decision_tree {
             if !tree.nodes.is_empty() {
                 let root_node = &tree.nodes[tree.root_node_index];
-                eprintln!("'instruction' Root Node: probe={:?}, branches={}", root_node.probe, root_node.branches.len());
+                eprintln!(
+                    "'instruction' Root Node: probe={:?}, branches={}",
+                    root_node.probe,
+                    root_node.branches.len()
+                );
             }
         }
     }
 
-    Ok(CompiledSlaTemplateLibrary {
+    let mut library = CompiledSlaTemplateLibrary {
         path: artifact.path.clone(),
         version: artifact.version,
         source_files,
         spaces,
         constructors_by_source,
         subtables,
-    })
+        native: SlaLanguage {
+            path: artifact.path.clone(),
+            version: artifact.version,
+            source_files: BTreeMap::new(),
+            spaces: BTreeMap::new(),
+            subtables: BTreeMap::new(),
+        },
+    };
+    library.native = SlaLanguage::from_compiled_library(&library);
+    Ok(library)
 }
 
 pub fn decode_decision_tree(
+    subtable_id: u32,
     element: &PackedElement,
 ) -> Result<crate::compiler::ir::CompiledDecisionTree> {
     let mut nodes = Vec::new();
-    let root_idx = decode_decision_node(element, &mut nodes)?;
+    let root_idx = decode_decision_node(subtable_id, element, &mut nodes)?;
     let decision_node_count = nodes.len();
     Ok(crate::compiler::ir::CompiledDecisionTree {
         root_node_index: root_idx,
@@ -407,6 +438,7 @@ pub fn decode_decision_tree(
 }
 
 fn decode_decision_node(
+    subtable_id: u32,
     element: &PackedElement,
     nodes: &mut Vec<crate::compiler::ir::CompiledDecisionNode>,
 ) -> Result<usize> {
@@ -439,11 +471,13 @@ fn decode_decision_node(
         let mut val = 0u32;
         for child in &element.children {
             if child.id == sla_format::ELEM_DECISION {
-                let child_idx = decode_decision_node(child, nodes)?;
-                nodes[node_idx].branches.push(crate::compiler::ir::CompiledDecisionEdge {
-                    value: val as u8,
-                    next_node_index: child_idx,
-                });
+                let child_idx = decode_decision_node(subtable_id, child, nodes)?;
+                nodes[node_idx]
+                    .branches
+                    .push(crate::compiler::ir::CompiledDecisionEdge {
+                        value: val as u8,
+                        next_node_index: child_idx,
+                    });
                 val += 1;
             }
         }
@@ -451,15 +485,13 @@ fn decode_decision_node(
         nodes[node_idx].probe = crate::compiler::ir::CompiledDecisionProbe::Terminal;
         for child in &element.children {
             if child.id == sla_format::ELEM_PAIR {
-                let constructor_id = child
-                    .attr_unsigned(sla_format::ATTR_ID)
-                    .or_else(|| {
-                        child.children.iter().find_map(|pair_child| {
-                            (pair_child.id == sla_format::ELEM_CONSTRUCTOR)
-                                .then(|| pair_child.attr_unsigned(sla_format::ATTR_ID))
-                                .flatten()
-                        })
-                    });
+                let constructor_id = child.attr_unsigned(sla_format::ATTR_ID).or_else(|| {
+                    child.children.iter().find_map(|pair_child| {
+                        (pair_child.id == sla_format::ELEM_CONSTRUCTOR)
+                            .then(|| pair_child.attr_unsigned(sla_format::ATTR_ID))
+                            .flatten()
+                    })
+                });
                 let Some(constructor_id) = constructor_id else {
                     continue;
                 };
@@ -471,10 +503,14 @@ fn decode_decision_node(
                     .iter()
                     .find_map(|pair_child| decode_disjoint_pattern(pair_child).ok())
                     .unwrap_or_else(always_true_instruction_pattern);
-                nodes[node_idx].leaf_entries.push(CompiledDecisionLeafEntry {
-                    constructor_index: constructor_id as usize,
-                    pattern,
-                });
+                nodes[node_idx]
+                    .leaf_entries
+                    .push(CompiledDecisionLeafEntry {
+                        subtable_id,
+                        constructor_id: constructor_id as u32,
+                        constructor_index: constructor_id as usize,
+                        pattern,
+                    });
             }
         }
     }
@@ -493,24 +529,22 @@ fn always_true_instruction_pattern() -> CompiledDisjointPattern {
 
 fn decode_disjoint_pattern(element: &PackedElement) -> Result<CompiledDisjointPattern> {
     match element.id {
-        sla_format::ELEM_INSTRUCT_PAT => Ok(CompiledDisjointPattern::Instruction(
-            decode_pattern_block(
+        sla_format::ELEM_INSTRUCT_PAT => {
+            Ok(CompiledDisjointPattern::Instruction(decode_pattern_block(
                 element
                     .children
                     .iter()
                     .find(|child| child.id == sla_format::ELEM_PAT_BLOCK)
                     .ok_or_else(|| anyhow!("instruction pattern missing pat_block"))?,
-            )?,
-        )),
-        sla_format::ELEM_CONTEXT_PAT => Ok(CompiledDisjointPattern::Context(
-            decode_pattern_block(
-                element
-                    .children
-                    .iter()
-                    .find(|child| child.id == sla_format::ELEM_PAT_BLOCK)
-                    .ok_or_else(|| anyhow!("context pattern missing pat_block"))?,
-            )?,
-        )),
+            )?))
+        }
+        sla_format::ELEM_CONTEXT_PAT => Ok(CompiledDisjointPattern::Context(decode_pattern_block(
+            element
+                .children
+                .iter()
+                .find(|child| child.id == sla_format::ELEM_PAT_BLOCK)
+                .ok_or_else(|| anyhow!("context pattern missing pat_block"))?,
+        )?)),
         sla_format::ELEM_COMBINE_PAT => {
             let context = element
                 .children
@@ -522,7 +556,8 @@ fn decode_disjoint_pattern(element: &PackedElement) -> Result<CompiledDisjointPa
                 .iter()
                 .find(|child| child.id == sla_format::ELEM_INSTRUCT_PAT)
                 .ok_or_else(|| anyhow!("combine pattern missing instruct_pat"))?;
-            let CompiledDisjointPattern::Context(context) = decode_disjoint_pattern(context)? else {
+            let CompiledDisjointPattern::Context(context) = decode_disjoint_pattern(context)?
+            else {
                 bail!("combine pattern context child decoded to unexpected kind");
             };
             let CompiledDisjointPattern::Instruction(instruction) =
@@ -553,7 +588,9 @@ fn decode_pattern_block(element: &PackedElement) -> Result<CompiledPatternBlock>
     if element.id != sla_format::ELEM_PAT_BLOCK {
         bail!("expected pat_block element, got {}", element.id);
     }
-    let offset = element.attr_signed(sla_format::ATTR_OFF).unwrap_or_default() as i32;
+    let offset = element
+        .attr_signed(sla_format::ATTR_OFF)
+        .unwrap_or_default() as i32;
     let nonzero_size = element
         .attr_signed(sla_format::ATTR_NONZERO)
         .unwrap_or_default() as i32;
