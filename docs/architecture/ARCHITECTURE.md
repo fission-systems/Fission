@@ -10,6 +10,11 @@ Updated: 2026-04-15
 - Facts and native preparation owner: `fission-static`
 - Printer and postprocess: consume-only
 
+Ghidra parity gaps are tracked separately in
+`docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md`. That audit is reporting-only:
+it must not be used as a semantic repair layer or as justification for
+approximate P-code success.
+
 ## Decompiler Layers
 
 ### `fission-pcode`

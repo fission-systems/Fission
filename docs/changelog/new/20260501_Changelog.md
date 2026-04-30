@@ -84,3 +84,35 @@
   - `average_similarity_score = 1.0`
   - `average_parity_ratio = 1.0`
   - `template_source_totals.sla_construct_tpl = 46`
+
+## Ghidra Parity Gap Audit
+
+- Added `scripts/audit/ghidra_parity_audit.py` as a reporting-only owner-chain audit for Ghidra parity gaps.
+- Added `docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md` to track current SLEIGH, loader, and FID/signature implementation status against Ghidra 12.0.4 structural owners.
+- The audit records gaps without changing semantics:
+  - SLEIGH remains partial because `.sla ConstructTpl` execution is active, but legacy token cursor and BoundOperand-derived handle debt still appear in successful-row audits.
+  - Loader remains partial because implemented executable loaders are Fission-owned, while lower-priority Ghidra loader families stay typed unsupported.
+  - FID remains partial because raw `.fidbf` records decode through a DBHandle-style reader, while packed `.fidb` and complete program-seeker/hash input parity remain typed unsupported.
+- Updated the raw P-code benchmark README to point at the Ghidra parity audit command.
+
+## Ghidra Parity Audit Validation
+
+- `python3 scripts/audit/ghidra_parity_audit.py --markdown`
+- Raw P-code gate report: `benchmark/artifacts/raw_p_code_benchmark/ghidra_gap_audit/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+- Current audit snapshot:
+  - `sleigh_native_model = partial`
+  - `sleigh_token_cursor = legacy_debt`
+  - `sleigh_handle_resolution = legacy_debt`
+  - `sleigh_compatibility_sources = legacy_debt`
+  - `loader_family_matrix = partial`
+  - `loader_raw_binary = typed_unsupported`
+  - `loader_postload_analyzers = legacy_debt`
+  - `fid_raw_dbhandle = partial`
+  - `fid_hash_and_match = partial`

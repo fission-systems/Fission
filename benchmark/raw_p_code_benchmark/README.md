@@ -142,6 +142,15 @@ The aggregate manifest report now also includes:
 observed while preserving the canonical parity gate, and must not be used to
 promote approximate P-code success.
 
+For a broader Ghidra owner-chain gap snapshot, run:
+
+```bash
+python3 scripts/audit/ghidra_parity_audit.py --markdown
+```
+
+The audit covers SLEIGH, loader, and FID/signature gaps. It is diagnostic only;
+the raw P-code success rule remains real decoded `.sla ConstructTpl` execution.
+
 Outputs:
 
 - `ghidra_raw_pcode.json`
