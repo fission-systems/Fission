@@ -1,9 +1,6 @@
 use crate::loader::reader::{ByteReader, SparseImage};
-use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
-};
+use crate::loader::types::{DataBuffer, LoadedBinary};
 use crate::prelude::*;
-use fission_core::architecture::{ArchitectureDescriptor, BinaryLoadSpec};
 
 pub struct IntelHexLoader;
 pub struct MotorolaHexLoader;
@@ -197,72 +194,17 @@ fn build_hex_binary(
     image: SparseImage,
     entry: Option<u64>,
 ) -> Result<LoadedBinary> {
+    let _ = (path, entry);
     if image.is_empty() {
         return Err(err!(
             loader,
             "MalformedHeader: {format} contains no data records"
         ));
     }
-    let (image_base, materialized) = image.materialize(0xff)?;
-    let data = DataBuffer::Heap(materialized);
-    let size = data.as_slice().len() as u64;
-    let entry_point = entry.unwrap_or(image_base);
-    let (architecture, load_spec) = generic_unknown_load_spec(format, image_base);
-    let function = FunctionInfo {
-        name: "entry".to_string(),
-        address: entry_point,
-        size: 0,
-        is_export: false,
-        is_import: false,
-        origin: Some(format!("{format}-entry")),
-        kind: Some("entry".to_string()),
-        source_section: Some("image".to_string()),
-        external_library: None,
-        is_thunk_like: false,
-    };
-    let section = SectionInfo {
-        name: "image".to_string(),
-        virtual_address: image_base,
-        virtual_size: size,
-        file_offset: 0,
-        file_size: size,
-        is_executable: true,
-        is_readable: true,
-        is_writable: true,
-    };
-
-    LoadedBinaryBuilder::new(path, data)
-        .format(format)
-        .architecture(architecture)
-        .load_spec(load_spec)
-        .entry_point(entry_point)
-        .image_base(image_base)
-        .is_64bit(false)
-        .add_section(section)
-        .add_function(function)
-        .build()
-}
-
-pub(crate) fn generic_unknown_load_spec(
-    format: &str,
-    image_base: u64,
-) -> (ArchitectureDescriptor, BinaryLoadSpec) {
-    let architecture = ArchitectureDescriptor::new(
-        "unknown",
-        "little",
-        32,
-        "default",
-        Some("unknown".to_string()),
-        format!("{format} generic binary image"),
-    );
-    let load_spec = BinaryLoadSpec::new(
-        format,
-        image_base,
-        "unknown:LE:32:default",
-        "default",
-        format!("{format} generic binary image"),
-    );
-    (architecture, load_spec)
+    Err(err!(
+        loader,
+        "LoadSpecNotFound: {format} requires an explicit load spec"
+    ))
 }
 
 fn first_ascii_line(bytes: &[u8]) -> Option<&str> {
@@ -319,12 +261,9 @@ mod tests {
     #[test]
     fn intel_hex_maps_data_and_entry() {
         let text = b":020000040001F9\n:0400100001020304E2\n:0400000500010010E6\n:00000001FF\n";
-        let binary = IntelHexLoader::parse(DataBuffer::Heap(text.to_vec()), "test.hex".to_string())
-            .expect("load intel hex");
-        assert_eq!(binary.format, "Intel HEX");
-        assert_eq!(binary.image_base, 0x10010);
-        assert_eq!(binary.entry_point, 0x10010);
-        assert_eq!(binary.sections[0].virtual_size, 4);
+        let err = IntelHexLoader::parse(DataBuffer::Heap(text.to_vec()), "test.hex".to_string())
+            .expect_err("Intel HEX needs an explicit load spec");
+        assert!(format!("{err}").contains("LoadSpecNotFound"));
     }
 
     #[test]
@@ -340,12 +279,9 @@ mod tests {
     #[test]
     fn motorola_hex_maps_data_and_entry() {
         let text = b"S3090000100001020304DC\nS70500001000EA\n";
-        let binary =
+        let err =
             MotorolaHexLoader::parse(DataBuffer::Heap(text.to_vec()), "test.srec".to_string())
-                .expect("load srec");
-        assert_eq!(binary.format, "Motorola S-record");
-        assert_eq!(binary.image_base, 0x1000);
-        assert_eq!(binary.entry_point, 0x1000);
-        assert_eq!(binary.sections[0].virtual_size, 4);
+                .expect_err("Motorola S-record needs an explicit load spec");
+        assert!(format!("{err}").contains("LoadSpecNotFound"));
     }
 }

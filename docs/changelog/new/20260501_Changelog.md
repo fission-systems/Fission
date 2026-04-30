@@ -222,6 +222,52 @@
 - Updated `.gitignore` so `benchmark/binary/realworld/**` stays out of git while `benchmark/binary/realworld/.gitkeep` can keep the local corpus root.
 - Updated `benchmark/BENCHMARK_GUIDE.md` with the GitHub release collection command and the no-binary-staging policy.
 
+## Loader Accuracy Gate
+
+- Strengthened the loader route contract so only inputs with a concrete, format-proven load spec can become executable `LoadedBinary` instances.
+- Removed the generic `unknown:LE:32:default` success path from raw binary, Intel HEX, Motorola S-record, MZ, NE, and Unix a.out loaders.
+- Raw binary loading now remains fail-closed unless an explicit caller-provided raw load hint is supplied.
+- Intel HEX, Motorola S-record, MZ, NE, and Unix a.out still validate exact headers/records, but return typed `LoadSpecNotFound` until a real load-spec source is available.
+- Expanded exact container routing for XZ, 7z, RAR, and Unix ar archives. These inputs now return `ContainerRequiresExtraction(...)` instead of falling through to unknown/raw executable handling.
+- Added `GzfLoader` to the known unsupported loader-family table using the exact Ghidra packed-file magic, returning typed `UnsupportedLoaderFamily(GzfLoader)`.
+- Updated loader smoke classification with explicit `load_spec_not_found` and `malformed_header` buckets.
+
+## Loader Accuracy Validation
+
+- `cargo check -p fission-loader`
+- `cargo test -p fission-loader --lib -- --test-threads=1`
+  - `55 passed`
+  - Note: the plain `cargo test -p fission-loader` command reached rustdoc/doc-test execution and did not terminate promptly in this workspace; unit tests were run with `--lib` to isolate loader behavior.
+- `cargo check -p fission-core`
+- `cargo check -p fission-cli`
+- `cargo check -p fission-tauri`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile scripts/benchmark/*.py scripts/corpus/*.py`
+- GitHub release loader smoke:
+  - Report: `benchmark/artifacts/realworld_suite/github_release_loader_accuracy_gate/loader_smoke_report.json`
+  - `row_count = 9`
+  - `loaded = 3`
+  - `load_failed = 6`
+  - `failure_bucket_counts.container_requires_extraction = 6`
+  - `input_classification_counts.executable_loaded = 3`
+  - `input_classification_counts.container:ZipArchive = 2`
+  - `input_classification_counts.container:Xz = 4`
+- Raw P-code canonical gate:
+  - Report: `benchmark/artifacts/raw_p_code_benchmark/loader_accuracy_gate_canonical/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+
+## Loader Accuracy Notes
+
+- No heuristic MSI/container string detection was added.
+- No approximate loader metadata or raw executable fallback was added.
+- No downloaded binaries, benchmark output artifacts, or Ghidra project DB files are staged with this change.
+
 ## GitHub Release Corpus Validation
 
 - `python3 -m py_compile scripts/corpus/collect_github_release_samples.py scripts/corpus/hash_and_manifest.py scripts/benchmark/run_loader_smoke.py scripts/benchmark/run_realworld_suite.py`

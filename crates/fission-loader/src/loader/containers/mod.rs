@@ -6,6 +6,10 @@ pub enum ContainerFormat {
     ZipArchive,
     Gzip,
     Cabinet,
+    Xz,
+    SevenZip,
+    Rar,
+    UnixArchive,
 }
 
 impl ContainerFormat {
@@ -15,6 +19,10 @@ impl ContainerFormat {
             Self::ZipArchive => "ZipArchive",
             Self::Gzip => "Gzip",
             Self::Cabinet => "Cabinet",
+            Self::Xz => "Xz",
+            Self::SevenZip => "SevenZip",
+            Self::Rar => "Rar",
+            Self::UnixArchive => "UnixArchive",
         }
     }
 }
@@ -36,8 +44,20 @@ pub fn detect_container(bytes: &[u8]) -> Result<Option<ContainerFormat>> {
     if looks_like_gzip(bytes) {
         return Ok(Some(ContainerFormat::Gzip));
     }
+    if looks_like_xz(bytes) {
+        return Ok(Some(ContainerFormat::Xz));
+    }
+    if looks_like_7z(bytes) {
+        return Ok(Some(ContainerFormat::SevenZip));
+    }
+    if looks_like_rar(bytes) {
+        return Ok(Some(ContainerFormat::Rar));
+    }
     if looks_like_cabinet(bytes) {
         return Ok(Some(ContainerFormat::Cabinet));
+    }
+    if looks_like_unix_archive(bytes) {
+        return Ok(Some(ContainerFormat::UnixArchive));
     }
     Ok(None)
 }
@@ -52,12 +72,28 @@ fn looks_like_gzip(bytes: &[u8]) -> bool {
     bytes.len() >= 10 && bytes[0] == 0x1f && bytes[1] == 0x8b && bytes[2] == 0x08
 }
 
+fn looks_like_xz(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00])
+}
+
+fn looks_like_7z(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[b'7', b'z', 0xbc, 0xaf, 0x27, 0x1c])
+}
+
+fn looks_like_rar(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"Rar!\x1a\x07\x00") || bytes.starts_with(b"Rar!\x1a\x07\x01\x00")
+}
+
 fn looks_like_cabinet(bytes: &[u8]) -> bool {
     if bytes.len() < 36 || !bytes.starts_with(b"MSCF") {
         return false;
     }
     let cb_cabinet = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
     cb_cabinet >= 36 && cb_cabinet <= bytes.len()
+}
+
+fn looks_like_unix_archive(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"!<arch>\n")
 }
 
 fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
@@ -109,9 +145,9 @@ fn validate_compound_document_header(bytes: &[u8]) -> Result<()> {
             "MalformedHeader: CompoundDocument has no FAT sectors",
         ));
     }
-    let sector_size = 1usize
-        .checked_shl(sector_shift as u32)
-        .ok_or_else(|| FissionError::loader("MalformedHeader: CompoundDocument sector size overflow"))?;
+    let sector_size = 1usize.checked_shl(sector_shift as u32).ok_or_else(|| {
+        FissionError::loader("MalformedHeader: CompoundDocument sector size overflow")
+    })?;
     let sector_count = bytes
         .len()
         .saturating_sub(CFB_HEADER_LEN)
@@ -149,16 +185,16 @@ fn validate_sector_id(id: u32, sector_count: u32, allow_end: bool, label: &str) 
 }
 
 fn u16_le(bytes: &[u8], offset: usize) -> Result<u16> {
-    let raw = bytes
-        .get(offset..offset + 2)
-        .ok_or_else(|| FissionError::loader("MalformedHeader: CompoundDocument u16 out of bounds"))?;
+    let raw = bytes.get(offset..offset + 2).ok_or_else(|| {
+        FissionError::loader("MalformedHeader: CompoundDocument u16 out of bounds")
+    })?;
     Ok(u16::from_le_bytes([raw[0], raw[1]]))
 }
 
 fn u32_le(bytes: &[u8], offset: usize) -> Result<u32> {
-    let raw = bytes
-        .get(offset..offset + 4)
-        .ok_or_else(|| FissionError::loader("MalformedHeader: CompoundDocument u32 out of bounds"))?;
+    let raw = bytes.get(offset..offset + 4).ok_or_else(|| {
+        FissionError::loader("MalformedHeader: CompoundDocument u32 out of bounds")
+    })?;
     Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 
@@ -197,5 +233,25 @@ mod tests {
         bytes[0x1c..0x1e].copy_from_slice(&0xfeffu16.to_le_bytes());
         let err = detect_container(&bytes).expect_err("invalid CFB must be malformed");
         assert!(format!("{err}").contains("MalformedHeader: CompoundDocument"));
+    }
+
+    #[test]
+    fn detects_exact_compression_and_archive_containers() {
+        assert_eq!(
+            detect_container(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]).unwrap(),
+            Some(ContainerFormat::Xz)
+        );
+        assert_eq!(
+            detect_container(&[b'7', b'z', 0xbc, 0xaf, 0x27, 0x1c]).unwrap(),
+            Some(ContainerFormat::SevenZip)
+        );
+        assert_eq!(
+            detect_container(b"Rar!\x1a\x07\x00rest").unwrap(),
+            Some(ContainerFormat::Rar)
+        );
+        assert_eq!(
+            detect_container(b"!<arch>\nmember").unwrap(),
+            Some(ContainerFormat::UnixArchive)
+        );
     }
 }

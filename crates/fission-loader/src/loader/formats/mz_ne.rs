@@ -1,8 +1,5 @@
-use crate::loader::formats::hex::generic_unknown_load_spec;
 use crate::loader::reader::{ByteReader, Endian};
-use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
-};
+use crate::loader::types::{DataBuffer, LoadedBinary, SectionInfo};
 use crate::prelude::*;
 
 pub struct MzLoader;
@@ -18,6 +15,7 @@ impl MzLoader {
         if !Self::looks_like(bytes) {
             return Err(err!(loader, "MalformedHeader: invalid MZ executable"));
         }
+        let _ = path;
         let reader = ByteReader::little(bytes);
         let last_page_bytes = reader.u16(0x02)? as u64;
         let pages = reader.u16(0x04)? as u64;
@@ -28,7 +26,6 @@ impl MzLoader {
         let file_size = mz_file_size(bytes.len() as u64, pages, last_page_bytes);
         let image_size = file_size.saturating_sub(header_size);
         let entry_point = cs.saturating_mul(16).saturating_add(ip);
-        let (architecture, load_spec) = generic_unknown_load_spec("MZ", 0);
 
         let section = SectionInfo {
             name: "dos_image".to_string(),
@@ -40,29 +37,11 @@ impl MzLoader {
             is_readable: true,
             is_writable: true,
         };
-        let function = FunctionInfo {
-            name: "entry".to_string(),
-            address: entry_point,
-            size: 0,
-            is_export: false,
-            is_import: false,
-            origin: Some("mz-entry".to_string()),
-            kind: Some("entry".to_string()),
-            source_section: Some("dos_image".to_string()),
-            external_library: None,
-            is_thunk_like: false,
-        };
-
-        LoadedBinaryBuilder::new(path, data)
-            .format("MZ")
-            .architecture(architecture)
-            .load_spec(load_spec)
-            .entry_point(entry_point)
-            .image_base(0)
-            .is_64bit(false)
-            .add_section(section)
-            .add_function(function)
-            .build()
+        let _ = (image_size, entry_point, section);
+        Err(err!(
+            loader,
+            "LoadSpecNotFound: MZ requires an exact load spec"
+        ))
     }
 }
 
@@ -76,6 +55,7 @@ impl NeLoader {
         if !Self::looks_like(bytes) {
             return Err(err!(loader, "MalformedHeader: invalid NE executable"));
         }
+        let _ = path;
         let reader = ByteReader::little(bytes);
         let ne_offset = reader.u32(0x3c)? as usize;
         let segment_count = reader.u16(ne_offset + 0x1c)? as usize;
@@ -93,34 +73,11 @@ impl NeLoader {
             segment_count,
             alignment_shift,
         )?;
-        let (architecture, load_spec) = generic_unknown_load_spec("NE", 0);
-        let functions = if entry_point != 0 {
-            vec![FunctionInfo {
-                name: "entry".to_string(),
-                address: entry_point,
-                size: 0,
-                is_export: false,
-                is_import: false,
-                origin: Some("ne-entry".to_string()),
-                kind: Some("entry".to_string()),
-                source_section: None,
-                external_library: None,
-                is_thunk_like: false,
-            }]
-        } else {
-            Vec::new()
-        };
-
-        LoadedBinaryBuilder::new(path, data)
-            .format("NE")
-            .architecture(architecture)
-            .load_spec(load_spec)
-            .entry_point(entry_point)
-            .image_base(0)
-            .is_64bit(false)
-            .add_sections(segments)
-            .add_functions(functions)
-            .build()
+        let _ = (entry_point, segments);
+        Err(err!(
+            loader,
+            "LoadSpecNotFound: NE requires an exact load spec"
+        ))
     }
 }
 
@@ -207,11 +164,9 @@ mod tests {
 
     #[test]
     fn mz_loader_maps_entry() {
-        let binary = MzLoader::parse(DataBuffer::Heap(minimal_mz()), "test.exe".to_string())
-            .expect("load mz");
-        assert_eq!(binary.format, "MZ");
-        assert_eq!(binary.entry_point, 0x10);
-        assert_eq!(binary.sections[0].file_offset, 0x40);
+        let err = MzLoader::parse(DataBuffer::Heap(minimal_mz()), "test.exe".to_string())
+            .expect_err("MZ needs an exact load spec");
+        assert!(format!("{err}").contains("LoadSpecNotFound"));
     }
 
     #[test]
@@ -225,10 +180,8 @@ mod tests {
         bytes[0x80 + 0x32..0x80 + 0x34].copy_from_slice(&4u16.to_le_bytes());
         bytes[0xc0..0xc2].copy_from_slice(&8u16.to_le_bytes());
         bytes[0xc2..0xc4].copy_from_slice(&0x20u16.to_le_bytes());
-        let binary =
-            NeLoader::parse(DataBuffer::Heap(bytes), "test.ne".to_string()).expect("load ne");
-        assert_eq!(binary.format, "NE");
-        assert_eq!(binary.sections.len(), 1);
-        assert_eq!(binary.sections[0].file_offset, 0x80);
+        let err = NeLoader::parse(DataBuffer::Heap(bytes), "test.ne".to_string())
+            .expect_err("NE needs an exact load spec");
+        assert!(format!("{err}").contains("LoadSpecNotFound"));
     }
 }

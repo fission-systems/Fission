@@ -1,4 +1,3 @@
-use crate::loader::formats::hex::generic_unknown_load_spec;
 use crate::loader::types::{
     DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
 };
@@ -37,16 +36,6 @@ impl BinaryLoader {
             hint.architecture,
             hint.load_spec,
         )
-    }
-
-    pub fn parse_with_generic_unknown(
-        data: DataBuffer,
-        path: String,
-        image_base: u64,
-        entry_point: u64,
-    ) -> Result<LoadedBinary> {
-        let (architecture, load_spec) = generic_unknown_load_spec("Raw Binary", image_base);
-        build_raw_binary(data, path, image_base, entry_point, architecture, load_spec)
     }
 }
 
@@ -109,12 +98,30 @@ mod tests {
     }
 
     #[test]
-    fn raw_binary_loads_with_explicit_generic_hint() {
-        let binary = BinaryLoader::parse_with_generic_unknown(
+    fn raw_binary_loads_with_explicit_hint() {
+        let hint = RawLoadHint {
+            image_base: 0x1000,
+            entry_point: 0x1000,
+            architecture: ArchitectureDescriptor::new(
+                "x86",
+                "little",
+                32,
+                "default",
+                Some("raw".to_string()),
+                "explicit raw test hint",
+            ),
+            load_spec: BinaryLoadSpec::new(
+                "Raw Binary",
+                0x1000,
+                "x86:LE:32:default",
+                "default",
+                "explicit raw test hint",
+            ),
+        };
+        let binary = BinaryLoader::parse_with_hint(
             DataBuffer::Heap(vec![0x90, 0xc3]),
             "raw.bin".to_string(),
-            0x1000,
-            0x1000,
+            hint,
         )
         .expect("load raw");
         assert_eq!(binary.format, "Raw Binary");

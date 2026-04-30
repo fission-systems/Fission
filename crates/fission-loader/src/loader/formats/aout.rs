@@ -1,8 +1,5 @@
-use crate::loader::formats::hex::generic_unknown_load_spec;
 use crate::loader::reader::{ByteReader, Endian};
-use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
-};
+use crate::loader::types::{DataBuffer, LoadedBinary, SectionInfo};
 use crate::prelude::*;
 
 pub struct UnixAoutLoader;
@@ -19,7 +16,6 @@ struct AoutHeader {
     data_size: u32,
     bss_size: u32,
     symbol_size: u32,
-    entry: u32,
 }
 
 impl UnixAoutLoader {
@@ -30,6 +26,7 @@ impl UnixAoutLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let header = parse_header(data.as_slice())
             .ok_or_else(|| err!(loader, "MalformedHeader: invalid Unix a.out header"))?;
+        let _ = path;
         let file_data_len = header
             .text_size
             .checked_add(header.data_size)
@@ -92,30 +89,11 @@ impl UnixAoutLoader {
             ));
         }
 
-        let (architecture, load_spec) = generic_unknown_load_spec("Unix a.out", 0);
-        let function = FunctionInfo {
-            name: "entry".to_string(),
-            address: header.entry as u64,
-            size: 0,
-            is_export: false,
-            is_import: false,
-            origin: Some("aout-entry".to_string()),
-            kind: Some("entry".to_string()),
-            source_section: Some("text".to_string()),
-            external_library: None,
-            is_thunk_like: false,
-        };
-
-        LoadedBinaryBuilder::new(path, data)
-            .format("Unix a.out")
-            .architecture(architecture)
-            .load_spec(load_spec)
-            .entry_point(header.entry as u64)
-            .image_base(0)
-            .is_64bit(false)
-            .add_sections(sections)
-            .add_function(function)
-            .build()
+        let _ = sections;
+        Err(err!(
+            loader,
+            "LoadSpecNotFound: Unix a.out requires an exact load spec"
+        ))
     }
 }
 
@@ -138,7 +116,7 @@ fn parse_header_with_endian(bytes: &[u8], endian: Endian) -> Option<AoutHeader> 
     let data_size = reader.u32(8).ok()?;
     let bss_size = reader.u32(12).ok()?;
     let symbol_size = reader.u32(16).ok()?;
-    let entry = reader.u32(20).ok()?;
+    let _entry = reader.u32(20).ok()?;
     if text_size == 0 && data_size == 0 {
         return None;
     }
@@ -148,7 +126,6 @@ fn parse_header_with_endian(bytes: &[u8], endian: Endian) -> Option<AoutHeader> 
         data_size,
         bss_size,
         symbol_size,
-        entry,
     })
 }
 
@@ -168,10 +145,8 @@ mod tests {
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&[0x90, 0x90, 0xc3, 0x00, 0x01, 0x02]);
-        let binary = UnixAoutLoader::parse(DataBuffer::Heap(bytes), "test.out".to_string())
-            .expect("load a.out");
-        assert_eq!(binary.format, "Unix a.out");
-        assert_eq!(binary.sections.len(), 3);
-        assert_eq!(binary.sections[0].name, "text");
+        let err = UnixAoutLoader::parse(DataBuffer::Heap(bytes), "test.out".to_string())
+            .expect_err("a.out needs an exact load spec");
+        assert!(format!("{err}").contains("LoadSpecNotFound"));
     }
 }

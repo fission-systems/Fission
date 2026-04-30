@@ -65,10 +65,14 @@ def classify_error(meta: dict[str, Any]) -> str:
         return "container_requires_extraction"
     if "unsupportedloaderfamily" in text:
         return "unsupported_loader_family"
+    if "loadspecnotfound" in text:
+        return "load_spec_not_found"
     if "unsupported machine" in text:
         return "unsupported_machine"
     if "unknown binary format" in text or "unsupported format" in text:
         return "unsupported_format"
+    if "malformedheader" in text or "malformed header" in text:
+        return "malformed_header"
     if "load spec" in text:
         return "load_spec"
     if "timed out" in text or "timeout" in text:
@@ -100,6 +104,10 @@ def next_action_for(bucket: str | None) -> str | None:
         return "inspect_format_or_add_exact_loader"
     if bucket == "load_spec":
         return "add_or_fix_load_spec"
+    if bucket == "load_spec_not_found":
+        return "add_exact_load_spec_or_skip"
+    if bucket == "malformed_header":
+        return "inspect_or_fix_malformed_input"
     return None
 
 

@@ -29,6 +29,7 @@ pub enum KnownUnsupportedLoaderFamily {
     SomLoader,
     OmfLoader,
     Omf51Loader,
+    GzfLoader,
     DbgLoader,
     DefLoader,
     MapLoader,
@@ -45,6 +46,7 @@ impl KnownUnsupportedLoaderFamily {
             Self::SomLoader => "SomLoader",
             Self::OmfLoader => "OmfLoader",
             Self::Omf51Loader => "Omf51Loader",
+            Self::GzfLoader => "GzfLoader",
             Self::DbgLoader => "DbgLoader",
             Self::DefLoader => "DefLoader",
             Self::MapLoader => "MapLoader",
@@ -184,6 +186,9 @@ fn looks_like_macho(bytes: &[u8]) -> bool {
 }
 
 fn known_unsupported_loader_family(bytes: &[u8]) -> Option<KnownUnsupportedLoaderFamily> {
+    if looks_like_gzf(bytes) {
+        return Some(KnownUnsupportedLoaderFamily::GzfLoader);
+    }
     if bytes.starts_with(b"dyld_v1") {
         return Some(KnownUnsupportedLoaderFamily::DyldCacheLoader);
     }
@@ -198,6 +203,17 @@ fn known_unsupported_loader_family(bytes: &[u8]) -> Option<KnownUnsupportedLoade
         return Some(KnownUnsupportedLoaderFamily::OmfLoader);
     }
     None
+}
+
+fn looks_like_gzf(bytes: &[u8]) -> bool {
+    const ITEM_SERIALIZER_MAGIC_OFFSET: usize = 6;
+    const ITEM_SERIALIZER_MAGIC: [u8; 8] = 0x2e30212634e92c20u64.to_be_bytes();
+    bytes
+        .get(
+            ITEM_SERIALIZER_MAGIC_OFFSET
+                ..ITEM_SERIALIZER_MAGIC_OFFSET + ITEM_SERIALIZER_MAGIC.len(),
+        )
+        .is_some_and(|magic| magic == ITEM_SERIALIZER_MAGIC)
 }
 
 #[cfg(test)]
@@ -236,6 +252,25 @@ mod tests {
         let err = LoaderPipeline::detect(&[0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0, 0])
             .expect_err("gzip containers are not executable images");
         assert!(format!("{err}").contains("ContainerRequiresExtraction(Gzip)"));
+    }
+
+    #[test]
+    fn routes_xz_and_unix_archive_as_containers() {
+        let err = LoaderPipeline::detect(&[0xfd, b'7', b'z', b'X', b'Z', 0x00])
+            .expect_err("xz containers are not executable images");
+        assert!(format!("{err}").contains("ContainerRequiresExtraction(Xz)"));
+
+        let err = LoaderPipeline::detect(b"!<arch>\nmember")
+            .expect_err("archives are not direct executable images");
+        assert!(format!("{err}").contains("ContainerRequiresExtraction(UnixArchive)"));
+    }
+
+    #[test]
+    fn routes_gzf_as_known_unsupported_loader_family() {
+        let mut bytes = vec![0u8; 14];
+        bytes[6..14].copy_from_slice(&0x2e30212634e92c20u64.to_be_bytes());
+        let err = LoaderPipeline::detect(&bytes).expect_err("gzf is not executable image input");
+        assert!(format!("{err}").contains("UnsupportedLoaderFamily(GzfLoader)"));
     }
 
     #[test]
