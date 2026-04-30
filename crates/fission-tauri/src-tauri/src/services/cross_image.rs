@@ -477,42 +477,6 @@ mod tests {
     }
 
     #[test]
-    fn ida76sp1_smoke_collects_some_renames_when_corpus_exists() {
-        let sample = Path::new("/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida64.dll");
-        if !sample.exists() {
-            return;
-        }
-
-        let binary = LoadedBinary::from_file(sample).expect("load ida64.dll");
-        let folder = sample.parent().expect("ida76sp1 folder");
-        let propagated = collect_folder_propagated_renames(&binary, folder);
-
-        assert!(
-            !propagated.is_empty(),
-            "expected some propagated names from ida76sp1 siblings"
-        );
-    }
-
-    #[test]
-    fn plugin_scope_candidates_include_plugins_subdir() {
-        let sample = Path::new("/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida64.dll");
-        if !sample.exists() {
-            return;
-        }
-
-        let folder = sample.parent().expect("ida76sp1 folder");
-        let candidates = collect_candidate_module_paths(folder);
-        assert!(
-            candidates.iter().any(|path| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().eq_ignore_ascii_case("hexrays.dll"))
-                    .unwrap_or(false)
-            }),
-            "expected plugins/hexrays.dll to be included in propagation scope"
-        );
-    }
-
-    #[test]
     fn weak_name_heuristics_cover_wrappers_and_ordinals() {
         for name in [
             "sub_401000",
