@@ -1,5 +1,5 @@
 use super::{
-    DataBuffer, LoadedBinary, coff, elf,
+    DataBuffer, LoadedBinary, coff, containers, elf,
     formats::{aout, hex, mz_ne},
     macho, pe,
 };
@@ -25,22 +25,41 @@ pub enum DetectedFormat {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KnownUnsupportedLoaderFamily {
     DyldCacheLoader,
-    GzfLoader,
     PefLoader,
     SomLoader,
     OmfLoader,
+    Omf51Loader,
+    DbgLoader,
+    DefLoader,
+    MapLoader,
+    GdtLoader,
+    XmlLoader,
+    DecompileDebugXmlLoader,
 }
 
 impl KnownUnsupportedLoaderFamily {
     fn as_str(self) -> &'static str {
         match self {
             Self::DyldCacheLoader => "DyldCacheLoader",
-            Self::GzfLoader => "GzfLoader",
             Self::PefLoader => "PefLoader",
             Self::SomLoader => "SomLoader",
             Self::OmfLoader => "OmfLoader",
+            Self::Omf51Loader => "Omf51Loader",
+            Self::DbgLoader => "DbgLoader",
+            Self::DefLoader => "DefLoader",
+            Self::MapLoader => "MapLoader",
+            Self::GdtLoader => "GdtLoader",
+            Self::XmlLoader => "XmlLoader",
+            Self::DecompileDebugXmlLoader => "DecompileDebugXmlLoader",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoaderRoute {
+    Executable(DetectedFormat),
+    Container(containers::ContainerFormat),
+    KnownUnsupported(KnownUnsupportedLoaderFamily),
 }
 
 /// Ghidra-style loader pipeline entrypoint.
@@ -51,7 +70,21 @@ pub struct LoaderPipeline;
 
 impl LoaderPipeline {
     pub fn load(data: DataBuffer, path: String) -> Result<LoadedBinary> {
-        let format = Self::detect(data.as_slice())?;
+        let format = match Self::route(data.as_slice())? {
+            LoaderRoute::Executable(format) => format,
+            LoaderRoute::Container(container) => {
+                return Err(FissionError::loader(format!(
+                    "ContainerRequiresExtraction({})",
+                    container.as_str()
+                )));
+            }
+            LoaderRoute::KnownUnsupported(loader_family) => {
+                return Err(FissionError::loader(format!(
+                    "UnsupportedLoaderFamily({})",
+                    loader_family.as_str()
+                )));
+            }
+        };
         match format {
             DetectedFormat::Pe => pe::PeLoader::parse(data, path),
             DetectedFormat::Coff => coff::CoffLoader::parse(data, path),
@@ -66,41 +99,55 @@ impl LoaderPipeline {
     }
 
     pub fn detect(bytes: &[u8]) -> Result<DetectedFormat> {
+        match Self::route(bytes)? {
+            LoaderRoute::Executable(format) => Ok(format),
+            LoaderRoute::Container(container) => Err(FissionError::loader(format!(
+                "ContainerRequiresExtraction({})",
+                container.as_str()
+            ))),
+            LoaderRoute::KnownUnsupported(loader_family) => Err(FissionError::loader(format!(
+                "UnsupportedLoaderFamily({})",
+                loader_family.as_str()
+            ))),
+        }
+    }
+
+    pub fn route(bytes: &[u8]) -> Result<LoaderRoute> {
         if bytes.len() < 4 {
             return Err(FissionError::loader("Binary too small"));
         }
         if looks_like_pe(bytes) {
-            return Ok(DetectedFormat::Pe);
+            return Ok(LoaderRoute::Executable(DetectedFormat::Pe));
         }
         if bytes.starts_with(b"\x7fELF") {
-            return Ok(DetectedFormat::Elf);
+            return Ok(LoaderRoute::Executable(DetectedFormat::Elf));
         }
         if coff::CoffLoader::looks_like_coff_object(bytes) {
-            return Ok(DetectedFormat::Coff);
+            return Ok(LoaderRoute::Executable(DetectedFormat::Coff));
         }
         if looks_like_macho(bytes) {
-            return Ok(DetectedFormat::MachO);
+            return Ok(LoaderRoute::Executable(DetectedFormat::MachO));
         }
         if hex::IntelHexLoader::looks_like(bytes) {
-            return Ok(DetectedFormat::IntelHex);
+            return Ok(LoaderRoute::Executable(DetectedFormat::IntelHex));
         }
         if hex::MotorolaHexLoader::looks_like(bytes) {
-            return Ok(DetectedFormat::MotorolaHex);
+            return Ok(LoaderRoute::Executable(DetectedFormat::MotorolaHex));
         }
         if mz_ne::NeLoader::looks_like(bytes) {
-            return Ok(DetectedFormat::Ne);
+            return Ok(LoaderRoute::Executable(DetectedFormat::Ne));
         }
         if mz_ne::MzLoader::looks_like(bytes) {
-            return Ok(DetectedFormat::Mz);
+            return Ok(LoaderRoute::Executable(DetectedFormat::Mz));
         }
         if aout::UnixAoutLoader::looks_like(bytes) {
-            return Ok(DetectedFormat::UnixAout);
+            return Ok(LoaderRoute::Executable(DetectedFormat::UnixAout));
+        }
+        if let Some(container) = containers::detect_container(bytes)? {
+            return Ok(LoaderRoute::Container(container));
         }
         if let Some(loader_family) = known_unsupported_loader_family(bytes) {
-            return Err(FissionError::loader(format!(
-                "UnsupportedLoaderFamily({})",
-                loader_family.as_str()
-            )));
+            return Ok(LoaderRoute::KnownUnsupported(loader_family));
         }
         Err(FissionError::loader(
             "UnsupportedFormat: unknown binary format",
@@ -140,9 +187,6 @@ fn known_unsupported_loader_family(bytes: &[u8]) -> Option<KnownUnsupportedLoade
     if bytes.starts_with(b"dyld_v1") {
         return Some(KnownUnsupportedLoaderFamily::DyldCacheLoader);
     }
-    if bytes.starts_with(&[0x1f, 0x8b]) {
-        return Some(KnownUnsupportedLoaderFamily::GzfLoader);
-    }
     if bytes.starts_with(&[0x4a, 0x6f, 0x79, 0x21]) {
         return Some(KnownUnsupportedLoaderFamily::PefLoader);
     }
@@ -167,6 +211,10 @@ mod tests {
         bytes[0x3c..0x40].copy_from_slice(&0x40u32.to_le_bytes());
         bytes[0x40..0x44].copy_from_slice(b"PE\0\0");
         assert_eq!(LoaderPipeline::detect(&bytes).unwrap(), DetectedFormat::Pe);
+        assert_eq!(
+            LoaderPipeline::route(&bytes).unwrap(),
+            LoaderRoute::Executable(DetectedFormat::Pe)
+        );
     }
 
     #[test]
@@ -184,9 +232,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_known_unsupported_loader_family_with_typed_message() {
-        let err = LoaderPipeline::detect(&[0x1f, 0x8b, 0x08, 0x00])
-            .expect_err("gzip-backed GzfLoader is not loaded yet");
-        assert!(format!("{err}").contains("UnsupportedLoaderFamily(GzfLoader)"));
+    fn rejects_gzip_container_with_typed_message() {
+        let err = LoaderPipeline::detect(&[0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0, 0])
+            .expect_err("gzip containers are not executable images");
+        assert!(format!("{err}").contains("ContainerRequiresExtraction(Gzip)"));
+    }
+
+    #[test]
+    fn routes_compound_document_as_container() {
+        let mut bytes = vec![0u8; 1536];
+        bytes[0..8].copy_from_slice(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+        bytes[0x18..0x1a].copy_from_slice(&0x003eu16.to_le_bytes());
+        bytes[0x1a..0x1c].copy_from_slice(&3u16.to_le_bytes());
+        bytes[0x1c..0x1e].copy_from_slice(&0xfffeu16.to_le_bytes());
+        bytes[0x1e..0x20].copy_from_slice(&9u16.to_le_bytes());
+        bytes[0x20..0x22].copy_from_slice(&6u16.to_le_bytes());
+        bytes[0x2c..0x30].copy_from_slice(&1u32.to_le_bytes());
+        bytes[0x30..0x34].copy_from_slice(&1u32.to_le_bytes());
+        bytes[0x38..0x3c].copy_from_slice(&4096u32.to_le_bytes());
+        bytes[0x3c..0x40].copy_from_slice(&0xffff_fffeu32.to_le_bytes());
+        bytes[0x44..0x48].copy_from_slice(&0xffff_fffeu32.to_le_bytes());
+
+        assert_eq!(
+            LoaderPipeline::route(&bytes).unwrap(),
+            LoaderRoute::Container(containers::ContainerFormat::CompoundDocument)
+        );
+        let err = LoaderPipeline::detect(&bytes).expect_err("CFB is not executable");
+        assert!(format!("{err}").contains("ContainerRequiresExtraction(CompoundDocument)"));
     }
 }

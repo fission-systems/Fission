@@ -63,7 +63,7 @@ PE/COFF/ELF/Mach-O parsing is Fission-owned through bounds-checked byte readers.
 inspection support. `gimli` and `pdb` remain specialized DWARF/PDB metadata
 readers rather than primary binary loaders.
 
-Ghidra loader family coverage is staged. The implemented priority group is
+Ghidra loader family coverage is staged. The implemented executable-loader group is
 `PeLoader`, `CoffLoader`/`MSCoffLoader`, `ElfLoader`, `MachoLoader`,
 `BinaryLoader` (explicit raw hint only), `IntelHexLoader`, `MotorolaHexLoader`,
 `MzLoader`/`NeLoader`, and `UnixAoutLoader`. Lower-priority or separate-wave
@@ -73,6 +73,14 @@ and XML/debug helper loaders. Known but unsupported families must fail closed
 with a typed loader message such as `UnsupportedLoaderFamily(<name>)`. Raw binary
 loading is never an automatic fallback for unknown bytes because that would hide
 malformed or unsupported formats.
+
+Container inputs are not executable loaders. Archive/file-system inputs such as
+Compound Document, ZIP, gzip, and Cabinet are classified before executable
+loading and fail closed with `ContainerRequiresExtraction(<name>)` until an exact
+extractor/file-system owner is implemented. Compound Document detection validates
+the CFB header shape; MSI classification is not inferred from strings or names.
+Raw P-code and full benchmark lanes must skip these rows unless an extracted
+executable child is explicitly provided.
 
 Loader provenance is a public contract shared by CLI and GUI surfaces.
 `FunctionInfo.origin`, `kind`, `is_import`, `is_export`, `is_thunk_like`,

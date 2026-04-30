@@ -49,6 +49,14 @@ def guess_format(path: Path) -> str:
         return "unknown"
     if data.startswith(b"MZ"):
         return "pe_or_mz"
+    if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return "compound_document"
+    if data.startswith(b"PK\x03\x04") or data.startswith(b"PK\x05\x06") or data.startswith(b"PK\x07\x08"):
+        return "zip_archive"
+    if data.startswith(b"\x1f\x8b\x08"):
+        return "gzip"
+    if data.startswith(b"MSCF"):
+        return "cabinet"
     if data.startswith(b"\x7fELF"):
         return "elf"
     if data.startswith((b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe")):

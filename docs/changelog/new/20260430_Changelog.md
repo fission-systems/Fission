@@ -136,6 +136,21 @@ benchmark/artifacts/raw_p_code_benchmark/putty_v083_installer_msi_attempt
 
 Follow-up: run the raw P-code lane on an actual extracted or downloaded PuTTY PE executable, not the MSI installer container.
 
+## Exact Container Classification
+
+Added the implementation plan for container-aware loader routing without string
+or name heuristics. Fission now treats container inputs as a distinct pre-loader
+classification owner rather than falling through to generic unknown executable
+loading.
+
+Implementation policy:
+
+- executable loaders remain PE/COFF/ELF/Mach-O/HEX/MZ/NE/a.out only
+- Compound Document, ZIP, gzip, and Cabinet route to typed container failures
+- Compound Document detection validates the CFB header shape and does not infer MSI from strings
+- benchmark loader smoke records `input_classification` and `next_action`
+- realworld suite orchestration skips raw/full lanes when the same manifest fails loader preflight as non-executable
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import time
 from collections import Counter
@@ -60,6 +61,10 @@ def run_json(command: list[str], timeout: float) -> tuple[Any | None, dict[str, 
 
 def classify_error(meta: dict[str, Any]) -> str:
     text = f"{meta.get('stderr_tail', '')}\n{meta.get('stdout_tail', '')}\n{meta.get('json_error', '')}".lower()
+    if "containerrequiresextraction" in text:
+        return "container_requires_extraction"
+    if "unsupportedloaderfamily" in text:
+        return "unsupported_loader_family"
     if "unsupported machine" in text:
         return "unsupported_machine"
     if "unknown binary format" in text or "unsupported format" in text:
@@ -73,6 +78,35 @@ def classify_error(meta: dict[str, Any]) -> str:
     return "loader_error"
 
 
+def input_classification(meta: dict[str, Any], info: Any | None) -> str:
+    if info is not None:
+        return "executable_loaded"
+    bucket = classify_error(meta)
+    if bucket == "container_requires_extraction":
+        match = re.search(r"ContainerRequiresExtraction\(([^)]+)\)", error_text(meta))
+        return f"container:{match.group(1)}" if match else "container"
+    if bucket == "unsupported_loader_family":
+        match = re.search(r"UnsupportedLoaderFamily\(([^)]+)\)", error_text(meta))
+        return f"known_unsupported:{match.group(1)}" if match else "known_unsupported"
+    return bucket
+
+
+def next_action_for(bucket: str | None) -> str | None:
+    if bucket == "container_requires_extraction":
+        return "extract_or_skip_raw_pcode"
+    if bucket == "unsupported_loader_family":
+        return "skip_until_loader_family_supported"
+    if bucket == "unsupported_format":
+        return "inspect_format_or_add_exact_loader"
+    if bucket == "load_spec":
+        return "add_or_fix_load_spec"
+    return None
+
+
+def error_text(meta: dict[str, Any]) -> str:
+    return f"{meta.get('stderr_tail', '')}\n{meta.get('stdout_tail', '')}\n{meta.get('json_error', '')}"
+
+
 def run_entry(entry: dict[str, Any], fission_bin: Path, timeout: float, output_dir: Path) -> dict[str, Any]:
     binary = resolve_binary(str(entry["binary_path"]))
     row_id = str(entry.get("id") or binary.stem)
@@ -82,12 +116,15 @@ def run_entry(entry: dict[str, Any], fission_bin: Path, timeout: float, output_d
     if info is not None:
         functions, list_meta = run_json([str(fission_bin), "list", "--json", str(binary)], timeout)
     status = "loaded" if info is not None else "load_failed"
+    failure_bucket = None if status == "loaded" else classify_error(info_meta)
     row = {
         "id": row_id,
         "binary_path": str(binary),
         "sha256": ((entry.get("metadata") or {}).get("sha256")),
         "status": status,
-        "failure_bucket": None if status == "loaded" else classify_error(info_meta),
+        "failure_bucket": failure_bucket,
+        "input_classification": input_classification(info_meta, info),
+        "next_action": next_action_for(failure_bucket),
         "info": info,
         "function_count": len(functions) if isinstance(functions, list) else None,
         "list_error_bucket": classify_error(list_meta) if info is not None and functions is None and list_meta else None,
@@ -102,6 +139,8 @@ def run_entry(entry: dict[str, Any], fission_bin: Path, timeout: float, output_d
 def build_aggregate(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> dict[str, Any]:
     status_counts = Counter(row["status"] for row in rows)
     failure_counts = Counter(row["failure_bucket"] for row in rows if row.get("failure_bucket"))
+    classification_counts = Counter(row["input_classification"] for row in rows if row.get("input_classification"))
+    next_action_counts = Counter(row["next_action"] for row in rows if row.get("next_action"))
     format_counts = Counter(str((row.get("info") or {}).get("format", "unknown")) for row in rows if row.get("info"))
     arch_counts = Counter(str((row.get("info") or {}).get("arch", "unknown")) for row in rows if row.get("info"))
     function_counts = [row["function_count"] for row in rows if isinstance(row.get("function_count"), int)]
@@ -112,6 +151,8 @@ def build_aggregate(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> dic
         "load_failed": status_counts.get("load_failed", 0),
         "status_counts": dict(sorted(status_counts.items())),
         "failure_bucket_counts": dict(sorted(failure_counts.items())),
+        "input_classification_counts": dict(sorted(classification_counts.items())),
+        "next_action_counts": dict(sorted(next_action_counts.items())),
         "format_counts": dict(sorted(format_counts.items())),
         "arch_counts": dict(sorted(arch_counts.items())),
         "function_count_total": sum(function_counts),

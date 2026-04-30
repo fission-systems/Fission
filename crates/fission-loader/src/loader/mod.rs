@@ -7,6 +7,7 @@ use std::path::Path;
 
 pub mod analyzers;
 pub mod coff;
+pub mod containers;
 pub mod demangle;
 pub mod dwarf;
 pub mod elf;
