@@ -51,3 +51,36 @@
 - `legacy_path_audit_totals.bound_operand_fixed_handle_fallback = 12`
 - `legacy_path_audit_totals.legacy_shared_token_policy = 46`
 - `legacy_path_audit_totals.no_export_subtable_fallback = 14`
+
+## Raw P-code Multi-binary Manifest Expansion
+
+- Added `binaries[]` manifest support to `run_raw_pcode_parity.py`.
+- The runner now flattens binary-level metadata into the existing row execution path, preserving the legacy `rows[]` manifest contract.
+- Added suite filters for larger manifests: `--binary-id`, `--language-filter`, and `--max-rows-per-binary`.
+- Added aggregate `binary_count`, `language_count`, `binary_totals`, and `language_totals` fields for suite-level reporting.
+- Added `benchmark/raw_p_code_benchmark/multi_binary_smoke.json` as a checked-in example manifest.
+
+## Multi-binary Validation
+
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+- `python3 -m json.tool benchmark/raw_p_code_benchmark/multi_binary_smoke.json`
+- Filtered smoke report: `benchmark/artifacts/raw_p_code_benchmark/multi_binary_smoke_filtered/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 2`
+  - `binary_count = 1`
+  - `full_match = 2`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+- Schema smoke report: `benchmark/artifacts/raw_p_code_benchmark/multi_binary_smoke_filtered_schema/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 1`
+  - `binary_count = 1`
+  - `language_count = 1`
+  - `full_match = 1`
+- Canonical gate report: `benchmark/artifacts/raw_p_code_benchmark/multi_manifest_canonical_gate/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 17`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `template_source_totals.sla_construct_tpl = 46`

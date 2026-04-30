@@ -80,6 +80,48 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
   --output-dir benchmark/artifacts/raw_p_code_benchmark/relative-call-latest
 ```
 
+## Multi-binary manifests
+
+The runner accepts both the legacy flat `rows[]` manifest shape and a
+`binaries[]` shape for real-world suites. `binaries[]` entries provide
+binary-level metadata once, and their child rows inherit it before the runner
+flattens them into the existing row execution path.
+
+```json
+{
+  "defaults": {
+    "no_analyze": true
+  },
+  "binaries": [
+    {
+      "id": "sample-x64",
+      "path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "rows": [
+        { "name": "entry-smoke", "addr": "0x140001450", "count": 8 }
+      ]
+    }
+  ]
+}
+```
+
+Run the checked-in smoke manifest:
+
+```bash
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/multi_binary_smoke.json \
+  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --fission-release \
+  --output-dir benchmark/artifacts/raw_p_code_benchmark/multi-binary-smoke
+```
+
+Useful filters for larger suites:
+
+- `--binary-id <id>`
+- `--language-filter <ghidra-language-id>`
+- `--max-rows-per-binary <n>`
+
 The aggregate output is:
 
 - `aggregate_raw_pcode_parity_report.json`
@@ -91,6 +133,8 @@ The aggregate manifest report now also includes:
 
 - `feature_totals`
 - `group_totals`
+- `binary_totals`
+- `language_totals`
 - `legacy_path_audit_totals`
 - `performance_summary`
 

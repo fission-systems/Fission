@@ -1,0 +1,50 @@
+{
+  "description": "Example multi-binary raw P-code parity manifest. The runner flattens binaries[] rows into the legacy row execution path.",
+  "defaults": {
+    "compiler": "windows",
+    "no_analyze": true
+  },
+  "binaries": [
+    {
+      "id": "test-functions-x64",
+      "path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "rows": [
+        {
+          "name": "add-lea",
+          "feature_group": "addressing",
+          "feature": "lea",
+          "owner": "raw_pcode_multi_binary_smoke",
+          "addr": "0x140001450",
+          "count": 1
+        },
+        {
+          "name": "startup-rip-load",
+          "feature_group": "memory",
+          "feature": "rip_relative_load",
+          "owner": "raw_pcode_multi_binary_smoke",
+          "addr": "0x1400013e4",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "llvm-x64-baremetal",
+      "path": "benchmark/binary/x86-64/baremetal/small/binary/c/llvm_smoke.o",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "disassemble_missing": true,
+      "rows": [
+        {
+          "name": "entry-smoke",
+          "feature_group": "architecture",
+          "feature": "llvm_baremetal_smoke",
+          "owner": "raw_pcode_multi_binary_smoke",
+          "addr": "0x100000",
+          "count": 4
+        }
+      ]
+    }
+  ]
+}

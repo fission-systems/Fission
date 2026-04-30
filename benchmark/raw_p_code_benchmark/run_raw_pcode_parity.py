@@ -22,6 +22,77 @@ def run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def merge_defaults(defaults: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(defaults)
+    merged.update(values)
+    return merged
+
+
+def expand_manifest_rows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return flat benchmark rows from either rows[] or binaries[] manifests.
+
+    The legacy rows[] shape remains the canonical representation used by the
+    runner. The binaries[] shape is a convenience layer for real-world suites:
+    binary-level metadata is inherited by every row and then flattened before
+    any filtering or execution happens.
+    """
+    defaults = manifest.get("defaults", {})
+    if defaults is None:
+        defaults = {}
+    if not isinstance(defaults, dict):
+        raise SystemExit("manifest defaults must be an object")
+
+    expanded: list[dict[str, Any]] = []
+    for row in manifest.get("rows", []):
+        if not isinstance(row, dict):
+            raise SystemExit("manifest rows[] entries must be objects")
+        expanded.append(merge_defaults(defaults, row))
+
+    binary_ids: set[str] = set()
+    for binary in manifest.get("binaries", []):
+        if not isinstance(binary, dict):
+            raise SystemExit("manifest binaries[] entries must be objects")
+        binary_id = str(binary.get("id") or binary.get("name") or "").strip()
+        if not binary_id:
+            raise SystemExit("manifest binaries[] entry is missing id")
+        if binary_id in binary_ids:
+            raise SystemExit(f"duplicate binary id {binary_id!r}")
+        binary_ids.add(binary_id)
+
+        binary_rows = binary.get("rows", [])
+        if not isinstance(binary_rows, list):
+            raise SystemExit(f"binary {binary_id!r} rows must be an array")
+
+        binary_defaults = merge_defaults(defaults, {k: v for k, v in binary.items() if k != "rows"})
+        binary_path = binary_defaults.get("binary") or binary_defaults.get("path")
+        if not binary_path:
+            raise SystemExit(f"binary {binary_id!r} is missing path")
+
+        for row in binary_rows:
+            if not isinstance(row, dict):
+                raise SystemExit(f"binary {binary_id!r} has a non-object row")
+            row_name = str(row.get("name") or row.get("addr") or len(expanded)).strip()
+            if not row_name:
+                raise SystemExit(f"binary {binary_id!r} has a row without name or addr")
+            expanded_row = merge_defaults(binary_defaults, row)
+            expanded_row["binary"] = str(binary_path)
+            expanded_row["binary_id"] = binary_id
+            expanded_row["name"] = str(row.get("qualified_name") or f"{binary_id}-{row_name}")
+            expanded.append(expanded_row)
+
+    return expanded
+
+
+def increment_nested_total(
+    totals: dict[str, dict[str, int]],
+    key: str,
+    buckets: dict[str, Any],
+) -> None:
+    nested = totals.setdefault(key, {})
+    for bucket, count in buckets.items():
+        nested[bucket] = nested.get(bucket, 0) + int(count)
+
+
 def add_performance_totals(
     totals: dict[str, float],
     performance: dict[str, Any],
@@ -236,11 +307,19 @@ def run_one(
 def run_manifest(args: argparse.Namespace) -> int:
     manifest_path = args.manifest if args.manifest.is_absolute() else ROOT / args.manifest
     manifest = json.loads(manifest_path.read_text())
-    rows = manifest.get("rows", [])
+    rows = expand_manifest_rows(manifest)
     if args.row:
         rows = [row for row in rows if row.get("name") == args.row]
         if not rows:
             raise SystemExit(f"no row named {args.row!r} in {manifest_path}")
+    if args.binary_id:
+        rows = [row for row in rows if row.get("binary_id") == args.binary_id]
+        if not rows:
+            raise SystemExit(f"no row with binary_id {args.binary_id!r} in {manifest_path}")
+    if args.language_filter:
+        rows = [row for row in rows if row.get("language", args.language) == args.language_filter]
+        if not rows:
+            raise SystemExit(f"no row with language {args.language_filter!r} in {manifest_path}")
     if args.feature:
         rows = [row for row in rows if row.get("feature") == args.feature]
         if not rows:
@@ -249,6 +328,17 @@ def run_manifest(args: argparse.Namespace) -> int:
         rows = [row for row in rows if row.get("feature_group") == args.group]
         if not rows:
             raise SystemExit(f"no row with feature_group {args.group!r} in {manifest_path}")
+    if args.max_rows_per_binary is not None:
+        limited_rows: list[dict[str, Any]] = []
+        seen_by_binary: dict[str, int] = {}
+        for row in rows:
+            binary_key = str(row.get("binary_id") or row.get("binary") or "")
+            seen = seen_by_binary.get(binary_key, 0)
+            if seen >= args.max_rows_per_binary:
+                continue
+            seen_by_binary[binary_key] = seen + 1
+            limited_rows.append(row)
+        rows = limited_rows
 
     aggregate_totals: dict[str, int] = {}
     owner_hint_totals: dict[str, int] = {}
@@ -257,6 +347,8 @@ def run_manifest(args: argparse.Namespace) -> int:
     compat_emitter_used_total = 0
     feature_totals: dict[str, dict[str, int]] = {}
     group_totals: dict[str, dict[str, int]] = {}
+    binary_totals: dict[str, dict[str, int]] = {}
+    language_totals: dict[str, dict[str, int]] = {}
     performance_totals: dict[str, float] = {}
     similarity_totals: dict[str, float] = {"sum_average_similarity_score": 0.0, "sum_parity_ratio": 0.0}
     similarity_component_totals: dict[str, float] = {}
@@ -267,6 +359,8 @@ def run_manifest(args: argparse.Namespace) -> int:
             raise SystemExit(f"row {row.get('name', '<unnamed>')} is missing binary")
         binary = binary if binary.is_absolute() else ROOT / binary
         row_name = row.get("name", f"0x{parse_int(str(row['addr'])):x}")
+        binary_id = row.get("binary_id") or str(binary)
+        language = row.get("language", args.language)
         feature = row.get("feature", "unclassified")
         feature_group = row.get("feature_group", "ungrouped")
         output_dir = args.output_dir / row_name
@@ -274,7 +368,7 @@ def run_manifest(args: argparse.Namespace) -> int:
             binary=binary,
             addr=parse_int(str(row["addr"])),
             count=int(row.get("count", args.count)),
-            language=row.get("language", args.language),
+            language=language,
             compiler=row.get("compiler", args.compiler),
             ghidra_dir=row.get("ghidra_dir")
             and Path(row["ghidra_dir"])
@@ -292,6 +386,8 @@ def run_manifest(args: argparse.Namespace) -> int:
             feature_bucket_totals[bucket] = feature_bucket_totals.get(bucket, 0) + int(count)
             group_bucket_totals = group_totals.setdefault(feature_group, {})
             group_bucket_totals[bucket] = group_bucket_totals.get(bucket, 0) + int(count)
+        increment_nested_total(binary_totals, str(binary_id), report["bucket_totals"])
+        increment_nested_total(language_totals, str(language), report["bucket_totals"])
         for hint, count in report.get("owner_hint_totals", {}).items():
             owner_hint_totals[hint] = owner_hint_totals.get(hint, 0) + int(count)
         for name, count in report.get("legacy_path_audit_totals", {}).items():
@@ -321,9 +417,11 @@ def run_manifest(args: argparse.Namespace) -> int:
                 "name": row_name,
                 "feature": feature,
                 "feature_group": feature_group,
+                "binary_id": binary_id,
                 "owner": row.get("owner"),
                 "notes": row.get("notes"),
                 "binary": str(binary),
+                "language": language,
                 "addr": row["addr"],
                 "report": report["report"],
                 "total_instructions": report["total_instructions"],
@@ -338,6 +436,8 @@ def run_manifest(args: argparse.Namespace) -> int:
     aggregate = {
         "manifest": str(manifest_path),
         "row_count": len(row_reports),
+        "binary_count": len({str(row["binary_id"]) for row in row_reports}),
+        "language_count": len({str(row["language"]) for row in row_reports}),
         "bucket_totals": dict(sorted(aggregate_totals.items())),
         "compat_emitter_used_total": compat_emitter_used_total,
         "invariant_totals": {
@@ -356,6 +456,14 @@ def run_manifest(args: argparse.Namespace) -> int:
             group: dict(sorted(buckets.items()))
             for group, buckets in sorted(group_totals.items())
         },
+        "binary_totals": {
+            binary: dict(sorted(buckets.items()))
+            for binary, buckets in sorted(binary_totals.items())
+        },
+        "language_totals": {
+            language: dict(sorted(buckets.items()))
+            for language, buckets in sorted(language_totals.items())
+        },
         "similarity_summary": {
             "average_similarity_score": similarity_totals["sum_average_similarity_score"] / len(rows) if rows else 0.0,
             "average_parity_ratio": similarity_totals["sum_parity_ratio"] / len(rows) if rows else 0.0,
@@ -373,6 +481,7 @@ def run_manifest(args: argparse.Namespace) -> int:
     print(json.dumps({
         "report": str(aggregate_path),
         "row_count": aggregate["row_count"],
+        "binary_count": aggregate["binary_count"],
         "bucket_totals": aggregate["bucket_totals"],
         "compat_emitter_used_total": aggregate["compat_emitter_used_total"],
         "invariant_totals": aggregate["invariant_totals"],
@@ -381,6 +490,7 @@ def run_manifest(args: argparse.Namespace) -> int:
         "performance_summary": aggregate["performance_summary"],
         "feature_count": len(aggregate["feature_totals"]),
         "group_count": len(aggregate["group_totals"]),
+        "language_count": len(aggregate["language_totals"]),
     }, indent=2, sort_keys=True))
     if args.require_perfect_canonical:
         failures = enforce_perfect_canonical_gate(
@@ -424,6 +534,14 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "benchmark/artifacts/raw_p_code_benchmark/latest")
     parser.add_argument("--manifest", type=Path, help="Run every row from a raw p-code parity manifest")
     parser.add_argument("--row", help="Run one named manifest row")
+    parser.add_argument("--binary-id", help="Run only rows belonging to one binaries[] manifest id")
+    parser.add_argument("--language-filter", help="Run only rows matching one Ghidra language id")
+    parser.add_argument(
+        "--max-rows-per-binary",
+        type=int,
+        default=None,
+        help="Limit manifest execution to N rows per binary after filtering.",
+    )
     parser.add_argument("--feature", help="Run only rows matching one feature tag from the manifest")
     parser.add_argument("--group", help="Run only rows matching one feature_group tag from the manifest")
     parser.add_argument("--no-analyze", action="store_true")
@@ -445,6 +563,8 @@ def main() -> int:
         help="Optional exact full_match count required by --require-perfect-canonical.",
     )
     args = parser.parse_args()
+    if args.max_rows_per_binary is not None and args.max_rows_per_binary < 0:
+        parser.error("--max-rows-per-binary must be >= 0")
 
     if args.manifest:
         return run_manifest(args)
