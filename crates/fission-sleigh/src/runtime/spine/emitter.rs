@@ -107,6 +107,10 @@ impl RuntimePcodeEmitter {
         self.append_checked(PcodeOpcode::Call, None, vec![target], mnemonic)
     }
 
+    pub fn emit_call_ind(&mut self, target: Varnode, mnemonic: &str) -> Result<()> {
+        self.append_checked(PcodeOpcode::CallInd, None, vec![target], mnemonic)
+    }
+
     pub fn emit_return(&mut self, mnemonic: &str) -> Result<()> {
         self.append_checked(PcodeOpcode::Return, None, Vec::new(), mnemonic)
     }

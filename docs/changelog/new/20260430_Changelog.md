@@ -457,3 +457,61 @@ python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
 python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py \
   --manifest benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json --fission-release
 ```
+
+---
+
+## Sleigh BRANCH/BRANCHIND 100% Parity
+
+**Date:** 2026-04-30
+**Scope:** `fission-sleigh` — BRANCH/BRANCHIND/CALLIND opcode alignment with Ghidra
+
+### Summary
+
+Fixed the final parity gap (94.1% → 100%) in the canonical 17-row x86-64 benchmark.
+The root cause was a heuristic in `template_eval.rs` that incorrectly classified any non-unique-space RAM branch target as `BRANCHIND`, while Ghidra determines BRANCH vs BRANCHIND **solely from the SLA template opcode**, not from the target's address space.
+
+### Root Cause
+
+| Issue | Before | After |
+|---|---|---|
+| `jmp rel32` emitted `BRANCHIND` | `is_indirect` heuristic: `target.space_id != unique_space_index` → `BRANCHIND` | SLA opcode `Branch` always emits `BRANCH` |
+| `BRANCHIND` / `CALLIND` SLA opcodes fell through to `Unsupported` | `map_pcode_opcode` had no mapping | Mapped to `BranchInd` / `CallInd` |
+| No `CALLIND` emitter method | `emit_call_ind` missing | Added to `RuntimePcodeEmitter` |
+
+### Changes
+
+| File | Change |
+|------|---------|
+| `compiler/ir/types.rs` | Added `BranchInd`, `CallInd` variants to `CompiledOpTplOpcode`; `as_str()` extended |
+| `compiler/sla/templates.rs` | `map_pcode_opcode` maps `PcodeOpcode::BranchInd` → `BranchInd`, `PcodeOpcode::CallInd` → `CallInd` |
+| `runtime/spine/emitter.rs` | Added `emit_call_ind` |
+| `runtime/spine/compiled_table/template_eval.rs` | `Branch` handler: removed `is_indirect` heuristic; added `BranchInd` and `CallInd` handlers |
+
+### Ghidra Alignment Principle
+
+> **Ghidra rule**: `BRANCH` vs `BRANCHIND` is determined by the SLA template opcode, not by the address space of the target varnode. A `BRANCH` template with a RAM-space absolute address target is still `BRANCH`.
+
+This matches Ghidra's `SleighBuilder::dump` which does not inspect target address space to decide the flow opcode.
+
+### Validation
+
+```bash
+cargo check -p fission-sleigh
+cargo build -p fission-cli --release
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+  --no-analyze --fission-release --require-perfect-canonical
+python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py \
+  --manifest benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json \
+  --fission-release
+```
+
+**Result:**
+
+```text
+average_similarity_score:  1.0
+average_parity_ratio:      1.0
+compat_emitter_used_total: 0
+template_source_totals:    sla_construct_tpl=46
+perfect_canonical_gate:    passed
+```

@@ -162,23 +162,32 @@ impl CompiledTableEmitter {
                 let target = self.read_template_varnode(target_tpl, state, 8)?;
                 self.emitter.emit_call(target, mnemonic)
             }
+            CompiledOpTplOpcode::CallInd => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("CALLIND template requires one input"))?;
+                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                self.emitter.emit_call_ind(target, mnemonic)
+            }
             CompiledOpTplOpcode::Branch => {
                 let target_tpl = op
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("BRANCH template requires one input"))?;
+                // Ghidra principle: BRANCH vs BRANCHIND is determined solely by the
+                // SLA template opcode, NOT by the target's address space. A direct
+                // jmp with a RAM-space absolute target is still a BRANCH.
                 let target = self.read_template_varnode(target_tpl, state, 8)?;
-                // A branch is indirect when the target is in a non-unique, non-const
-                // address space. Unique space targets are internal pcode labels; const
-                // targets are absolute addresses. Both route through emit_branch.
-                let is_indirect = !target.is_constant
-                    && self.unique_space_index != u64::MAX
-                    && target.space_id != self.unique_space_index;
-                if is_indirect {
-                    self.emitter.emit_branch_ind(target, mnemonic)
-                } else {
-                    self.emitter.emit_branch(target, mnemonic)
-                }
+                self.emitter.emit_branch(target, mnemonic)
+            }
+            CompiledOpTplOpcode::BranchInd => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("BRANCHIND template requires one input"))?;
+                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                self.emitter.emit_branch_ind(target, mnemonic)
             }
             CompiledOpTplOpcode::Copy => {
                 let out_tpl = op
