@@ -32,6 +32,10 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
     }
 }
 
+fn const_varnode(value: u64, size: u32) -> Varnode {
+    Varnode::constant(value as i64, size)
+}
+
 pub(super) fn emit_pcode_for_state(
     compiled: &CompiledFrontend,
     native: Option<&Arc<NativeBackend>>,
@@ -1117,7 +1121,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         let size = u32::try_from(self.resolve_const_value(size, state)?)
                             .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
                         if offset_space.index == 0 || offset_space.name == "const" {
-                            return Ok(Varnode::constant(handle.fixed.offset_offset as i64, size));
+                            return Ok(const_varnode(handle.fixed.offset_offset, size));
                         }
                         return Ok(Varnode {
                             space_id: offset_space.index,
@@ -1132,9 +1136,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let size = u32::try_from(self.resolve_const_value(size, state)?)
                     .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
                 if space.index == 0 || space.name == "const" {
-                    let value = i64::try_from(offset)
-                        .map_err(|_| anyhow!("constant VarnodeTpl offset {offset} exceeds i64"))?;
-                    return Ok(Varnode::constant(value, size));
+                    return Ok(const_varnode(offset, size));
                 }
                 Ok(Varnode {
                     space_id: space.index,
@@ -1161,10 +1163,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         .and_then(|size| u32::try_from(size).ok())
                         .unwrap_or(0);
                     if ptr_space.index == 0 || ptr_space.name == "const" {
-                        let value = i64::try_from(ptr_offset).map_err(|_| {
-                            anyhow!("constant HandleTpl ptr_offset {ptr_offset} exceeds i64")
-                        })?;
-                        return Ok(Varnode::constant(value, ptr_size));
+                        return Ok(const_varnode(ptr_offset, ptr_size));
                     }
                     return Ok(Varnode {
                         space_id: ptr_space.index,
@@ -1191,7 +1190,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     0
                 };
                 if space.index == 0 || space.name == "const" {
-                    return Ok(Varnode::constant(offset as i64, size));
+                    return Ok(const_varnode(offset, size));
                 }
                 Ok(Varnode {
                     space_id: space.index,

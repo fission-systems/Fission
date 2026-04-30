@@ -231,6 +231,31 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
 }
 
 #[test]
+fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_error() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let bytes = [0x8d, 0x41, 0xff];
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_148e)
+            .expect("lift lea negative displacement");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+    assert_eq!(
+        ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
+        vec![
+            PcodeOpcode::IntAdd,
+            PcodeOpcode::SubPiece,
+            PcodeOpcode::IntZExt,
+        ]
+    );
+    assert_eq!(ops[0].inputs[1].constant_val, -1);
+    assert_eq!(ops[0].inputs[1].offset, u64::MAX);
+}
+
+#[test]
 fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
