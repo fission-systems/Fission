@@ -91,7 +91,12 @@ The aggregate manifest report now also includes:
 
 - `feature_totals`
 - `group_totals`
+- `legacy_path_audit_totals`
 - `performance_summary`
+
+`legacy_path_audit_totals` is reporting-only. It counts legacy runtime debt
+observed while preserving the canonical parity gate, and must not be used to
+promote approximate P-code success.
 
 Outputs:
 

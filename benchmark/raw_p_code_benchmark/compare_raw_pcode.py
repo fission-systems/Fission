@@ -445,6 +445,7 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
         "sla_construct_tpl" if template_source == "SpecDerived" else template_source
     )
     detail["raw_template_source"] = template_source
+    detail["legacy_path_audit"] = fission.get("legacy_path_audit", {})
 
     ghidra_error = str(ghidra.get("error") or "")
     if (
@@ -605,6 +606,7 @@ def main() -> int:
 
     totals: Counter[str] = Counter()
     owner_hint_totals: Counter[str] = Counter()
+    legacy_path_audit_totals: Counter[str] = Counter()
     rows = []
     total_similarity = 0.0
     similarity_denominator = 0
@@ -634,6 +636,9 @@ def main() -> int:
         hints = owner_hints_for(buckets, detail)
         for hint in hints:
             owner_hint_totals[hint] += 1
+        for name, value in detail.get("legacy_path_audit", {}).items():
+            if bool(value):
+                legacy_path_audit_totals[name] += 1
         detail["index"] = idx
         detail["buckets"] = buckets
         detail["owner_hints"] = hints
@@ -659,6 +664,7 @@ def main() -> int:
         "total_instructions": len(rows),
         "bucket_totals": dict(sorted(totals.items())),
         "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
+        "legacy_path_audit_totals": dict(sorted(legacy_path_audit_totals.items())),
         "similarity_summary": {
             "average_similarity_score": average_similarity,
             "average_components": average_similarity_components,

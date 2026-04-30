@@ -30,3 +30,24 @@
 - No mnemonic-family semantic emitter was added.
 - No architecture-name branch was added for the fix.
 - Benchmark artifacts and Ghidra project DB state remain uncommitted.
+
+## SLEIGH Canonical Gate Audit
+
+- Added reporting-only legacy path audit fields to raw P-code probe/report output.
+- The audit records debt involvement without changing semantic success: `BoundOperand -> FixedHandle` fallback, no-export subtable fallback, legacy shared-token policy, direct token parser, compatibility template source, and source-line/opprint remap.
+- Promoted the x86-64 canonical perfect gate as the regression command: `--require-perfect-canonical --expected-full-match 44`.
+- Preserved the strict success rule: successful rows must still report real `.sla ConstructTpl` source and cannot count compatibility or approximate P-code as success.
+
+## Canonical Gate Audit Validation
+
+- Report: `benchmark/artifacts/raw_p_code_benchmark/canonical_gate_audit/aggregate_raw_pcode_parity_report.json`
+- `full_match = 44`
+- `average_similarity_score = 1.0`
+- `average_parity_ratio = 1.0`
+- `compat_emitter_used = 0`
+- `fake_placeholder_op = 0`
+- `invalid_pcode_shape = 0`
+- `template_source_totals.sla_construct_tpl = 46`
+- `legacy_path_audit_totals.bound_operand_fixed_handle_fallback = 12`
+- `legacy_path_audit_totals.legacy_shared_token_policy = 46`
+- `legacy_path_audit_totals.no_export_subtable_fallback = 14`

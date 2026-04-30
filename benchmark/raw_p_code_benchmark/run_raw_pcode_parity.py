@@ -252,6 +252,7 @@ def run_manifest(args: argparse.Namespace) -> int:
 
     aggregate_totals: dict[str, int] = {}
     owner_hint_totals: dict[str, int] = {}
+    legacy_path_audit_totals: dict[str, int] = {}
     template_source_totals: dict[str, int] = {}
     compat_emitter_used_total = 0
     feature_totals: dict[str, dict[str, int]] = {}
@@ -293,6 +294,8 @@ def run_manifest(args: argparse.Namespace) -> int:
             group_bucket_totals[bucket] = group_bucket_totals.get(bucket, 0) + int(count)
         for hint, count in report.get("owner_hint_totals", {}).items():
             owner_hint_totals[hint] = owner_hint_totals.get(hint, 0) + int(count)
+        for name, count in report.get("legacy_path_audit_totals", {}).items():
+            legacy_path_audit_totals[name] = legacy_path_audit_totals.get(name, 0) + int(count)
         for entry in report.get("rows", []):
             if entry.get("compat_emitter_used"):
                 compat_emitter_used_total += 1
@@ -325,6 +328,7 @@ def run_manifest(args: argparse.Namespace) -> int:
                 "report": report["report"],
                 "total_instructions": report["total_instructions"],
                 "bucket_totals": report["bucket_totals"],
+                "legacy_path_audit_totals": report.get("legacy_path_audit_totals", {}),
                 "similarity_summary": similarity,
                 "performance": performance,
                 "first_mismatch": first_mismatch,
@@ -342,6 +346,7 @@ def run_manifest(args: argparse.Namespace) -> int:
             "invalid_pcode_shape": int(aggregate_totals.get("invalid_pcode_shape", 0)),
         },
         "owner_hint_totals": dict(sorted(owner_hint_totals.items())),
+        "legacy_path_audit_totals": dict(sorted(legacy_path_audit_totals.items())),
         "template_source_totals": dict(sorted(template_source_totals.items())),
         "feature_totals": {
             feature: dict(sorted(buckets.items()))

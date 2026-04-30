@@ -21,6 +21,7 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     token_fields: Option<TokenFieldBundle>,
     handles: Vec<Option<RuntimeHandle>>,
     walker: spine::RuntimeParserWalker,
+    legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit,
 }
 
 pub(super) struct OperandBinding {
@@ -104,6 +105,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 selection.constructor.matcher
             );
         }
+        let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
+        let compatibility_template_source =
+            selection.constructor.constructor_template.template_source != CompiledTemplateSource::SpecDerived;
         Ok(Self {
             compiled,
             strategy,
@@ -117,6 +121,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             token_fields: None,
             handles,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
+            legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
+                legacy_shared_token_policy: token_policy.uses_shared_token_cursor(),
+                compatibility_template_source,
+                ..Default::default()
+            },
         })
     }
 
@@ -264,6 +273,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             condition_code,
             length,
             match_trace: self.selection.trace,
+            legacy_path_audit: self.legacy_path_audit,
         })
     }
 
@@ -475,12 +485,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             self.cursor.saturating_sub(operand_cursor_start),
             handle_index,
         );
+        let fixed = match binding.fixed {
+            Some(fixed) => fixed,
+            None => {
+                self.legacy_path_audit.bound_operand_fixed_handle_fallback = true;
+                fixed_handle_for_bound_operand(&binding.value)
+            }
+        };
         self.handles[operand_index] = Some(RuntimeHandle {
             operand_index,
             spec: template.spec,
-            fixed: binding
-                .fixed
-                .unwrap_or_else(|| fixed_handle_for_bound_operand(&binding.value)),
+            fixed,
             debug_value: Some(binding.value),
             subtable_state: binding.subtable_state.map(Box::new),
         });
@@ -489,6 +504,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
     fn ensure_token_fields(&mut self) -> Result<TokenFieldBundle> {
         if self.token_fields.is_none() {
+            self.legacy_path_audit.direct_token_parser = true;
             let token_offset = if self
                 .selection
                 .constructor
@@ -774,6 +790,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             } => {
                 let cursor_start = self.cursor;
                 let sub_state = self.decode_subtable(table_name, Some(*reloffset), Some(*offsetbase))?;
+                self.legacy_path_audit = self
+                    .legacy_path_audit
+                    .merge(sub_state.legacy_path_audit);
                 if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
                     && (shared_token_cursor_policy_shared_token_subtable(table_name)
                         || shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name))
@@ -854,6 +873,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             subtable_cursor_start,
                             sub_state.length,
                         )? {
+                            self.legacy_path_audit.no_export_subtable_fallback = true;
                             return Ok(OperandBinding {
                                 value: binding.value,
                                 fixed: binding.fixed,
