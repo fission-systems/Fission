@@ -287,6 +287,7 @@ pub mod sla_format {
     pub const ELEM_SUB_EXP: u32 = 56;
     pub const ELEM_XOR_EXP: u32 = 57;
     pub const ELEM_INTB: u32 = 58;
+    pub const ELEM_COMMIT: u32 = 79;
     pub const ELEM_CONST_START: u32 = 80;
     pub const ELEM_CONST_NEXT: u32 = 81;
     pub const ELEM_CONST_NEXT2: u32 = 82;
@@ -315,6 +316,7 @@ pub mod sla_format {
     pub const ATTR_CT: u32 = 17;
     pub const ATTR_MINLEN: u32 = 18;
     pub const ATTR_BASE: u32 = 19;
+    pub const ATTR_NUMBER: u32 = 20;
     pub const ATTR_CONTEXT: u32 = 21;
     pub const ATTR_PARENT: u32 = 22;
     pub const ATTR_SUBSYM: u32 = 23;

@@ -74,6 +74,8 @@ mod tests {
             condition_code: None,
             length: 1,
             match_trace: empty_trace(),
+            named_templates: Vec::new(),
+            context_commits: Vec::new(),
         };
 
         let err = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
@@ -110,6 +112,8 @@ mod tests {
             condition_code: None,
             length: 1,
             match_trace: empty_trace(),
+            named_templates: Vec::new(),
+            context_commits: Vec::new(),
         };
 
         let details = RuntimeTemplateEvaluator::new(&mut NoopExecutor)

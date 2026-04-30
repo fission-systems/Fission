@@ -158,6 +158,12 @@ pub struct DecodedInstruction {
     pub flow_kind: DecodedFlowKind,
     pub direct_target: Option<u64>,
     pub references: Vec<DecodedReference>,
+    /// Resolved ContextCommit entries from Ghidra's `globalset` directive.
+    /// Each entry: (target_address, word_index, mask, value).
+    /// Multi-instruction decoders should apply these to the context before
+    /// decoding the instruction at `target_address`.
+    #[serde(default)]
+    pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
 }
 
 impl DecodedInstruction {

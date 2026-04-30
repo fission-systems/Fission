@@ -57,12 +57,25 @@ impl RuntimeSleighFrontend {
             return Ok(Vec::new());
         }
 
+        // Pending ContextCommit overrides: address → (context_bits, mask).
+        // Populated after each instruction's globalset / ContextCommit ops.
+        let mut pending_overrides: std::collections::BTreeMap<u64, (u64, u64)> =
+            std::collections::BTreeMap::new();
+
         let mut decoded = Vec::with_capacity(limit.min(64));
         let mut offset = 0usize;
         let mut current = address;
         while offset < bytes.len() && decoded.len() < limit {
             let remaining = &bytes[offset..];
-            let instruction = match self.decode_instruction_with_len(remaining, current) {
+
+            // Apply any pending ContextCommit overrides for this address.
+            let ctx_override = pending_overrides.get(&current).copied();
+
+            let instruction = match self.decode_instruction_with_context_override(
+                remaining,
+                current,
+                ctx_override,
+            ) {
                 Ok(instruction) => instruction,
                 Err(err) if decoded.is_empty() => return Err(err),
                 Err(_) => break,
@@ -79,6 +92,16 @@ impl RuntimeSleighFrontend {
                     current
                 );
             }
+
+            // Collect context commits from this instruction and queue them.
+            for (target_addr, word_index, mask_u32, value_u32) in &instruction.pending_context_commits {
+                let mask_u64 = (u64::from(*mask_u32)) << (word_index * 32);
+                let value_u64 = (u64::from(*value_u32)) << (word_index * 32);
+                let entry = pending_overrides.entry(*target_addr).or_insert((0, 0));
+                entry.0 = (entry.0 & !mask_u64) | (value_u64 & mask_u64);
+                entry.1 |= mask_u64;
+            }
+
             current = current.saturating_add(step as u64);
             offset = offset.saturating_add(step);
             decoded.push(instruction);
@@ -113,6 +136,40 @@ impl RuntimeSleighFrontend {
             offset = offset.saturating_add(instruction.length);
         }
         Ok(targets.into_iter().collect())
+    }
+
+    fn decode_instruction_with_context_override(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        context_override: Option<(u64, u64)>,
+    ) -> Result<DecodedInstruction> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_instruction_with_context(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                self.native_backend.as_ref(),
+                bytes,
+                address,
+                context_override,
+            ),
+        }
     }
 
     pub(super) fn decode_instruction_with_len(

@@ -253,6 +253,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             mnemonic: self.selection.constructor.mnemonic.clone(),
             construct_tpl_kind: self.selection.constructor.construct_tpl_kind,
             constructor_template: self.selection.constructor.constructor_template.clone(),
+            named_templates: self.selection.constructor.named_templates.clone(),
+            context_commits: self.selection.constructor.context_commits.clone(),
             display_template: self.selection.constructor.display_template.clone(),
             display_operands: self.selection.constructor.display_operands.clone(),
             construct_nodes: self.walker.into_nodes(),
@@ -423,6 +425,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let handle = handles
                     .get(*handle_index as usize)
                     .ok_or_else(|| anyhow!("export handle {} is missing", handle_index))?;
+                if matches!(selector, CompiledHandleSelector::OffsetPlus) {
+                    return Ok(resolve_offset_plus_pub(handle, plus.unwrap_or(0)));
+                }
                 let value = match selector {
                     CompiledHandleSelector::Space => handle
                         .fixed
@@ -432,7 +437,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .ok_or_else(|| anyhow!("export fixed handle missing space"))?,
                     CompiledHandleSelector::Offset => handle.fixed.offset_offset,
                     CompiledHandleSelector::Size => u64::from(handle.fixed.size),
-                    CompiledHandleSelector::OffsetPlus => bail!("export OffsetPlus unsupported"),
+                    CompiledHandleSelector::OffsetPlus => unreachable!(),
                 };
                 Ok(value.wrapping_add(plus.unwrap_or(0)))
             }

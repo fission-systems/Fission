@@ -131,6 +131,26 @@ pub struct CompiledMacro {
     pub body_line_count: usize,
 }
 
+/// Deferred global context change (Ghidra `ContextCommit` / `globalset` statement).
+///
+/// When a constructor fires, its `context_commits` are queued. After the instruction
+/// is decoded, `apply_context_commits()` resolves each commit's target address from the
+/// fixed handle of the referenced symbol and writes the context bits to the context
+/// cache for future instructions at that address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompiledContextCommit {
+    /// Symbol table ID of the target operand (raw SLA `ATTR_ID`). Used for tracing.
+    pub symbol_id: u32,
+    /// Resolved operand handle index within the constructor's handle list.
+    /// `u32::MAX` means the symbol is a built-in (e.g. `inst_next`): the target
+    /// address is computed at runtime as `instruction_start + instruction_length`.
+    pub hand_index: u32,
+    /// Word index within the context register (Ghidra `ATTR_NUMBER`).
+    pub word_index: u32,
+    /// Bit mask of the context bits to commit (Ghidra `ATTR_MASK`).
+    pub mask: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledContextOp {
     pub bit_offset: u32,
@@ -171,6 +191,9 @@ pub struct CompiledExecutableConstructor {
     pub signature_hash: u64,
     pub minimum_length: u32,
     pub context_changes: Vec<CompiledContextOp>,
+    /// Deferred global context commits (Ghidra `globalset` / `ContextCommit`).
+    #[serde(default)]
+    pub context_commits: Vec<CompiledContextCommit>,
     pub matcher: CompiledPatternMatcher,
     pub mod_constraint: Option<u8>,
     pub operand_reg_values: Vec<u8>,
@@ -180,6 +203,10 @@ pub struct CompiledExecutableConstructor {
     pub display_operands: Vec<CompiledDisplayOperand>,
     pub construct_tpl_kind: CompiledConstructTplKind,
     pub constructor_template: CompiledConstructorTemplate,
+    /// Named p-code sections from Ghidra's `namedtempl`.
+    /// Index corresponds to the section number (ATTR_SECTION value).
+    #[serde(default)]
+    pub named_templates: Vec<Option<CompiledConstructTpl>>,
     pub runtime_ready: bool,
     pub unsupported_template_kind: Option<String>,
 }

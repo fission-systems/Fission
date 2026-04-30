@@ -1,6 +1,7 @@
 use crate::compiler::{
-    CompiledConstructTplKind, CompiledConstructorTemplate, CompiledDisplayOperand,
-    CompiledDisplayTemplate, CompiledOperandSpec, CompiledSpaceRef,
+    CompiledConstructTpl, CompiledConstructTplKind, CompiledConstructorTemplate,
+    CompiledContextCommit, CompiledDisplayOperand, CompiledDisplayTemplate, CompiledOperandSpec,
+    CompiledSpaceRef,
 };
 
 use super::RuntimeMatchTrace;
@@ -14,6 +15,11 @@ pub struct RuntimeConstructState {
     pub mnemonic: String,
     pub construct_tpl_kind: CompiledConstructTplKind,
     pub constructor_template: CompiledConstructorTemplate,
+    /// Named p-code sections (Ghidra's namedtempl). Each entry corresponds to
+    /// a section number (ATTR_SECTION). Used by CROSSBUILD / sectioned constructors.
+    pub named_templates: Vec<Option<CompiledConstructTpl>>,
+    /// Deferred global context commits (Ghidra's `globalset` / `ContextCommit`).
+    pub context_commits: Vec<CompiledContextCommit>,
     pub display_template: CompiledDisplayTemplate,
     pub display_operands: Vec<CompiledDisplayOperand>,
     pub construct_nodes: Vec<RuntimeConstructNode>,

@@ -8,12 +8,13 @@ use fission_pcode::PcodeOpcode;
 use flate2::read::ZlibDecoder;
 
 use super::ir::{
-    CompiledConstTpl, CompiledConstructTpl, CompiledContextOp, CompiledDecisionLeafEntry,
-    CompiledDisjointPattern, CompiledDisplayOperand, CompiledDisplayOperandKind,
-    CompiledDisplayPiece, CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl,
-    CompiledLabelRef, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandSpec,
-    CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode,
-    CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl, CompiledVarnodeTpl,
+    CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextOp,
+    CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
+    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledOpTpl,
+    CompiledOpTplOpcode, CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression,
+    CompiledResolvedVarnode, CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl,
+    CompiledVarnodeTpl,
 };
 
 pub const GHIDRA_SLA_MAGIC: &[u8; 3] = b"sla";

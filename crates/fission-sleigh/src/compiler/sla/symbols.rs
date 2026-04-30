@@ -42,8 +42,14 @@ pub struct CompiledSlaConstructorTemplate {
     pub opprint_indices: Vec<usize>,
     pub operand_specs: Vec<CompiledOperandSpec>,
     pub context_changes: Vec<CompiledContextOp>,
+    /// Deferred global context commits (Ghidra `globalset` / `ELEM_COMMIT` elements).
+    pub context_commits: Vec<CompiledContextCommit>,
     pub flowthru_operand_index: Option<usize>,
     pub constructor_template: CompiledConstructTpl,
+    /// Named p-code sections from Ghidra's `namedtempl` (ATTR_SECTION >= 0).
+    /// Index corresponds to the section number. Used by CROSSBUILD and
+    /// sectioned constructors to dispatch p-code from a specific named section.
+    pub named_templates: Vec<Option<CompiledConstructTpl>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

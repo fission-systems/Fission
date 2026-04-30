@@ -53,3 +53,32 @@ pub(crate) fn decode_instruction(
         .into()),
     }
 }
+
+pub(crate) fn decode_instruction_with_context(
+    entry: &EntrySpec,
+    compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
+    bytes: &[u8],
+    address: u64,
+    context_override: Option<(u64, u64)>,
+) -> Result<DecodedInstruction> {
+    match registry::executable_engine_key_for_entry(entry) {
+        Some(ExecutionEngineKey::CompiledTable) => {
+            compiled_table::decode_instruction_with_context(
+                compiled,
+                native,
+                bytes,
+                address,
+                context_override,
+            )
+        }
+        _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+            language: entry.entry_id.clone(),
+            reason: format!(
+                "{} runtime status is executable, but no shared execution engine is registered",
+                entry.entry_id
+            ),
+        }
+        .into()),
+    }
+}

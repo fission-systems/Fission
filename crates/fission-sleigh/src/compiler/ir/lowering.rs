@@ -388,6 +388,7 @@ fn executable_constructor_from_sla_template(
         signature_hash,
         minimum_length: sla_template.minimum_length,
         context_changes: sla_template.context_changes.clone(),
+        context_commits: sla_template.context_commits.clone(),
         matcher: CompiledPatternMatcher::BitConstraints(vec![]),
         mod_constraint: None,
         operand_reg_values: Vec::new(),
@@ -412,6 +413,7 @@ fn executable_constructor_from_sla_template(
             ops: sla_template.constructor_template.ops.clone(),
             template_source: CompiledTemplateSource::SpecDerived,
         },
+        named_templates: sla_template.named_templates.clone(),
         runtime_ready: unsupported_template_kind.is_none(),
         unsupported_template_kind,
     }
@@ -821,6 +823,8 @@ impl Collector {
                 .collect(),
             construct_tpl_kind,
             constructor_template,
+            named_templates: Vec::new(),
+            context_commits: Vec::new(),
             runtime_ready: false,
             unsupported_template_kind: Some(
                 unsupported_template_reason(signature, construct_tpl_kind, &operand_specs)

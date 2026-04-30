@@ -1,13 +1,77 @@
+/// Ghidra ConstTpl::getReal() V_OFFSET_PLUS case.
+///
+/// `plus` is value_real read from ATTR_PLUS in the SLA.
+/// - Non-constant space: effective_offset + (plus & 0xFFFF)
+/// - Constant space: effective_offset >> (8 * (plus >> 16))
+pub(super) fn resolve_offset_plus_pub(handle: &RuntimeHandle, plus: u64) -> u64 {
+    resolve_offset_plus(handle, plus)
+}
+
+fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
+    let effective_offset = if handle.fixed.offset_space.is_some() {
+        handle.fixed.temp_offset
+    } else {
+        handle.fixed.offset_offset
+    };
+    let is_const_space = handle
+        .fixed
+        .space
+        .as_ref()
+        .map(|s| s.name == "const")
+        .unwrap_or(false);
+    if !is_const_space {
+        effective_offset.wrapping_add(plus & 0xFFFF)
+    } else {
+        let shift_bytes = plus >> 16;
+        let shift_bits = shift_bytes.saturating_mul(8);
+        if shift_bits >= 64 {
+            0
+        } else {
+            effective_offset >> shift_bits
+        }
+    }
+}
+
 pub(super) fn emit_pcode_for_state(
     compiled: &CompiledFrontend,
     address: u64,
     decoded: &RuntimeConstructState,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    let mut emitter = CompiledTableEmitter::new(compiled, address);
+    emit_pcode_for_state_with_bytes(compiled, address, &[], decoded)
+}
+
+pub(super) fn emit_pcode_for_state_with_bytes(
+    compiled: &CompiledFrontend,
+    address: u64,
+    instruction_bytes: &[u8],
+    decoded: &RuntimeConstructState,
+) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
+    let mut emitter = CompiledTableEmitter::new(compiled, address, instruction_bytes);
+    // If the template uses InstNext2 (delay-slot architectures), pre-decode the
+    // delay-slot instruction to get its actual length.
+    if uses_inst_next2(&decoded.constructor_template.ops) && !instruction_bytes.is_empty() {
+        emitter.precompute_delay_slot_length(compiled, decoded.length);
+    }
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, decoded)
         .map_err(|err| template_emit_error(compiled, err))?;
     Ok((emitter.finish(), details))
+}
+
+/// Returns true if the template contains an InstNext2 constant, meaning this
+/// is a delay-slot instruction and we need the delay slot's actual length.
+fn uses_inst_next2(ops: &[CompiledOpTpl]) -> bool {
+    ops.iter().any(|op| {
+        let check_const = |c: &CompiledConstTpl| matches!(c, CompiledConstTpl::InstNext2);
+        let check_varnode = |v: &CompiledVarnodeTpl| match v {
+            CompiledVarnodeTpl::Varnode { offset, size, .. } => {
+                check_const(offset) || check_const(size)
+            }
+            _ => false,
+        };
+        op.output.as_ref().map(check_varnode).unwrap_or(false)
+            || op.inputs.iter().any(check_varnode)
+    })
 }
 
 pub(super) fn template_emit_error(compiled: &CompiledFrontend, err: anyhow::Error) -> anyhow::Error {
@@ -61,6 +125,12 @@ pub(super) struct CompiledTableEmitter {
     /// Label positions: `label_num` → emitter op count at the time the Label was seen.
     /// Used for `resolveRelatives()` post-processing.
     label_positions: std::collections::BTreeMap<u64, u32>,
+    /// Raw instruction bytes, stored for potential delay-slot decoding (InstNext2).
+    instruction_bytes: Vec<u8>,
+    /// Pre-computed delay slot instruction length in bytes.
+    /// `Some(n)` if the delay slot instruction was successfully decoded; `None` otherwise.
+    /// Used for `InstNext2 = inst_next + delay_slot_length`.
+    delay_slot_length: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,10 +142,7 @@ pub(super) struct DynamicMemoryTarget {
 }
 
 impl CompiledTableEmitter {
-    fn new(compiled: &CompiledFrontend, address: u64) -> Self {
-        // Unique base offset comes from the `.sla` `uniqbase` attribute
-        // (Ghidra: (addr & uniqmask) | uniqbase pattern). Using the SLA-derived
-        // value ensures correct unique varnode allocation for any architecture.
+    fn new(compiled: &CompiledFrontend, address: u64, instruction_bytes: &[u8]) -> Self {
         let uniqbase = compiled.sla_uniqbase;
         Self {
             address,
@@ -85,6 +152,30 @@ impl CompiledTableEmitter {
             unique_space_index: compiled.sla_unique_space_index,
             sla_spaces: compiled.sla_spaces.clone(),
             label_positions: std::collections::BTreeMap::new(),
+            instruction_bytes: instruction_bytes.to_vec(),
+            delay_slot_length: None,
+        }
+    }
+
+    /// Pre-compute the delay slot instruction length. Called from the emit wrapper
+    /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
+    /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
+    fn precompute_delay_slot_length(
+        &mut self,
+        compiled: &CompiledFrontend,
+        inst_length: usize,
+    ) {
+        let inst_next_offset = inst_length;
+        let inst_next_address = self.address.saturating_add(inst_length as u64);
+        let len = decode_instruction_length(
+            compiled,
+            None,
+            &self.instruction_bytes,
+            inst_next_address,
+            inst_next_offset,
+        );
+        if len > 0 {
+            self.delay_slot_length = Some(len);
         }
     }
 
@@ -455,8 +546,19 @@ impl CompiledTableEmitter {
         // treated as "already built" because the parent used the same numeric
         // index for a different operand (e.g. 0 for the memory operand itself).
         let saved_built = std::mem::take(&mut self.built_operands);
-        for child_op in &child.constructor_template.ops {
-            self.emit_op_template(child, child_op)?;
+        if child.constructor_template.ops.is_empty() {
+            // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
+            // fall back to the parent's named section indexed by the operand number.
+            // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
+            if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
+                for named_op in &named_tpl.ops {
+                    self.emit_op_template(child, named_op)?;
+                }
+            }
+        } else {
+            for child_op in &child.constructor_template.ops {
+                self.emit_op_template(child, child_op)?;
+            }
         }
         self.built_operands = saved_built;
         if let Some(exported) = child.exported_handle.as_ref() {
@@ -917,6 +1019,10 @@ impl CompiledTableEmitter {
                     .get(*handle_index as usize)
                     .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
 
+                if matches!(selector, CompiledHandleSelector::OffsetPlus) {
+                    return Ok(resolve_offset_plus(handle, plus.unwrap_or(0)));
+                }
+
                 let val = self.resolve_fixed_handle_selector(handle, *selector)?;
                 if let Some(plus) = plus {
                     Ok(val.wrapping_add(*plus))
@@ -937,10 +1043,13 @@ impl CompiledTableEmitter {
                 Ok(encode_relative_sentinel(0))
             }
             CompiledConstTpl::InstNext2 => {
-                // Delay-slot architecture: address of the instruction after the delay
-                // slot. Approximation: inst_next + inst_length (will be refined when
-                // delay slot decoding is fully implemented).
-                Ok(self.address.saturating_add(state.length as u64 * 2))
+                // Ghidra: inst_next2 = inst_next + delay_slot_instruction_length.
+                // `inst_next` = address of the instruction after the current one.
+                // `delay_slot_length` = actual length of the instruction in the delay slot,
+                // pre-decoded in `precompute_delay_slot_length`.
+                let inst_next = self.address.saturating_add(state.length as u64);
+                let delay_len = self.delay_slot_length.unwrap_or(0) as u64;
+                Ok(inst_next.saturating_add(delay_len))
             }
             CompiledConstTpl::CurSpace => {
                 // The default (ram/code) address space ID. Use the first non-const,
@@ -954,9 +1063,19 @@ impl CompiledTableEmitter {
                 Ok(1)
             }
             CompiledConstTpl::CurSpaceSize => {
-                // Size of the default address space in bytes (typically 4 or 8).
-                // Use 8 as a safe default for 64-bit architectures.
-                Ok(8)
+                let addr_size = self
+                    .sla_spaces
+                    .values()
+                    .find(|s| {
+                        s.name == "ram"
+                            || (s.name != "const"
+                                && s.name != "unique"
+                                && s.name != "register")
+                    })
+                    .map(|s| s.addr_size)
+                    .filter(|&sz| sz > 0)
+                    .unwrap_or(8);
+                Ok(addr_size as u64)
             }
             CompiledConstTpl::FlowRef => bail!("ConstTpl flowref resolution is unsupported"),
             CompiledConstTpl::FlowRefSize => {
@@ -1005,7 +1124,9 @@ impl CompiledTableEmitter {
                 }
             }
             CompiledHandleSelector::Size => Ok(handle.fixed.size as u64),
-            CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),
+            CompiledHandleSelector::OffsetPlus => {
+                unreachable!("OffsetPlus is handled before calling resolve_fixed_handle_selector")
+            }
         }
     }
 

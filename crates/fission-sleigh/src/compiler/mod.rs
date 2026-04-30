@@ -34,7 +34,8 @@ pub use equivalence::{
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
     CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledContextField, CompiledContextFieldRef, CompiledContextOp, CompiledDecisionBucket,
+    CompiledContextCommit, CompiledContextField, CompiledContextFieldRef, CompiledContextOp,
+    CompiledDecisionBucket,
     CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode, CompiledDecisionProbe,
     CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,

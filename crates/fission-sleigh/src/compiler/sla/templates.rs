@@ -100,6 +100,8 @@ fn decode_construct_templates(
                     && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
             })
             .or_else(|| {
+                // Fallback: if no section-less template exists, pick any ELEM_CONSTRUCT_TPL
+                // that has no section attribute (only valid for truly section-less constructors).
                 constructor
                     .children
                     .iter()
@@ -126,6 +128,33 @@ fn decode_construct_templates(
                 return None;
             }
         };
+
+        // Collect named p-code sections (Ghidra's namedtempl: ELEM_CONSTRUCT_TPL with
+        // ATTR_SECTION >= 0). These are referenced by CROSSBUILD and sectioned constructors.
+        let mut named_templates: Vec<Option<CompiledConstructTpl>> = Vec::new();
+        for child in &constructor.children {
+            if child.id != sla_format::ELEM_CONSTRUCT_TPL {
+                continue;
+            }
+            let Some(section_idx) = child.attr_unsigned(sla_format::ATTR_SECTION) else {
+                continue; // main template, already handled
+            };
+            let section_idx = section_idx as usize;
+            // Extend vector to fit this section index.
+            while named_templates.len() <= section_idx {
+                named_templates.push(None);
+            }
+            match decode_construct_tpl(child, &spaces) {
+                Ok(named_tpl) => named_templates[section_idx] = Some(named_tpl),
+                Err(err) => {
+                    if trace_sla_parse {
+                        eprintln!(
+                            "[sla-parse] decode named section {section_idx} failed subtable={subtable_name} slot={local_index} err={err:#}"
+                        );
+                    }
+                }
+            }
+        }
 
         let mut opprint_indices = Vec::new();
         let mut display_pieces = Vec::new();
@@ -252,6 +281,41 @@ fn decode_construct_templates(
             }
         }
 
+        // Ghidra: ContextCommit elements encode deferred global context changes.
+        // Each ELEM_COMMIT child carries: symbol_id (ATTR_ID), word_index (ATTR_NUMBER),
+        // and mask (ATTR_MASK). See ContextCommit.encode() in Ghidra.
+        let mut context_commits = Vec::new();
+        for child in constructor
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_COMMIT)
+        {
+            let symbol_id = child
+                .attr_unsigned(sla_format::ATTR_ID)
+                .map(|v| v as u32)
+                .unwrap_or(0);
+            let word_index = child
+                .attr_unsigned(sla_format::ATTR_NUMBER)
+                .map(|v| v as u32)
+                .unwrap_or(0);
+            let mask = child
+                .attr_unsigned(sla_format::ATTR_MASK)
+                .map(|v| v as u32)
+                .unwrap_or(0);
+            // Resolve symbol_id → hand_index: look up in the operand symbol table.
+            // If the symbol is a built-in (e.g. `inst_next`), store u32::MAX as sentinel.
+            let hand_index = operand_symbols
+                .get(&symbol_id)
+                .map(|sym| sym.hand_index as u32)
+                .unwrap_or(u32::MAX);
+            context_commits.push(CompiledContextCommit {
+                symbol_id,
+                hand_index,
+                word_index,
+                mask,
+            });
+        }
+
         Some(CompiledSlaConstructorTemplate {
             id,
             subtable_id,
@@ -273,8 +337,10 @@ fn decode_construct_templates(
             opprint_indices,
             operand_specs,
             context_changes,
+            context_commits,
             flowthru_operand_index,
             constructor_template: template,
+            named_templates,
         })
     };
 
@@ -322,6 +388,7 @@ fn decode_construct_templates(
                     opprint_indices: Vec::new(),
                     operand_specs: Vec::new(),
                     context_changes: Vec::new(),
+                    context_commits: Vec::new(),
                     flowthru_operand_index: None,
                     constructor_template: CompiledConstructTpl {
                         constructor_hash: 0,
@@ -329,6 +396,7 @@ fn decode_construct_templates(
                         result: None,
                         ops: Vec::new(),
                     },
+                    named_templates: Vec::new(),
                 }
             });
             constructors_by_index.insert(slot, template);
@@ -365,6 +433,7 @@ fn decode_construct_templates(
                     opprint_indices: Vec::new(),
                     operand_specs: Vec::new(),
                     context_changes: Vec::new(),
+                    context_commits: Vec::new(),
                     flowthru_operand_index: None,
                     constructor_template: CompiledConstructTpl {
                         constructor_hash: 0,
@@ -372,6 +441,7 @@ fn decode_construct_templates(
                         result: None,
                         ops: Vec::new(),
                     },
+                    named_templates: Vec::new(),
                 },
             ));
         }
