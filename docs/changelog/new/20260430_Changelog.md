@@ -182,6 +182,26 @@ An initial run without `--disassemble-missing` produced Ghidra
 confirms this was oracle materialization setup, not a Fission raw P-code
 semantic mismatch.
 
+Expanded the same DLL check to the first 100 loader-discovered entry/export
+function seeds:
+
+```text
+report: /tmp/sqlite3_raw_pcode_export100/aggregate_raw_pcode_parity_report.json
+row_count: 100
+full_match: 800
+average_similarity_score: 1.0
+average_parity_ratio: 1.0
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+template_source_totals: sla_construct_tpl=800
+fission_wall_clock_sec: 327.68184033373836
+ghidra_wall_clock_sec: 321.9895864216378
+```
+
+This keeps the current x86-64 `.sla ConstructTpl` raw P-code path exact across a
+larger real-world PE DLL export surface, not just the synthetic canonical rows.
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.
