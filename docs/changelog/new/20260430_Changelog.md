@@ -151,6 +151,37 @@ Implementation policy:
 - benchmark loader smoke records `input_classification` and `next_action`
 - realworld suite orchestration skips raw/full lanes when the same manifest fails loader preflight as non-executable
 
+## Raw P-code SQLite DLL Smoke
+
+Ran a temporary six-row raw P-code smoke against:
+
+```text
+benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll
+```
+
+Rows were selected from loader-discovered PE x86-64 entry/export function seeds
+and run with Ghidra `--disassemble-missing` so the oracle materializes
+instructions at the requested export addresses.
+
+Result:
+
+```text
+report: /tmp/sqlite3_raw_pcode_smoke_disassemble/aggregate_raw_pcode_parity_report.json
+row_count: 6
+full_match: 48
+average_similarity_score: 1.0
+average_parity_ratio: 1.0
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+template_source_totals: sla_construct_tpl=48
+```
+
+An initial run without `--disassemble-missing` produced Ghidra
+`no instruction` rows while Fission decoded branch thunks. The corrected run
+confirms this was oracle materialization setup, not a Fission raw P-code
+semantic mismatch.
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.
