@@ -1,9 +1,57 @@
-# Changelog: DIE Loader Detection and GUI Metadata Surfacing
+# Changelog: 2026-04-30
 
-**Date:** 2026-04-30
+Rolling notes for work landed on this date. Sections are independent topics.
+
+## fission-sleigh: Ghidra SLEIGH five-gap closure (clean-room parity)
+
+**Date:** 2026-04-30  
+**Scope:** `crates/fission-sleigh` — SLA decode, lowering, runtime decode/lift
+
+### Summary
+
+Closed five remaining runtime/compiler gaps against Ghidra Sleigh semantics using SLA-driven rules only: no architecture-specific hardcoding, no decode heuristics, and no numeric approximations where Ghidra uses exact definitions (notably `CurSpaceSize` and `InstNext2`).
+
+### Gaps
+
+| # | Area | Implementation |
+|---|------|----------------|
+| 1 | ContextCommit (`ELEM_COMMIT` / `globalset`) | `packed` constants; parse commits in `templates.rs`; `CompiledContextCommit` in IR; resolve/apply in `compiled_table/mod.rs`; `decode_window` carries pending context overrides across instructions. |
+| 2 | Named template sections (`ATTR_SECTION`) | Main vs sectioned `ELEM_CONSTRUCT_TPL`; `named_templates` on constructor IR/runtime state; BUILD uses named section when child template has no ops. |
+| 3 | OffsetPlus (`V_OFFSET_PLUS`) | Ghidra-aligned offset handling in `template_eval.rs` and `walker.rs` (`resolve_offset_plus_pub`). |
+| 4 | CurSpaceSize | Pointer width from packaged SLA RAM space metadata (`sla_spaces`), not a literal `8`. |
+| 5 | InstNext2 | Delay-slot length from recursive instruction-length decode (`decode_instruction_length`), not a fixed multiplier guess. |
+
+### Representative paths
+
+- `crates/fission-sleigh/src/compiler/sla/{packed.rs,templates.rs,symbols.rs,mod.rs}`
+- `crates/fission-sleigh/src/compiler/ir/{types.rs,lowering.rs}` and `compiler/mod.rs`
+- `crates/fission-sleigh/src/runtime/{decode.rs,engine.rs,mod.rs}`
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/{mod.rs,template_eval.rs,walker.rs}`
+- `crates/fission-sleigh/src/runtime/spine/{construct.rs,template.rs}`
+
+### Git
+
+Landed on `main` as `feaf3757` — `feat(fission-sleigh): Ghidra Sleigh 5-gap closure (cleanroom algorithm implementation)`.
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+- Targeted `cargo test -p fission-sleigh` subsets (54 tests) over runtime spine/registry and compiler SLA/IR paths; no new failures in that set.
+- Known pre-existing failures (unchanged by this wave): `runtime_registry_covers_all_ghidra_processors`, `compile_frontend_collects_pcode_ops_and_patterns`.
+
+### Follow-up
+
+- Broad raw P-code smoke across architectures: `benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json` with `run_architecture_parallel.py`.
+- Decide whether to refresh or quarantine the two stale tests above for CI.
+
+---
+
+## DIE Loader Detection and GUI Metadata Surfacing
+
+**Date:** 2026-04-30  
 **Scope:** `fission-loader` DIE detection resources/parser, Tauri GUI detection metadata
 
-## Summary
+### Summary
 
 Moved Detect-It-Easy based loader enrichment toward a Fission-owned, vendored-resource model and surfaced the resulting static detections in the desktop UI. This does not make DIE the binary format owner and does not execute DIE JavaScript/DSL. Loader format identity remains owned by Fission parsers; DIE detections are metadata enrichment only.
 
@@ -15,7 +63,7 @@ Strict policy remains:
 - unsupported DIE DSL constructs are ignored or counted as unsupported metadata, not treated as successful evidence
 - detection metadata does not alter load-spec selection, SLEIGH decode, or raw P-code semantics
 
-## Implementation Notes
+### Implementation Notes
 
 ### Vendored DIE Resources
 
@@ -75,7 +123,7 @@ Added detection metadata to the Tauri binary info DTO:
 
 The Explorer sidebar now shows a read-only `Detections` panel, and the status bar shows the detection count. This is display-only metadata and does not change loader or decompiler behavior.
 
-## Validation
+### Validation
 
 Completed:
 
@@ -96,7 +144,7 @@ Result: no active references outside the checked-in DIE resource mirror.
 
 Observed warnings during Rust checks are existing workspace warnings in downstream crates and are not introduced by this loader metadata change.
 
-## Remaining Work
+### Remaining Work
 
 - Split the remaining parser/matcher logic out of `die_engine.rs` into dedicated parser and matcher modules.
 - Add CLI JSON exposure for DIE detection details if needed for non-GUI workflows.
