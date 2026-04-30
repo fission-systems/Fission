@@ -14,7 +14,7 @@ use super::ir::{
     CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledOpTpl,
     CompiledOpTplOpcode, CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression,
     CompiledResolvedVarnode, CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl,
-    CompiledVarnodeTpl,
+    CompiledVarnodeTpl, SlaOperandSymbolMeta,
 };
 
 pub const GHIDRA_SLA_MAGIC: &[u8; 3] = b"sla";
@@ -26,6 +26,10 @@ include!("native.rs");
 include!("templates.rs");
 include!("packed.rs");
 
+#[cfg(test)]
+mod ghidra_const_tpl_map;
+#[cfg(test)]
+mod pcode_golden_harness;
 #[cfg(test)]
 mod tests;
 pub fn load_compiled_sla(path: impl AsRef<Path>) -> Result<CompiledSlaArtifact> {

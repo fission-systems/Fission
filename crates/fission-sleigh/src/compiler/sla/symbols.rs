@@ -20,6 +20,8 @@ pub struct CompiledSlaTemplateLibrary {
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
     pub unique_space_index: u64,
     pub register_space_index: u64,
+    /// Ghidra `defaultspace` attribute resolved against `spaces` (`u64::MAX` if unknown).
+    pub default_space_index: u64,
     pub uniqbase: u64,
     pub uniqmask: u64,
     pub constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>>,
@@ -51,6 +53,9 @@ pub struct CompiledSlaConstructorTemplate {
     /// Index corresponds to the section number. Used by CROSSBUILD and
     /// sectioned constructors to dispatch p-code from a specific named section.
     pub named_templates: Vec<Option<CompiledConstructTpl>>,
+    /// Per-operand metadata from Ghidra `OperandSymbol.encode` (`ATTRIB_MINLEN`, `ATTRIB_CODE`).
+    /// Index aligns with `operand_specs` / constructor handle order.
+    pub operand_symbol_meta: Vec<SlaOperandSymbolMeta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +67,8 @@ struct DecodedOperandSymbol {
     /// Index of the base operand for the offset calculation, or -1 if relative to
     /// the constructor's own start. Corresponds to `ATTRIB_BASE` (OperandSymbol.offsetbase).
     offsetbase: i32,
+    /// Ghidra `OperandSymbol.encode` fields carried on `ELEM_OPERAND_SYM` (see `SlaOperandSymbolMeta`).
+    sla_encode_meta: SlaOperandSymbolMeta,
     subtable_name: Option<String>,
     display_kind: CompiledDisplayOperandKind,
     token_field: Option<DecodedTokenField>,
@@ -110,6 +117,94 @@ pub(super) struct SlaSpaceDecodeResult {
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
     pub unique_space_index: u64,
     pub register_space_index: u64,
+    /// Resolved index of Ghidra `defaultspace` on the `spaces` element (`u64::MAX` if unknown).
+    pub default_space_index: u64,
+}
+
+fn walk_space_children(
+    element: &PackedElement,
+    spaces: &mut BTreeMap<u64, CompiledSpaceRef>,
+    unique_space_index: &mut u64,
+    register_space_index: &mut u64,
+) -> Result<()> {
+    if element.id == sla_format::ELEM_SPACE {
+        ingest_packed_space(
+            spaces,
+            unique_space_index,
+            register_space_index,
+            element,
+            false,
+        )?;
+    } else if element.id == sla_format::ELEM_SPACE_UNIQUE {
+        ingest_packed_space(
+            spaces,
+            unique_space_index,
+            register_space_index,
+            element,
+            true,
+        )?;
+    }
+    for child in &element.children {
+        walk_space_children(
+            child,
+            spaces,
+            unique_space_index,
+            register_space_index,
+        )?;
+    }
+    Ok(())
+}
+
+fn ingest_packed_space(
+    spaces: &mut BTreeMap<u64, CompiledSpaceRef>,
+    unique_space_index: &mut u64,
+    register_space_index: &mut u64,
+    element: &PackedElement,
+    is_unique_element: bool,
+) -> Result<()> {
+    let index = element
+        .attr_unsigned(sla_format::ATTR_INDEX)
+        .ok_or_else(|| anyhow!("space missing index"))?;
+    let name = element
+        .attr_string(sla_format::ATTR_NAME)
+        .unwrap_or(if is_unique_element { "unique" } else { "space" })
+        .to_string();
+    let word_size = element
+        .attr_unsigned(sla_format::ATTR_WORDSIZE)
+        .map(|v| v as u32)
+        .unwrap_or(1);
+    let addr_size = element
+        .attr_unsigned(sla_format::ATTR_SIZE)
+        .map(|v| v as u32)
+        .unwrap_or(0);
+    let delay = element
+        .attr_signed(sla_format::ATTR_DELAY)
+        .map(|v| v as i32)
+        .unwrap_or(-1);
+    let (sleigh_is_ram_class, sleigh_is_unique_space, delay_slots) = if is_unique_element {
+        (false, true, -1)
+    } else {
+        (delay > 0, false, delay)
+    };
+    if name == "register" {
+        *register_space_index = index;
+    }
+    if is_unique_element {
+        *unique_space_index = index;
+    }
+    spaces.insert(
+        index,
+        CompiledSpaceRef {
+            name: name.clone(),
+            index,
+            word_size,
+            addr_size,
+            sleigh_delay_slots: delay_slots,
+            sleigh_is_ram_class,
+            sleigh_is_unique_space,
+        },
+    );
+    Ok(())
 }
 
 fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
@@ -121,64 +216,72 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
             index: 0,
             word_size: 0,
             addr_size: 0,
+            sleigh_delay_slots: -1,
+            sleigh_is_ram_class: false,
+            sleigh_is_unique_space: false,
         },
     );
     let mut unique_space_index = u64::MAX;
     let mut register_space_index = u64::MAX;
 
-    for space in root.descendants_with_id(sla_format::ELEM_SPACE) {
-        let index = space
-            .attr_unsigned(sla_format::ATTR_INDEX)
-            .ok_or_else(|| anyhow!("space missing index"))?;
-        let name = space
-            .attr_string(sla_format::ATTR_NAME)
-            .ok_or_else(|| anyhow!("space missing name"))?;
-        // Ghidra: ATTRIB_WORDSIZE is the addressable unit size (1 for byte-addressed spaces).
-        // ATTRIB_WORDSIZE is only written to the SLA when > 1; default is 1.
-        // ATTRIB_SIZE is the address/pointer size (e.g., 4 for x86-32).
-        let word_size = space
-            .attr_unsigned(sla_format::ATTR_WORDSIZE)
-            .map(|v| v as u32)
-            .unwrap_or(1);
-        let addr_size = space
-            .attr_unsigned(sla_format::ATTR_SIZE)
-            .map(|v| v as u32)
-            .unwrap_or(0);
-        if name == "register" {
-            register_space_index = index;
+    let spaces_root = root
+        .children
+        .iter()
+        .find(|child| child.id == sla_format::ELEM_SPACES);
+    let default_space_name = spaces_root
+        .and_then(|node| node.attr_string(sla_format::ATTR_DEFAULTSPACE))
+        .map(str::to_string);
+
+    if let Some(node) = spaces_root {
+        walk_space_children(
+            node,
+            &mut spaces,
+            &mut unique_space_index,
+            &mut register_space_index,
+        )?;
+    } else {
+        for space in root.descendants_with_id(sla_format::ELEM_SPACE) {
+            ingest_packed_space(
+                &mut spaces,
+                &mut unique_space_index,
+                &mut register_space_index,
+                space,
+                false,
+            )?;
         }
-        spaces.insert(
-            index,
-            CompiledSpaceRef {
-                name: name.to_string(),
-                index,
-                word_size,
-                addr_size,
-            },
-        );
+        for space in root.descendants_with_id(sla_format::ELEM_SPACE_UNIQUE) {
+            ingest_packed_space(
+                &mut spaces,
+                &mut unique_space_index,
+                &mut register_space_index,
+                space,
+                true,
+            )?;
+        }
     }
-    for space in root.descendants_with_id(sla_format::ELEM_SPACE_UNIQUE) {
-        let index = space
-            .attr_unsigned(sla_format::ATTR_INDEX)
-            .ok_or_else(|| anyhow!("unique space missing index"))?;
-        let name = space
-            .attr_string(sla_format::ATTR_NAME)
-            .unwrap_or("unique");
-        unique_space_index = index;
-        spaces.insert(
-            index,
-            CompiledSpaceRef {
-                name: name.to_string(),
-                index,
-                word_size: 0,
-                addr_size: 0,
-            },
-        );
+
+    let mut default_space_index = u64::MAX;
+    if let Some(ref want) = default_space_name {
+        if let Some(found) = spaces.values().find(|s| s.name == *want) {
+            default_space_index = found.index;
+        }
     }
+    if default_space_index == u64::MAX {
+        let ram_candidates: Vec<u64> = spaces
+            .iter()
+            .filter(|(_, s)| s.sleigh_is_ram_class)
+            .map(|(idx, _)| *idx)
+            .collect();
+        if ram_candidates.len() == 1 {
+            default_space_index = ram_candidates[0];
+        }
+    }
+
     Ok(SlaSpaceDecodeResult {
         spaces,
         unique_space_index,
         register_space_index,
+        default_space_index,
     })
 }
 
@@ -200,6 +303,12 @@ fn decode_operand_symbols(
         let offsetbase = operand
             .attr_signed(sla_format::ATTR_BASE)
             .unwrap_or(-1) as i32;
+        let sla_encode_meta = SlaOperandSymbolMeta {
+            min_length: operand
+                .attr_signed(sla_format::ATTR_MINLEN)
+                .map(|value| value as i32),
+            code_address: operand.attr_bool(sla_format::ATTR_CODE),
+        };
         let direct_pattern_expression = operand
             .children
             .iter()
@@ -301,6 +410,7 @@ fn decode_operand_symbols(
                 hand_index,
                 reloffset,
                 offsetbase,
+                sla_encode_meta,
                 subtable_name,
                 display_kind,
                 token_field,

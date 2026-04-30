@@ -365,29 +365,53 @@ fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
 fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let files = [
+        manifest_dir.join("src/compiler/decode_metadata.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/selection.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/walker.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/walker/impl_walker.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/walker/structs.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/handles.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/template_eval.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_impl.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_types.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/impl_executor_trait.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/token.rs"),
         manifest_dir.join("src/runtime/spine/decision.rs"),
     ];
     for file in files {
         let source = std::fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        assert!(
-            !source.contains("is_x86_compat_language"),
-            "{} still uses architecture-named compatibility predicate",
-            file.display()
-        );
+        for forbidden in [
+            "is_x86_compat_language",
+            "ghidra_x86_subtable_symbol_cursor_policy_bits",
+            "CompiledTokenCursorPolicy",
+            "shared_token_cursor_policy_",
+            "decode_shared_token_fields",
+            "is_instruction_prefix_byte",
+            "opcode_len_from_cursor",
+            "fixed_handle_for_bound_operand",
+            "fallback_binding_for_no_export_subtable",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} still uses forbidden canonical SLEIGH policy/helper: {forbidden}",
+                file.display()
+            );
+        }
     }
 }
 
 #[test]
 fn canonical_template_executor_has_no_compatibility_success_entrypoints() {
-    let template_eval = include_str!("template_eval.rs");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let files = [
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_impl.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_types.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/impl_executor_trait.rs"),
+    ];
     for forbidden in [
         "NativeFission",
         "CompatibilityLowered",
@@ -395,16 +419,26 @@ fn canonical_template_executor_has_no_compatibility_success_entrypoints() {
         "semantic_ops_for_kind",
         "classify_construct_tpl_kind",
     ] {
-        assert!(
-            !template_eval.contains(forbidden),
-            "canonical template executor must not expose compatibility p-code success path: {forbidden}"
-        );
+        for file in &files {
+            let source = std::fs::read_to_string(file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+            assert!(
+                !source.contains(forbidden),
+                "canonical template executor must not expose compatibility p-code success path: {forbidden}"
+            );
+        }
     }
 }
 
 #[test]
 fn canonical_template_executor_does_not_materialize_from_bound_operand_helpers() {
-    let template_eval = include_str!("template_eval.rs");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let files = [
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_impl.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/emitter_types.rs"),
+        manifest_dir.join("src/runtime/spine/compiled_table/template_eval/impl_executor_trait.rs"),
+    ];
     for forbidden in [
         "fixed_handle_for_bound_operand",
         "BoundOperand",
@@ -412,9 +446,13 @@ fn canonical_template_executor_does_not_materialize_from_bound_operand_helpers()
         "CompiledVarnodeTpl::FixedRegister",
         "CompiledVarnodeTpl::Flag",
     ] {
-        assert!(
-            !template_eval.contains(forbidden),
-            "template execution must resolve .sla VarnodeTpl/HandleTpl, not manual operand helpers: {forbidden}"
-        );
+        for file in &files {
+            let source = std::fs::read_to_string(file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+            assert!(
+                !source.contains(forbidden),
+                "template execution must resolve .sla VarnodeTpl/HandleTpl, not manual operand helpers: {forbidden}"
+            );
+        }
     }
 }

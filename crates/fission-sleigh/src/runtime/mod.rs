@@ -211,10 +211,14 @@ pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::GhidraLanguageManifest;
     use fission_core::architecture::BinaryLoadSpec;
     use fission_loader::loader::LoadedBinary;
     use std::collections::BTreeSet;
     use std::path::PathBuf;
+
+    const GHIDRA_LANGUAGE_MANIFEST_TEST_JSON: &str =
+        include_str!("../../specs/ghidra_language_manifest.json");
 
     fn var(offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -245,8 +249,10 @@ mod tests {
 
     #[test]
     fn runtime_registry_discovers_all_variants() {
+        let manifest: GhidraLanguageManifest = serde_json::from_str(GHIDRA_LANGUAGE_MANIFEST_TEST_JSON)
+            .expect("parse checked-in language manifest");
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
-        assert_eq!(registry.frontends().len(), 146);
+        assert_eq!(registry.frontends().len(), manifest.variant_count);
         let x86_64 = registry.lookup("x86-64").expect("x86-64 registered");
         assert_eq!(x86_64.status, RuntimeFrontendStatus::ExecutableCandidate);
         assert_eq!(x86_64.processor, "x86");
@@ -262,6 +268,8 @@ mod tests {
 
     #[test]
     fn runtime_registry_covers_all_ghidra_processors() {
+        let manifest: GhidraLanguageManifest = serde_json::from_str(GHIDRA_LANGUAGE_MANIFEST_TEST_JSON)
+            .expect("parse checked-in language manifest");
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
         let manifest_processors = registry
             .frontends()
@@ -274,21 +282,21 @@ mod tests {
             .map(|descriptor| descriptor.ghidra_processor.as_str())
             .collect::<BTreeSet<_>>();
 
-        assert_eq!(manifest_processors.len(), 38);
+        assert_eq!(manifest_processors.len(), manifest.processor_count);
         assert_eq!(registry_processors, manifest_processors);
-        assert_eq!(
-            registry
-                .frontends()
-                .iter()
-                .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
-                .map(|frontend| frontend.processor.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                "AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM",
-                "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "MIPS", "MIPS",
-                "MIPS", "MIPS", "MIPS", "MIPS", "RISCV", "RISCV", "x86", "x86",
-            ]
-        );
+        let expected_executable: Vec<&str> = manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.runtime_status == RuntimeFrontendStatus::ExecutableCandidate.as_str())
+            .map(|entry| entry.processor.as_str())
+            .collect();
+        let actual_executable: Vec<&str> = registry
+            .frontends()
+            .iter()
+            .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
+            .map(|frontend| frontend.processor.as_str())
+            .collect();
+        assert_eq!(actual_executable, expected_executable);
     }
 
     #[test]

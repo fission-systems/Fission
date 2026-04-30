@@ -58,12 +58,25 @@ mod handles {
     include!("handles.rs");
 }
 
+mod audit {
+    include!("audit.rs");
+}
+
+mod bind_decode {
+    use super::*;
+    include!("bind_decode.rs");
+}
+
 mod template_eval {
     use super::*;
     include!("template_eval.rs");
 }
 
 pub use template_eval::{FlowEmitOptions, RuntimeFlowOverride};
+pub use audit::{audit_sla_template_features, SlaTemplateFeatureAudit};
+pub(crate) use bind_decode::{
+    apply_context_commits, decode_instruction_length, try_bind_runtime_state_at,
+};
 
 use context::*;
 use display::*;
@@ -73,84 +86,6 @@ use selection::*;
 use strategy::*;
 use template_eval::*;
 use walker::*;
-
-/// Counts cross-build / delay-slot / flow-const usage across all `.sla`-lowered constructor templates.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct SlaTemplateFeatureAudit {
-    pub opcode_cross_build: u64,
-    pub opcode_delay_slot_indirect: u64,
-    pub const_flow_ref: u64,
-    pub const_flow_ref_size: u64,
-    pub const_flow_dest: u64,
-    pub const_flow_dest_size: u64,
-}
-
-/// Scan `compiled` subtable constructors for template features that need Ghidra `PcodeEmit` parity.
-pub fn audit_sla_template_features(compiled: &CompiledFrontend) -> SlaTemplateFeatureAudit {
-    let mut audit = SlaTemplateFeatureAudit::default();
-    for sub in compiled.subtables.values() {
-        for ctor in &sub.constructors {
-            audit_construct_tpl_ops(&ctor.constructor_template.ops, &mut audit);
-            for named in &ctor.named_templates {
-                if let Some(tpl) = named {
-                    audit_construct_tpl_ops(&tpl.ops, &mut audit);
-                }
-            }
-        }
-    }
-    audit
-}
-
-fn audit_construct_tpl_ops(ops: &[CompiledOpTpl], audit: &mut SlaTemplateFeatureAudit) {
-    for op in ops {
-        match op.opcode {
-            CompiledOpTplOpcode::CrossBuild => audit.opcode_cross_build += 1,
-            CompiledOpTplOpcode::DelaySlotIndirect => audit.opcode_delay_slot_indirect += 1,
-            _ => {}
-        }
-        if let Some(out) = &op.output {
-            audit_varnode_tpl_flow_consts(out, audit);
-        }
-        for inp in &op.inputs {
-            audit_varnode_tpl_flow_consts(inp, audit);
-        }
-    }
-}
-
-fn audit_varnode_tpl_flow_consts(vn: &CompiledVarnodeTpl, audit: &mut SlaTemplateFeatureAudit) {
-    match vn {
-        CompiledVarnodeTpl::Const(c) => audit_const_tpl_flow(c, audit),
-        CompiledVarnodeTpl::Varnode { space, offset, size } => {
-            if let CompiledSpaceTpl::Const(c) = space {
-                audit_const_tpl_flow(c, audit);
-            }
-            audit_const_tpl_flow(offset, audit);
-            audit_const_tpl_flow(size, audit);
-        }
-        CompiledVarnodeTpl::HandleTpl(ht) => {
-            if let Some(s) = &ht.size {
-                audit_const_tpl_flow(s, audit);
-            }
-            if let Some(o) = &ht.ptr_offset {
-                audit_const_tpl_flow(o, audit);
-            }
-            if let Some(o) = &ht.temp_offset {
-                audit_const_tpl_flow(o, audit);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn audit_const_tpl_flow(ct: &CompiledConstTpl, audit: &mut SlaTemplateFeatureAudit) {
-    match ct {
-        CompiledConstTpl::FlowRef => audit.const_flow_ref += 1,
-        CompiledConstTpl::FlowRefSize => audit.const_flow_ref_size += 1,
-        CompiledConstTpl::FlowDest => audit.const_flow_dest += 1,
-        CompiledConstTpl::FlowDestSize => audit.const_flow_dest_size += 1,
-        _ => {}
-    }
-}
 
 #[cfg(test)]
 mod tests;
@@ -360,177 +295,6 @@ fn typed_template_resolution_error(
         .into()
     } else {
         err
-    }
-}
-
-/// Decodes the instruction at `inst_next_offset` within `bytes` and returns its
-/// length in bytes. Used by `InstNext2` for delay-slot architectures.
-///
-/// Ghidra: `SleighInstructionPrototype.getDelaySlotByteCount()` returns the byte count
-/// of the delay-slot instruction by actually decoding it at `inst_next`.
-pub(super) fn decode_instruction_length(
-    compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
-    bytes: &[u8],
-    inst_next_address: u64,
-    inst_next_byte_offset: usize,
-) -> u32 {
-    let remaining = match bytes.get(inst_next_byte_offset..) {
-        Some(b) if !b.is_empty() => b,
-        _ => return 0,
-    };
-    let ctx = match CompiledInstructionContext::parse(remaining, inst_next_address) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-    let mut ctx = ctx;
-    ctx.context_register = compiled.default_context;
-    ctx.context_known_mask = compiled.default_context_known_mask;
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = match candidate_selections(compiled, &strategy, &ctx, inst_next_address) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-    for selection in candidates {
-        if !selection.constructor.runtime_ready {
-            continue;
-        }
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-        if let Ok(decoded) = bind_instruction(compiled, strategy, &ctx, selection) {
-            return decoded.length as u32;
-        }
-    }
-    0
-}
-
-/// Bind (decode operands/handles for) the instruction at `target_address` using a
-/// contiguous `memory_window` where index `0` corresponds to `memory_base`.
-///
-/// Used by Ghidra `PcodeEmit.appendCrossBuild` and delay-slot emission.
-pub(super) fn try_bind_runtime_state_at(
-    compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
-    memory_window: &[u8],
-    memory_base: u64,
-    target_address: u64,
-    context_register: u64,
-    context_known_mask: u64,
-) -> Result<RuntimeConstructState> {
-    let offset = target_address
-        .checked_sub(memory_base)
-        .ok_or_else(|| {
-            anyhow!(
-                "bind target 0x{target_address:x} precedes memory base 0x{memory_base:x}"
-            )
-        })? as usize;
-    let slice = memory_window.get(offset..).ok_or_else(|| {
-        anyhow!(
-            "bind target 0x{target_address:x} past memory window (base=0x{memory_base:x}, len={})",
-            memory_window.len()
-        )
-    })?;
-    let mut ctx = CompiledInstructionContext::parse(slice, target_address)?;
-    ctx.context_register = context_register;
-    ctx.context_known_mask = context_known_mask;
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = candidate_selections(compiled, &strategy, &ctx, target_address)?;
-    let mut first_err: Option<anyhow::Error> = None;
-    for selection in candidates {
-        if !selection.constructor.runtime_ready {
-            continue;
-        }
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-        match bind_instruction(compiled, strategy, &ctx, selection) {
-            Ok(state) => return Ok(state),
-            Err(err) => {
-                if first_err.is_none() {
-                    first_err = Some(err);
-                }
-            }
-        }
-    }
-    Err(first_err.unwrap_or_else(|| {
-        anyhow!("decode bind failed at target_address=0x{target_address:x}")
-    }))
-}
-
-/// Resolved deferred context commit: Ghidra's SleighParserContext.applyCommits().
-///
-/// Each entry is `(target_address, word_index, mask, context_word_value)`.
-/// The caller should apply these to the context cache for future instruction decodes.
-pub(crate) type ResolvedContextCommit = (u64, u32, u32, u32);
-
-/// Resolves `context_commits` from a decoded instruction into concrete
-/// `(target_address, word_index, mask, value)` tuples for the caller to apply.
-///
-/// Ghidra algorithm (SleighParserContext.applyCommits):
-/// - For each commit, look up the handle (by hand_index or built-in symbol).
-/// - Extract the target address from the handle's offset.
-/// - Read the current context bits at (word_index, mask).
-/// - Return (target_addr, word_index, mask, value) for the caller to apply.
-pub(crate) fn apply_context_commits(
-    compiled: &CompiledFrontend,
-    decoded: &RuntimeConstructState,
-    instruction_address: u64,
-    current_context: u64,
-) -> Vec<ResolvedContextCommit> {
-    let mut results = Vec::new();
-    for commit in &decoded.context_commits {
-        let target_addr = if commit.hand_index == u32::MAX {
-            // Built-in symbol (e.g. `inst_next`): target = instruction start + length.
-            instruction_address.saturating_add(decoded.length as u64)
-        } else {
-            // Resolve via the operand's fixed handle.
-            let Some(handle) = decoded.handles.get(commit.hand_index as usize) else {
-                continue;
-            };
-            // Ghidra: if handle.offset_space.type == CONSTANT, multiply by ram addr_unit
-            let offset = if handle.fixed.offset_space.is_some() {
-                handle.fixed.temp_offset
-            } else {
-                handle.fixed.offset_offset
-            };
-            if handle
-                .fixed
-                .space
-                .as_ref()
-                .map(|s| s.name == "const")
-                .unwrap_or(false)
-            {
-                let addr_unit = compiled
-                    .sla_spaces
-                    .values()
-                    .find(|s| s.name == "ram" || (s.name != "const" && s.name != "unique" && s.name != "register"))
-                    .map(|s| s.word_size as u64)
-                    .unwrap_or(1);
-                offset.wrapping_mul(addr_unit)
-            } else {
-                offset
-            }
-        };
-        // Read current context bits at (word_index, mask) to get the value to commit.
-        let value = match packed_context_word(current_context, commit.word_index) {
-            Ok(word) => word & commit.mask,
-            Err(_) => continue,
-        };
-        results.push((target_addr, commit.word_index, commit.mask, value));
-    }
-    results
-}
-
-/// Applies resolved context commits to a mutable context register.
-/// Called before decoding an instruction at `address` to override context.
-pub(crate) fn apply_pending_commits_to_context(
-    context_register: &mut u64,
-    context_known_mask: &mut u64,
-    address: u64,
-    pending: &[(u64, u32, u32, u32)],
-) {
-    for &(target_addr, word_index, mask, value) in pending {
-        if target_addr == address {
-            let _ = set_packed_context_word(context_register, word_index, value, mask);
-            let _ = set_packed_context_word(context_known_mask, word_index, mask, mask);
-        }
     }
 }
 

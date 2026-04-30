@@ -37,6 +37,9 @@ impl SpaceMap {
                 index: 0,
                 word_size: 0,
                 addr_size: 0,
+                sleigh_delay_slots: -1,
+                sleigh_is_ram_class: false,
+                sleigh_is_unique_space: false,
             },
         );
         Self { by_id }
