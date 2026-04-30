@@ -104,6 +104,38 @@ Observed warnings during Rust checks are existing workspace warnings in downstre
 - Keep YARA execution as a separate future analyzer wave; current `yara_rules` are stored resources only.
 - Continue treating DIE signatures as loader metadata enrichment, not as format/load-spec authority.
 
+## Raw P-code PuTTY Installer Check
+
+Ran the requested raw P-code probe against:
+
+```text
+benchmark/binary/x86-64/window/commercial_binary/binary/PuTTY_V0.83.exe
+```
+
+Result: the file is not a PE executable image. It is a Windows Installer MSI stored as a Compound Document File:
+
+```text
+sha256: d816fba5750e95ae5f845ad22bd165e19ebefbbf298f453abc1db2ef7655e4b8
+magic: d0 cf 11 e0 a1 b1 1a e1
+file: Composite Document File V2 Document, MSI Installer
+```
+
+Fission loader result:
+
+```text
+UnsupportedFormat: unknown binary format
+```
+
+Ghidra raw P-code probe at `0x0` produced a typed no-instruction result, and the Fission raw probe was stopped because the input has no executable PE instruction stream to compare. This is an input/loader-family classification issue, not a SLEIGH raw P-code parity regression.
+
+Artifact directory:
+
+```text
+benchmark/artifacts/raw_p_code_benchmark/putty_v083_installer_msi_attempt
+```
+
+Follow-up: run the raw P-code lane on an actual extracted or downloaded PuTTY PE executable, not the MSI installer container.
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.
