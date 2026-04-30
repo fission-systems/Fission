@@ -136,3 +136,33 @@
 - Size audit:
   - total copied corpus footprint is approximately `350M`.
   - no copied file exceeded `90M`, so the corpus does not hit GitHub's single-file size limit.
+
+## Vendor Binary Multi-corpus Raw P-code Smoke
+
+- Added `benchmark/raw_p_code_benchmark/vendor_binary_smoke.json` as a `binaries[]` manifest over newly organized vendor corpus samples.
+- The smoke covers four entry-point rows:
+  - x86-64 ELF: `benchmark/binary/x86-64/vendor_binaries/x86_64/fauxware`
+  - x86-64 PE: `benchmark/binary/x86-64/vendor_binaries/x86_64/windows/not_packed_pe64.exe`
+  - x86 ELF: `benchmark/binary/x86/vendor_binaries/i386/fauxware`
+  - x86 PE: `benchmark/binary/x86/vendor_binaries/x86/windows/not_packed_pe32.exe`
+
+## Vendor Binary Smoke Validation
+
+- `python3 -m json.tool benchmark/raw_p_code_benchmark/vendor_binary_smoke.json`
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+- Report: `benchmark/artifacts/raw_p_code_benchmark/vendor_binary_smoke/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 4`
+  - `binary_count = 4`
+  - `language_count = 2`
+  - `full_match = 13`
+  - `average_similarity_score = 0.8799006944444444`
+  - `average_parity_ratio = 0.8125`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+- Per-binary outcome:
+  - `vendor-x64-elf-fauxware`: 4/4 full match.
+  - `vendor-x64-pe-not-packed`: 4/4 full match.
+  - `vendor-x86-elf-fauxware`: 4/4 full match.
+  - `vendor-x86-pe-not-packed`: 1/4 full match, with remaining owner hints under `decode_length`, `handle_selector_resolution`, and `template_opcode_sequence`.

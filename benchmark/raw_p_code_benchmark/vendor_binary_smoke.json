@@ -1,0 +1,73 @@
+{
+  "description": "Multi-binary raw P-code smoke over architecture-organized vendor_binaries corpus entries.",
+  "defaults": {
+    "no_analyze": true,
+    "disassemble_missing": true
+  },
+  "binaries": [
+    {
+      "id": "vendor-x64-elf-fauxware",
+      "path": "benchmark/binary/x86-64/vendor_binaries/x86_64/fauxware",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "rows": [
+        {
+          "name": "entry",
+          "feature_group": "vendor_corpus",
+          "feature": "x64_elf_entry",
+          "owner": "raw_pcode_vendor_binary_smoke",
+          "addr": "0x400580",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "id": "vendor-x64-pe-not-packed",
+      "path": "benchmark/binary/x86-64/vendor_binaries/x86_64/windows/not_packed_pe64.exe",
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "rows": [
+        {
+          "name": "entry",
+          "feature_group": "vendor_corpus",
+          "feature": "x64_pe_entry",
+          "owner": "raw_pcode_vendor_binary_smoke",
+          "addr": "0x401500",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "id": "vendor-x86-elf-fauxware",
+      "path": "benchmark/binary/x86/vendor_binaries/i386/fauxware",
+      "language": "x86:LE:32:default",
+      "compiler": "gcc",
+      "rows": [
+        {
+          "name": "entry",
+          "feature_group": "vendor_corpus",
+          "feature": "x86_elf_entry",
+          "owner": "raw_pcode_vendor_binary_smoke",
+          "addr": "0x8048470",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "id": "vendor-x86-pe-not-packed",
+      "path": "benchmark/binary/x86/vendor_binaries/x86/windows/not_packed_pe32.exe",
+      "language": "x86:LE:32:default",
+      "compiler": "windows",
+      "rows": [
+        {
+          "name": "entry",
+          "feature_group": "vendor_corpus",
+          "feature": "x86_pe_entry",
+          "owner": "raw_pcode_vendor_binary_smoke",
+          "addr": "0x4014e0",
+          "count": 4
+        }
+      ]
+    }
+  ]
+}
