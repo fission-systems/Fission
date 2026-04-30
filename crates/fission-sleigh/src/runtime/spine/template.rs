@@ -81,7 +81,8 @@ mod tests {
             .expect_err("SpecDerived must reject compatibility varnodes");
         let rendered = err.to_string();
         assert!(rendered.contains("UnsupportedPcodeTemplate"));
-        assert!(rendered.contains("spec_derived_construct_tpl_contains_compatibility_varnode"));
+        assert!(rendered.contains("spec_derived_construct_tpl_contains_"));
+        assert!(rendered.contains("compatibility_handle_varnode"));
     }
 
     #[test]
@@ -155,15 +156,13 @@ where
             }
             .into());
         }
-        if !state
+        if let Some(reason) = state
             .constructor_template
-            .ops
-            .iter()
-            .all(CompiledOpTpl::uses_only_ghidra_template_shapes)
+            .ghidra_template_shape_error()
         {
             return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
                 language: language.to_string(),
-                reason: "spec_derived_construct_tpl_contains_compatibility_varnode".to_string(),
+                reason: format!("spec_derived_construct_tpl_contains_{reason}"),
             }
             .into());
         }

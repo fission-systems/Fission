@@ -240,16 +240,16 @@ fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {
     None
 }
 
-pub fn apply_sla_construct_templates(
+pub fn build_frontend_from_sla_native_model(
     compiled: &mut CompiledFrontend,
     library: &CompiledSlaTemplateLibrary,
 ) -> usize {
     let mut updated = 0usize;
 
-    // The compiled .sla artifact is the canonical executable identity. Do not
-    // overlay templates onto .slaspec/Ast constructors by source line,
-    // mnemonic, or pprint ordering: Ghidra decision leaves resolve subtable
-    // local constructor ids and the runtime must consume that same domain.
+    // The compiled .sla artifact is the canonical executable identity. Ghidra
+    // decision leaves resolve subtable-local constructor ids; Fission must
+    // preserve and execute that same identity domain instead of remapping
+    // through .slaspec source lines, display text, or local constructor order.
     for (name, sla_subtable) in &library.subtables {
         let mut executable_constructors = Vec::with_capacity(sla_subtable.constructors.len());
         for (idx, sla_template) in sla_subtable.constructors.iter().enumerate() {
@@ -305,13 +305,6 @@ pub fn apply_sla_construct_templates(
     updated
 }
 
-pub fn build_frontend_from_sla_native_model(
-    compiled: &mut CompiledFrontend,
-    library: &CompiledSlaTemplateLibrary,
-) -> usize {
-    apply_sla_construct_templates(compiled, library)
-}
-
 fn constructors_by_sla_id(
     constructors: &[CompiledExecutableConstructor],
 ) -> BTreeMap<u32, usize> {
@@ -358,6 +351,7 @@ fn executable_constructor_from_sla_template(
         );
     }
 
+    let unsupported_template_kind = sla_constructor_unsupported_reason(sla_template);
     let decode_failed = sla_template.decode_status != CompiledSlaDecodeStatus::Decoded;
     CompiledExecutableConstructor {
         constructor_id: sla_template.id,
@@ -406,10 +400,21 @@ fn executable_constructor_from_sla_template(
             ops: sla_template.constructor_template.ops.clone(),
             template_source: CompiledTemplateSource::SpecDerived,
         },
-        runtime_ready: !decode_failed,
-        unsupported_template_kind: decode_failed
-            .then(|| "sla_constructor_decode_failed".to_string()),
+        runtime_ready: unsupported_template_kind.is_none(),
+        unsupported_template_kind,
     }
+}
+
+fn sla_constructor_unsupported_reason(
+    sla_template: &crate::compiler::sla::CompiledSlaConstructorTemplate,
+) -> Option<String> {
+    if sla_template.decode_status != CompiledSlaDecodeStatus::Decoded {
+        return Some("sla_constructor_decode_failed".to_string());
+    }
+    sla_template
+        .constructor_template
+        .ghidra_template_shape_error()
+        .map(|reason| format!("sla_construct_tpl_contains_{reason}"))
 }
 
 fn constructor_mnemonic_from_display(template: &CompiledDisplayTemplate) -> Option<String> {

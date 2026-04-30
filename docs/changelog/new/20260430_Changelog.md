@@ -318,3 +318,53 @@ handle resolution for 32-bit subtables such as `rel32`, `rel8`,
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.
 - Existing unrelated dirty files in SLEIGH/NIR/runtime areas are outside this changelog scope.
+
+## SLEIGH Compiler `.sla` Native Template Guard
+
+Moved the compiler-side SLEIGH template boundary closer to Ghidra's compiled
+`.sla` owner chain. The old overlay-named `apply_sla_construct_templates`
+entrypoint was removed; the primary builder is now
+`build_frontend_from_sla_native_model`, making the executable constructor path
+explicitly source from decoded `.sla` native identity rather than a
+source-line/opprint/mnemonic overlay.
+
+Runtime-ready constructors now require real `.sla` identity and recursively
+validated Ghidra-shaped template varnodes. Canonical raw P-code templates accept
+only `Varnode { space, offset, size }` and `HandleTpl` shapes; compatibility
+varnodes such as synthetic handles, effective addresses, fixed registers,
+flags, temps, and condition predicates are marked as typed unsupported before
+they can become raw P-code success.
+
+The runtime evaluator now reports the exact forbidden template shape in
+`UnsupportedPcodeTemplate` reasons, preserving fail-closed behavior instead of
+silently executing compatibility payloads.
+
+Validation:
+
+```text
+cargo test -p fission-sleigh sla_construct_template_cutover_has_no_source_line_or_opprint_remap_overlay -- --test-threads=1
+cargo test -p fission-sleigh sla_native_runtime_ready_constructors_are_canonical -- --test-threads=1
+cargo test -p fission-sleigh spec_derived_template_rejects_compatibility_varnode -- --test-threads=1
+cargo check -p fission-sleigh
+cargo build --release -p fission-cli
+python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+```
+
+Raw P-code gate:
+
+```text
+report: benchmark/artifacts/raw_p_code_benchmark/sla_native_compiler_guard/aggregate_raw_pcode_parity_report.json
+full_match: 44
+both_decode_error_or_padding: 2
+ghidra_decode_error: 2
+average_similarity_score: 1.0
+average_parity_ratio: 1.0
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+template_source_totals: sla_construct_tpl=46
+```
+
+Remaining owner: deeper runtime conversion to pure `(subtable_id,
+constructor_id)` lookup and exact `BUILD`/`HandleTpl` export materialization for
+the 32-bit x86 EverPlanet rows. No approximate P-code path was added.

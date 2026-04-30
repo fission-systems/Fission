@@ -525,6 +525,23 @@ pub struct CompiledConstructTpl {
     pub ops: Vec<CompiledOpTpl>,
 }
 
+impl CompiledConstructTpl {
+    pub fn ghidra_template_shape_error(&self) -> Option<&'static str> {
+        if let Some(result) = &self.result {
+            if let Some(reason) = result.ghidra_template_shape_error() {
+                return Some(reason);
+            }
+        }
+        self.ops
+            .iter()
+            .find_map(CompiledOpTpl::ghidra_template_shape_error)
+    }
+
+    pub fn uses_only_ghidra_template_shapes(&self) -> bool {
+        self.ghidra_template_shape_error().is_none()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledTemplateSource {
     SpecDerived,
@@ -679,20 +696,63 @@ pub enum CompiledHandleSelector {
 
 impl CompiledOpTpl {
     pub fn uses_only_ghidra_template_shapes(&self) -> bool {
-        self.output
-            .as_ref()
-            .map(CompiledVarnodeTpl::is_ghidra_template_shape)
-            .unwrap_or(true)
-            && self
-                .inputs
-                .iter()
-                .all(CompiledVarnodeTpl::is_ghidra_template_shape)
+        self.ghidra_template_shape_error().is_none()
+    }
+
+    pub fn ghidra_template_shape_error(&self) -> Option<&'static str> {
+        if let Some(output) = &self.output {
+            if let Some(reason) = output.ghidra_template_shape_error() {
+                return Some(reason);
+            }
+        }
+        self.inputs
+            .iter()
+            .find_map(CompiledVarnodeTpl::ghidra_template_shape_error)
     }
 }
 
 impl CompiledVarnodeTpl {
     pub fn is_ghidra_template_shape(&self) -> bool {
-        matches!(self, Self::Varnode { .. } | Self::HandleTpl(_))
+        self.ghidra_template_shape_error().is_none()
+    }
+
+    pub fn ghidra_template_shape_error(&self) -> Option<&'static str> {
+        match self {
+            Self::Varnode { .. } => None,
+            Self::HandleTpl(handle) => handle.ghidra_template_shape_error(),
+            Self::Handle { .. } => Some("compatibility_handle_varnode"),
+            Self::EffectiveAddress { .. } => Some("compatibility_effective_address_varnode"),
+            Self::ConditionPredicate => Some("compatibility_condition_predicate_varnode"),
+            Self::Const(_) => Some("compatibility_const_varnode"),
+            Self::Space(_) => Some("compatibility_space_varnode"),
+            Self::Temp { .. } => Some("compatibility_temp_varnode"),
+            Self::Register { .. } => Some("compatibility_register_varnode"),
+            Self::FixedRegister { .. } => Some("compatibility_fixed_register_varnode"),
+            Self::Flag { .. } => Some("compatibility_flag_varnode"),
+        }
+    }
+}
+
+impl CompiledConstructorTemplate {
+    pub fn ghidra_template_shape_error(&self) -> Option<&'static str> {
+        if let Some(result) = &self.result {
+            if let Some(reason) = result.ghidra_template_shape_error() {
+                return Some(reason);
+            }
+        }
+        self.ops
+            .iter()
+            .find_map(CompiledOpTpl::ghidra_template_shape_error)
+    }
+
+    pub fn uses_only_ghidra_template_shapes(&self) -> bool {
+        self.ghidra_template_shape_error().is_none()
+    }
+}
+
+impl CompiledHandleTpl {
+    pub fn ghidra_template_shape_error(&self) -> Option<&'static str> {
+        None
     }
 }
 
