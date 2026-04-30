@@ -579,6 +579,9 @@ pub enum CompiledOperandDecodeStep {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledPatternExpression {
     Constant(i64),
+    InstStart,
+    InstNext,
+    InstNext2,
     TokenField {
         big_endian: bool,
         sign_bit: bool,

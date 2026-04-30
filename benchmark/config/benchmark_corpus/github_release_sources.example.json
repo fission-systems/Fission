@@ -1,0 +1,19 @@
+{
+  "notes": "Example input for scripts/corpus/collect_github_release_samples.py. Keep downloaded binaries out of git.",
+  "sources": [
+    {
+      "asset_exclude": ".*(source|src|debug|symbols?|pdb|dSYM|sha256|checksums?|asc|sig).*",
+      "asset_include": ".*\\.(exe|dll|msi|zip)$",
+      "latest": true,
+      "max_assets": 4,
+      "repo": "sqlite/sqlite"
+    },
+    {
+      "asset_exclude": ".*(source|src|debug|symbols?|pdb|dSYM|sha256|checksums?|asc|sig).*",
+      "asset_include": ".*\\.(exe|dll|zip)$",
+      "latest": true,
+      "max_assets": 4,
+      "repo": "winscp/winscp"
+    }
+  ]
+}

@@ -15,98 +15,42 @@ pub(super) fn register_offset(index: u8) -> u64 {
     }
 }
 
-pub(super) fn fixed_handle_for_bound_operand(value: &BoundOperand) -> RuntimeFixedHandle {
-    match value {
-        BoundOperand::Register { index, size } => RuntimeFixedHandle {
-            space: Some(compiled_space("register", 4)),
-            size: *size,
-            offset_space: None,
-            offset_offset: register_offset(*index),
-            offset_size: *size,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: true,
-        },
-        BoundOperand::NamedVarnode { size, .. } => RuntimeFixedHandle {
-            space: None,
-            size: *size,
-            offset_space: None,
-            offset_offset: 0,
-            offset_size: *size,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: false,
-        },
-        BoundOperand::Immediate {
-            value,
-            encoded_size,
-            ..
-        } => RuntimeFixedHandle {
-            space: Some(compiled_space("const", 0)),
-            size: *encoded_size,
-            offset_space: None,
-            offset_offset: *value,
-            offset_size: *encoded_size,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: true,
-        },
-        BoundOperand::Relative { target } => RuntimeFixedHandle {
-            space: Some(compiled_space("ram", 3)),
-            size: 8,
-            offset_space: None,
-            offset_offset: *target,
-            offset_size: 8,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: true,
-        },
-        BoundOperand::Memory {
-            base,
-            index,
-            displacement,
-            rip_relative,
-            size,
-            ..
-        } if base.is_some() && index.is_none() && *displacement == 0 && !*rip_relative => {
-            RuntimeFixedHandle {
-                // SpaceId constants in STORE/LOAD use Ghidra's address-space
-                // id, while actual pointer varnodes stay in the register space.
-                space: Some(compiled_space("ram", 0x1b1)),
-                size: *size,
-                offset_space: Some(compiled_space("register", 4)),
-                offset_offset: register_offset(base.expect("checked above")),
-                offset_size: 8,
-                temp_space: Some(compiled_space("unique", 2)),
-                temp_offset: 0xd400,
-                fixable: true,
-            }
-        }
-        BoundOperand::Memory {
-            rip_relative: true,
-            absolute: Some(absolute),
-            size,
-            ..
-        } => RuntimeFixedHandle {
-            space: Some(compiled_space("ram", 3)),
-            size: *size,
-            offset_space: None,
-            offset_offset: *absolute,
-            offset_size: *size,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: true,
-        },
-        BoundOperand::Memory { size, .. } => RuntimeFixedHandle {
-            space: Some(compiled_space("ram", 0x1b1)),
-            size: *size,
-            offset_space: None,
-            offset_offset: 0,
-            offset_size: 0,
-            temp_space: None,
-            temp_offset: 0,
-            fixable: false,
-        },
+pub(super) fn fixed_handle_for_const_value(value: u64, size: u32) -> RuntimeFixedHandle {
+    RuntimeFixedHandle {
+        space: Some(compiled_space("const", 0)),
+        size,
+        offset_space: None,
+        offset_offset: value,
+        offset_size: size,
+        temp_space: None,
+        temp_offset: 0,
+        fixable: true,
+    }
+}
+
+pub(super) fn fixed_handle_for_ram_target(target: u64, size: u32) -> RuntimeFixedHandle {
+    RuntimeFixedHandle {
+        space: Some(compiled_space("ram", 3)),
+        size,
+        offset_space: None,
+        offset_offset: target,
+        offset_size: size,
+        temp_space: None,
+        temp_offset: 0,
+        fixable: true,
+    }
+}
+
+pub(super) fn fixed_handle_for_register_index(index: u8, size: u32) -> RuntimeFixedHandle {
+    RuntimeFixedHandle {
+        space: Some(compiled_space("register", 4)),
+        size,
+        offset_space: None,
+        offset_offset: register_offset(index),
+        offset_size: size,
+        temp_space: None,
+        temp_offset: 0,
+        fixable: true,
     }
 }
 

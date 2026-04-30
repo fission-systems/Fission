@@ -445,6 +445,9 @@ fn decode_pattern_expression(element: &PackedElement) -> Result<CompiledPatternE
                 .attr_signed(sla_format::ATTR_VAL)
                 .ok_or_else(|| anyhow!("intb missing val"))?,
         )),
+        sla_format::ELEM_START_EXP => Ok(CompiledPatternExpression::InstStart),
+        sla_format::ELEM_END_EXP => Ok(CompiledPatternExpression::InstNext),
+        sla_format::ELEM_NEXT2_EXP => Ok(CompiledPatternExpression::InstNext2),
         sla_format::ELEM_TOKENFIELD => {
             let field = decode_token_field(element)?;
             Ok(CompiledPatternExpression::TokenField {
@@ -524,6 +527,9 @@ fn pattern_expression_references_operand(
             pattern_expression_references_operand(inner, operand_index)
         }
         CompiledPatternExpression::Constant(_)
+        | CompiledPatternExpression::InstStart
+        | CompiledPatternExpression::InstNext
+        | CompiledPatternExpression::InstNext2
         | CompiledPatternExpression::TokenField { .. }
         | CompiledPatternExpression::ContextField { .. } => false,
     }

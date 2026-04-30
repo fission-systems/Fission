@@ -166,3 +166,66 @@
   - `vendor-x64-pe-not-packed`: 4/4 full match.
   - `vendor-x86-elf-fauxware`: 4/4 full match.
   - `vendor-x86-pe-not-packed`: 1/4 full match, with remaining owner hints under `decode_length`, `handle_selector_resolution`, and `template_opcode_sequence`.
+
+## Vendor x86 PE SLEIGH Operand Extent Fix
+
+- Fixed the `vendor-x86-pe-not-packed-entry` stream desync at `0x4014e3` without adding table-name, mnemonic, source-line, or binary-specific mapping.
+- Root cause: x86 `.sla` operand expressions for the PE32 entry stream were not fully decoded; `rel32` depended on Ghidra-style instruction-boundary pattern expressions, and the walker could under-consume the `C7 /0` absolute-store immediate slice.
+- Added `.sla` pattern expression support for `start_exp`, `end_exp`, and `next2_exp` as native pattern-expression variants. `start_exp` and `end_exp` now feed the existing operand expression evaluator; unresolved `next2_exp` remains fail-closed.
+- The `0x4014e3` row now decodes as a 10-byte `mov dword ptr [0x405034],0x0` and emits exact raw P-code: `COPY const(0,4) -> ram(0x405034,4)`.
+- Replaced the old no-export subconstructor fallback with parent-template handle-reference validation. Referenced operands without an exported fixed handle now fail typed instead of receiving a dummy handle; guard-only operands are allowed only when the parent `ConstructTpl` does not reference that handle.
+- Removed the canonical `fixed_handle_for_bound_operand` helper. Fixed handles used by this path now come from `.sla` token/expression/export metadata; `BoundOperand` remains display/debug DTO state.
+- Added `vendor_x86_pe_c7_moffs_imm32_uses_sla_extents` as a targeted x86 regression test.
+
+## Vendor x86 PE Validation
+
+- `cargo check -p fission-sleigh`
+- `cargo test -p fission-sleigh vendor_x86_pe_c7_moffs_imm32_uses_sla_extents -- --test-threads=1`
+- `cargo test -p fission-sleigh generated_runtime_decodes_startup_call_rel32_without_compatibility_lift -- --test-threads=1`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+- Disassembly smoke: `not_packed_pe32.exe @ 0x4014e0`
+  - `0x4014e0`: `sub ESP,0xc`, 3 bytes
+  - `0x4014e3`: `mov dword ptr [0x405034],0x0`, 10 bytes
+  - `0x4014ed`: `call 0x402200`, 5 bytes
+- Vendor smoke report: `benchmark/artifacts/raw_p_code_benchmark/vendor_binary_smoke_no_manual_mapping/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 16`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+- Canonical gate report: `benchmark/artifacts/raw_p_code_benchmark/canonical_gate_no_manual_mapping/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+
+## Vendor x86 PE Notes
+
+- No approximate P-code path was added.
+- No architecture-name semantic branch was added.
+- No table-name or binary-specific rule was added for `C7 /0`, `rel32`, `addr32`, or `rm32`.
+- `fixed_handle_for_bound_operand` and `fallback_binding_for_no_export_subtable` are absent from active SLEIGH compiler/runtime source outside audit-test string literals.
+
+## GitHub Release Corpus Collection
+
+- Added `scripts/corpus/collect_github_release_samples.py` for CLI-first GitHub release sample collection.
+- The collector queries GitHub release metadata, filters assets by explicit include/exclude regexes, emits a URL list, and only downloads binaries when `--download` is provided.
+- Downloaded assets are stored under `benchmark/binary/realworld/github` by default and are treated as local corpus artifacts, not source files.
+- Generated manifest entries include SHA-256, size, repository, release tag, asset name, asset URL, content type, and source config index.
+- Added `benchmark/config/benchmark_corpus/github_release_sources.example.json` as a non-binary example source config.
+- Updated `.gitignore` so `benchmark/binary/realworld/**` stays out of git while `benchmark/binary/realworld/.gitkeep` can keep the local corpus root.
+- Updated `benchmark/BENCHMARK_GUIDE.md` with the GitHub release collection command and the no-binary-staging policy.
+
+## GitHub Release Corpus Validation
+
+- `python3 -m py_compile scripts/corpus/collect_github_release_samples.py scripts/corpus/hash_and_manifest.py scripts/benchmark/run_loader_smoke.py scripts/benchmark/run_realworld_suite.py`
+- `python3 -m json.tool benchmark/config/benchmark_corpus/github_release_sources.example.json`
+- `python3 scripts/corpus/collect_github_release_samples.py --help`
+- `git check-ignore -v benchmark/binary/realworld/github/example.bin`
+- `git check-ignore -q benchmark/binary/realworld/.gitkeep`

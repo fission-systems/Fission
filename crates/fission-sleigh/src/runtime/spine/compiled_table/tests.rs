@@ -175,6 +175,40 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
 }
 
 #[test]
+fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("repo root")
+        .to_path_buf();
+    let x86_spec = repo_root.join("crates/fission-sleigh/specs/languages/x86/x86.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
+    let bytes = [0xc7, 0x05, 0x34, 0x50, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x4014e3)
+        .expect("decode mov moffs32, imm32");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "mov");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x4014e3)
+        .expect("lift mov moffs32, imm32");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].opcode, PcodeOpcode::Copy);
+    assert_eq!(ops[0].inputs[0].constant_val, 0);
+    assert_eq!(ops[0].inputs[0].size, 4);
+    let output = ops[0].output.as_ref().expect("copy output");
+    assert_eq!(output.space_id, 3);
+    assert_eq!(output.offset, 0x405034);
+    assert_eq!(output.size, 4);
+}
+
+#[test]
 fn generated_runtime_records_decision_trace_for_startup_store() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)

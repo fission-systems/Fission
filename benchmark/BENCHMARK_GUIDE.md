@@ -56,6 +56,14 @@ python3 scripts/corpus/hash_and_manifest.py \
   --repo-relative \
   --output benchmark/config/benchmark_corpus/realworld_downloaded.json
 
+# Optional: collect GitHub release asset URLs and, with --download, store them
+# under an ignored local corpus directory before writing a manifest.
+python3 scripts/corpus/collect_github_release_samples.py \
+  --source-config benchmark/config/benchmark_corpus/github_release_sources.example.json \
+  --download \
+  --store benchmark/binary/realworld/github \
+  --output benchmark/config/benchmark_corpus/github_release_samples.json
+
 # 2. Run loader-only smoke over the manifest.
 python3 scripts/benchmark/run_loader_smoke.py \
   --manifest benchmark/config/benchmark_corpus/realworld_local.json \
@@ -82,6 +90,8 @@ python3 scripts/benchmark/compare_reports.py \
 Downloaded samples are not automatically trusted. The manifest records SHA-256,
 size, source provenance, and a magic-byte format guess; loader semantics still
 come from Fission parsers and typed loader failures, not benchmark-side repair.
+Downloaded GitHub release binaries under `benchmark/binary/realworld/` are local
+corpus artifacts and must not be staged or pushed.
 
 ## Canonical Paths
 

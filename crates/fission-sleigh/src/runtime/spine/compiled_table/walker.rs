@@ -25,27 +25,132 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
 }
 
 pub(super) struct OperandBinding {
-    value: BoundOperand,
+    debug_value: Option<BoundOperand>,
     subtable_state: Option<RuntimeConstructState>,
     fixed: Option<RuntimeFixedHandle>,
+    requires_fixed: bool,
 }
 
 impl OperandBinding {
     fn plain(value: BoundOperand) -> Self {
         Self {
-            value,
+            debug_value: Some(value),
             subtable_state: None,
             fixed: None,
+            requires_fixed: true,
         }
     }
 
     fn with_fixed(value: BoundOperand, fixed: RuntimeFixedHandle) -> Self {
         Self {
-            value,
+            debug_value: Some(value),
             subtable_state: None,
             fixed: Some(fixed),
+            requires_fixed: true,
         }
     }
+
+    fn guard_only(subtable_state: RuntimeConstructState) -> Self {
+        Self {
+            debug_value: None,
+            subtable_state: Some(subtable_state),
+            fixed: None,
+            requires_fixed: false,
+        }
+    }
+}
+
+fn constructor_references_handle(
+    template: &crate::compiler::CompiledConstructorTemplate,
+    handle_index: usize,
+) -> bool {
+    template
+        .result
+        .as_ref()
+        .is_some_and(|handle| handle_tpl_references_handle(handle, handle_index))
+        || template.ops.iter().any(|op| op_references_handle(op, handle_index))
+}
+
+fn op_references_handle(op: &CompiledOpTpl, handle_index: usize) -> bool {
+    op.output
+        .as_ref()
+        .is_some_and(|varnode| varnode_tpl_references_handle(varnode, handle_index))
+        || op
+            .inputs
+            .iter()
+            .any(|varnode| varnode_tpl_references_handle(varnode, handle_index))
+}
+
+fn varnode_tpl_references_handle(varnode: &CompiledVarnodeTpl, handle_index: usize) -> bool {
+    match varnode {
+        CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } => {
+            space_tpl_references_handle(space, handle_index)
+                || const_tpl_references_handle(offset, handle_index)
+                || const_tpl_references_handle(size, handle_index)
+        }
+        CompiledVarnodeTpl::HandleTpl(handle) => handle_tpl_references_handle(handle, handle_index),
+        CompiledVarnodeTpl::Handle { operand_index }
+        | CompiledVarnodeTpl::EffectiveAddress { operand_index } => *operand_index == handle_index,
+        CompiledVarnodeTpl::Const(value) => const_tpl_references_handle(value, handle_index),
+        CompiledVarnodeTpl::Space(_)
+        | CompiledVarnodeTpl::Temp { .. }
+        | CompiledVarnodeTpl::Register { .. }
+        | CompiledVarnodeTpl::FixedRegister { .. }
+        | CompiledVarnodeTpl::Flag { .. }
+        | CompiledVarnodeTpl::ConditionPredicate => false,
+    }
+}
+
+fn handle_tpl_references_handle(handle: &CompiledHandleTpl, handle_index: usize) -> bool {
+    handle
+        .space
+        .as_ref()
+        .is_some_and(|space| space_tpl_references_handle(space, handle_index))
+        || handle
+            .size
+            .as_ref()
+            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
+        || handle
+            .ptr_space
+            .as_ref()
+            .is_some_and(|space| space_tpl_references_handle(space, handle_index))
+        || handle
+            .ptr_offset
+            .as_ref()
+            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
+        || handle
+            .ptr_size
+            .as_ref()
+            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
+        || handle
+            .temp_space
+            .as_ref()
+            .is_some_and(|space| space_tpl_references_handle(space, handle_index))
+        || handle
+            .temp_offset
+            .as_ref()
+            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
+}
+
+fn space_tpl_references_handle(space: &CompiledSpaceTpl, handle_index: usize) -> bool {
+    match space {
+        CompiledSpaceTpl::SpaceRef(_) => false,
+        CompiledSpaceTpl::Const(value) => const_tpl_references_handle(value, handle_index),
+    }
+}
+
+fn const_tpl_references_handle(value: &CompiledConstTpl, handle_index: usize) -> bool {
+    matches!(
+        value,
+        CompiledConstTpl::Handle {
+            handle_index: actual,
+            ..
+        } if *actual == handle_index as i64
+    )
 }
 
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
@@ -487,16 +592,16 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         );
         let fixed = match binding.fixed {
             Some(fixed) => fixed,
-            None => {
-                self.legacy_path_audit.bound_operand_fixed_handle_fallback = true;
-                fixed_handle_for_bound_operand(&binding.value)
-            }
+            None if !binding.requires_fixed => RuntimeFixedHandle::default(),
+            None => bail!(
+                "missing_sla_exported_fixed_handle: operand {operand_index} did not produce a fixed handle"
+            ),
         };
         self.handles[operand_index] = Some(RuntimeHandle {
             operand_index,
             spec: template.spec,
             fixed,
-            debug_value: Some(binding.value),
+            debug_value: binding.debug_value,
             subtable_state: binding.subtable_state.map(Box::new),
         });
         Ok(())
@@ -587,11 +692,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .cursor
                         .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
                 }
-                Ok(OperandBinding::plain(BoundOperand::Immediate {
-                    value,
-                    encoded_size: ((*byte_end - *byte_start) + 1).max(1),
-                    signed: *sign_bit,
-                }))
+                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
+                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                }
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value,
+                        encoded_size,
+                        signed: *sign_bit,
+                    },
+                    fixed_handle_for_const_value(value, encoded_size),
+                ))
             }
             CompiledOperandSpec::SlaVarnodeList {
                 big_endian,
@@ -680,11 +792,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         values.len()
                     )
                 })?;
-                Ok(OperandBinding::plain(BoundOperand::Immediate {
-                    value: value as u64,
-                    encoded_size: ((*byte_end - *byte_start) + 1).max(1),
-                    signed: *sign_bit || value < 0,
-                }))
+                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
+                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                }
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value: value as u64,
+                        encoded_size,
+                        signed: *sign_bit || value < 0,
+                    },
+                    fixed_handle_for_const_value(value as u64, encoded_size),
+                ))
             }
             CompiledOperandSpec::SlaFixedVarnode { varnode } => Ok(OperandBinding::with_fixed(
                 BoundOperand::NamedVarnode {
@@ -695,6 +814,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 fixed_handle_from_resolved_varnode(varnode),
             )),
             CompiledOperandSpec::SlaPatternExpression { expr, reloffset } => {
+                let mut encoded_size = 0;
                 let value = if CompiledTokenCursorPolicy::for_frontend(self.compiled)
                     .uses_shared_token_cursor()
                 {
@@ -720,9 +840,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             *byte_end,
                             *shift,
                         )? as i64;
-                        self.cursor = self
-                            .cursor
-                            .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
+                        encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                        self.cursor = self.cursor.max(token_base + encoded_size as usize);
                         value
                     } else {
                         self.eval_pattern_expression(expr)?
@@ -741,7 +860,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     // read from `ctx.cursor + reloffset + byte_start`, matching Ghidra's
                     // `point.getOffset() + bytestart` computation.
                     let token_base = self.token_base_for_sla_field(*reloffset);
-                    read_sla_token_field_at(
+                    let raw = read_sla_token_field_at(
                         self.ctx,
                         token_base,
                         *big_endian,
@@ -751,15 +870,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         *byte_start,
                         *byte_end,
                         *shift,
-                    )? as i64
+                    )? as i64;
+                    encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                    raw
                 } else {
                     self.eval_pattern_expression(expr)?
                 };
-                Ok(OperandBinding::plain(BoundOperand::Immediate {
-                    value: value as u64,
-                    encoded_size: 0,
-                    signed: value < 0,
-                }))
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value: value as u64,
+                        encoded_size,
+                        signed: value < 0,
+                    },
+                    fixed_handle_for_const_value(value as u64, encoded_size),
+                ))
             }
             CompiledOperandSpec::ContextFieldExtraction {
                 bit_offset,
@@ -777,11 +902,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 } else {
                     val
                 };
-                Ok(OperandBinding::plain(BoundOperand::Immediate {
-                    value,
-                    encoded_size: (*bit_width / 8).max(1),
-                    signed: *sign_extend,
-                }))
+                let encoded_size = (*bit_width / 8).max(1);
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value,
+                        encoded_size,
+                        signed: *sign_extend,
+                    },
+                    fixed_handle_for_const_value(value, encoded_size),
+                ))
             }
             CompiledOperandSpec::SubtableEvaluation {
                 table_name,
@@ -845,67 +974,57 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     }
                     self.cursor = self.cursor.max(next_cursor);
                 }
-                // Return the exported handle from the sub-constructor. Some
-                // x86 subtables are zero-op BUILD checks/prefix hooks and do
-                // not export a value; keep those as handle placeholders only,
-                // never as synthetic p-code.
+                // Return the exported handle from the sub-constructor. If no
+                // handle is exported, only pure guard subtables may continue:
+                // the parent ConstructTpl must not reference this operand
+                // handle. This keeps no-export subtables out of raw P-code
+                // handle resolution instead of inventing dummy handles.
                 let exported = match sub_state.exported_handle.as_ref() {
                     Some(exported) => exported,
-                    None => {
-                        let subtable_cursor_start = sub_state
-                            .construct_nodes
-                            .first()
-                            .map(|node| node.absolute_offset)
-                            .unwrap_or(cursor_start);
-                        if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
-                            let first_node_off = sub_state.construct_nodes.first().map(|n| n.absolute_offset);
-                            eprintln!(
-                                "[rel-fallback-pre] table={table_name} cursor_start={cursor_start} \
-                                 sub_state.construct_nodes.len={} first_node_abs_offset={:?} \
-                                 subtable_cursor_start={subtable_cursor_start}",
-                                sub_state.construct_nodes.len(),
-                                first_node_off
-                            );
-                        }
-                        if let Some(binding) = self.fallback_binding_for_no_export_subtable(
-                            table_name,
-                            cursor_start,
-                            subtable_cursor_start,
-                            sub_state.length,
-                        )? {
-                            self.legacy_path_audit.no_export_subtable_fallback = true;
-                            return Ok(OperandBinding {
-                                value: binding.value,
-                                fixed: binding.fixed,
-                                subtable_state: Some(sub_state),
-                            });
-                        }
-                        bail!("subtable {table_name} did not export a handle");
+	                    None => {
+	                        if constructor_references_handle(
+	                            &self.selection.constructor.constructor_template,
+	                            template.operand_index,
+	                        ) {
+	                            bail!(
+	                                "missing_sla_exported_fixed_handle: subtable {table_name} did not export handle for referenced operand {}",
+	                                template.operand_index
+	                            );
+	                        }
+	                        self.legacy_path_audit.no_export_subtable_fallback = true;
+                        return Ok(OperandBinding::guard_only(sub_state));
                     }
                 };
                 let value = display_value_for_exported_handle(exported, &sub_state);
                 Ok(OperandBinding {
-                    value,
+                    debug_value: Some(value),
                     fixed: Some(exported.fixed.clone()),
                     subtable_state: Some(sub_state),
+                    requires_fixed: true,
                 })
             }
             CompiledOperandSpec::Immediate { size, signed } => {
                 let value = read_uint(self.ctx.bytes, self.cursor, *size)?;
                 self.cursor += *size as usize;
-                Ok(OperandBinding::plain(BoundOperand::Immediate {
-                    value,
-                    encoded_size: *size,
-                    signed: *signed,
-                }))
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value,
+                        encoded_size: *size,
+                        signed: *signed,
+                    },
+                    fixed_handle_for_const_value(value, *size),
+                ))
             }
             CompiledOperandSpec::Relative { size } => {
                 let signed = read_sint(self.ctx.bytes, self.cursor, *size)?;
                 self.cursor += *size as usize;
                 let next_ip = self.ctx.address.wrapping_add(self.cursor as u64);
-                Ok(OperandBinding::plain(BoundOperand::Relative {
-                    target: next_ip.wrapping_add_signed(signed),
-                }))
+                let target = next_ip.wrapping_add_signed(signed);
+                let addr_size = self.compiled.sla_ram_address_size().max(*size);
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Relative { target },
+                    fixed_handle_for_ram_target(target, addr_size),
+                ))
             }
             CompiledOperandSpec::FixedRegister { reg, size } => {
                 let index = match reg {
@@ -913,95 +1032,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     CompiledFixedRegister::StackPointer => 4,
                     CompiledFixedRegister::FramePointer => 5,
                 };
-                Ok(OperandBinding::plain(BoundOperand::Register {
-                    index,
-                    size: *size,
-                }))
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Register { index, size: *size },
+                    fixed_handle_for_register_index(index, *size),
+                ))
             }
         }
-    }
-
-    fn fallback_binding_for_no_export_subtable(
-        &mut self,
-        table_name: &str,
-        cursor_start: usize,
-        subtable_cursor_start: usize,
-        sub_state_length: usize,
-    ) -> Result<Option<OperandBinding>> {
-        // Architecture-neutral: subtables named rel{N} or pcRelSimm{N} encode a
-        // signed relative displacement of N bits. Apply this fallback universally
-        // regardless of the shared-token-cursor policy — any architecture (not just
-        // x86-64) may define relative-offset subtables that Ghidra does not
-        // materialise into a handle in the compiled SLA.
-        let relative_size = table_name
-            .strip_prefix("pcRelSimm")
-            .or_else(|| table_name.strip_prefix("rel"))
-            .and_then(|suffix| suffix.parse::<u32>().ok())
-            .map(|bits| (bits / 8).max(1));
-        if let Some(size) = relative_size {
-            // The displacement field is always at the END of the instruction.
-            // Derive its start byte from sub_state_length (total matched bytes)
-            // minus the displacement size. This is robust against architectures
-            // where the opcode length is not tracked in the cursor (e.g. 32-bit
-            // x86 where the native decoder owns opcode byte consumption).
-            let disp_start = sub_state_length
-                .saturating_sub(size as usize)
-                .max(subtable_cursor_start);
-            let end_cursor = sub_state_length.max(disp_start + size as usize);
-            let signed = read_sint(self.ctx.bytes, disp_start, size)?;
-            self.cursor = self.cursor.max(end_cursor);
-            let next_ip = self.ctx.address.wrapping_add(end_cursor as u64);
-            let target = next_ip.wrapping_add_signed(signed);
-            if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
-                eprintln!(
-                    "[rel-fallback] table={table_name} sub_state_length={sub_state_length} \
-                     disp_start={disp_start} size={size} signed=0x{signed:x} end_cursor={end_cursor} \
-                     ctx_addr=0x{:x} next_ip=0x{next_ip:x} target=0x{target:x}",
-                    self.ctx.address
-                );
-            }
-            let value = BoundOperand::Relative { target };
-            // Use the architecture's actual RAM address size for the handle,
-            // not the hardcoded 8-byte default (which is wrong for 32-bit).
-            let ram_addr_size = self.compiled.sla_ram_address_size();
-            let mut handle = fixed_handle_for_bound_operand(&value);
-            if ram_addr_size > 0 && ram_addr_size != handle.size {
-                handle.size = ram_addr_size;
-                handle.offset_size = ram_addr_size;
-            }
-            return Ok(Some(OperandBinding::with_fixed(value, handle)));
-        }
-
-        if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            // Non-shared-cursor architecture (e.g. 32-bit x86, ARM): subtables that don't
-            // export a handle (e.g. "check_Reg32_dest") are pure pattern-matching guards.
-            // Ghidra leaves the fixed handle zero for these; return a zero dummy binding so the
-            // parent instruction's P-code template can still be evaluated.
-            let value = BoundOperand::Immediate {
-                value: 0,
-                encoded_size: 0,
-                signed: false,
-            };
-            return Ok(Some(OperandBinding::with_fixed(
-                value.clone(),
-                fixed_handle_for_bound_operand(&value),
-            )));
-        }
-
-        if shared_token_cursor_policy_zero_width_subtable(table_name) {
-            self.cursor = cursor_start;
-            let value = BoundOperand::Immediate {
-                value: 0,
-                encoded_size: 0,
-                signed: false,
-            };
-            return Ok(Some(OperandBinding::with_fixed(
-                value.clone(),
-                fixed_handle_for_bound_operand(&value),
-            )));
-        }
-
-        Ok(None)
     }
 
     fn apply_context_change(&mut self, change: &crate::compiler::CompiledContextOp) -> Result<()> {
@@ -1072,12 +1108,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
     fn token_base_for_sla_field(&self, reloffset: i32) -> usize {
         if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            // Non-shared-cursor (e.g. x86-32): add the operand's reloffset so that the read
-            // position matches Ghidra's `point.getOffset() + bytestart`.
-            // Ghidra: point.getOffset() = ctx.cursor + reloffset (set via setOffset in the
-            // decode loop), and bytestart is token-local (0 for first byte of the token).
-            let base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
-            return base;
+            // Non-shared-cursor: Ghidra's ParserWalker advances the current
+            // point as sequential operands are consumed, while operand
+            // `reloffset` anchors subconstructors at an instruction-relative
+            // point. Use the later of the current construct point and the
+            // explicit reloffset anchor; this is data-driven by the decoded
+            // operand metadata and does not inspect table names.
+            let reloffset_base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
+            return self.cursor.max(reloffset_base);
         }
         // x86 SLEIGH models opcode, ModRM, and SIB as separate token
         // streams. Fission's compatibility walker keeps SIB subtables rooted
@@ -1118,6 +1156,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
+            CompiledPatternExpression::InstStart => Ok(self.ctx.address as i64),
+            CompiledPatternExpression::InstNext => {
+                Ok(self.ctx.address.saturating_add(self.cursor as u64) as i64)
+            }
+            CompiledPatternExpression::InstNext2 => {
+                bail!("pattern expression inst_next2 requires delayed instruction context")
+            }
             CompiledPatternExpression::TokenField {
                 big_endian,
                 sign_bit,

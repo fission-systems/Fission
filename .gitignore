@@ -77,6 +77,8 @@ vendor/
 
 # Local sample corpora and scratch projects
 samples/
+/benchmark/binary/realworld/**
+!/benchmark/binary/realworld/.gitkeep
 
 # Local thesis working directories (but keep scripts tracked)
 /thesis/

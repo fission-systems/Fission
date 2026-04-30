@@ -287,6 +287,9 @@ pub mod sla_format {
     pub const ELEM_SUB_EXP: u32 = 56;
     pub const ELEM_XOR_EXP: u32 = 57;
     pub const ELEM_INTB: u32 = 58;
+    pub const ELEM_END_EXP: u32 = 59;
+    pub const ELEM_NEXT2_EXP: u32 = 60;
+    pub const ELEM_START_EXP: u32 = 61;
     pub const ELEM_COMMIT: u32 = 79;
     pub const ELEM_CONST_START: u32 = 80;
     pub const ELEM_CONST_NEXT: u32 = 81;
