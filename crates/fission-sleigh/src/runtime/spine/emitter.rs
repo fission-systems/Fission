@@ -21,6 +21,38 @@ impl RuntimePcodeEmitter {
         }
     }
 
+    /// Ghidra `PcodeEmit.setUniqueOffset(Address)` — seed for unique temporaries at `pcode_address`.
+    #[inline]
+    pub fn unique_seed_for_address(unique_mask: u64, pcode_address: u64) -> u64 {
+        (pcode_address & unique_mask).wrapping_shl(8)
+    }
+
+    /// Temporarily switch the pcode instruction address and unique temp allocator (cross-build / delay slot).
+    pub fn with_emit_context<R>(
+        &mut self,
+        pcode_address: u64,
+        unique_next_tmp: u64,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let saved_addr = self.address;
+        let saved_tmp = self.next_tmp;
+        self.address = pcode_address;
+        self.next_tmp = unique_next_tmp;
+        let out = body(self);
+        self.address = saved_addr;
+        self.next_tmp = saved_tmp;
+        out
+    }
+
+    pub fn emit_context(&self) -> (u64, u64) {
+        (self.address, self.next_tmp)
+    }
+
+    pub fn set_emit_context(&mut self, pcode_address: u64, next_tmp: u64) {
+        self.address = pcode_address;
+        self.next_tmp = next_tmp;
+    }
+
     pub fn finish(self) -> Vec<PcodeOp> {
         self.ops
     }

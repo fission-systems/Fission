@@ -120,6 +120,7 @@ pub fn compile_frontend(
         sla_unique_space_index: u64::MAX,
         sla_register_space_index: u64::MAX,
         sla_uniqbase: 0,
+        sla_uniqmask: u64::MAX,
     })
 }
 
@@ -257,6 +258,7 @@ pub fn build_frontend_from_sla_native_model(
     compiled.sla_unique_space_index = library.unique_space_index;
     compiled.sla_register_space_index = library.register_space_index;
     compiled.sla_uniqbase = library.uniqbase;
+    compiled.sla_uniqmask = library.uniqmask;
 
     // The compiled .sla artifact is the canonical executable identity. Ghidra
     // decision leaves resolve subtable-local constructor ids; Fission must

@@ -34,28 +34,116 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
 
 pub(super) fn emit_pcode_for_state(
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     address: u64,
+    memory_window: &[u8],
+    memory_base: u64,
     decoded: &RuntimeConstructState,
+    flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    emit_pcode_for_state_with_bytes(compiled, address, &[], decoded)
+    emit_pcode_for_state_with_bytes(
+        compiled,
+        native,
+        address,
+        memory_window,
+        memory_base,
+        decoded,
+        flow,
+    )
+}
+
+/// Options for pcode template emission (Ghidra `PcodeEmit` parity hooks).
+#[derive(Debug, Clone, Default)]
+pub struct FlowEmitOptions {
+    /// Context register bits when binding cross-build / delay-slot instructions at another PC.
+    pub instruction_context_register: u64,
+    pub instruction_context_known_mask: u64,
+    /// When set, Ghidra-style `ConstTpl` flowref / flowdest constants resolve from these.
+    pub flow_ref_addr: Option<u64>,
+    pub flow_ref_space_index: Option<u64>,
+    pub flow_dest_addr: Option<u64>,
+    pub flow_dest_space_index: Option<u64>,
+    /// Ghidra `FlowOverride` — only `None` is fully supported; other variants fail closed until ported.
+    pub flow_override: RuntimeFlowOverride,
+}
+
+/// Ghidra `PcodeEmit.flowOverride` (subset; extend as pcode replacement is ported).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuntimeFlowOverride {
+    #[default]
+    None,
+    Branch,
+    Call,
+    CallReturn,
+    Return,
 }
 
 pub(super) fn emit_pcode_for_state_with_bytes(
     compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
     address: u64,
-    instruction_bytes: &[u8],
+    memory_window: &[u8],
+    memory_base: u64,
     decoded: &RuntimeConstructState,
+    flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    let mut emitter = CompiledTableEmitter::new(compiled, address, instruction_bytes);
+    let mut emitter = CompiledTableEmitter::new(
+        compiled,
+        native,
+        address,
+        memory_window,
+        memory_base,
+        flow,
+    );
     // If the template uses InstNext2 (delay-slot architectures), pre-decode the
     // delay-slot instruction to get its actual length.
-    if uses_inst_next2(&decoded.constructor_template.ops) && !instruction_bytes.is_empty() {
-        emitter.precompute_delay_slot_length(compiled, decoded.length);
+    if (uses_inst_next2(&decoded.constructor_template.ops)
+        || uses_delay_slot_indirect(&decoded.constructor_template.ops))
+        && !memory_window.is_empty()
+    {
+        emitter.precompute_delay_slot_length(decoded.length);
     }
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, decoded)
         .map_err(|err| template_emit_error(compiled, err))?;
     Ok((emitter.finish(), details))
+}
+
+fn ptrsub_named_section_index(op: &CompiledOpTpl) -> Result<usize> {
+    let v1 = op
+        .inputs
+        .get(1)
+        .ok_or_else(|| anyhow!("PTRSUB/CROSSBUILD missing section index input"))?;
+    match v1 {
+        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+            CompiledConstTpl::Real { value } => usize::try_from(*value)
+                .map_err(|_| anyhow!("PTRSUB named section index does not fit usize")),
+            _ => bail!("PTRSUB section index must be ConstTpl::Real"),
+        },
+        _ => bail!("PTRSUB section index must be a VarnodeTpl"),
+    }
+}
+
+fn indirect_placeholder_delay_bytes(op: &CompiledOpTpl) -> Result<u32> {
+    let v0 = op
+        .inputs
+        .first()
+        .ok_or_else(|| anyhow!("INDIRECT delay-slot placeholder missing inputs"))?;
+    match v0 {
+        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+            CompiledConstTpl::Real { value } => u32::try_from(*value)
+                .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
+            _ => bail!("INDIRECT delay size must be ConstTpl::Real (Ghidra walkTemplates)"),
+        },
+        CompiledVarnodeTpl::Const(CompiledConstTpl::Real { value }) => u32::try_from(*value)
+            .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
+        _ => bail!("INDIRECT delay placeholder has unexpected varnode shape"),
+    }
+}
+
+fn uses_delay_slot_indirect(ops: &[CompiledOpTpl]) -> bool {
+    ops.iter()
+        .any(|op| op.opcode == CompiledOpTplOpcode::DelaySlotIndirect)
 }
 
 /// Returns true if the template contains an InstNext2 constant, meaning this
@@ -111,7 +199,12 @@ fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct CompiledTableEmitter {
+pub(super) struct CompiledTableEmitter<'c> {
+    compiled: &'c CompiledFrontend,
+    native: Option<&'c Arc<NativeBackend>>,
+    /// Byte window for the current decode; `memory_window[0]` is at `memory_base`.
+    memory_window: &'c [u8],
+    memory_base: u64,
     emitter: RuntimePcodeEmitter,
     address: u64,
     built_operands: std::collections::BTreeSet<usize>,
@@ -125,12 +218,14 @@ pub(super) struct CompiledTableEmitter {
     /// Label positions: `label_num` → emitter op count at the time the Label was seen.
     /// Used for `resolveRelatives()` post-processing.
     label_positions: std::collections::BTreeMap<u64, u32>,
-    /// Raw instruction bytes, stored for potential delay-slot decoding (InstNext2).
-    instruction_bytes: Vec<u8>,
-    /// Pre-computed delay slot instruction length in bytes.
-    /// `Some(n)` if the delay slot instruction was successfully decoded; `None` otherwise.
+    /// Pre-computed delay slot instruction length in bytes (first slot only).
     /// Used for `InstNext2 = inst_next + delay_slot_length`.
     delay_slot_length: Option<u32>,
+    flow: FlowEmitOptions,
+    /// Ghidra `PcodeEmit.build(construct, secnum)` — named-section pcode uses secnum ≥ 0.
+    pcode_build_secnum: i32,
+    in_delay_slot: bool,
+    uniq_mask: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -141,10 +236,21 @@ pub(super) struct DynamicMemoryTarget {
     size: u32,
 }
 
-impl CompiledTableEmitter {
-    fn new(compiled: &CompiledFrontend, address: u64, instruction_bytes: &[u8]) -> Self {
+impl<'c> CompiledTableEmitter<'c> {
+    fn new(
+        compiled: &'c CompiledFrontend,
+        native: Option<&'c Arc<NativeBackend>>,
+        address: u64,
+        memory_window: &'c [u8],
+        memory_base: u64,
+        flow: FlowEmitOptions,
+    ) -> Self {
         let uniqbase = compiled.sla_uniqbase;
         Self {
+            compiled,
+            native,
+            memory_window,
+            memory_base,
             address,
             emitter: RuntimePcodeEmitter::new(address, uniqbase),
             built_operands: std::collections::BTreeSet::new(),
@@ -152,8 +258,11 @@ impl CompiledTableEmitter {
             unique_space_index: compiled.sla_unique_space_index,
             sla_spaces: compiled.sla_spaces.clone(),
             label_positions: std::collections::BTreeMap::new(),
-            instruction_bytes: instruction_bytes.to_vec(),
             delay_slot_length: None,
+            flow,
+            pcode_build_secnum: -1,
+            in_delay_slot: false,
+            uniq_mask: compiled.sla_uniqmask,
         }
     }
 
@@ -162,20 +271,49 @@ impl CompiledTableEmitter {
     /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
     fn precompute_delay_slot_length(
         &mut self,
-        compiled: &CompiledFrontend,
         inst_length: usize,
     ) {
-        let inst_next_offset = inst_length;
+        let inst_next_offset = (self.address + inst_length as u64)
+            .checked_sub(self.memory_base)
+            .unwrap_or(0) as usize;
         let inst_next_address = self.address.saturating_add(inst_length as u64);
         let len = decode_instruction_length(
-            compiled,
-            None,
-            &self.instruction_bytes,
+            self.compiled,
+            self.native,
+            self.memory_window,
             inst_next_address,
             inst_next_offset,
         );
         if len > 0 {
             self.delay_slot_length = Some(len);
+        }
+    }
+
+    fn truncate_to_pointer_size(space: &CompiledSpaceRef, offset: u64) -> u64 {
+        let bits = (space.addr_size as u32).saturating_mul(8);
+        if space.addr_size == 0 || bits >= 64 {
+            offset
+        } else {
+            offset & ((1u64 << bits) - 1)
+        }
+    }
+
+    fn crossbuild_flat_address(
+        &mut self,
+        tpl: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<(CompiledSpaceRef, u64)> {
+        match tpl {
+            CompiledVarnodeTpl::Varnode {
+                space: space_tpl,
+                offset: off_tpl,
+                ..
+            } => {
+                let space = self.resolve_space_tpl(space_tpl, state)?;
+                let offset = self.resolve_const_value(off_tpl, state)?;
+                Ok((space, offset))
+            }
+            _ => bail!("CROSSBUILD address input must be a plain varnode template"),
         }
     }
 
@@ -216,6 +354,22 @@ impl CompiledTableEmitter {
         op: &CompiledOpTpl,
     ) -> Result<()> {
         let mnemonic = op.opcode.as_str();
+        if !matches!(self.flow.flow_override, RuntimeFlowOverride::None)
+            && !self.in_delay_slot
+            && matches!(
+                op.opcode,
+                CompiledOpTplOpcode::Branch
+                    | CompiledOpTplOpcode::BranchInd
+                    | CompiledOpTplOpcode::Call
+                    | CompiledOpTplOpcode::CallInd
+                    | CompiledOpTplOpcode::Return
+            )
+        {
+            bail!(
+                "FlowOverride {:?} pcode substitution is not supported yet",
+                self.flow.flow_override
+            );
+        }
         match op.opcode {
             CompiledOpTplOpcode::Label => {
                 // Record the current emitter op count as this label's position.
@@ -505,6 +659,108 @@ impl CompiledTableEmitter {
                 };
                 self.emitter.emit_callother(output, inputs, mnemonic)
             }
+            CompiledOpTplOpcode::CrossBuild => {
+                if self.pcode_build_secnum >= 0 {
+                    bail!(
+                        "CROSSBUILD (PTRSUB) while emitting named pcode section {} (Ghidra recursion guard)",
+                        self.pcode_build_secnum
+                    );
+                }
+                if op.inputs.len() < 2 {
+                    bail!("CROSSBUILD (PTRSUB) requires two varnode inputs");
+                }
+                let (target_space, target_offset) =
+                    self.crossbuild_flat_address(&op.inputs[0], state)?;
+                let target_pc = Self::truncate_to_pointer_size(&target_space, target_offset);
+                let section = ptrsub_named_section_index(op)?;
+                let ctx_reg = self.flow.instruction_context_register;
+                let ctx_mask = self.flow.instruction_context_known_mask;
+                let cross_state = try_bind_runtime_state_at(
+                    self.compiled,
+                    self.native,
+                    self.memory_window,
+                    self.memory_base,
+                    target_pc,
+                    ctx_reg,
+                    ctx_mask,
+                )?;
+                let unique_seed =
+                    RuntimePcodeEmitter::unique_seed_for_address(self.uniq_mask, target_pc);
+                let saved_emit = self.emitter.emit_context();
+                let saved_labels = std::mem::take(&mut self.label_positions);
+                let saved_built = std::mem::take(&mut self.built_operands);
+                self.emitter.set_emit_context(target_pc, unique_seed);
+                let emit_result = (|| -> Result<()> {
+                    let Some(Some(named)) = cross_state.named_templates.get(section) else {
+                        bail!(
+                            "crossbuild: named template section {section} missing at target 0x{target_pc:x}"
+                        );
+                    };
+                    for cop in &named.ops {
+                        self.emit_op_template(&cross_state, cop)?;
+                    }
+                    Ok(())
+                })();
+                self.built_operands = saved_built;
+                self.label_positions = saved_labels;
+                self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
+                emit_result
+            }
+            CompiledOpTplOpcode::DelaySlotIndirect => {
+                if self.in_delay_slot {
+                    bail!(
+                        "INDIRECT delay-slot recursion at pcode address 0x{:x}",
+                        self.address
+                    );
+                }
+                let delay_total = indirect_placeholder_delay_bytes(op)?;
+                self.in_delay_slot = true;
+                let ctx_reg = self.flow.instruction_context_register;
+                let ctx_mask = self.flow.instruction_context_known_mask;
+                let emit_result = (|| -> Result<()> {
+                    let mut fall_offset = state.length as u64;
+                    let mut byte_count: u32 = 0;
+                    while byte_count < delay_total {
+                        let slot_pc = self.address.saturating_add(fall_offset);
+                        let slot_state = try_bind_runtime_state_at(
+                            self.compiled,
+                            self.native,
+                            self.memory_window,
+                            self.memory_base,
+                            slot_pc,
+                            ctx_reg,
+                            ctx_mask,
+                        )?;
+                        let slot_len = slot_state.length as u32;
+                        if slot_len == 0 {
+                            bail!("delay slot decode returned zero length at 0x{slot_pc:x}");
+                        }
+                        let unique_seed =
+                            RuntimePcodeEmitter::unique_seed_for_address(self.uniq_mask, slot_pc);
+                        let saved_emit = self.emitter.emit_context();
+                        let saved_labels = std::mem::take(&mut self.label_positions);
+                        let saved_built = std::mem::take(&mut self.built_operands);
+                        self.emitter.set_emit_context(slot_pc, unique_seed);
+                        let inner = (|| -> Result<()> {
+                            for cop in &slot_state.constructor_template.ops {
+                                self.emit_op_template(&slot_state, cop)?;
+                            }
+                            Ok(())
+                        })();
+                        self.built_operands = saved_built;
+                        self.label_positions = saved_labels;
+                        self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
+                        inner?;
+                        fall_offset = fall_offset.saturating_add(u64::from(slot_len));
+                        byte_count = byte_count
+                            .checked_add(slot_len)
+                            .ok_or_else(|| anyhow!("delay slot byte count overflow"))?;
+                    }
+                    Ok(())
+                })();
+                self.in_delay_slot = false;
+                emit_result
+            }
             CompiledOpTplOpcode::Unsupported => bail!(
                 "compiled op template {} is not executable in compiled-table cutover",
                 mnemonic
@@ -520,54 +776,61 @@ impl CompiledTableEmitter {
         if !self.built_operands.insert(operand_index) {
             return Ok(());
         }
-        let handle = state
-            .handles
-            .get(operand_index)
-            .ok_or_else(|| anyhow!("BUILD operand {operand_index} has no bound handle"))?;
-        let Some(child) = handle.subtable_state.as_deref() else {
-            return Ok(());
-        };
-        if child.constructor_template.template_source != CompiledTemplateSource::SpecDerived {
-            bail!("BUILD operand {operand_index} is not backed by a SpecDerived subconstructor");
-        }
-        if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
-            eprintln!(
-                "[emit_build_operand] operand={operand_index} mnemonic={} child_ops_count={}",
-                child.mnemonic,
-                child.constructor_template.ops.len()
-            );
-            for (i, child_op) in child.constructor_template.ops.iter().enumerate() {
-                eprintln!("  [child_op {}] {:?}", i, child_op.opcode);
+        let saved_sec = self.pcode_build_secnum;
+        let result = (|| -> Result<()> {
+            let handle = state
+                .handles
+                .get(operand_index)
+                .ok_or_else(|| anyhow!("BUILD operand {operand_index} has no bound handle"))?;
+            let Some(child) = handle.subtable_state.as_deref() else {
+                return Ok(());
+            };
+            if child.constructor_template.template_source != CompiledTemplateSource::SpecDerived {
+                bail!("BUILD operand {operand_index} is not backed by a SpecDerived subconstructor");
             }
-        }
-        // Ghidra: each sub-constructor's BUILD scope is independent. Save and
-        // restore `built_operands` so that child operand indices (e.g. 0 for the
-        // base register within a memory-addressing subtable) are not mistakenly
-        // treated as "already built" because the parent used the same numeric
-        // index for a different operand (e.g. 0 for the memory operand itself).
-        let saved_built = std::mem::take(&mut self.built_operands);
-        if child.constructor_template.ops.is_empty() {
-            // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
-            // fall back to the parent's named section indexed by the operand number.
-            // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
-            if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
-                for named_op in &named_tpl.ops {
-                    self.emit_op_template(child, named_op)?;
+            if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                eprintln!(
+                    "[emit_build_operand] operand={operand_index} mnemonic={} child_ops_count={}",
+                    child.mnemonic,
+                    child.constructor_template.ops.len()
+                );
+                for (i, child_op) in child.constructor_template.ops.iter().enumerate() {
+                    eprintln!("  [child_op {}] {:?}", i, child_op.opcode);
                 }
             }
-        } else {
-            for child_op in &child.constructor_template.ops {
-                self.emit_op_template(child, child_op)?;
+            // Ghidra: each sub-constructor's BUILD scope is independent. Save and
+            // restore `built_operands` so that child operand indices (e.g. 0 for the
+            // base register within a memory-addressing subtable) are not mistakenly
+            // treated as "already built" because the parent used the same numeric
+            // index for a different operand (e.g. 0 for the memory operand itself).
+            let saved_built = std::mem::take(&mut self.built_operands);
+            if child.constructor_template.ops.is_empty() {
+                // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
+                // fall back to the parent's named section indexed by the operand number.
+                // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
+                self.pcode_build_secnum = operand_index as i32;
+                if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
+                    for named_op in &named_tpl.ops {
+                        self.emit_op_template(child, named_op)?;
+                    }
+                }
+            } else {
+                self.pcode_build_secnum = -1;
+                for child_op in &child.constructor_template.ops {
+                    self.emit_op_template(child, child_op)?;
+                }
             }
-        }
-        self.built_operands = saved_built;
-        if let Some(exported) = child.exported_handle.as_ref() {
-            if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
-                let handle_key = -((operand_index as i64) + 1);
-                self.exported_build_varnodes.insert(handle_key, varnode);
+            self.built_operands = saved_built;
+            if let Some(exported) = child.exported_handle.as_ref() {
+                if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
+                    let handle_key = -((operand_index as i64) + 1);
+                    self.exported_build_varnodes.insert(handle_key, varnode);
+                }
             }
-        }
-        Ok(())
+            Ok(())
+        })();
+        self.pcode_build_secnum = saved_sec;
+        result
     }
 
     fn template_varnode_size(
@@ -1051,39 +1314,48 @@ impl CompiledTableEmitter {
                 let delay_len = self.delay_slot_length.unwrap_or(0) as u64;
                 Ok(inst_next.saturating_add(delay_len))
             }
-            CompiledConstTpl::CurSpace => {
-                // The default (ram/code) address space ID. Use the first non-const,
-                // non-unique, non-register space from the SLA space table.
-                for (index, space) in &self.sla_spaces {
-                    if space.name != "const" && space.name != "unique" && space.name != "register" {
-                        return Ok(*index);
-                    }
-                }
-                // Fallback: index 1 is typically the ram/default space.
-                Ok(1)
-            }
-            CompiledConstTpl::CurSpaceSize => {
-                let addr_size = self
-                    .sla_spaces
-                    .values()
-                    .find(|s| {
-                        s.name == "ram"
-                            || (s.name != "const"
-                                && s.name != "unique"
-                                && s.name != "register")
-                    })
-                    .map(|s| s.addr_size)
-                    .filter(|&sz| sz > 0)
-                    .unwrap_or(8);
-                Ok(addr_size as u64)
-            }
-            CompiledConstTpl::FlowRef => bail!("ConstTpl flowref resolution is unsupported"),
+            CompiledConstTpl::CurSpace => self.compiled.sla_default_cur_space_index(),
+            CompiledConstTpl::CurSpaceSize => self
+                .compiled
+                .sla_default_cur_space_pointer_size()
+                .map(|s| s as u64),
+            CompiledConstTpl::FlowRef => self
+                .flow
+                .flow_ref_addr
+                .ok_or_else(|| anyhow!("ConstTpl FlowRef requires FlowEmitOptions.flow_ref_addr")),
             CompiledConstTpl::FlowRefSize => {
-                bail!("ConstTpl flowref_size resolution is unsupported")
+                let idx = self
+                    .flow
+                    .flow_ref_space_index
+                    .ok_or_else(|| anyhow!("ConstTpl FlowRefSize requires FlowEmitOptions.flow_ref_space_index"))?;
+                let space = self
+                    .compiled
+                    .sla_spaces
+                    .get(&idx)
+                    .ok_or_else(|| anyhow!("FlowRefSize space index {idx} missing from sla_spaces"))?;
+                if space.addr_size == 0 {
+                    bail!("FlowRefSize space {} has addr_size=0", space.name);
+                }
+                Ok(space.addr_size as u64)
             }
-            CompiledConstTpl::FlowDest => bail!("ConstTpl flowdest resolution is unsupported"),
+            CompiledConstTpl::FlowDest => self
+                .flow
+                .flow_dest_addr
+                .ok_or_else(|| anyhow!("ConstTpl FlowDest requires FlowEmitOptions.flow_dest_addr")),
             CompiledConstTpl::FlowDestSize => {
-                bail!("ConstTpl flowdest_size resolution is unsupported")
+                let idx = self
+                    .flow
+                    .flow_dest_space_index
+                    .ok_or_else(|| anyhow!("ConstTpl FlowDestSize requires FlowEmitOptions.flow_dest_space_index"))?;
+                let space = self
+                    .compiled
+                    .sla_spaces
+                    .get(&idx)
+                    .ok_or_else(|| anyhow!("FlowDestSize space index {idx} missing from sla_spaces"))?;
+                if space.addr_size == 0 {
+                    bail!("FlowDestSize space {} has addr_size=0", space.name);
+                }
+                Ok(space.addr_size as u64)
             }
         }
     }
@@ -1167,7 +1439,7 @@ impl CompiledTableEmitter {
     }
 }
 
-impl RuntimeTemplateExecutor for CompiledTableEmitter {
+impl RuntimeTemplateExecutor for CompiledTableEmitter<'_> {
     fn emit_op_template(
         &mut self,
         state: &RuntimeConstructState,

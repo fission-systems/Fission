@@ -38,6 +38,22 @@ fn assert_spec_derived_lift_or_typed_unsupported(
 }
 
 #[test]
+fn sla_template_feature_audit_smoke() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let audit = audit_sla_template_features(&compiled);
+    let ctor_count: usize = compiled
+        .subtables
+        .values()
+        .map(|s| s.constructors.len())
+        .sum();
+    assert!(ctor_count > 0, "expected at least one executable constructor");
+    let _ = audit.opcode_cross_build
+        + audit.opcode_delay_slot_indirect
+        + audit.const_flow_ref
+        + audit.const_flow_dest;
+}
+
+#[test]
 fn generated_runtime_decodes_ret_with_spec_derived_lift() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded = decode_instruction(&compiled, None, &[0xC3], 0x1000).expect("generated ret");

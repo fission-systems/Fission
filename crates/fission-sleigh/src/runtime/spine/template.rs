@@ -55,6 +55,7 @@ mod tests {
                 num_labels: 0,
                 result: None,
                 ops: vec![CompiledOpTpl {
+                    sla_raw_pcode_opcode: 0,
                     opcode: CompiledOpTplOpcode::Copy,
                     output: Some(CompiledVarnodeTpl::Handle { operand_index: 0 }),
                     inputs: vec![CompiledVarnodeTpl::Const(CompiledConstTpl::Integer {

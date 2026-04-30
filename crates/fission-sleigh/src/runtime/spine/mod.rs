@@ -7,6 +7,10 @@
 //! through telemetry and replaced by spec-derived template execution.
 
 pub mod compiled_table;
+#[allow(unused_imports)] // Re-exported API (flow overrides, SLA audits).
+pub use compiled_table::{
+    audit_sla_template_features, FlowEmitOptions, RuntimeFlowOverride, SlaTemplateFeatureAudit,
+};
 pub mod construct;
 pub mod context;
 pub mod decision;

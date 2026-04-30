@@ -46,6 +46,49 @@ Landed on `main` as `feaf3757` — `feat(fission-sleigh): Ghidra Sleigh 5-gap cl
 
 ---
 
+## fission-sleigh: Ghidra PcodeEmit / ConstTpl parity (second wave)
+
+**Date:** 2026-04-30  
+**Scope:** `crates/fission-sleigh` — SLA `ATTR_UNIQMASK`, compiled-table emit, spine exports
+
+### Summary
+
+Aligned remaining **PcodeEmit**-class behaviors with Ghidra reference semantics using packaged `.sla` data and explicit errors (no numeric CurSpace guesses, no silent flow-const resolution).
+
+### Changes
+
+| Area | Behavior |
+|------|----------|
+| **FlowRef / FlowDest consts** | Resolve from `FlowEmitOptions` when set; otherwise fail with a clear error (no `bail!("unsupported")` stub). |
+| **CurSpace / CurSpaceSize** | `CompiledFrontend::sla_default_cur_space_index()` / `sla_default_cur_space_pointer_size()` only; removed table-walk + `Ok(1)` / `unwrap_or(8)` fallbacks. |
+| **CrossBuild (PTRSUB)** | Decode target PC + section index; `try_bind_runtime_state_at`; emit named-section ops; Ghidra recursion guard when `pcode_build_secnum >= 0`; unique temp seed `(PC & sla_uniqmask) << 8`. |
+| **Delay INDIRECT** | INDIRECT placeholder: delay total bytes from template (Ghidra `walkTemplates` Real); inline delay-slot instruction pcode with per-slot PC and unique seed; pairs with `InstNext2` pre-decode when INDIRECT appears. |
+| **FlowOverride** | `RuntimeFlowOverride` + `FlowEmitOptions.flow_override` exported; non-`None` on branch/call/return paths **fail closed** until `dumpFlowOverride` parity exists. |
+| **Instruction context for nested bind** | `FlowEmitOptions.instruction_context_{register,known_mask}` threaded from decode `ctx` into emit/cross-build/delay-slot `try_bind`. |
+| **SLA uniq mask** | `ATTR_UNIQMASK` → `CompiledSlaTemplateLibrary::uniqmask` → `CompiledFrontend::sla_uniqmask` (serde default `u64::MAX` for older artifacts). |
+| **Audit** | `audit_sla_template_features` / `SlaTemplateFeatureAudit` scan ctor + named templates for CrossBuild, DelaySlotIndirect, and flow const tpls; smoke test `sla_template_feature_audit_smoke`. Re-exported from `runtime::spine`. |
+
+### Representative paths
+
+- `crates/fission-sleigh/src/compiler/ir/types.rs`, `lowering.rs`
+- `crates/fission-sleigh/src/compiler/sla/{symbols.rs,templates.rs}`
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/{mod.rs,template_eval.rs,tests.rs}`
+- `crates/fission-sleigh/src/runtime/spine/{emitter.rs,mod.rs,template.rs}`
+
+### Validation
+
+- `cargo check -p fission-sleigh`
+- `cargo test -p fission-sleigh sla_template_feature_audit_smoke`
+
+### Follow-up
+
+- Ghidra **buildEmpty** when cross-build named template is missing (currently explicit error).
+- Overlay address translation for cross-build targets (Ghidra `OverlayAddressSpace`).
+- Full **FlowOverride** pcode substitution (`dumpFlowOverride` parity).
+- Optional: extend public decode entry points to accept caller-built `FlowEmitOptions` (flow refs / overrides) without going through internal emit helpers.
+
+---
+
 ## DIE Loader Detection and GUI Metadata Surfacing
 
 **Date:** 2026-04-30  

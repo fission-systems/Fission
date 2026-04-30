@@ -25,6 +25,9 @@ fn decode_construct_templates(
     let uniqbase = root
         .attr_unsigned(sla_format::ATTR_UNIQBASE)
         .unwrap_or(0);
+    let uniqmask = root
+        .attr_unsigned(sla_format::ATTR_UNIQMASK)
+        .unwrap_or(u64::MAX);
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
@@ -484,6 +487,7 @@ fn decode_construct_templates(
         unique_space_index,
         register_space_index,
         uniqbase,
+        uniqmask,
         constructors_by_source,
         subtables,
         native: SlaLanguage {
@@ -762,6 +766,7 @@ fn decode_op_tpl(
         }
     }
     Ok(CompiledOpTpl {
+        sla_raw_pcode_opcode: opcode_code as u32,
         opcode,
         output,
         inputs,
@@ -812,6 +817,8 @@ fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
         PcodeOpcode::Piece => CompiledOpTplOpcode::Piece,
         PcodeOpcode::SubPiece => CompiledOpTplOpcode::Subpiece,
         PcodeOpcode::PtrAdd => CompiledOpTplOpcode::Label,
+        PcodeOpcode::PtrSub => CompiledOpTplOpcode::CrossBuild,
+        PcodeOpcode::Indirect => CompiledOpTplOpcode::DelaySlotIndirect,
         PcodeOpcode::PopCount => CompiledOpTplOpcode::PopCount,
         _ => CompiledOpTplOpcode::Unsupported,
     }

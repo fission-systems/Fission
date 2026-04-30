@@ -39,9 +39,49 @@ pub struct CompiledFrontend {
     /// Base offset for unique temporary varnode allocation (`uniqbase` from `.sla`).
     #[serde(default)]
     pub sla_uniqbase: u64,
+    /// Ghidra unique allocation mask (`ATTR_UNIQMASK`); used with instruction PC for temp bases.
+    #[serde(default = "default_sla_uniqmask")]
+    pub sla_uniqmask: u64,
+}
+
+fn default_sla_uniqmask() -> u64 {
+    u64::MAX
 }
 
 impl CompiledFrontend {
+    /// Ghidra `ConstTpl.J_CURSPACE` / `ParserWalker.getCurSpace()`: the default
+    /// non-const address space for pcode emission (typically `ram`).
+    ///
+    /// Algorithm: prefer the SLA space named `ram`; otherwise the first space
+    /// that is not `const`, `unique`, or `register`. No numeric index guess.
+    pub fn sla_default_cur_space_index(&self) -> anyhow::Result<u64> {
+        if let Some((idx, _)) = self.sla_spaces.iter().find(|(_, s)| s.name == "ram") {
+            return Ok(*idx);
+        }
+        self.sla_spaces
+            .iter()
+            .find(|(_, s)| {
+                s.name != "const" && s.name != "unique" && s.name != "register"
+            })
+            .map(|(idx, _)| *idx)
+            .ok_or_else(|| {
+                anyhow::anyhow!("SLA space table has no ram or other default address space for CurSpace")
+            })
+    }
+
+    /// Pointer size in bytes for [`Self::sla_default_cur_space_index`]'s space.
+    pub fn sla_default_cur_space_pointer_size(&self) -> anyhow::Result<u32> {
+        let idx = self.sla_default_cur_space_index()?;
+        let space = self
+            .sla_spaces
+            .get(&idx)
+            .ok_or_else(|| anyhow::anyhow!("CurSpace index {idx} missing from sla_spaces"))?;
+        if space.addr_size == 0 {
+            anyhow::bail!("SLA space {} has addr_size=0 (cannot resolve CurSpaceSize)", space.name);
+        }
+        Ok(space.addr_size)
+    }
+
     /// Returns the pointer/address size in bytes for the RAM (default data) space.
     /// This is ATTRIB_SIZE in Ghidra (e.g. 4 for 32-bit, 8 for 64-bit).
     /// Falls back to 8 (64-bit) when the SLA did not encode an address size.
@@ -632,6 +672,9 @@ pub enum CompiledTemplateSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledOpTpl {
+    /// Flat pcode opcode integer from SLA `ATTRIB_CODE` (Ghidra `PcodeOp` encoding).
+    #[serde(default)]
+    pub sla_raw_pcode_opcode: u32,
     pub opcode: CompiledOpTplOpcode,
     pub output: Option<CompiledVarnodeTpl>,
     pub inputs: Vec<CompiledVarnodeTpl>,
@@ -675,6 +718,10 @@ pub enum CompiledOpTplOpcode {
     Return,
     CallOther,
     Build,
+    /// Ghidra `PcodeEmit.appendCrossBuild`: `PTRSUB` placeholder in ConstructTpl.
+    CrossBuild,
+    /// Ghidra `PcodeEmit.delaySlot`: `INDIRECT` placeholder in ConstructTpl.
+    DelaySlotIndirect,
     Label,
     Unsupported,
 }
@@ -1023,6 +1070,8 @@ impl CompiledOpTplOpcode {
             Self::Return => "RETURN",
             Self::CallOther => "CALLOTHER",
             Self::Build => "BUILD",
+            Self::CrossBuild => "CROSSBUILD",
+            Self::DelaySlotIndirect => "DELAYSLOT_INDIRECT",
             Self::Label => "LABEL",
             Self::Unsupported => "UNSUPPORTED",
         }

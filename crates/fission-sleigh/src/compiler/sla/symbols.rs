@@ -21,6 +21,7 @@ pub struct CompiledSlaTemplateLibrary {
     pub unique_space_index: u64,
     pub register_space_index: u64,
     pub uniqbase: u64,
+    pub uniqmask: u64,
     pub constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>>,
     pub subtables: BTreeMap<String, CompiledSlaSubtable>,
     pub native: SlaLanguage,
