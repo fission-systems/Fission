@@ -202,6 +202,52 @@ ghidra_wall_clock_sec: 321.9895864216378
 This keeps the current x86-64 `.sla ConstructTpl` raw P-code path exact across a
 larger real-world PE DLL export surface, not just the synthetic canonical rows.
 
+## Raw P-code Timing Breakdown
+
+Split Fission raw P-code benchmark timing so performance reports now separate
+process/harness startup, binary loading, frontend loading, and checked
+decode/lift execution.
+
+New Fission timing fields:
+
+```text
+process_startup_sec
+binary_load_sec
+frontend_load_sec
+decode_lift_sec
+rust_probe_sec
+decode_lift_instructions_per_sec
+decode_lift_pcode_ops_per_sec
+```
+
+The Rust `raw_pcode_probe` example now records binary load, SLEIGH frontend
+load, and decode/lift timings directly. The Python benchmark harness subtracts
+the Rust probe runtime from wall clock time to expose process startup/harness
+overhead instead of folding it into SLEIGH execution.
+
+Validation used the same temporary sqlite3 DLL six-row smoke:
+
+```text
+report: /tmp/sqlite3_raw_pcode_timing_smoke/aggregate_raw_pcode_parity_report.json
+row_count: 6
+full_match: 48
+average_similarity_score: 1.0
+average_parity_ratio: 1.0
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+template_source_totals: sla_construct_tpl=48
+process_startup_sec: 12.839296834027973
+binary_load_sec: 12.647225417000001
+frontend_load_sec: 5.239065835
+decode_lift_sec: 0.00176879
+```
+
+This confirms the current sqlite3 smoke wall-clock gap is not in checked
+`.sla ConstructTpl` execution. Native backend policy is unchanged: native code
+remains candidate acceleration only, and final raw P-code success still requires
+common checked `.sla ConstructTpl` execution.
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.

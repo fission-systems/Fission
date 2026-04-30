@@ -56,12 +56,32 @@ def main() -> int:
     instructions = report.get("instructions", [])
     instruction_count = sum(1 for instruction in instructions if instruction.get("status") == "ok")
     pcode_op_count = sum(len(instruction.get("pcode", [])) for instruction in instructions)
+    probe_timing = report.get("timing") if isinstance(report.get("timing"), dict) else {}
+    rust_probe_sec = probe_timing.get("rust_probe_sec")
+    process_startup_sec = None
+    if isinstance(rust_probe_sec, (int, float)):
+        process_startup_sec = max(0.0, elapsed_sec - float(rust_probe_sec))
     report["timing"] = {
         "wall_clock_sec": elapsed_sec,
+        "process_startup_sec": process_startup_sec,
+        "frontend_load_sec": probe_timing.get("frontend_load_sec"),
+        "decode_lift_sec": probe_timing.get("decode_lift_sec"),
+        "binary_load_sec": probe_timing.get("binary_load_sec"),
+        "rust_probe_sec": rust_probe_sec,
         "instruction_count": instruction_count,
         "pcode_op_count": pcode_op_count,
         "instructions_per_sec": instruction_count / elapsed_sec if elapsed_sec > 0 else None,
         "pcode_ops_per_sec": pcode_op_count / elapsed_sec if elapsed_sec > 0 else None,
+        "decode_lift_instructions_per_sec": (
+            instruction_count / probe_timing["decode_lift_sec"]
+            if isinstance(probe_timing.get("decode_lift_sec"), (int, float)) and probe_timing["decode_lift_sec"] > 0
+            else None
+        ),
+        "decode_lift_pcode_ops_per_sec": (
+            pcode_op_count / probe_timing["decode_lift_sec"]
+            if isinstance(probe_timing.get("decode_lift_sec"), (int, float)) and probe_timing["decode_lift_sec"] > 0
+            else None
+        ),
     }
     report["tool"] = "fission"
     text = json.dumps(report, indent=2, sort_keys=True)

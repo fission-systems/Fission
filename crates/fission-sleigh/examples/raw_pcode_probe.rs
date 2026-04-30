@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
@@ -82,7 +83,16 @@ struct ProbeReport {
     start_address: u64,
     requested_count: usize,
     space_map: BTreeMap<String, u64>,
+    timing: ProbeTiming,
     instructions: Vec<InstructionReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProbeTiming {
+    rust_probe_sec: f64,
+    binary_load_sec: f64,
+    frontend_load_sec: f64,
+    decode_lift_sec: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,17 +238,26 @@ fn find_named_file(root: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) -
 }
 
 fn main() -> Result<()> {
+    let probe_started = Instant::now();
     let args = parse_args()?;
+
+    let binary_load_started = Instant::now();
     let binary = LoadedBinary::from_file(&args.binary)
         .with_context(|| format!("failed to load {}", args.binary.display()))?;
+    let binary_load_sec = binary_load_started.elapsed().as_secs_f64();
+
     let load_spec = binary
         .load_spec()
         .ok_or_else(|| anyhow!("loader did not select a load spec"))?;
+
+    let frontend_load_started = Instant::now();
     let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec)?;
     let space_map = load_space_map(&frontend);
+    let frontend_load_sec = frontend_load_started.elapsed().as_secs_f64();
 
     let mut instructions = Vec::new();
     let mut current = args.address;
+    let mut decode_lift_sec = 0.0f64;
     for _ in 0..args.count {
         let Some(bytes) = binary
             .view_executable_bytes(current, args.window_bytes)
@@ -257,8 +276,11 @@ fn main() -> Result<()> {
             break;
         };
 
+        let decode_lift_started = Instant::now();
         let decoded = frontend.decode_window(bytes, current, 1);
-        match frontend.decode_and_lift_with_details(bytes, current) {
+        let lifted = frontend.decode_and_lift_with_details(bytes, current);
+        decode_lift_sec += decode_lift_started.elapsed().as_secs_f64();
+        match lifted {
             Ok((ops, len, details)) => {
                 instructions.push(InstructionReport {
                     address: current,
@@ -315,6 +337,12 @@ fn main() -> Result<()> {
         start_address: args.address,
         requested_count: args.count,
         space_map: space_map_json,
+        timing: ProbeTiming {
+            rust_probe_sec: probe_started.elapsed().as_secs_f64(),
+            binary_load_sec,
+            frontend_load_sec,
+            decode_lift_sec,
+        },
         instructions,
     };
     println!("{}", serde_json::to_string_pretty(&report)?);

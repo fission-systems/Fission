@@ -31,6 +31,16 @@ def add_performance_totals(
     wall_clock_sec = performance.get("wall_clock_sec")
     instruction_count = performance.get("instruction_count")
     pcode_op_count = performance.get("pcode_op_count")
+    for key in (
+        "process_startup_sec",
+        "frontend_load_sec",
+        "decode_lift_sec",
+        "binary_load_sec",
+        "rust_probe_sec",
+    ):
+        value = performance.get(key)
+        if value is not None:
+            totals[f"{prefix}_{key}"] = totals.get(f"{prefix}_{key}", 0.0) + float(value)
     if wall_clock_sec is not None:
         totals[f"{prefix}_wall_clock_sec"] = totals.get(f"{prefix}_wall_clock_sec", 0.0) + float(wall_clock_sec)
     if instruction_count is not None:
@@ -57,10 +67,25 @@ def finalize_performance_summary(totals: dict[str, float]) -> dict[str, Any]:
         },
         "fission": {
             "wall_clock_sec": fission_wall,
+            "process_startup_sec": totals.get("fission_process_startup_sec"),
+            "frontend_load_sec": totals.get("fission_frontend_load_sec"),
+            "decode_lift_sec": totals.get("fission_decode_lift_sec"),
+            "binary_load_sec": totals.get("fission_binary_load_sec"),
+            "rust_probe_sec": totals.get("fission_rust_probe_sec"),
             "instruction_count": int(fission_instructions),
             "pcode_op_count": int(fission_ops),
             "instructions_per_sec": fission_instructions / fission_wall if fission_wall > 0 else None,
             "pcode_ops_per_sec": fission_ops / fission_wall if fission_wall > 0 else None,
+            "decode_lift_instructions_per_sec": (
+                fission_instructions / totals["fission_decode_lift_sec"]
+                if totals.get("fission_decode_lift_sec", 0.0) > 0
+                else None
+            ),
+            "decode_lift_pcode_ops_per_sec": (
+                fission_ops / totals["fission_decode_lift_sec"]
+                if totals.get("fission_decode_lift_sec", 0.0) > 0
+                else None
+            ),
         },
         "delta": {
             "wall_clock_delta_sec": fission_wall - ghidra_wall,

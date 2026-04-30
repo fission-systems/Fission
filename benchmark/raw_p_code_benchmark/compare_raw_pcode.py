@@ -338,13 +338,25 @@ def performance_from_report(report: dict[str, Any]) -> dict[str, Any]:
     wall_clock_sec = timing.get("wall_clock_sec")
     instruction_count = int(timing.get("instruction_count", 0))
     pcode_op_count = int(timing.get("pcode_op_count", 0))
-    return {
+    performance = {
         "wall_clock_sec": wall_clock_sec,
         "instruction_count": instruction_count,
         "pcode_op_count": pcode_op_count,
         "instructions_per_sec": timing.get("instructions_per_sec"),
         "pcode_ops_per_sec": timing.get("pcode_ops_per_sec"),
     }
+    for key in (
+        "process_startup_sec",
+        "frontend_load_sec",
+        "decode_lift_sec",
+        "binary_load_sec",
+        "rust_probe_sec",
+        "decode_lift_instructions_per_sec",
+        "decode_lift_pcode_ops_per_sec",
+    ):
+        if key in timing:
+            performance[key] = timing.get(key)
+    return performance
 
 
 def performance_delta(ghidra: dict[str, Any], fission: dict[str, Any]) -> dict[str, Any]:
