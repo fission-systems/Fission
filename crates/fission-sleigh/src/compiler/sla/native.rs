@@ -10,6 +10,12 @@ pub struct SlaLanguage {
     pub version: u8,
     pub source_files: BTreeMap<u64, String>,
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
+    /// Index of the unique (temporary) address space in the `.sla` space table.
+    pub unique_space_index: u64,
+    /// Index of the register address space in the `.sla` space table.
+    pub register_space_index: u64,
+    /// Base offset for unique temporary varnode allocation (`uniqbase` from `.sla`).
+    pub uniqbase: u64,
     pub subtables: BTreeMap<String, SlaSubtable>,
 }
 
@@ -115,6 +121,9 @@ impl SlaLanguage {
             version: library.version,
             source_files: library.source_files.clone(),
             spaces: library.spaces.clone(),
+            unique_space_index: library.unique_space_index,
+            register_space_index: library.register_space_index,
+            uniqbase: library.uniqbase,
             subtables,
         }
     }

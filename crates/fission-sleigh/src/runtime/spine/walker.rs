@@ -35,6 +35,28 @@ impl RuntimeParserWalker {
         });
     }
 
+    /// Extract instruction bits at `[start_bit, start_bit + bit_size)` from the
+    /// instruction byte stream.  This is the SLA-native equivalent of Ghidra's
+    /// `ParserWalker::getInstructionBits(startbit, size)` (slghsymbol.cc:2293).
+    ///
+    /// Bit numbering follows Ghidra's little-endian convention:
+    /// - bit 0 is the LSB of byte 0 of the instruction.
+    /// - Bits are extracted MSB-first within each bit-slice group.
+    ///
+    /// The result is zero-extended to u64. Sign extension is the caller's
+    /// responsibility (use `sign_bit` from the SLA token field spec).
+    pub fn instruction_bits(&self, bytes: &[u8], start_bit: u32, bit_size: u32) -> u64 {
+        let mut result = 0u64;
+        for i in 0..bit_size {
+            let bit_pos = start_bit + i;
+            let byte_idx = (bit_pos / 8) as usize;
+            let bit_in_byte = bit_pos % 8;
+            let bit = bytes.get(byte_idx).map(|b| (b >> bit_in_byte) & 1).unwrap_or(0);
+            result |= u64::from(bit) << i;
+        }
+        result
+    }
+
     pub fn into_nodes(self) -> Vec<RuntimeConstructNode> {
         self.construct_nodes
     }

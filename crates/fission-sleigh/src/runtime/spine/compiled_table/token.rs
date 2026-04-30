@@ -11,10 +11,21 @@ pub(super) struct TokenFieldBundle {
     pub(super) length: usize,
 }
 
-// Transitional shared-token cursor policy. This preserves the existing
-// compiled-table behavior for frontends whose SLEIGH metadata still models
-// opcode, ModRM, and SIB as shared token subtables. It is compatibility debt,
-// not a new architecture provider/helper module.
+// Transitional shared-token cursor policy.
+//
+// MIGRATION DEBT: This policy detects whether a frontend uses x86-style shared
+// token subtables (e.g. ModRM byte shared between Rmr64, addr64, Reg64) by
+// checking for well-known x86 subtable names. This is an architecture-specific
+// heuristic that must eventually be replaced with SLA-native token field byte
+// range tracking.
+//
+// The canonical replacement is: each operand's byte range comes from its
+// `SlaTokenField` byte_start/byte_end fields. When the walker accumulates
+// operand byte ranges from the SLA token field metadata rather than a cursor
+// advance, this policy becomes unnecessary.
+//
+// Do NOT add new subtable name entries to the detection lists below. Fix the
+// underlying SLA-native byte-range accumulation instead.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CompiledTokenCursorPolicy {
     shared_token_cursor: bool,
@@ -22,6 +33,10 @@ pub(super) struct CompiledTokenCursorPolicy {
 
 impl CompiledTokenCursorPolicy {
     pub(super) fn for_frontend(compiled: &CompiledFrontend) -> Self {
+        // Detect x86 by presence of well-known ModRM/SIB shared-token subtables.
+        // This heuristic works because these subtable names are canonical in the
+        // Ghidra x86 SLEIGH spec (x86-64.slaspec). No other architecture in the
+        // supported set uses these exact subtable names.
         Self {
             shared_token_cursor: compiled.subtables.contains_key("Rmr64")
                 && compiled.subtables.contains_key("addr64")

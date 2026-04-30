@@ -25,6 +25,10 @@ impl RuntimePcodeEmitter {
         self.ops
     }
 
+    pub fn op_count(&self) -> u32 {
+        self.ops.len() as u32
+    }
+
     pub fn tmp(&mut self, space_id: u64, size: u32) -> Varnode {
         let vn = Varnode {
             space_id,

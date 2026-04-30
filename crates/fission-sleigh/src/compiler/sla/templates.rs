@@ -18,7 +18,13 @@ fn decode_construct_templates(
     }
 
     let source_files = decode_source_files(&root)?;
-    let spaces = decode_spaces(&root)?;
+    let space_result = decode_spaces(&root)?;
+    let spaces = space_result.spaces;
+    let unique_space_index = space_result.unique_space_index;
+    let register_space_index = space_result.register_space_index;
+    let uniqbase = root
+        .attr_unsigned(sla_format::ATTR_UNIQBASE)
+        .unwrap_or(0);
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
@@ -405,6 +411,9 @@ fn decode_construct_templates(
         version: artifact.version,
         source_files,
         spaces,
+        unique_space_index,
+        register_space_index,
+        uniqbase,
         constructors_by_source,
         subtables,
         native: SlaLanguage {
@@ -412,6 +421,9 @@ fn decode_construct_templates(
             version: artifact.version,
             source_files: BTreeMap::new(),
             spaces: BTreeMap::new(),
+            unique_space_index: u64::MAX,
+            register_space_index: u64::MAX,
+            uniqbase: 0,
             subtables: BTreeMap::new(),
         },
     };

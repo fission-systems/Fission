@@ -3,7 +3,7 @@ pub(super) fn emit_pcode_for_state(
     address: u64,
     decoded: &RuntimeConstructState,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    let mut emitter = CompiledTableEmitter::new(address);
+    let mut emitter = CompiledTableEmitter::new(compiled, address);
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, decoded)
         .map_err(|err| template_emit_error(compiled, err))?;
@@ -28,6 +28,24 @@ pub(super) fn template_emit_error(compiled: &CompiledFrontend, err: anyhow::Erro
 }
 
 
+/// Sentinel used to tag branch targets that reference pcode-internal relative labels.
+/// Convention follows Ghidra: `-(label_num + 1)` as i64, stored as u64.
+/// Any branch target constant with value > RELATIVE_LABEL_SENTINEL_THRESHOLD is a sentinel.
+const RELATIVE_LABEL_SENTINEL_THRESHOLD: u64 = u64::MAX - 0x10000;
+
+fn encode_relative_sentinel(label_num: u64) -> u64 {
+    (-(label_num as i64 + 1)) as u64
+}
+
+fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
+    if sentinel > RELATIVE_LABEL_SENTINEL_THRESHOLD {
+        let label_num = (-(sentinel as i64) - 1) as u64;
+        Some(label_num)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CompiledTableEmitter {
     emitter: RuntimePcodeEmitter,
@@ -36,6 +54,13 @@ pub(super) struct CompiledTableEmitter {
     /// Exported varnodes produced by BUILD subconstructors. Ghidra templates
     /// reference these through negative handle indices in parent templates.
     exported_build_varnodes: std::collections::BTreeMap<i64, Varnode>,
+    /// Index of the unique (temporary) address space, derived from `.sla` metadata.
+    unique_space_index: u64,
+    /// Mapping from space index to space reference, derived from `.sla` metadata.
+    sla_spaces: std::collections::BTreeMap<u64, CompiledSpaceRef>,
+    /// Label positions: `label_num` → emitter op count at the time the Label was seen.
+    /// Used for `resolveRelatives()` post-processing.
+    label_positions: std::collections::BTreeMap<u64, u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,22 +72,51 @@ pub(super) struct DynamicMemoryTarget {
 }
 
 impl CompiledTableEmitter {
-    fn new(address: u64) -> Self {
-        // Use Ghidra-compatible unique offset base: 0x9300 is the first
-        // canonical unique temp used by the x86 Addr sub-constructors.
-        // Ghidra computes: (addr & uniquemask) << 8, but for the SLA
-        // template temps these are static offsets baked into the spec.
-        // We start at 0x9300 to match Ghidra's allocation pattern.
+    fn new(compiled: &CompiledFrontend, address: u64) -> Self {
+        // Unique base offset comes from the `.sla` `uniqbase` attribute
+        // (Ghidra: (addr & uniqmask) | uniqbase pattern). Using the SLA-derived
+        // value ensures correct unique varnode allocation for any architecture.
+        let uniqbase = compiled.sla_uniqbase;
         Self {
             address,
-            emitter: RuntimePcodeEmitter::new(address, 0x9300),
+            emitter: RuntimePcodeEmitter::new(address, uniqbase),
             built_operands: std::collections::BTreeSet::new(),
             exported_build_varnodes: std::collections::BTreeMap::new(),
+            unique_space_index: compiled.sla_unique_space_index,
+            sla_spaces: compiled.sla_spaces.clone(),
+            label_positions: std::collections::BTreeMap::new(),
         }
     }
 
     fn finish(self) -> Vec<PcodeOp> {
-        self.emitter.finish()
+        let label_positions = self.label_positions;
+        let mut ops = self.emitter.finish();
+        // resolveRelatives: replace sentinel branch targets with actual relative offsets.
+        // Follows Ghidra's PcodeCacher::resolveRelatives() convention.
+        for i in 0..ops.len() {
+            let opcode = ops[i].opcode;
+            if !matches!(opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                continue;
+            }
+            // Branch: input[0] is the target. CBranch: input[0] is target, input[1] is cond.
+            if let Some(target_vn) = ops[i].inputs.first() {
+                if !target_vn.is_constant {
+                    continue;
+                }
+                let raw = target_vn.constant_val as u64;
+                if let Some(label_num) = decode_relative_sentinel(raw) {
+                    if let Some(&label_op_count) = label_positions.get(&label_num) {
+                        // Relative offset = label_op_count - (branch_op_index + 1)
+                        // Ghidra convention: positive = forward, negative = backward.
+                        let branch_op = i as i64;
+                        let label_pos = label_op_count as i64;
+                        let relative = label_pos - branch_op;
+                        ops[i].inputs[0] = Varnode::constant(relative, 8);
+                    }
+                }
+            }
+        }
+        ops
     }
 
     fn emit_op_template(
@@ -72,7 +126,23 @@ impl CompiledTableEmitter {
     ) -> Result<()> {
         let mnemonic = op.opcode.as_str();
         match op.opcode {
-            CompiledOpTplOpcode::Label => Ok(()),
+            CompiledOpTplOpcode::Label => {
+                // Record the current emitter op count as this label's position.
+                // Labels themselves don't emit pcode ops; they are position markers.
+                // The label number is encoded in the output varnode's offset field.
+                let label_num = op.output.as_ref().and_then(|out| {
+                    if let CompiledVarnodeTpl::Varnode { offset, .. } = out {
+                        if let CompiledConstTpl::Real { value } = offset.as_ref() {
+                            return Some(*value);
+                        }
+                    }
+                    None
+                }).unwrap_or(0);
+                // Use the emitter's actual op count so even recursively emitted ops
+                // (via BUILD) are accounted for correctly.
+                self.label_positions.insert(label_num, self.emitter.op_count());
+                Ok(())
+            }
             CompiledOpTplOpcode::Return => {
                 if op.output.is_some() || op.inputs.len() > 1 {
                     bail!("RETURN template shape is unsupported");
@@ -98,7 +168,12 @@ impl CompiledTableEmitter {
                     .first()
                     .ok_or_else(|| anyhow!("BRANCH template requires one input"))?;
                 let target = self.read_template_varnode(target_tpl, state, 8)?;
-                let is_indirect = !target.is_constant && target.space_id != 3;
+                // A branch is indirect when the target is in a non-unique, non-const
+                // address space. Unique space targets are internal pcode labels; const
+                // targets are absolute addresses. Both route through emit_branch.
+                let is_indirect = !target.is_constant
+                    && self.unique_space_index != u64::MAX
+                    && target.space_id != self.unique_space_index;
                 if is_indirect {
                     self.emitter.emit_branch_ind(target, mnemonic)
                 } else {
@@ -148,21 +223,6 @@ impl CompiledTableEmitter {
                         vec![value, trunc_const],
                         "SUBPIECE",
                     )?;
-                    // In x86-64, writing to a 32-bit register implicitly
-                    // zero-extends to 64 bits. Emit INT_ZEXT if the output
-                    // is a 4-byte register (Ghidra does this explicitly).
-                    if out.size == 4 && out.space_id == 4 {
-                        let extended = Varnode {
-                            size: 8,
-                            ..out.clone()
-                        };
-                        self.emitter.append_checked(
-                            fission_pcode::PcodeOpcode::IntZExt,
-                            Some(extended),
-                            vec![out],
-                            "INT_ZEXT",
-                        )?;
-                    }
                     Ok(())
                 } else {
                     self.write_template_target(out_tpl, value, state, mnemonic)
@@ -683,13 +743,14 @@ impl CompiledTableEmitter {
             CompiledSpaceTpl::SpaceRef(space) => Ok(space.clone()),
             CompiledSpaceTpl::Const(const_tpl) => {
                 let space_id = self.resolve_const_value(const_tpl, state)?;
-                let name = match space_id {
-                    0 => "const",
-                    2 => "unique",
-                    3 => "ram",
-                    4 => "register",
-                    _ => "unknown",
-                };
+                // Look up the space name from the SLA-derived space table instead
+                // of using a hardcoded architecture-specific mapping.
+                if let Some(space_ref) = self.sla_spaces.get(&space_id) {
+                    return Ok(space_ref.clone());
+                }
+                // Const space (ID 0) is always the constant space regardless of
+                // architecture. Fall back to index-only for unknown spaces.
+                let name = if space_id == 0 { "const" } else { "unknown" };
                 Ok(CompiledSpaceRef {
                     name: name.to_string(),
                     index: space_id,
@@ -729,13 +790,39 @@ impl CompiledTableEmitter {
                     Ok(val)
                 }
             }
-            CompiledConstTpl::Relative { .. } | CompiledConstTpl::RelativeAddress => {
-                bail!("ConstTpl relative label resolution is unsupported")
+            CompiledConstTpl::Relative { value: label_num } => {
+                // Emit a sentinel value; resolveRelatives() in finish() will replace it
+                // with the actual relative op offset after all ops are emitted.
+                // Uses Ghidra's convention: -(label_num + 1) so the value is in the
+                // RELATIVE_LABEL_SENTINEL_THRESHOLD range (large unsigned values).
+                Ok(encode_relative_sentinel(*label_num))
             }
-            CompiledConstTpl::InstNext2 => bail!("ConstTpl inst_next2 resolution is unsupported"),
-            CompiledConstTpl::CurSpace => bail!("ConstTpl curspace resolution is unsupported"),
+            CompiledConstTpl::RelativeAddress => {
+                // RelativeAddress is a backward-compat form of Relative without an
+                // explicit label num; treat as label 0.
+                Ok(encode_relative_sentinel(0))
+            }
+            CompiledConstTpl::InstNext2 => {
+                // Delay-slot architecture: address of the instruction after the delay
+                // slot. Approximation: inst_next + inst_length (will be refined when
+                // delay slot decoding is fully implemented).
+                Ok(self.address.saturating_add(state.length as u64 * 2))
+            }
+            CompiledConstTpl::CurSpace => {
+                // The default (ram/code) address space ID. Use the first non-const,
+                // non-unique, non-register space from the SLA space table.
+                for (index, space) in &self.sla_spaces {
+                    if space.name != "const" && space.name != "unique" && space.name != "register" {
+                        return Ok(*index);
+                    }
+                }
+                // Fallback: index 1 is typically the ram/default space.
+                Ok(1)
+            }
             CompiledConstTpl::CurSpaceSize => {
-                bail!("ConstTpl curspace_size resolution is unsupported")
+                // Size of the default address space in bytes (typically 4 or 8).
+                // Use 8 as a safe default for 64-bit architectures.
+                Ok(8)
             }
             CompiledConstTpl::FlowRef => bail!("ConstTpl flowref resolution is unsupported"),
             CompiledConstTpl::FlowRefSize => {

@@ -26,6 +26,19 @@ pub struct CompiledFrontend {
     pub construct_templates: Vec<CompiledConstructTpl>,
     pub pcode_ops: Vec<CompiledPcodeOp>,
     pub pattern_nodes: Vec<CompiledPatternNode>,
+    /// Address spaces decoded from the `.sla` file (index → space ref).
+    #[serde(default)]
+    pub sla_spaces: BTreeMap<u64, CompiledSpaceRef>,
+    /// Index of the unique (temporary) address space derived from `.sla`.
+    /// Replaces the hardcoded `UNIQUE_SPACE_ID = 3` constant.
+    #[serde(default)]
+    pub sla_unique_space_index: u64,
+    /// Index of the register address space derived from `.sla`.
+    #[serde(default)]
+    pub sla_register_space_index: u64,
+    /// Base offset for unique temporary varnode allocation (`uniqbase` from `.sla`).
+    #[serde(default)]
+    pub sla_uniqbase: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

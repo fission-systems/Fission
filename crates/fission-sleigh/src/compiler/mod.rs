@@ -831,7 +831,7 @@ mod tests {
             .iter()
             .find(|entry| entry.processor == "RISCV")
             .expect("RISCV manifest entry");
-        assert_eq!(riscv.runtime_status, "registered_compile_only");
+        assert_eq!(riscv.runtime_status, "executable_candidate");
     }
 
     #[test]

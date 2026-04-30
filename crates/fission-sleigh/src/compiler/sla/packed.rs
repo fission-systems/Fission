@@ -328,6 +328,9 @@ pub mod sla_format {
     pub const ATTR_ENDBYTE: u32 = 32;
     pub const ATTR_STARTBYTE: u32 = 33;
     pub const ATTR_BIGENDIAN: u32 = 35;
+    pub const ATTR_ALIGN: u32 = 36;
+    pub const ATTR_UNIQBASE: u32 = 37;
+    pub const ATTR_UNIQMASK: u32 = 39;
     pub const ATTR_I: u32 = 52;
     pub const ATTR_SECTION: u32 = 54;
     pub const ATTR_LABELS: u32 = 55;

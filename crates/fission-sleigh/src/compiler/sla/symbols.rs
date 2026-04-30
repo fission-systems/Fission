@@ -18,6 +18,9 @@ pub struct CompiledSlaTemplateLibrary {
     pub version: u8,
     pub source_files: BTreeMap<u64, String>,
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
+    pub unique_space_index: u64,
+    pub register_space_index: u64,
+    pub uniqbase: u64,
     pub constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>>,
     pub subtables: BTreeMap<String, CompiledSlaSubtable>,
     pub native: SlaLanguage,
@@ -90,27 +93,35 @@ fn decode_source_files(root: &PackedElement) -> Result<BTreeMap<u64, String>> {
     Ok(out)
 }
 
-fn decode_spaces(root: &PackedElement) -> Result<BTreeMap<u64, CompiledSpaceRef>> {
-    let mut out = BTreeMap::new();
-    out.insert(
+pub(super) struct SlaSpaceDecodeResult {
+    pub spaces: BTreeMap<u64, CompiledSpaceRef>,
+    pub unique_space_index: u64,
+    pub register_space_index: u64,
+}
+
+fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
+    let mut spaces = BTreeMap::new();
+    spaces.insert(
         0,
         CompiledSpaceRef {
             name: "const".to_string(),
             index: 0,
         },
     );
-    for space in root
-        .descendants_with_id(sla_format::ELEM_SPACE)
-        .into_iter()
-        .chain(root.descendants_with_id(sla_format::ELEM_SPACE_UNIQUE))
-    {
+    let mut unique_space_index = u64::MAX;
+    let mut register_space_index = u64::MAX;
+
+    for space in root.descendants_with_id(sla_format::ELEM_SPACE) {
         let index = space
             .attr_unsigned(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("space missing index"))?;
         let name = space
             .attr_string(sla_format::ATTR_NAME)
             .ok_or_else(|| anyhow!("space missing name"))?;
-        out.insert(
+        if name == "register" {
+            register_space_index = index;
+        }
+        spaces.insert(
             index,
             CompiledSpaceRef {
                 name: name.to_string(),
@@ -118,7 +129,27 @@ fn decode_spaces(root: &PackedElement) -> Result<BTreeMap<u64, CompiledSpaceRef>
             },
         );
     }
-    Ok(out)
+    for space in root.descendants_with_id(sla_format::ELEM_SPACE_UNIQUE) {
+        let index = space
+            .attr_unsigned(sla_format::ATTR_INDEX)
+            .ok_or_else(|| anyhow!("unique space missing index"))?;
+        let name = space
+            .attr_string(sla_format::ATTR_NAME)
+            .unwrap_or("unique");
+        unique_space_index = index;
+        spaces.insert(
+            index,
+            CompiledSpaceRef {
+                name: name.to_string(),
+                index,
+            },
+        );
+    }
+    Ok(SlaSpaceDecodeResult {
+        spaces,
+        unique_space_index,
+        register_space_index,
+    })
 }
 
 fn decode_operand_symbols(

@@ -116,6 +116,10 @@ pub fn compile_frontend(
         construct_templates,
         pcode_ops,
         pattern_nodes: collector.pattern_nodes,
+        sla_spaces: BTreeMap::new(),
+        sla_unique_space_index: u64::MAX,
+        sla_register_space_index: u64::MAX,
+        sla_uniqbase: 0,
     })
 }
 
@@ -245,6 +249,14 @@ pub fn build_frontend_from_sla_native_model(
     library: &CompiledSlaTemplateLibrary,
 ) -> usize {
     let mut updated = 0usize;
+
+    // Propagate SLA-native space metadata so the runtime never uses hardcoded
+    // space IDs. These replace UNIQUE_SPACE_ID=3, register space=4, and the
+    // 0x9300 unique offset seed that were previously architecture-specific constants.
+    compiled.sla_spaces = library.spaces.clone();
+    compiled.sla_unique_space_index = library.unique_space_index;
+    compiled.sla_register_space_index = library.register_space_index;
+    compiled.sla_uniqbase = library.uniqbase;
 
     // The compiled .sla artifact is the canonical executable identity. Ghidra
     // decision leaves resolve subtable-local constructor ids; Fission must

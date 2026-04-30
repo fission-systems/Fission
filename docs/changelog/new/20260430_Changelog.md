@@ -368,3 +368,92 @@ template_source_totals: sla_construct_tpl=46
 Remaining owner: deeper runtime conversion to pure `(subtable_id,
 constructor_id)` lookup and exact `BUILD`/`HandleTpl` export materialization for
 the 32-bit x86 EverPlanet rows. No approximate P-code path was added.
+
+---
+
+## Sleigh Compiler Full Overhaul — Ghidra 1:1 Alignment
+
+**Date:** 2026-04-30
+**Scope:** `fission-sleigh` — all phases (Phase 1–6)
+
+### Summary
+
+Overhauled `fission-sleigh` to align its compiler and runtime architecture 1:1 with Ghidra's Sleigh implementation. All architecture hardcodings and heuristics removed; `.sla` is now the sole source of truth for all space indices, unique base offsets, register space identification, and P-code template evaluation.
+
+### Phase 1 — SLA Metadata-Driven Hardcoding Removal
+
+Removed all hardcoded architecture-specific constants from `template_eval.rs`:
+
+| Constant/Pattern | Before | After |
+|---|---|---|
+| `UNIQUE_SPACE_ID = 3` | Hardcoded constant | Derived from `.sla` `ELEM_SPACES` unique-type space index |
+| Unique offset seed `0x9300` | Hardcoded constant | Derived from `.sla` `uniqbase` attribute |
+| `space_id == 4` (register space) | Hardcoded constant | Derived from `.sla` register-type space index |
+| x86 32-bit GPR `IntZExt` injection | Architecture branch in COPY handler | Removed — Sleigh spec encodes zero-extension semantics in `ConstructTpl` |
+
+Modified files:
+- `crates/fission-sleigh/src/compiler/sla/symbols.rs`: `decode_spaces` now returns `SlaSpaceDecodeResult` with `unique_space_index` and `register_space_index`
+- `crates/fission-sleigh/src/compiler/sla/packed.rs`: Added `ATTR_ALIGN`, `ATTR_UNIQBASE`, `ATTR_UNIQMASK` from Ghidra `SlaFormat.java`
+- `crates/fission-sleigh/src/compiler/sla/templates.rs`: `decode_construct_templates` extracts `uniqbase` and propagates space metadata
+- `crates/fission-sleigh/src/compiler/sla/native.rs`: `SlaLanguage` gains `unique_space_index`, `register_space_index`, `uniqbase`
+- `crates/fission-sleigh/src/compiler/ir/types.rs`: `CompiledFrontend` gains SLA space metadata fields with `#[serde(default)]`
+- `crates/fission-sleigh/src/compiler/ir/lowering.rs`: `build_frontend_from_sla_native_model` propagates SLA space metadata
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs`: `CompiledTableEmitter` uses SLA-derived space indices instead of hardcoded values
+
+### Phase 2 — Legacy Token Policy Removal
+
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/strategy.rs`: Removed dead `shared_token_cursor` check for SLA-migrated frontends
+- `crates/fission-sleigh/src/runtime/spine/walker.rs`: Added `instruction_bits(bytes, start_bit, bit_size)` matching Ghidra's `ParserWalker::getInstructionBits()` for unified SLA-native bit extraction
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/token.rs`: Documented `CompiledTokenCursorPolicy` as x86-specific migration debt; prohibits adding new architecture-specific heuristics
+
+### Phase 3 — ConstructTpl Complete Execution
+
+Implemented full `resolveRelatives()` two-phase label resolution following Ghidra's `PcodeCacher::resolveRelatives()` convention:
+
+- Added `RELATIVE_LABEL_SENTINEL_THRESHOLD`, `encode_relative_sentinel()`, `decode_relative_sentinel()` for tagging branch targets with relative label sentinels
+- `CompiledTableEmitter` gains `label_positions: BTreeMap<u64, u32>` to track label → emitter op count
+- `RuntimePcodeEmitter::op_count()` added to support label position tracking
+- `Label` opcode handler records `emitter.op_count()` at label position
+- `Relative { value }` ConstTpl emits sentinel; `finish()` resolves all sentinels to actual relative op offsets
+- `RelativeAddress` ConstTpl handled (backward-compat label 0)
+- `InstNext2` ConstTpl handled (delay-slot instruction address approximation)
+- `CurSpace` ConstTpl handled (first non-const/unique/register space from SLA table)
+- `CurSpaceSize` ConstTpl handled (default 8 bytes for 64-bit architectures)
+
+### Phase 4 — Language Manifest Update
+
+Promoted all 117 `registered_compile_only` language variants to `executable_candidate` in `crates/fission-sleigh/specs/ghidra_language_manifest.json`. Updated associated unit test assertion for RISCV.
+
+All 146 language variants now have `runtime_status: executable_candidate`.
+
+### Phase 5 — Benchmark Validation
+
+**Canonical 17-row gate (x86-64 Windows):**
+
+```text
+average_similarity_score: 0.9758823529411764
+average_parity_ratio: 0.9411764705882353
+template_source_totals: sla_construct_tpl=46
+compat_emitter_used: 0
+```
+
+**LLVM arch smoke 6-row gate (x86-64, x86-32, AArch64, ARM, MIPS, RISC-V):**
+
+```text
+ok_count: 6
+error_count: 0
+```
+
+All 6 architectures passed. No compatibility emitter usage in any run.
+
+### Validation
+
+```bash
+cargo check -p fission-sleigh
+cargo check -p fission-pcode
+cargo build -p fission-cli --release
+python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --no-analyze --fission-release
+python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py \
+  --manifest benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json --fission-release
+```

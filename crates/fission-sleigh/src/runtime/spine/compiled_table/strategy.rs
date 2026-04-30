@@ -75,11 +75,16 @@ fn native_backend_allowed(
         // subtable/constructor-id lookup before a constructor is final.  Until
         // codegen emits the same checked terminal verifier, native remains an
         // acceleration target for legacy tables only.
+        // After build_frontend_from_sla_native_model, all SLA-loaded subtables
+        // have sla_subtable_id != 0 or leaf_entries, so this returns false for
+        // all current architectures.
         return false;
     }
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() {
-        return true;
-    }
+    // Note: the previous `shared_token_cursor` short-circuit that allowed native
+    // for x86 has been removed. For SLA-migrated frontends the check above already
+    // returns false for all subtables that have SLA identity. The shared_token_cursor
+    // heuristic was x86-specific and is no longer a valid gate for architecture-neutral
+    // native backend selection.
     !subtable
         .decision_tree
         .nodes
