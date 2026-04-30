@@ -116,3 +116,23 @@
   - `loader_postload_analyzers = legacy_debt`
   - `fid_raw_dbhandle = partial`
   - `fid_hash_and_match = partial`
+
+## Architecture-organized Vendor Binary Corpus
+
+- Reorganized `vendor/binaries/tests/*` into `benchmark/binary/<architecture>/vendor_binaries/<source-family>/` instead of a single flat vendor corpus copy.
+- Copied only the architecture/test binary families from `vendor/binaries/tests`; excluded `vendor/binaries/.git`, `.github`, `tests_src`, `tests_data`, and other source/support-only trees.
+- Preserved original source-family names under each architecture bucket so provenance remains explicit:
+  - `x86_64 -> benchmark/binary/x86-64/vendor_binaries/x86_64`
+  - `x86`, `i386 -> benchmark/binary/x86/vendor_binaries/*`
+  - `aarch64 -> benchmark/binary/AARCH64/vendor_binaries/aarch64`
+  - `armel`, `armhf -> benchmark/binary/ARM7_le/vendor_binaries/*`
+  - MIPS, PowerPC, RISC-V, JVM/Dalvik, SuperH4, PA-RISC, m68k, s390x, alpha, and mixed corpus families were placed under their matching benchmark architecture buckets.
+
+## Vendor Corpus Copy Validation
+
+- Verified source/destination file counts for all copied families:
+  - `25` source-family directories copied.
+  - `949` source files matched `949` destination files.
+- Size audit:
+  - total copied corpus footprint is approximately `350M`.
+  - no copied file exceeded `90M`, so the corpus does not hit GitHub's single-file size limit.
