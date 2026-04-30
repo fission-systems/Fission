@@ -2,6 +2,8 @@ pub(super) fn compiled_space(name: &str, index: u64) -> CompiledSpaceRef {
     CompiledSpaceRef {
         name: name.to_string(),
         index,
+        word_size: 0,
+        addr_size: 0,
     }
 }
 

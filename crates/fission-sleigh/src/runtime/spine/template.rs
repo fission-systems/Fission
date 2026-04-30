@@ -166,6 +166,17 @@ where
             }
             .into());
         }
+        if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+            eprintln!(
+                "[template-emit] mnemonic={} template_source={:?} op_count={}",
+                state.mnemonic,
+                state.constructor_template.template_source,
+                state.constructor_template.ops.len()
+            );
+            for (i, op) in state.constructor_template.ops.iter().enumerate() {
+                eprintln!("  [op {}] {:?}", i, op.opcode);
+            }
+        }
         for op in &state.constructor_template.ops {
             self.emitter.emit_op_template(state, op)?;
         }

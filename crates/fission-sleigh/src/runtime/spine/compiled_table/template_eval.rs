@@ -148,7 +148,8 @@ impl CompiledTableEmitter {
                     bail!("RETURN template shape is unsupported");
                 }
                 if let Some(target_tpl) = op.inputs.first() {
-                    let target = self.read_template_varnode(target_tpl, state, 8)?;
+                    // Use size 0 (no constraint): address size varies by architecture.
+                    let target = self.read_template_varnode(target_tpl, state, 0)?;
                     self.emitter.emit_return_target(target, mnemonic)
                 } else {
                     self.emitter.emit_return(mnemonic)
@@ -159,7 +160,8 @@ impl CompiledTableEmitter {
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("CALL template requires one input"))?;
-                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                // Use size 0: address size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
                 self.emitter.emit_call(target, mnemonic)
             }
             CompiledOpTplOpcode::CallInd => {
@@ -167,7 +169,7 @@ impl CompiledTableEmitter {
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("CALLIND template requires one input"))?;
-                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
                 self.emitter.emit_call_ind(target, mnemonic)
             }
             CompiledOpTplOpcode::Branch => {
@@ -178,7 +180,8 @@ impl CompiledTableEmitter {
                 // Ghidra principle: BRANCH vs BRANCHIND is determined solely by the
                 // SLA template opcode, NOT by the target's address space. A direct
                 // jmp with a RAM-space absolute target is still a BRANCH.
-                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                // Use size 0: address size is architecture-dependent.
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
                 self.emitter.emit_branch(target, mnemonic)
             }
             CompiledOpTplOpcode::BranchInd => {
@@ -186,7 +189,7 @@ impl CompiledTableEmitter {
                     .inputs
                     .first()
                     .ok_or_else(|| anyhow!("BRANCHIND template requires one input"))?;
-                let target = self.read_template_varnode(target_tpl, state, 8)?;
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
                 self.emitter.emit_branch_ind(target, mnemonic)
             }
             CompiledOpTplOpcode::Copy => {
@@ -308,8 +311,9 @@ impl CompiledTableEmitter {
                     bail!("LOAD template requires two inputs");
                 }
                 let _out_size = self.template_varnode_size(out_tpl, state)?;
-                let space = self.read_template_varnode(&op.inputs[0], state, 8)?;
-                let ptr = self.read_template_varnode(&op.inputs[1], state, 8)?;
+                // Space and pointer sizes are architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let space = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 0)?;
                 let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
                 self.emitter.emit_load(out.clone(), space, ptr, mnemonic)?;
                 self.commit_template_write_target(out_tpl, out, state, mnemonic)
@@ -318,8 +322,9 @@ impl CompiledTableEmitter {
                 if op.output.is_some() || op.inputs.len() != 3 {
                     bail!("STORE template requires three inputs and no output");
                 }
-                let space = self.read_template_varnode(&op.inputs[0], state, 8)?;
-                let ptr = self.read_template_varnode(&op.inputs[1], state, 8)?;
+                // Space and pointer sizes are architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let space = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 0)?;
                 let value_size = self.template_varnode_size(&op.inputs[2], state)?;
                 let value = self.read_template_varnode(&op.inputs[2], state, value_size)?;
                 self.emitter.emit_store(space, ptr, value, mnemonic)
@@ -332,7 +337,8 @@ impl CompiledTableEmitter {
                     if out_tpl.is_some() || op.inputs.len() != 2 {
                         bail!("CBRANCH template requires two inputs and no output");
                     }
-                    let target = self.read_template_varnode(&op.inputs[0], state, 8)?;
+                    // Target size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                    let target = self.read_template_varnode(&op.inputs[0], state, 0)?;
                     let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
                     self.emitter.emit_cbranch(target, cond, mnemonic)
                 } else {
@@ -375,6 +381,20 @@ impl CompiledTableEmitter {
                     None
                 };
                 if let Some(idx) = operand_index {
+                    if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                        let handle = state.handles.get(idx);
+                        let has_sub = handle.as_ref().and_then(|h| h.subtable_state.as_ref()).is_some();
+                        let template_src = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                            .map(|s| format!("{:?}", s.constructor_template.template_source))
+                            .unwrap_or_else(|| "None".to_string());
+                        let ops_count = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                            .map(|s| s.constructor_template.ops.len())
+                            .unwrap_or(0);
+                        eprintln!(
+                            "[BUILD] operand={idx} has_sub={has_sub} template_src={template_src} ops={ops_count} already_built={}",
+                            self.built_operands.contains(&idx)
+                        );
+                    }
                     self.emit_build_operand(state, idx)?;
                 }
                 Ok(())
@@ -419,9 +439,26 @@ impl CompiledTableEmitter {
         if child.constructor_template.template_source != CompiledTemplateSource::SpecDerived {
             bail!("BUILD operand {operand_index} is not backed by a SpecDerived subconstructor");
         }
+        if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+            eprintln!(
+                "[emit_build_operand] operand={operand_index} mnemonic={} child_ops_count={}",
+                child.mnemonic,
+                child.constructor_template.ops.len()
+            );
+            for (i, child_op) in child.constructor_template.ops.iter().enumerate() {
+                eprintln!("  [child_op {}] {:?}", i, child_op.opcode);
+            }
+        }
+        // Ghidra: each sub-constructor's BUILD scope is independent. Save and
+        // restore `built_operands` so that child operand indices (e.g. 0 for the
+        // base register within a memory-addressing subtable) are not mistakenly
+        // treated as "already built" because the parent used the same numeric
+        // index for a different operand (e.g. 0 for the memory operand itself).
+        let saved_built = std::mem::take(&mut self.built_operands);
         for child_op in &child.constructor_template.ops {
             self.emit_op_template(child, child_op)?;
         }
+        self.built_operands = saved_built;
         if let Some(exported) = child.exported_handle.as_ref() {
             if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
                 let handle_key = -((operand_index as i64) + 1);
@@ -461,6 +498,16 @@ impl CompiledTableEmitter {
     ) -> Result<Varnode> {
         match template {
             CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
+                // Ghidra: check isDynamic before resolving — emit LOAD for dynamic memory inputs.
+                if let Some(loaded) = self.dynamic_memory_source(template, state)? {
+                    if expected_size > 0 && loaded.size != expected_size {
+                        bail!(
+                            "dynamic memory source size {} did not match expected size {expected_size}",
+                            loaded.size
+                        );
+                    }
+                    return Ok(loaded);
+                }
                 let varnode = self.resolve_varnode_tpl(template, state)?;
                 if expected_size > 0 && varnode.size != expected_size {
                     bail!(
@@ -597,6 +644,82 @@ impl CompiledTableEmitter {
             },
             size: target_size,
         }))
+    }
+
+    /// Ghidra `VarnodeTpl.isDynamic(walker)` path for **input** varnodes.
+    ///
+    /// When the offset ConstTpl of a VarnodeTpl is a HANDLE reference (selector=Offset)
+    /// and the resolved FixedHandle has a non-null `offset_space`, Ghidra's `PcodeEmit.dump()`
+    /// emits a synthetic LOAD op to materialise the value before the parent op.
+    ///
+    /// Returns the temp varnode (LOAD output) if a LOAD was emitted; `None` otherwise.
+    fn dynamic_memory_source(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<Varnode>> {
+        // Only `Varnode { space, offset, size }` can be dynamic (matches Ghidra's VarnodeTpl).
+        let CompiledVarnodeTpl::Varnode { offset, size, .. } = template else {
+            return Ok(None);
+        };
+
+        // isDynamic condition 1: offset.getType() == ConstTpl.HANDLE (selector = Offset)
+        let Some(handle_index) = handle_selector_index(offset, CompiledHandleSelector::Offset)
+        else {
+            return Ok(None);
+        };
+
+        let handle = state
+            .handles
+            .get(handle_index)
+            .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+
+        // isDynamic condition 2: fixedHandle.offset_space != null
+        if handle.fixed.offset_space.is_none() {
+            return Ok(None);
+        }
+
+        let space = handle
+            .fixed
+            .space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing space", handle_index))?;
+        let offset_space = handle
+            .fixed
+            .offset_space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing offset_space", handle_index))?;
+        let temp_space = handle
+            .fixed
+            .temp_space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing temp_space", handle_index))?;
+
+        let data_size = u32::try_from(self.resolve_const_value(size, state)?)
+            .map_err(|_| anyhow!("dynamic memory source size exceeds u32"))?;
+
+        // Ghidra: generateLocation → incache[i] = (temp_space, temp_offset, size)
+        //         generatePointer  → dyncache[1] = (offset_space, offset_offset, offset_size)
+        //         dump LOAD(ram_id, ptr) → temp
+        let space_id = Varnode::constant(space.index as i64, 4);
+        let ptr = Varnode {
+            space_id: offset_space.index,
+            offset: handle.fixed.offset_offset,
+            size: handle.fixed.offset_size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let temp = Varnode {
+            space_id: temp_space.index,
+            offset: handle.fixed.temp_offset,
+            size: data_size,
+            is_constant: false,
+            constant_val: 0,
+        };
+
+        self.emitter.emit_load(temp.clone(), space_id, ptr, "LOAD")?;
+
+        Ok(Some(temp))
     }
 
     fn resolve_varnode_tpl(
@@ -763,6 +886,8 @@ impl CompiledTableEmitter {
                 Ok(CompiledSpaceRef {
                     name: name.to_string(),
                     index: space_id,
+                    word_size: 0,
+                    addr_size: 0,
                 })
             }
         }
@@ -850,14 +975,34 @@ impl CompiledTableEmitter {
         selector: CompiledHandleSelector,
     ) -> Result<u64> {
         match selector {
-            CompiledHandleSelector::Space => handle
-                .fixed
-                .space
-                .as_ref()
-                .map(|space| space.index)
-                .ok_or_else(|| anyhow!("fixed handle missing space")),
+            CompiledHandleSelector::Space => {
+                // Ghidra: ConstTpl.fixSpace() — when offset_space != null (dynamic),
+                // returns temp_space rather than the primary space.
+                if handle.fixed.offset_space.is_some() {
+                    handle
+                        .fixed
+                        .temp_space
+                        .as_ref()
+                        .map(|s| s.index)
+                        .ok_or_else(|| anyhow!("dynamic handle missing temp_space for Space selector"))
+                } else {
+                    handle
+                        .fixed
+                        .space
+                        .as_ref()
+                        .map(|space| space.index)
+                        .ok_or_else(|| anyhow!("fixed handle missing space"))
+                }
+            }
             CompiledHandleSelector::Offset => {
-                Ok(handle.fixed.offset_offset)
+                // Ghidra: ConstTpl.fix() for V_OFFSET — when offset_space != null (dynamic),
+                // returns temp_offset (the output temp of the implicit LOAD) rather than
+                // offset_offset (the pointer location).
+                if handle.fixed.offset_space.is_some() {
+                    Ok(handle.fixed.temp_offset)
+                } else {
+                    Ok(handle.fixed.offset_offset)
+                }
             }
             CompiledHandleSelector::Size => Ok(handle.fixed.size as u64),
             CompiledHandleSelector::OffsetPlus => bail!("OffsetPlus unsupported"),

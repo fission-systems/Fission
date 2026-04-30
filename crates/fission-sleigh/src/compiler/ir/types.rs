@@ -41,6 +41,20 @@ pub struct CompiledFrontend {
     pub sla_uniqbase: u64,
 }
 
+impl CompiledFrontend {
+    /// Returns the pointer/address size in bytes for the RAM (default data) space.
+    /// This is ATTRIB_SIZE in Ghidra (e.g. 4 for 32-bit, 8 for 64-bit).
+    /// Falls back to 8 (64-bit) when the SLA did not encode an address size.
+    pub fn sla_ram_address_size(&self) -> u32 {
+        self.sla_spaces
+            .values()
+            .find(|s| s.name == "ram" || (s.name != "const" && s.name != "unique" && s.name != "register"))
+            .map(|s| s.addr_size)
+            .filter(|&sz| sz > 0)
+            .unwrap_or(8)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledLanguageLayout {
     pub address_spaces: Vec<CompiledAddressSpace>,
@@ -366,6 +380,10 @@ impl CompiledPatternMatcher {
     }
 }
 
+fn default_offsetbase() -> i32 {
+    -1
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandSpec {
     TokenFieldExtraction {
@@ -381,6 +399,12 @@ pub enum CompiledOperandSpec {
         byte_start: u32,
         byte_end: u32,
         shift: i32,
+        /// Byte offset of this token field's token from the start of the parent constructor.
+        /// Mirrors OperandSymbol.reloffset in Ghidra (ATTRIB_OFF). Used in non-shared-cursor
+        /// architectures so that `ctx.cursor + reloffset + byte_start` gives the correct
+        /// absolute instruction-stream byte position (matches Ghidra's `point.getOffset() + bytestart`).
+        #[serde(default)]
+        reloffset: i32,
     },
     SlaVarnodeList {
         big_endian: bool,
@@ -391,6 +415,9 @@ pub enum CompiledOperandSpec {
         byte_end: u32,
         shift: i32,
         entries: Vec<CompiledResolvedVarnode>,
+        /// See `SlaTokenField::reloffset`.
+        #[serde(default)]
+        reloffset: i32,
     },
     SlaValueMap {
         big_endian: bool,
@@ -401,6 +428,9 @@ pub enum CompiledOperandSpec {
         byte_end: u32,
         shift: i32,
         values: Vec<i64>,
+        /// See `SlaTokenField::reloffset`.
+        #[serde(default)]
+        reloffset: i32,
     },
     SlaFixedVarnode {
         varnode: CompiledResolvedVarnode,
@@ -412,6 +442,15 @@ pub enum CompiledOperandSpec {
     },
     SubtableEvaluation {
         table_name: String,
+        /// Byte offset of this operand's token from the start of the parent constructor.
+        /// Derived from `ATTRIB_OFF` in Ghidra's SLA (OperandSymbol.reloffset).
+        /// Used to position the sub-walker's cursor for non-shared-token-cursor architectures.
+        #[serde(default)]
+        reloffset: i32,
+        /// Base operand index for the offset, or -1 if relative to constructor start.
+        /// Derived from `ATTRIB_BASE` in Ghidra's SLA (OperandSymbol.offsetbase).
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
     },
     Immediate {
         size: u32,
@@ -426,6 +465,10 @@ pub enum CompiledOperandSpec {
     },
     SlaPatternExpression {
         expr: CompiledPatternExpression,
+        /// See `SlaTokenField::reloffset`. Used for non-shared-cursor architectures when
+        /// the expression is a direct TokenField (e.g. `imm32` as a sequential operand).
+        #[serde(default)]
+        reloffset: i32,
     },
 }
 
@@ -694,6 +737,18 @@ pub enum CompiledConstTpl {
 pub struct CompiledSpaceRef {
     pub name: String,
     pub index: u64,
+    /// Addressable unit size in bytes (ATTRIB_WORDSIZE in Ghidra).
+    /// 1 for byte-addressed spaces (RAM, register). Defaults to 1.
+    #[serde(default = "default_word_size")]
+    pub word_size: u32,
+    /// Pointer/address size in bytes (ATTRIB_SIZE in Ghidra).
+    /// 4 for 32-bit address spaces, 8 for 64-bit. Defaults to 0 (unknown).
+    #[serde(default)]
+    pub addr_size: u32,
+}
+
+fn default_word_size() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

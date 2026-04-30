@@ -347,7 +347,7 @@ fn executable_constructor_from_sla_template(
 
     let mut decode_steps = Vec::new();
     if let Some(flowthru_operand_index) = sla_template.flowthru_operand_index {
-        if let Some(CompiledOperandSpec::SubtableEvaluation { table_name }) =
+        if let Some(CompiledOperandSpec::SubtableEvaluation { table_name, .. }) =
             sla_template.operand_specs.get(flowthru_operand_index)
         {
             decode_steps.push(CompiledOperandDecodeStep::DescendSubtable {
@@ -1477,6 +1477,8 @@ fn parse_operand_specs(
         {
             specs.push(CompiledOperandSpec::SubtableEvaluation {
                 table_name: token.to_string(),
+                reloffset: 0,
+                offsetbase: -1,
             });
         } else {
             specs.push(CompiledOperandSpec::Immediate {
@@ -1488,6 +1490,8 @@ fn parse_operand_specs(
     if specs.is_empty() && !operand_part.is_empty() {
         return Ok(vec![CompiledOperandSpec::SubtableEvaluation {
             table_name: "unknown".to_string(),
+            reloffset: 0,
+            offsetbase: -1,
         }]);
     }
     if specs.is_empty() && operand_part.is_empty() {

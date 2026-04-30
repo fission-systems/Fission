@@ -66,6 +66,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 && constructor_consumes_sequential_operand_bytes(compiled, selection.constructor)
             {
                 opcode_len_from_context(ctx)?
+            } else if selection.trace.root_bucket == "instruction" {
+                // For instruction-level constructors whose subtables aren't yet tracked in
+                // compiled.subtables (e.g. 32-bit architectures where rel32/rel8 are native-only),
+                // fall back to the matcher length so the cursor is positioned after the opcode
+                // before binding displacement/address operands.
+                opcode_len_from_matcher(&selection.constructor.matcher)
             } else {
                 0
             }
@@ -88,6 +94,16 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             selection.constructor.minimum_length as usize
         };
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
+        if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
+            let matcher_len = opcode_len_from_matcher(&selection.constructor.matcher);
+            let seq_bytes = constructor_consumes_sequential_operand_bytes(compiled, selection.constructor);
+            eprintln!(
+                "[bind-instr] bucket={} opcode_len={opcode_len} ctx.cursor={} sel_src={:?} \
+                 matcher_len={matcher_len} seq_bytes={seq_bytes} matcher={:?}",
+                selection.trace.root_bucket, ctx.cursor, selection.constructor.constructor_template.template_source,
+                selection.constructor.matcher
+            );
+        }
         Ok(Self {
             compiled,
             strategy,
@@ -140,7 +156,29 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     table_name,
                     replace_current,
                 } => {
-                    let sub_state = self.decode_subtable(&table_name)?;
+                    // For non-shared-cursor architectures, look up reloffset/offsetbase
+                    // from the handle template whose spec is SubtableEvaluation for this table.
+                    let (reloffset, offsetbase) = self
+                        .selection
+                        .constructor
+                        .constructor_template
+                        .handles
+                        .iter()
+                        .find_map(|h| {
+                            if let CompiledOperandSpec::SubtableEvaluation {
+                                table_name: ref tn,
+                                reloffset,
+                                offsetbase,
+                            } = h.spec
+                            {
+                                if tn.as_str() == table_name.as_str() {
+                                    return Some((Some(reloffset), Some(offsetbase)));
+                                }
+                            }
+                            None
+                        })
+                        .unwrap_or((None, None));
+                    let sub_state = self.decode_subtable(&table_name, reloffset, offsetbase)?;
                     if replace_current {
                         return Ok(sub_state);
                     }
@@ -197,7 +235,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 .any(|handle| {
                     matches!(
                         &handle.spec,
-                        CompiledOperandSpec::SubtableEvaluation { table_name }
+                        CompiledOperandSpec::SubtableEvaluation { table_name, .. }
                             if shared_token_cursor_policy_relative_trailing_subtable(table_name)
                     )
                 })
@@ -246,6 +284,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_index: usize::MAX,
             spec: CompiledOperandSpec::SubtableEvaluation {
                 table_name: self.selection.constructor.source.clone(),
+                reloffset: 0,
+                offsetbase: -1,
             },
             fixed,
             debug_value: Some(value),
@@ -299,6 +339,30 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .map(|value| self.resolve_export_const_tpl(value, handles))
             .transpose()?
             .unwrap_or(0);
+        // Ghidra: HandleTpl.fix() sets offset_space = null when the pointer space is
+        // the constant address space (TYPE_CONSTANT). This distinguishes static handles
+        // (register/RAM at a constant offset) from truly dynamic handles (pointer in unique).
+        // Without this, register operands with const ptr_space incorrectly appear dynamic.
+        let is_const_space = offset_space
+            .as_ref()
+            .is_some_and(|s| s.index == 0 || s.name == "const");
+        let (offset_space, offset_offset, offset_size, temp_space, temp_offset) = if is_const_space
+        {
+            // Convert constant offset_space to static handle: multiply offset by addressable unit
+            // size. For RAM (word_size=1) this is a no-op; for other spaces it scales correctly.
+            let addr_unit = space
+                .as_ref()
+                .and_then(|s| {
+                    self.compiled
+                        .sla_spaces
+                        .get(&s.index)
+                        .map(|sr| sr.word_size.max(1) as u64)
+                })
+                .unwrap_or(1);
+            (None, offset_offset.wrapping_mul(addr_unit), 0u32, None, 0u64)
+        } else {
+            (offset_space, offset_offset, offset_size, temp_space, temp_offset)
+        };
         let fixable = space.is_some()
             && (offset_space.is_none() || (offset_size != 0 && temp_space.is_some()));
         Ok(RuntimeFixedHandle {
@@ -332,6 +396,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(CompiledSpaceRef {
                     name: name.to_string(),
                     index,
+                    word_size: 0,
+                    addr_size: 0,
                 })
             }
         }
@@ -477,8 +543,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_start,
                 byte_end,
                 shift,
+                reloffset,
             } => {
-                let token_base = self.token_base_for_sla_field();
+                let token_base = self.token_base_for_sla_field(*reloffset);
                 let value = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -514,8 +581,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_end,
                 shift,
                 entries,
+                reloffset,
             } => {
-                let token_base = self.token_base_for_sla_field();
+                let token_base = self.token_base_for_sla_field(*reloffset);
                 let selector = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -561,8 +629,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_end,
                 shift,
                 values,
+                reloffset,
             } => {
-                let token_base = self.token_base_for_sla_field();
+                let token_base = self.token_base_for_sla_field(*reloffset);
                 let selector = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -604,7 +673,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 },
                 fixed_handle_from_resolved_varnode(varnode),
             )),
-            CompiledOperandSpec::SlaPatternExpression { expr } => {
+            CompiledOperandSpec::SlaPatternExpression { expr, reloffset } => {
                 let value = if CompiledTokenCursorPolicy::for_frontend(self.compiled)
                     .uses_shared_token_cursor()
                 {
@@ -618,7 +687,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         shift,
                     } = expr
                     {
-                        let token_base = self.token_base_for_sla_field();
+                        let token_base = self.token_base_for_sla_field(0);
                         let value = read_sla_token_field_at(
                             self.ctx,
                             token_base,
@@ -637,6 +706,31 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     } else {
                         self.eval_pattern_expression(expr)?
                     }
+                } else if let CompiledPatternExpression::TokenField {
+                    big_endian,
+                    sign_bit,
+                    bit_start,
+                    bit_end,
+                    byte_start,
+                    byte_end,
+                    shift,
+                } = expr
+                {
+                    // Non-shared-cursor (e.g. x86-32): apply reloffset so the token field is
+                    // read from `ctx.cursor + reloffset + byte_start`, matching Ghidra's
+                    // `point.getOffset() + bytestart` computation.
+                    let token_base = self.token_base_for_sla_field(*reloffset);
+                    read_sla_token_field_at(
+                        self.ctx,
+                        token_base,
+                        *big_endian,
+                        *sign_bit,
+                        *bit_start,
+                        *bit_end,
+                        *byte_start,
+                        *byte_end,
+                        *shift,
+                    )? as i64
                 } else {
                     self.eval_pattern_expression(expr)?
                 };
@@ -668,9 +762,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     signed: *sign_extend,
                 }))
             }
-            CompiledOperandSpec::SubtableEvaluation { table_name } => {
+            CompiledOperandSpec::SubtableEvaluation {
+                table_name,
+                reloffset,
+                offsetbase,
+            } => {
                 let cursor_start = self.cursor;
-                let sub_state = self.decode_subtable(table_name)?;
+                let sub_state = self.decode_subtable(table_name, Some(*reloffset), Some(*offsetbase))?;
                 if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
                     && (shared_token_cursor_policy_shared_token_subtable(table_name)
                         || shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name))
@@ -735,10 +833,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             .first()
                             .map(|node| node.absolute_offset)
                             .unwrap_or(cursor_start);
+                        if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
+                            let first_node_off = sub_state.construct_nodes.first().map(|n| n.absolute_offset);
+                            eprintln!(
+                                "[rel-fallback-pre] table={table_name} cursor_start={cursor_start} \
+                                 sub_state.construct_nodes.len={} first_node_abs_offset={:?} \
+                                 subtable_cursor_start={subtable_cursor_start}",
+                                sub_state.construct_nodes.len(),
+                                first_node_off
+                            );
+                        }
                         if let Some(binding) = self.fallback_binding_for_no_export_subtable(
                             table_name,
                             cursor_start,
                             subtable_cursor_start,
+                            sub_state.length,
                         )? {
                             return Ok(OperandBinding {
                                 value: binding.value,
@@ -792,9 +901,66 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         table_name: &str,
         cursor_start: usize,
         subtable_cursor_start: usize,
+        sub_state_length: usize,
     ) -> Result<Option<OperandBinding>> {
+        // Architecture-neutral: subtables named rel{N} or pcRelSimm{N} encode a
+        // signed relative displacement of N bits. Apply this fallback universally
+        // regardless of the shared-token-cursor policy — any architecture (not just
+        // x86-64) may define relative-offset subtables that Ghidra does not
+        // materialise into a handle in the compiled SLA.
+        let relative_size = table_name
+            .strip_prefix("pcRelSimm")
+            .or_else(|| table_name.strip_prefix("rel"))
+            .and_then(|suffix| suffix.parse::<u32>().ok())
+            .map(|bits| (bits / 8).max(1));
+        if let Some(size) = relative_size {
+            // The displacement field is always at the END of the instruction.
+            // Derive its start byte from sub_state_length (total matched bytes)
+            // minus the displacement size. This is robust against architectures
+            // where the opcode length is not tracked in the cursor (e.g. 32-bit
+            // x86 where the native decoder owns opcode byte consumption).
+            let disp_start = sub_state_length
+                .saturating_sub(size as usize)
+                .max(subtable_cursor_start);
+            let end_cursor = sub_state_length.max(disp_start + size as usize);
+            let signed = read_sint(self.ctx.bytes, disp_start, size)?;
+            self.cursor = self.cursor.max(end_cursor);
+            let next_ip = self.ctx.address.wrapping_add(end_cursor as u64);
+            let target = next_ip.wrapping_add_signed(signed);
+            if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
+                eprintln!(
+                    "[rel-fallback] table={table_name} sub_state_length={sub_state_length} \
+                     disp_start={disp_start} size={size} signed=0x{signed:x} end_cursor={end_cursor} \
+                     ctx_addr=0x{:x} next_ip=0x{next_ip:x} target=0x{target:x}",
+                    self.ctx.address
+                );
+            }
+            let value = BoundOperand::Relative { target };
+            // Use the architecture's actual RAM address size for the handle,
+            // not the hardcoded 8-byte default (which is wrong for 32-bit).
+            let ram_addr_size = self.compiled.sla_ram_address_size();
+            let mut handle = fixed_handle_for_bound_operand(&value);
+            if ram_addr_size > 0 && ram_addr_size != handle.size {
+                handle.size = ram_addr_size;
+                handle.offset_size = ram_addr_size;
+            }
+            return Ok(Some(OperandBinding::with_fixed(value, handle)));
+        }
+
         if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            return Ok(None);
+            // Non-shared-cursor architecture (e.g. 32-bit x86, ARM): subtables that don't
+            // export a handle (e.g. "check_Reg32_dest") are pure pattern-matching guards.
+            // Ghidra leaves the fixed handle zero for these; return a zero dummy binding so the
+            // parent instruction's P-code template can still be evaluated.
+            let value = BoundOperand::Immediate {
+                value: 0,
+                encoded_size: 0,
+                signed: false,
+            };
+            return Ok(Some(OperandBinding::with_fixed(
+                value.clone(),
+                fixed_handle_for_bound_operand(&value),
+            )));
         }
 
         if shared_token_cursor_policy_zero_width_subtable(table_name) {
@@ -810,24 +976,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             )));
         }
 
-        let relative_size = table_name
-            .strip_prefix("pcRelSimm")
-            .or_else(|| table_name.strip_prefix("rel"))
-            .and_then(|suffix| suffix.parse::<u32>().ok())
-            .map(|bits| (bits / 8).max(1));
-        let Some(size) = relative_size else {
-            return Ok(None);
-        };
-        let signed = read_sint(self.ctx.bytes, subtable_cursor_start, size)?;
-        let end_cursor = subtable_cursor_start + size as usize;
-        self.cursor = self.cursor.max(end_cursor);
-        let next_ip = self.ctx.address.wrapping_add(end_cursor as u64);
-        let target = next_ip.wrapping_add_signed(signed);
-        let value = BoundOperand::Relative { target };
-        Ok(Some(OperandBinding::with_fixed(
-            value.clone(),
-            fixed_handle_for_bound_operand(&value),
-        )))
+        Ok(None)
     }
 
     fn apply_context_change(&mut self, change: &crate::compiler::CompiledContextOp) -> Result<()> {
@@ -896,9 +1045,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn token_base_for_sla_field(&self) -> usize {
+    fn token_base_for_sla_field(&self, reloffset: i32) -> usize {
         if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            return self.ctx.cursor;
+            // Non-shared-cursor (e.g. x86-32): add the operand's reloffset so that the read
+            // position matches Ghidra's `point.getOffset() + bytestart`.
+            // Ghidra: point.getOffset() = ctx.cursor + reloffset (set via setOffset in the
+            // decode loop), and bytestart is token-local (0 for first byte of the token).
+            let base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
+            return base;
         }
         // x86 SLEIGH models opcode, ModRM, and SIB as separate token
         // streams. Fission's compatibility walker keeps SIB subtables rooted
@@ -1048,7 +1202,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn decode_subtable(&self, table_name: &str) -> Result<RuntimeConstructState> {
+    fn decode_subtable(
+        &self,
+        table_name: &str,
+        reloffset: Option<i32>,
+        offsetbase: Option<i32>,
+    ) -> Result<RuntimeConstructState> {
         let mut sub_ctx = (*self.ctx).clone();
         let consumed_instruction_bytes =
             if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
@@ -1081,7 +1240,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && self.selection.trace.root_bucket == "instruction"
         {
             opcode_cursor_from_context(self.ctx)
-        } else if shared_token_cursor_policy_register_subtable(table_name) {
+        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
+            && shared_token_cursor_policy_register_subtable(table_name)
+        {
             self.cursor
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_opcode_token_subtable(table_name)
@@ -1107,6 +1268,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             )
         {
             self.cursor.saturating_add(1)
+        } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
+            .uses_shared_token_cursor()
+            && reloffset.is_some_and(|rel| rel >= 0)
+            && offsetbase.unwrap_or(-1) < 0
+        {
+            // Non-shared-cursor architecture (e.g. 32-bit x86, ARM): position the
+            // sub-walker using the operand's relative offset within the parent constructor.
+            // Mirrors Ghidra's ParserWalker.pushOperand() / OperandSymbol.reloffset logic.
+            if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
+                eprintln!(
+                    "[non-shared-cursor] table={table_name} ctx.cursor={} reloffset={:?} offsetbase={:?} → sub_ctx.cursor={}",
+                    self.ctx.cursor,
+                    reloffset,
+                    offsetbase,
+                    self.ctx.cursor + reloffset.unwrap() as usize,
+                );
+            }
+            self.ctx.cursor + reloffset.unwrap() as usize
         } else if self.selection.constructor.context_changes.is_empty()
             || consumed_instruction_bytes == 0
         {

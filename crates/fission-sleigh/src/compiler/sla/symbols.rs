@@ -49,6 +49,12 @@ pub struct CompiledSlaConstructorTemplate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DecodedOperandSymbol {
     hand_index: usize,
+    /// Byte offset of this operand's token from the start of the parent constructor.
+    /// Corresponds to `ATTRIB_OFF` in Ghidra's SLA format (OperandSymbol.reloffset).
+    reloffset: i32,
+    /// Index of the base operand for the offset calculation, or -1 if relative to
+    /// the constructor's own start. Corresponds to `ATTRIB_BASE` (OperandSymbol.offsetbase).
+    offsetbase: i32,
     subtable_name: Option<String>,
     display_kind: CompiledDisplayOperandKind,
     token_field: Option<DecodedTokenField>,
@@ -106,6 +112,8 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
         CompiledSpaceRef {
             name: "const".to_string(),
             index: 0,
+            word_size: 0,
+            addr_size: 0,
         },
     );
     let mut unique_space_index = u64::MAX;
@@ -118,6 +126,17 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
         let name = space
             .attr_string(sla_format::ATTR_NAME)
             .ok_or_else(|| anyhow!("space missing name"))?;
+        // Ghidra: ATTRIB_WORDSIZE is the addressable unit size (1 for byte-addressed spaces).
+        // ATTRIB_WORDSIZE is only written to the SLA when > 1; default is 1.
+        // ATTRIB_SIZE is the address/pointer size (e.g., 4 for x86-32).
+        let word_size = space
+            .attr_unsigned(sla_format::ATTR_WORDSIZE)
+            .map(|v| v as u32)
+            .unwrap_or(1);
+        let addr_size = space
+            .attr_unsigned(sla_format::ATTR_SIZE)
+            .map(|v| v as u32)
+            .unwrap_or(0);
         if name == "register" {
             register_space_index = index;
         }
@@ -126,6 +145,8 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
             CompiledSpaceRef {
                 name: name.to_string(),
                 index,
+                word_size,
+                addr_size,
             },
         );
     }
@@ -142,6 +163,8 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
             CompiledSpaceRef {
                 name: name.to_string(),
                 index,
+                word_size: 0,
+                addr_size: 0,
             },
         );
     }
@@ -164,6 +187,12 @@ fn decode_operand_symbols(
         let hand_index = operand
             .attr_signed(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("operand_sym missing index"))? as usize;
+        let reloffset = operand
+            .attr_signed(sla_format::ATTR_OFF)
+            .unwrap_or(0) as i32;
+        let offsetbase = operand
+            .attr_signed(sla_format::ATTR_BASE)
+            .unwrap_or(-1) as i32;
         let direct_pattern_expression = operand
             .children
             .iter()
@@ -263,6 +292,8 @@ fn decode_operand_symbols(
             id,
             DecodedOperandSymbol {
                 hand_index,
+                reloffset,
+                offsetbase,
                 subtable_name,
                 display_kind,
                 token_field,
@@ -305,6 +336,8 @@ fn compiled_operand_spec_for_symbol(
     if let Some(table_name) = &symbol.subtable_name {
         return Some(CompiledOperandSpec::SubtableEvaluation {
             table_name: table_name.clone(),
+            reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
         });
     }
     if let Some(varnode) = &symbol.fixed_varnode {
@@ -313,7 +346,10 @@ fn compiled_operand_spec_for_symbol(
         });
     }
     if let Some(expr) = &symbol.pattern_expression {
-        return Some(CompiledOperandSpec::SlaPatternExpression { expr: expr.clone() });
+        return Some(CompiledOperandSpec::SlaPatternExpression {
+            expr: expr.clone(),
+            reloffset: symbol.reloffset,
+        });
     }
     if let (Some(token_field), Some(entries)) = (&symbol.token_field, &symbol.varnode_list) {
         return Some(CompiledOperandSpec::SlaVarnodeList {
@@ -325,6 +361,7 @@ fn compiled_operand_spec_for_symbol(
             byte_end: token_field.byte_end,
             shift: token_field.shift,
             entries: entries.clone(),
+            reloffset: symbol.reloffset,
         });
     }
     if let (Some(token_field), Some(values)) = (&symbol.token_field, &symbol.value_map) {
@@ -337,6 +374,7 @@ fn compiled_operand_spec_for_symbol(
             byte_end: token_field.byte_end,
             shift: token_field.shift,
             values: values.clone(),
+            reloffset: symbol.reloffset,
         });
     }
     symbol
@@ -350,6 +388,7 @@ fn compiled_operand_spec_for_symbol(
             byte_start: field.byte_start,
             byte_end: field.byte_end,
             shift: field.shift,
+            reloffset: symbol.reloffset,
         })
 }
 

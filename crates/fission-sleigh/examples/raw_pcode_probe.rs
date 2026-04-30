@@ -35,6 +35,8 @@ impl SpaceMap {
             CompiledSpaceRef {
                 name: "const".to_string(),
                 index: 0,
+                word_size: 0,
+                addr_size: 0,
             },
         );
         Self { by_id }

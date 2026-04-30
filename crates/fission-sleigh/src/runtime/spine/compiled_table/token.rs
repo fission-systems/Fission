@@ -274,7 +274,7 @@ pub(super) fn constructor_has_shared_token_operand(
         .any(|handle| {
             matches!(
                 &handle.spec,
-                CompiledOperandSpec::SubtableEvaluation { table_name }
+                CompiledOperandSpec::SubtableEvaluation { table_name, .. }
                     if shared_token_cursor_policy_shared_token_subtable(table_name)
             )
         })
@@ -324,12 +324,12 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         | CompiledOperandSpec::SlaValueMap { .. }
         | CompiledOperandSpec::Immediate { .. }
         | CompiledOperandSpec::Relative { .. } => true,
-        CompiledOperandSpec::SubtableEvaluation { table_name }
+        CompiledOperandSpec::SubtableEvaluation { table_name, .. }
             if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() =>
         {
             !shared_token_cursor_policy_zero_width_subtable(table_name)
         }
-        CompiledOperandSpec::SubtableEvaluation { table_name } => {
+        CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
             subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
         }
         _ => false,

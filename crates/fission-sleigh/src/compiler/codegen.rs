@@ -689,7 +689,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     "{{\"kind\": \"token_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift } => {
+            crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift, reloffset: _ } => {
                 format!(
                     "{{\"kind\": \"sla_token_field\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}}}"
                 )
@@ -703,6 +703,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 byte_end,
                 shift,
                 entries,
+                reloffset: _,
             } => {
                 let entries = entries
                     .iter()
@@ -730,6 +731,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 byte_end,
                 shift,
                 values,
+                reloffset: _,
             } => {
                 let values = values
                     .iter()
@@ -754,7 +756,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     "{{\"kind\": \"context_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::SubtableEvaluation { table_name } => {
+            crate::compiler::CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
                 format!("{{\"kind\": \"subtable_evaluation\", \"table_name\": {}}}", json_string(table_name))
             }
             crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
@@ -771,7 +773,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
                 })
             ),
-            crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr } => {
+            crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr, reloffset: _ } => {
                 format!(
                     "{{\"kind\": \"sla_pattern_expression\", \"expr\": {}}}",
                     json_string(&format!("{expr:?}"))
