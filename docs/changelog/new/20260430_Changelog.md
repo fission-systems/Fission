@@ -248,6 +248,72 @@ This confirms the current sqlite3 smoke wall-clock gap is not in checked
 remains candidate acceleration only, and final raw P-code success still requires
 common checked `.sla ConstructTpl` execution.
 
+## Raw P-code EverPlanet x86 Smoke
+
+Ran a temporary raw P-code smoke against:
+
+```text
+benchmark/binary/x86/window/commercial_binary/binary/EverPlanet_KR_v1842_U_DEVM.exe
+```
+
+Loader classification:
+
+```text
+format: PE
+arch: x86
+bits: 32
+entry: 0xc2cc03
+functions: 1
+imports: 336
+exports: 0
+sections: 6
+```
+
+The first entry-window run used one row with `count=32`:
+
+```text
+report: /tmp/everplanet_raw_pcode_entry_smoke/aggregate_raw_pcode_parity_report.json
+row_count: 1
+bucket_totals: unsupported_template=1, missing_fission_instruction=31
+first_error: UnsupportedPcodeTemplate: x86: operand_template_resolution_failed: subtable rel32 did not export a handle
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+```
+
+To avoid treating the first fail-closed instruction as 31 cascade misses, the
+same Ghidra-disassembled entry window was split into 32 one-instruction rows:
+
+```text
+report: /tmp/everplanet_raw_pcode_entry_split/aggregate_raw_pcode_parity_report.json
+row_count: 32
+bucket_totals:
+  unsupported_template: 15
+  fission_decode_error: 14
+  input_varnode_mismatch: 2
+  pcode_opcode_mismatch: 1
+  pcode_op_count_mismatch: 1
+  length_mismatch: 1
+average_similarity_score: 0.07565398391812866
+average_parity_ratio: 0.0
+compat_emitter_used: 0
+fake_placeholder_op: 0
+invalid_pcode_shape: 0
+template_source_totals: sla_construct_tpl=3
+owner_hint_totals:
+  unsupported_template: 15
+  decode_length: 15
+  handle_selector_resolution: 1
+  varnode_identity: 1
+  template_opcode_sequence: 1
+```
+
+This is an x86 32-bit SLEIGH runtime coverage gap, not a loader failure and not
+an approximate P-code regression. The direct next owner is `.sla` operand export
+handle resolution for 32-bit subtables such as `rel32`, `rel8`,
+`check_Reg32_dest`, `check_rm32_dest`, and `xrelease`, plus 32-bit stack
+`VarnodeTpl` size handling.
+
 ## Commit Scope Notes
 
 - Benchmark output artifacts and generated Ghidra DB state are not commit material.
