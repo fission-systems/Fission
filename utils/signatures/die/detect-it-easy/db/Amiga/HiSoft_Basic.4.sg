@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+// https://en.wikipedia.org/wiki/HiSoft_Systems
+meta("compiler", "HiSoft BASIC");
+
+function detect() {
+    if (Amiga.compareEP("267c........6000$$$$7a..383c....263c........3e3c....243c")) {
+        sOptions = "1988-94";
+        bDetected = true;
+    } else if (Amiga.compareEP("267c........6000$$$$7a..383c....363c....3e3c....343c")) {
+        bDetected = true;
+        sOptions = "1988";
+    }
+
+    sLang = "BASIC";
+
+    return result();
+}

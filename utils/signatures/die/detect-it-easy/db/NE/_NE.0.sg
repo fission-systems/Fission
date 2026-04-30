@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("operation system", "Windows");
+
+function detect() {
+    if (NE.isVerbose()) {
+        sName = NE.getOperationSystemName();
+        sVersion = NE.getOperationSystemVersion();
+        sOptions = NE.getOperationSystemOptions();
+
+        bDetected = true;
+    }
+
+    return result();
+}

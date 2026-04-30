@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Wintermute Engine
+
+// https://wiki.scummvm.org/index.php/Wintermute
+meta("archive", "DCP");
+
+function detect() {
+    if (Binary.compare("DE AD C0 DE 4A 55 4E 4B")) {
+        var copyrightYear = Binary.getString(58, 5).trim();
+
+        if (/^[12]\d{3}$/.test(copyrightYear)) {
+            sVersion = copyrightYear;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

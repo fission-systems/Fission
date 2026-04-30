@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://file-recovery.com/ogg-signature-format.htm
+meta("audio", "Vorbis");
+
+function detect() {
+    if (Binary.compare("'OggS'00020000000000000000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://ctan.org/tex-archive/obsolete/graphics/metapost/base/texmf/fonts/tfm/
+meta("font", "TFM");
+
+function detect() {
+    if (Binary.compare("....0012000000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

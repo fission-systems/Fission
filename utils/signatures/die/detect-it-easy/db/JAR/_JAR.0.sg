@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("virtual machine", "JVM");
+
+function detect() {
+    if (JAR.isVerbose()) {
+        sName = JAR.getOperationSystemName();
+        sVersion = JAR.getOperationSystemVersion();
+        sOptions = JAR.getOperationSystemOptions();
+
+        bDetected = true;
+    }
+
+    return result();
+}

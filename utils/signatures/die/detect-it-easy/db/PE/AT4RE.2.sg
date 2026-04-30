@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+// https://bbs.kanxue.com/thread-67920-1.htm
+meta("protector", "AT4RE");
+
+function detect() {
+    if (PE.compareEP("0f3133c903c8eb$$0f312bc13d........0f83........e9$$$$$$$$b8........33f633db8a1c0680eb")) {
+        sVersion = "1.0";
+        bDetected = true;
+    }
+
+    return result();
+}

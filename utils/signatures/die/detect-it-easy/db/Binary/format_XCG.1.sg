@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Battlecry 3
+
+// https://en.wikipedia.org/wiki/Warlords_Battlecry_III
+meta("format", "XCG (Graphics)");
+
+function detect() {
+    if (Binary.compare("'xcg File'")) {
+        var versionNumber = Binary.getString(9, 4).trim();
+
+        if (/^[0-9/.]{4}$/.test(versionNumber)) {
+            sVersion = versionNumber;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

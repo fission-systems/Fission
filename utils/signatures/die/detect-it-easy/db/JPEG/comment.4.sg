@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: Jason Hood <jadoxa@yahoo.com.au>
+
+meta("image", "comment");
+
+function detect() {
+    sOptions = Jpeg.getComment();
+
+    if (sOptions) {
+        bDetected = true;
+    }
+
+    return result();
+}

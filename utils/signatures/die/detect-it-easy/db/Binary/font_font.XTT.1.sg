@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://file.org/extension/xtt#xbox360systemfontfile
+meta("font", "Xbox 360 System Font (.XTT)");
+
+function detect() {
+    if (Binary.compare("78 74 74 66")) {
+        var font = Binary.getString(1, 3).trim();
+
+        if (/^[a-z]{3}$/.test(font)) {
+            if (X.isVerbose()) sOptions = font;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+
+meta("archive", "7-Zip");
+
+function detect() {
+    const overlayOffset = PE.getOverlayOffset();
+
+    if (PE.compareOverlay("';!@Install@!UTF-8!'") || PE.compareOverlay("efbbbf';!@Install@!UTF-8!'")) {
+        if (PE.isSignaturePresent(overlayOffset, 0x2000, "'7z'BCAF271C")) {
+            sVersion = "SFX";
+            bDetected = true;
+        }
+    } else if (PE.compare("'7z'BCAF271C", overlayOffset)) {
+        sVersion = PE.readByte(overlayOffset + 6) + "." + PE.readByte(overlayOffset + 7);
+        bDetected = true;
+    }
+
+    return result();
+}

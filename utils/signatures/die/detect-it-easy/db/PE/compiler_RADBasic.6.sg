@@ -1,0 +1,27 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://www.radbasic.dev/
+meta("compiler", "RAD Basic");
+
+function detect() {
+    if (PE.compareEP(PE.is64() ? "48 83 EC" : "E8") && PE.getImportFunctionName(0, 0) === "CloseHandle") {
+        const rdataSection = PE.section[".rdata"];
+
+        if (rdataSection && PE.isSignatureInSectionPresent(rdataSection.Number, "'RADBasic'")) {
+            bDetected = true;
+        }
+    }
+
+    if (!bDetected && PE.isResourceNamePresent("RADBASICAPPICON")) {
+        bDetected = true;
+    }
+
+    sLang = "VB";
+
+    return result();
+}

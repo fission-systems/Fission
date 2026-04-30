@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/DosX-dev/obfus.h
+meta("protection", "obfus.h");
+
+function detect() {
+    if ((PE.section[".obfh"] || PE.isExportFunctionPresent("WhatSoundDoesACowMake")) && PE.isFunctionPresent("vsprintf"))
+        bDetected = true;
+
+    sLang = "C";
+
+    return result();
+}

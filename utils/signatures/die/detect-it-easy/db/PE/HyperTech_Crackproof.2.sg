@@ -1,0 +1,11 @@
+// Detect It Easy: detection rule file
+
+meta("protector", "HyperTech Crackproof");
+
+function detect() {
+    if (PE.getNumberOfImports() > 0 && PE.getImportLibraryName(0) === "KeRnEl32.dLl") {
+        bDetected = true;
+    }
+
+    return result();
+}

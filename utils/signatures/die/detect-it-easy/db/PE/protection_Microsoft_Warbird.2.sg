@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protection", "Microsoft Warbird");
+
+function detect() {
+    bDetected = PE.section["?g_Encry"] && PE.isFunctionPresent("NtQuerySystemInformation");
+
+    if (bDetected && PE.findSignature(0, PE.getSize() - PE.getOverlaySize(), "'?g_EncryptedSegmentSystemCall_"))
+        sOptions = "VM";
+
+    return result();
+}

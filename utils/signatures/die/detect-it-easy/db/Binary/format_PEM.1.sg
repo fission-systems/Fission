@@ -1,0 +1,35 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail
+meta("format", "Privacy-Enhanced Mail (.PEM)");
+
+function detect() {
+    if (Binary.compare("2d2d2d2d2d424547494e20'CERTIFICATE'2d2d2d2d2d")) {
+        sVersion = "Certificate";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'PRIVATE KEY'2d2d2d2d2d")) {
+        sVersion = "Private Key";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'RSA PRIVATE KEY'2d2d2d2d2d")) {
+        sVersion = "RSA Private Key";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'ENCRYPTED PRIVATE KEY'2d2d2d2d2d")) {
+        sVersion = "Encrypted Private Key";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'PUBLIC KEY'2d2d2d2d2d")) {
+        sVersion = "Public Key";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'CERTIFICATE REQUEST'2d2d2d2d2d")) {
+        sVersion = "Certificate Signing Request (CSR)";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'PKCS7'2d2d2d2d2d")) {
+        sVersion = "PKCS7/CMS Message";
+        bDetected = true;
+    } else if (Binary.compare("2d2d2d2d2d424547494e20'X509 CRL'2d2d2d2d2d")) {
+        sVersion = "Certificate Revocation List (CRL)";
+        bDetected = true;
+    }
+
+    return result();
+}

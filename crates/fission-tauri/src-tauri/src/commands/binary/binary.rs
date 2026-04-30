@@ -5,9 +5,10 @@ use crate::error::{CmdError, CmdResult};
 use crate::services::cross_image::{apply_propagated_renames, collect_folder_propagated_renames};
 use crate::state::AppState;
 use fission_core::format_addr;
-use fission_loader::loader::LoadedBinary;
+use fission_loader::detector::Detection;
 use fission_loader::loader::function_view::{canonical_functions_sorted, canonical_view_counts};
-use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
+use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,6 +130,11 @@ pub(super) fn binary_to_info(binary: &fission_loader::loader::LoadedBinary) -> B
         .as_ref()
         .map(|arch| arch.bitness)
         .unwrap_or(if binary.is_64bit { 64 } else { 32 });
+    let detections = fission_loader::detect(binary)
+        .detections
+        .iter()
+        .map(detection_to_info)
+        .collect();
     BinaryInfo {
         name: std::path::Path::new(&binary.path)
             .file_name()
@@ -144,6 +150,17 @@ pub(super) fn binary_to_info(binary: &fission_loader::loader::LoadedBinary) -> B
         import_count: counts.imports,
         export_count: counts.exports,
         image_base: format_addr(binary.image_base),
+        detections,
+    }
+}
+
+fn detection_to_info(detection: &Detection) -> DetectionInfo {
+    DetectionInfo {
+        detection_type: detection.detection_type.to_string(),
+        name: detection.name.clone(),
+        version: detection.version.clone(),
+        confidence: detection.confidence.to_string(),
+        details: detection.details.clone(),
     }
 }
 

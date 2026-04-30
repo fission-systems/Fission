@@ -1,0 +1,12 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("sfx", "LHASFX");
+
+function detect() {
+    if (Amiga.compareEP("6000$$$$2a484230....49fa....2854d9ccd9cc294f....2c78....43fa")) {
+        bDetected = true;
+    }
+
+    return result();
+}

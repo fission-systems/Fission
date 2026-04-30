@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+
+meta("protector", "FISH .NET");
+
+function detect() {
+    if (PE.isNet()) {
+        if (PE.isSignatureInSectionPresent(0, "0800'FISH_NET'")) {
+            sVersion = "1.X";
+            bDetected = true;
+        } else if (PE.isSignatureInSectionPresent(0, "'FISH.NET'")) {
+            sVersion = "1.X";
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

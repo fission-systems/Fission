@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Dunkle Schatten
+
+// https://wiki.multimedia.cx/index.php/Engines/PSM
+meta("format", "PSM2CFG");
+
+function detect() {
+    if (Binary.compare("'PSM2CFG'")) {
+        var versionNumber = Binary.getString(17, 4).trim();
+
+        if (/^[0-9\.]{4}$/.test(versionNumber)) {
+            sVersion = versionNumber;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

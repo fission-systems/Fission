@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: Levis <levintaeyeon@live.com>
+
+meta("protector", "Yummy Game SoftwareShield");
+
+function detect() {
+    if (PE.compareEP("31C0E9B9FFFFFFC3")) {
+        sVersion = "5.X";
+        bDetected = true;
+    }
+
+    return result();
+}

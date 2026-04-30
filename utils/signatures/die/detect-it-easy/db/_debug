@@ -1,0 +1,28 @@
+// Detect It Easy: DiE-JS framework file
+// Don't change anything unless you're sure about what you're doing
+
+// Debugging functions to help with development
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// Just a debug function
+function _debug(messageText) {
+    messageText = "-> " + messageText;
+    _log("Debug: " + messageText);
+    _setResult("dev-output", messageText, "", "");
+}
+
+// Handle exceptions and log them
+function _error(exceptionText) {
+    var exceptionText = "Error: " + exceptionText;
+
+    if (sName) {
+        exceptionText += ", last define() is '" + sName + "' with type '" + sType + "'";
+    }
+
+    _log("Exception: " + exceptionText);
+    throw exceptionText;
+}

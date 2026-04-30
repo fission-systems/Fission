@@ -1,0 +1,10 @@
+// Detect It Easy: detection rule file
+// Author: Jason Hood <jadoxa@yahoo.com.au>
+
+includeScript("arj");
+
+function detect() {
+    detect_ARJ(0);
+
+    return result();
+}

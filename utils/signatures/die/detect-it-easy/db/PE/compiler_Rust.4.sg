@@ -1,0 +1,35 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("compiler", "Rust");
+
+function detect() {
+    /* if (!PE.is64()) {
+         if (PE.compareEP("e8$$$$$$$$8b0d........5657bf........be........3bcf74..85ce75..e8")) {
+             sVersion = "i686-pc-windows-msvc";
+             bDetected = true;
+         }
+     } else if (PE.compareEP("4883ec..e8$$$$$$$$48895c24..55488bec4883ec..488b05........48bb................483bc3")) {
+           sVersion = "x86_64-pc-windows-msvc";
+           bDetected = true;
+     } else if (PE.compareEP("48895c24..48897424..574883ec..498bf88bda488bf183fa..75..e8$$$$$$$$48895c24..55488bec4883ec..488b05........48bb................483bc3")) {
+           sVersion = "x86_64-pc-windows-msvc";
+           bDetected = true;
+     } */
+
+    var rdataSection = PE.section[".rdata"];
+
+    if (PE.isTLSPresent() && rdataSection && PE.section["_RDATA"] &&
+        PE.findSignature(rdataSection.FileOffset, rdataSection.FileSize, "4C6F63616C5C527573744261636B74726163654D75746578") != -1 &&
+        PE.findSignature(rdataSection.FileOffset, rdataSection.FileSize, "'/rust'") != -1) {
+        bDetected = true;
+    }
+
+    sLang = "Rust";
+
+    return result();
+}

@@ -36,6 +36,7 @@ export default function StatusBar({
                         <span className="status-bar__item">Imp {binaryInfo.import_count}</span>
                         <span className="status-bar__item">Exp {binaryInfo.export_count}</span>
                         <span className="status-bar__item">§ {binaryInfo.section_count}</span>
+                        <span className="status-bar__item">Det {binaryInfo.detections.length}</span>
                     </>
                 ) : (
                     <span className="status-bar__item status-bar__item--muted">No binary loaded</span>

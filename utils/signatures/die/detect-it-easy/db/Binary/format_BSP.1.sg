@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://developer.valvesoftware.com/wiki/BSP_(Source)
+meta("format", "BSP");
+
+function detect() {
+    if (Binary.compare("'VBSP'15000000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://flatpak.org/
+meta("archive", "Flatpak");
+
+function detect() {
+    if (Binary.compare("66 6C 61 74 70 61 6B")) {
+        var versionNumber = Binary.getString(24, 33).trim();
+
+        if (/^[a-zA-Z0-9\/._-]{33}/.test(versionNumber)) {
+            if (X.isVerbose()) sVersion = versionNumber;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

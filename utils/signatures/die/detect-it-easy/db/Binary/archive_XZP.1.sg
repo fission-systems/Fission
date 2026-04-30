@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://digiex.net/threads/xzp-tool-v2-0-browse-edit-xbox-360-zxp-files.15990/
+meta("archive", "XBox Zip File (.XZP)");
+
+function detect() {
+    if (Binary.compare("'BDES'00000001")) {
+        bDetected = true;
+    }
+
+    return result();
+}

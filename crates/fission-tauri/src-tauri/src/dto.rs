@@ -20,6 +20,17 @@ pub struct BinaryInfo {
     pub import_count: usize,
     pub export_count: usize,
     pub image_base: String,
+    pub detections: Vec<DetectionInfo>,
+}
+
+/// Static signature detections associated with the loaded binary.
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectionInfo {
+    pub detection_type: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub confidence: String,
+    pub details: Option<String>,
 }
 
 /// Function information for the function list.

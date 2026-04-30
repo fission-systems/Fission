@@ -1,0 +1,25 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/ZermangoLove/OneVM-Source-Code
+meta("protector", "OneVM");
+
+function detect() {
+    if (PE.isNet() &&
+        PE.isNetObjectPresent("Koi") &&
+        PE.isNetObjectPresent("OneVM.Runtime") &&
+        PE.isSignatureInSectionPresent(0, "72 .. .. .. .. 73 .. .. .. .. 7A") && // throw
+        PE.isSignatureInSectionPresent(0, "%% 00 %% %% %% %% %% %% %% %% 00 %%")) {
+        bDetected = true;
+
+        if (PE.isNetUStringPresent("OneVM V2 BETA")) {
+            sVersion = "2.0, beta";
+        }
+    }
+
+    return result();
+}

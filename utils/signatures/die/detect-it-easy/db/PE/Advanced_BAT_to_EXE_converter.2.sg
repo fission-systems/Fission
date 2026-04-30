@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+// Author: A.S.L. <asl@onet.eu> 2018
+
+// https://www.battoexeconverter.com/
+meta("packer", "Advanced BAT to EXE Converter");
+
+function detect() {
+    if (PE.compareEP("558BEC6AFF68") && PE.compareOverlay("..02020202363A38393a")) {
+        sVersion = "2.X-4.X";
+        bDetected = true;
+    }
+
+    sLang = "Batch";
+
+    return result();
+}

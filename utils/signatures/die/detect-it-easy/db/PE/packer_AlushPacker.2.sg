@@ -1,0 +1,35 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/Alon-Alush/AlushPacker
+meta("packer", "AlushPacker");
+
+function detect() {
+    if (PE.getNumberOfImports() > 2 &&
+        PE.isRichSignaturePresent() &&
+        PE.isLibraryPresentExp(/vcruntime140/i) && (
+            PE.getImportFunctionName(0, 0) === "VirtualProtect" &&
+            PE.getImportFunctionName(0, 1) === "GetCurrentProcess" &&
+            PE.getImportFunctionName(0, 2) === "GetModuleHandleA" &&
+            PE.getImportFunctionName(0, 3) === "MultiByteToWideChar" &&
+            PE.getImportFunctionName(0, 4) === "FlushInstructionCache"
+        )) {
+        var packedLatestSection = PE.section[".packed"];
+
+        if (!packedLatestSection) {
+            packedLatestSection = PE.section[PE.getNumberOfSections() - 1];
+            sOptions = "modified";
+        }
+
+        if (PE.compare("00 ** ?? 00", packedLatestSection.FileOffset)) {
+            bDetected = true;
+        }
+
+    }
+
+    return result();
+}

@@ -1,0 +1,23 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("library");
+
+function detect() {
+    var nSize = PE.isOverlayPresent() ? PE.getOverlayOffset() : PE.getSize();
+
+    if (nSize > 50000000)
+        nSize = 50000000;
+
+    var nOffset = PE.findSignature(0, nSize, "'@(#) F'");
+    if (nOffset != -1) {
+        sName = PE.getString(nOffset, 200).match(/\w\S*/i);
+        sVersion = PE.getString(nOffset, 200).match(/\d\S*/i);
+
+        if (sVersion != null) {
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

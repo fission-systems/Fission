@@ -1,0 +1,12 @@
+// Detect It Easy: detection rule file
+// Author: Vito <@ScalletaZ>
+
+meta("protector", "Virbox");
+
+function detect() {
+    if (PE.compare("'SENS'", 40)) {
+        bDetected = true;
+    }
+
+    return result();
+}

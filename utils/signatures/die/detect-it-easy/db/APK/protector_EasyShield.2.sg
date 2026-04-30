@@ -1,0 +1,21 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protector", "NetEase EasyShield");
+
+function detect() {
+    bDetected =
+        APK.isArchiveRecordPresent("assets/nedata.db") ||
+        APK.isArchiveRecordPresent("assets/nedig.properties") ||
+        APK.isArchiveRecordPresent("lib/arm/libnesec.so") ||
+        APK.isArchiveRecordPresent("lib/arm/libnesec-x86.so") ||
+        APK.isArchiveRecordPresent("lib/arm/libnshelper.so") ||
+        APK.isArchiveRecordPresent("com/netease/nis/wrapper") ||
+        APK.isArchiveRecordPresent("com/netease/nis/wrapper/MyApplication");
+
+    return result();
+}

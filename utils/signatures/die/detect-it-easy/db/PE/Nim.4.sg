@@ -1,0 +1,20 @@
+// Detect It Easy: detection rule file
+
+meta("compiler", "Nim");
+
+function detect() {
+    var rdataSection = PE.section[".rdata"];
+
+    if (!PE.isRichSignaturePresent() && rdataSection && PE.isLibraryPresentExp(/^msvcrt/i)) {
+        var nOffset = rdataSection.FileOffset,
+            nSize = rdataSection.FileSize;
+
+        if (PE.findString(nOffset, nSize, "io.nim") !== -1 || PE.findString(nOffset, nSize, "fatal.nim") !== -1) {
+            bDetected = true;
+        }
+    }
+
+    sLang = "Nim";
+
+    return result();
+}

@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+// Author: Jason Hood <jadoxa@yahoo.com.au>
+
+meta("script");
+
+includeScript("shell-script");
+
+function detect() {
+    if (sInterpreter) {
+        // Capitalize the first letter, lowercase the rest.
+        sName = sInterpreter.substr(0, 1).toUpperCase() + sInterpreter.substr(1).toLowerCase();
+        bDetected = true;
+    }
+
+    return result();
+}

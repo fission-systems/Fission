@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("library", "FOXPRO");
+
+function detect() {
+    for (var i = 0; i <= PE.nLastSection; i++) {
+        var nOffset = PE.findString(PE.section[i].FileOffset, 512, "VisualFoxProRuntime.");
+        if (nOffset != -1) {
+            sVersion = PE.getString(nOffset + 20) + ".0";
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

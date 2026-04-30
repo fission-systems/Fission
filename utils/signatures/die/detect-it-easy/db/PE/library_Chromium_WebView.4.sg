@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("library", "Chromium WebView");
+
+function detect() {
+    if (PE.isLibraryPresent("chrome_elf.dll") || PE.isSectionNamePresent("CPADinfo")) {
+        bDetected = true;
+    }
+
+    return result();
+}

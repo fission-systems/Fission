@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protector", "PangXie");
+
+function detect() {
+    bDetected =
+        APK.isArchiveRecordPresent("lib/armeabi-v7a/libnsecure.so") ||
+        APK.isArchiveRecordPresent("lib/armeabi/libnsecure.so");
+
+    return result();
+}

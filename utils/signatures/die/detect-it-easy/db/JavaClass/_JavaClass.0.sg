@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("format", "JavaClass");
+
+function detect() {
+    sName = JavaClass.getFileFormatName();
+    sVersion = JavaClass.getFileFormatVersion();
+    sOptions = JavaClass.getFileFormatOptions();
+
+    bDetected = true;
+
+    return result();
+}

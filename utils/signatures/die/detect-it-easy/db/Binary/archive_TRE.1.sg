@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://modthegalaxy.com/index.php?threads/tre-explorer.11/
+meta("archive", "TRE");
+
+function detect() {
+    if (Binary.compare("'EERT5000'....0000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

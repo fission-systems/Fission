@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protector", "ModGuard");
+
+function detect() {
+    if (DEX.isDexStringPresent("ModGuard - Protect Your Piracy v1.2 by ill420smoker")) {
+        sVersion = "v1.2";
+    } else if (DEX.isDexStringPresent("ModGuard - Protect Your Piracy v1.3 by ill420smoker")) {
+        sVersion = "v1.3";
+    }
+
+    return result();
+}

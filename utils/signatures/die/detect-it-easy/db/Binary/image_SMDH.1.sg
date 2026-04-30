@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://www.3dbrew.org/wiki/SMDH
+meta("image", "SMDH");
+
+function detect() {
+    if (Binary.compare("'SMDH'00000000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

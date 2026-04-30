@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("compiler", "gdc");
+
+function detect() {
+    if (ELF.isLibraryPresent("libgphobos.so.2")) {
+        bDetected = true;
+    }
+
+    sLang = "C/C++";
+
+    return result();
+}

@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("compiler", "Borland C++");
+
+function detect() {
+    if (LX.compareEP("8b4424..a3........5868........50e8........e9$$$$$$$$558bec83ec..535756e8........68")) {
+        sVersion = "1992";
+    } else if (LX.compareEP("8b4424..a3........5868........50e9$$$$$$$$558bec83ec..53575668........ff35")) {
+        sVersion = "1992";
+    }
+
+    bDetected = bDetected || Boolean(sVersion) || Boolean(sOptions);
+
+    sLang = "C/C++";
+
+    return result();
+}

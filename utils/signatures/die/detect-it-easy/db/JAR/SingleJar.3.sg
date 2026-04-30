@@ -1,0 +1,11 @@
+// Detect It Easy: detection rule file
+
+meta("tool", "SingleJar");
+
+function detect() {
+    if (JAR.getManifestRecord("Created-By") == "singlejar") {
+        bDetected = true;
+    }
+
+    return result();
+}

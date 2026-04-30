@@ -13,6 +13,15 @@ export interface BinaryInfo {
     import_count: number;
     export_count: number;
     image_base: string;
+    detections: DetectionInfo[];
+}
+
+export interface DetectionInfo {
+    detection_type: string;
+    name: string;
+    version: string | null;
+    confidence: string;
+    details: string | null;
 }
 
 export type FunctionCategory = "import" | "export" | "internal" | "thunk" | "external" | "debug";

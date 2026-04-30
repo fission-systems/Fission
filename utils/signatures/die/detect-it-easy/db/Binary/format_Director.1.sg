@@ -1,0 +1,28 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// Director File Format Info:
+// XFIR = 58464952 (Big endian)
+// RIFX = 52494658 (Little endian)
+// Platform type:
+// BE = Mac based Director game
+// LE = Windows based Director game
+
+// https://github.com/rvanlaar/director-extrator/blob/master/extract.py
+// https://github.com/einstein95/py_scripts/blob/main/shock.py
+// https://wiki.scummvm.org/index.php?title=Director
+meta("format", "Director (.DXR/.DIR/.DCR/.DRX/.CXT/.CST/.CCT)");
+
+function detect() {
+    if (Binary.compare("5249465800")) {
+        sOptions = Binary.getString(0x00000008, 8);
+        sVersion = "Win";
+        bDetected = true;
+    } else if (Binary.compare("58464952......00")) {
+        sOptions = Binary.getString(0x00000008, 8);
+        sVersion = "Mac";
+        bDetected = true;
+    }
+
+    return result();
+}

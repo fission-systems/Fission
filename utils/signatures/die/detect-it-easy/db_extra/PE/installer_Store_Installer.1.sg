@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+
+meta("installer", "Store Installer");
+
+function detect() {
+    if (PE.isNET()) {
+        if (PE.getVersionStringInfo("InternalName") == "StoreInstaller.exe") {
+            sVersion = PE.getVersionStringInfo("FileVersion");
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

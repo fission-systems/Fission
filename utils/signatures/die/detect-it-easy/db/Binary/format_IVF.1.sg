@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://wiki.multimedia.cx/index.php/Duck_IVF
+meta("format", "Duck IVF");
+
+function detect() {
+    if (Binary.compare("'DKIF'00002000")) {
+        var codecInfo = Binary.getString(8, 4).trim();
+
+        if (/^[A-Z0-9]{4}$/.test(codecInfo)) {
+            if (X.isVerbose()) sOptions = "Codec: " + codecInfo;
+            bDetected = true;
+        }
+    }
+    return result();
+}

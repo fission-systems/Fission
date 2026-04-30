@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+// Author: A.S.L <asl@onet.eu>
+
+meta("installer", "FDM Installer");
+
+function detect() {
+    if (PE.compareOverlay("'###FDMDATA###'")) {
+        bDetected = true;
+
+        if (PE.compareEP("558BEC6AFF6820714000682C364000")) {
+            sVersion = "1.0";
+        }
+    }
+
+    return result();
+}

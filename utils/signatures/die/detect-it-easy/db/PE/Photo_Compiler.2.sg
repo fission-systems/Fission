@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: A.S.L. <asl@onet.eu> 2019.10.20
+
+meta("protector", "Photo Compiler");
+
+function detect() {
+    if (PE.compareEP("558bEC83C4F0B8") && PE.compareOverlay("'PK'")) {
+        if (PE.isSignatureInSectionPresent(0, "'PhotoCompiler.Runtime'")) {
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

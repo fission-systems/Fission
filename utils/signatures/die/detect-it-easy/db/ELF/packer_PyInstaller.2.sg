@@ -1,0 +1,26 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("packer", "PyInstaller"); // python = 💩
+
+function detect() {
+
+    // they insert pkgs into the section named "pydata"
+    const pydata = ELF.getSectionNumber("pydata")
+
+    // we can find the magic number in the section
+    if (pydata != -1 && ELF.findSignature(
+            ELF.getSectionFileOffset(pydata),
+            ELF.getSectionFileSize(pydata),
+            "4d45490c0b0a0b0e"
+        ) != -1)
+        bDetected = true;
+
+    sLang = "Python";
+
+    return result();
+}

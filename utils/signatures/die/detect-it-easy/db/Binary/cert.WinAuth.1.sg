@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("Certificate", "WinAuth");
+
+function detect() {
+    if (Binary.compare("........00020200")) {
+        sVersion = "2.0";
+        sOptions = "PKCS #7";
+        bDetected = true;
+    }
+
+    return result();
+}

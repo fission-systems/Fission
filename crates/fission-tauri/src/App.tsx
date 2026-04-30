@@ -23,6 +23,7 @@ import GotoDialog from "./panels/dialogs/GotoDialog";
 import RenameDialog from "./panels/dialogs/RenameDialog";
 import CommentDialog from "./panels/dialogs/CommentDialog";
 import FunctionsList from "./panels/sidebar/FunctionsList";
+import DetectionsPanel from "./panels/sidebar/DetectionsPanel";
 import DecompileView from "./panels/editor/DecompileView";
 import AssemblyView from "./panels/editor/AssemblyView";
 import HexView from "./panels/editor/HexView";
@@ -512,6 +513,7 @@ function App() {
                                 onCopyAddress={(addr) => log(`Copied: ${addr}`)}
                                 onOpenHex={handleOpenHexTab}
                             />
+                            <DetectionsPanel detections={binaryInfo?.detections ?? []} />
                             <SectionsPanel sections={sections} />
                         </>
                     )}

@@ -1,0 +1,166 @@
+// Detect It Easy: DiE-JS framework file
+// Don't change anything unless you're sure about what you're doing
+
+/**
+ * Attaches new strings to `this`, separating everything with a comma and no space.
+ * @param {String...} the open list of strings to append.
+ */
+String.prototype.append = function () {
+    var str = String(this);
+    var separator = ", ";
+
+    if (arguments.length > 0) {
+        if (str.length > 0) {
+            str += separator;
+        }
+        str += Array.prototype.join.call(arguments, separator);
+    }
+
+    return str;
+}
+
+
+/**
+ * Append a string with a custom separator.
+ * @param {String} stringToAppend - String to append.
+ * @param {String} [separator=", "] - Separator string.
+ * @returns {String} The new string.
+ * @global
+ * @example
+ * sOptions = sOptions.appendS("debug","::");
+ */
+String.prototype.appendS = function (stringToAppend, separator) {
+    var str = String(this);
+    var sep = (typeof separator === "string") ? separator : ", ";
+
+    if (stringToAppend) {
+        if (str.length > 0) {
+            str += sep;
+        }
+        str += stringToAppend;
+    }
+
+    return str;
+}
+
+
+String.prototype.addIfNone = function (substring) {
+    var str = String(this);
+
+    if (substring && str.indexOf(substring) < 0) {
+        str += substring;
+    }
+
+    return str;
+}
+
+
+// Some ECMA6 functions that should be removed if DIE transitions to it
+if(!String.prototype.startsWith) String.prototype.startsWith = function (s, min) {
+    // the default case-sensitive version of startsWith
+    var m = (typeof min == "number") ? Math.min(s.length, min) : 0;
+    if (s.length > this.length - m) return false; else return this.slice(m, s.length) == s;
+}
+
+String.prototype.startsWithCI = function (s, min) {
+    // case-insensitive version of startsWith
+    return this.toLowerCase().startsWith(s.toLowerCase(), min);
+}
+
+if(!String.prototype.endsWith) String.prototype.endsWith = function (s, max) {
+    // the default case-sensitive version of endsWith
+    var m = (typeof max == "number") ? Math.min(this.length, max) : this.length;
+    if (s.length > m) return false; else return this.slice(m - s.length, m) == s;
+}
+
+String.prototype.endsWithCI = function (s, max) {
+    // the case-insensitive version of endsWith
+    return this.toLowerCase().endsWith(s.toLowerCase(), max);
+}
+
+if (!String.prototype.repeat) String.prototype.repeat = function (num) {
+    if (typeof num !== "number") return this;
+    var s = this; for (var i = 1; i < num; i++) s += this; return s;
+}
+
+/**
+ * Pad the start of a line with spaces or the character given.
+ * @param {String or Number} The width desired.
+ * @param {Number} [nPad=" "] The padding string. Loops.
+ * @returns {String} The new string.
+ * @global
+ * @example
+ * var a = 12; ...; if("aba12" === a.padStart(5,"ab")) ...
+ */
+if (!String.prototype.padStart) String.prototype.padStart = function (targetLength, padString) {
+    var s = this.valueOf();
+
+    targetLength >>= 0; // truncate if number or convert non-number to 0;
+    padString = String(padString || ' ');
+
+    if (s.length >= targetLength) {
+        return String(s);
+    }
+
+    targetLength -= s.length;
+    if (targetLength > padString.length) {
+        padString += padString.repeat(Math.ceil(targetLength / padString.length));
+        // append to original to ensure we are longer than needed
+    }
+
+    return padString.slice(0, targetLength) + String(s);
+}
+
+if (!Number.prototype.padStart) Number.prototype.padStart = function (targetLength, padString) {
+    var s = this.valueOf().toString();
+
+    targetLength >>= 0; // truncate if number or convert non-number to 0;
+    padString = String(padString || ' ');
+
+    if (s.length >= targetLength) return s;
+
+    targetLength -= s.length;
+    if (targetLength > padString.length) {
+        padString += padString.repeat(Math.ceil(targetLength / padString.length));
+        // append to original to ensure we are longer than needed
+    }
+
+    return padString.slice(0, targetLength) + s;
+}
+
+if(!Number.prototype.clamp) Number.prototype.clamp = function (min, max) { return Math.min(Math.max(this, min), max) }
+
+if(!String.prototype.replaceAll) String.prototype.replaceAll = function (s, r) {
+    if (typeof s != 'string' || typeof r != 'string') return '?' + s;
+    var o = '';
+    for (var i = 0; i < this.length; i++) {
+        if (this.slice(i, i + s.length) == s) { o += r; i += s.length - 1 } else o += this[i];
+    }
+    return o;
+}
+
+if (!Array.prototype.includes) { Array.prototype.includes = function (searchElement, fromIndex) {
+    if (this == null) throw new TypeError('"this" is null or not defined');
+    var o = Object(this);
+    var len = o.length >>> 0;
+    if (len === 0) return false;
+
+    var n = fromIndex | 0;
+    var k = Math.max(n >= 0 ? n : len - Math.abs(n), 0);
+
+    while (k < len) {
+      var element = o[k];
+      if (element === searchElement || (typeof element === 'number' && typeof searchElement === 'number' && isNaN(element) && isNaN(searchElement))) {
+        return true;
+      }
+      k++;
+    }
+    return false;
+  };
+}
+
+if (!String.prototype.includes) String.prototype.includes = function (search, start) {
+    if (typeof start !== 'number') start = 0;
+    if (start + search.length > this.length) return false;
+    return this.indexOf(search, start) !== -1;
+  };

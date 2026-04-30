@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://robustify.xyz/
+meta("protector", "Robust Obfuscator");
+
+function detect() {
+    if (PE.isNet() && PE.isNetGlobalCctorPresent() && PE.isSignatureInSectionPresent(0, "00 20 .. .. .. .. FE 0E .. .. 20 .. .. .. .. 20 .. .. .. .. 20 .. .. .. .. 61 20 .. .. .. .. 20 .. .. .. .. 5F 20 .. .. .. ..")) {
+        bDetected = true;
+    }
+
+    return result();
+}

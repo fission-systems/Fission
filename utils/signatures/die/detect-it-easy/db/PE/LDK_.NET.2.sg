@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("protector", "SafeNet Sentinel LDK .NET");
+
+function detect() {
+    if (PE.isNet()) {
+        if (PE.isNetObjectPresent(".protect") && PE.isNetObjectPresent("haspdnert.dll")) {
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

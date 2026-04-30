@@ -1,0 +1,20 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/opencv/opencv
+// https://github.com/shimat/opencvsharp
+meta("library", "OpenCV");
+
+function detect() {
+    if (PE.isNetObjectPresent("OpenCvSharp")) {
+        bDetected = true;
+    } else if (PE.isLibraryPresentExp(/^opencv/i)) {
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("cruncher", "House (RSI Packer)");
+
+function detect() {
+    if (Amiga.compareEP("................................13fc............41fa....43f9........47fa....49f9")) {
+        sVersion = "1.4";
+        bDetected = true;
+    }
+
+    return result();
+}

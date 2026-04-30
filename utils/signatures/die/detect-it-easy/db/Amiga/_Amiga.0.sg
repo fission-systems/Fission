@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("operation system", "AmigaOS");
+
+function detect() {
+    if (Amiga.isVerbose()) {
+        sName = Amiga.getOperationSystemName();
+        sVersion = Amiga.getOperationSystemVersion();
+        sOptions = Amiga.getOperationSystemOptions();
+
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("library", "Microsoft C/C++ Runtime");
+
+function detect() {
+    if (PE.isLibraryPresent("vcruntime140.dll") ||
+        PE.isLibraryPresent("vcruntime140_1.dll")) {
+        sOptions = "dynamic";
+        bDetected = true;
+    }
+
+    return result();
+}

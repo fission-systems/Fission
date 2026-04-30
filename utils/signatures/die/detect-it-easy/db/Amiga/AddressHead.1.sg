@@ -1,0 +1,12 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("cruncher", "AddressHead");
+
+function detect() {
+    if (Amiga.compareEP("41fa....20080680........43fa....2340....43f9........203c")) {
+        bDetected = true;
+    }
+
+    return result();
+}

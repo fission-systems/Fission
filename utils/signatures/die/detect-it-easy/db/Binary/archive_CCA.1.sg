@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://wiki.multimedia.cx/index.php/Engines/CNCSA
+meta("archive", "Click & Create Archive (.CCA)");
+
+function detect() {
+    if (Binary.compare("'PAME'0702")) {
+        bDetected = true;
+    }
+
+    return result();
+}

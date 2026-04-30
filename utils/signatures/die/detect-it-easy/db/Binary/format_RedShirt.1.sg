@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://en.wikipedia.org/wiki/Uplink_(video_game)
+meta("format", "RedShirt");
+
+function detect() {
+    if (Binary.compare("'REDSHIRT'00")) {
+        sVersion = "v1.0";
+        bDetected = true;
+    } else if (Binary.compare("'REDSHRT2'00")) {
+        sVersion = "v2.0";
+        bDetected = true;
+    }
+
+    return result();
+}

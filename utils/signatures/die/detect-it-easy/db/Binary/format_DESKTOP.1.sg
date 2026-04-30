@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Linux based dists for the desktop shortcuts
+
+// Rewritten by DosX
+
+meta("format", "Desktop Entry (.desktop)");
+
+function detect() {
+    if (Binary.isText() && (Binary.compare("'#'") || Binary.compare("'\n'") || Binary.compare("'['")) && Binary.isSignaturePresent(0, 512, "'[Desktop Entry]'")) {
+        bDetected = true;
+    }
+
+    return result();
+}

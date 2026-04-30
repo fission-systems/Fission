@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+
+meta("format", "Archive");
+
+function detect() {
+    if (Archive.isVerbose()) {
+        sName = Archive.getFileFormatName();
+        sVersion = Archive.getFileFormatVersion();
+        sOptions = Archive.getFileFormatOptions();
+        
+        if (sName) {
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

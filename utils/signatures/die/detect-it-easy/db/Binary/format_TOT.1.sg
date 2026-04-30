@@ -1,0 +1,31 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+// ---
+// Samples by: BJNFNE <bjnfne@web.de>
+
+// https://github.com/scummvm/scummvm-tools/blob/77daf9269a65c428a8445653c2b59196dfd52021/engines/gob/degob_script_v1.cpp
+meta("format", "TOT");
+
+function detect() {
+    if (Binary.compare("?? ** 00'") && Binary.isSignaturePresent(0, 32, "00 00 '(c)'")) {
+        bDetected = true;
+
+        var versionInfo = Binary.findSignature(0, 64, "'Version ' %% 2E %%");
+
+        if (versionInfo !== -1) {
+            sVersion = Binary.getString(versionInfo + 8, 4);
+        }
+
+        var copyrightYear = Binary.findSignature(0, 64, "'19' %% %%");
+
+        if (copyrightYear !== -1) {
+            sVersion += (sVersion ? ", " : String()) + Binary.getString(copyrightYear, 4);
+        }
+    }
+
+    return result();
+}
