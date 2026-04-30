@@ -1,8 +1,1450 @@
-// ConstructTpl → p-code emission for the compiled table. Split into `template_eval/*.rs`
-// fragments (single `template_eval` module scope via `include!`).
-include!("template_eval/flow.rs");
-include!("template_eval/relative_label.rs");
-include!("template_eval/emitter_types.rs");
-// Single `impl CompiledTableEmitter` file avoids `include!` delimiter edge cases across fragments.
-include!("template_eval/emitter_impl.rs");
-include!("template_eval/impl_executor_trait.rs");
+/// Ghidra ConstTpl::getReal() V_OFFSET_PLUS case.
+///
+/// `plus` is value_real read from ATTR_PLUS in the SLA.
+/// - Non-constant space: effective_offset + (plus & 0xFFFF)
+/// - Constant space: effective_offset >> (8 * (plus >> 16))
+pub(super) fn resolve_offset_plus_pub(handle: &RuntimeHandle, plus: u64) -> u64 {
+    resolve_offset_plus(handle, plus)
+}
+
+fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
+    let effective_offset = if handle.fixed.offset_space.is_some() {
+        handle.fixed.temp_offset
+    } else {
+        handle.fixed.offset_offset
+    };
+    let is_const_space = handle
+        .fixed
+        .space
+        .as_ref()
+        .map(|s| s.name == "const")
+        .unwrap_or(false);
+    if !is_const_space {
+        effective_offset.wrapping_add(plus & 0xFFFF)
+    } else {
+        let shift_bytes = plus >> 16;
+        let shift_bits = shift_bytes.saturating_mul(8);
+        if shift_bits >= 64 {
+            0
+        } else {
+            effective_offset >> shift_bits
+        }
+    }
+}
+
+pub(super) fn emit_pcode_for_state(
+    compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
+    address: u64,
+    memory_window: &[u8],
+    memory_base: u64,
+    decoded: &RuntimeConstructState,
+    flow: FlowEmitOptions,
+) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
+    emit_pcode_for_state_with_bytes(
+        compiled,
+        native,
+        address,
+        memory_window,
+        memory_base,
+        decoded,
+        flow,
+    )
+}
+
+/// Options for pcode template emission (Ghidra `PcodeEmit` parity hooks).
+#[derive(Debug, Clone, Default)]
+pub struct FlowEmitOptions {
+    /// Context register bits when binding cross-build / delay-slot instructions at another PC.
+    pub instruction_context_register: u64,
+    pub instruction_context_known_mask: u64,
+    /// When set, Ghidra-style `ConstTpl` flowref / flowdest constants resolve from these.
+    pub flow_ref_addr: Option<u64>,
+    pub flow_ref_space_index: Option<u64>,
+    pub flow_dest_addr: Option<u64>,
+    pub flow_dest_space_index: Option<u64>,
+    /// Ghidra `FlowOverride` — only `None` is fully supported; other variants fail closed until ported.
+    pub flow_override: RuntimeFlowOverride,
+}
+
+/// Ghidra `PcodeEmit.flowOverride` (subset; extend as pcode replacement is ported).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuntimeFlowOverride {
+    #[default]
+    None,
+    Branch,
+    Call,
+    CallReturn,
+    Return,
+}
+
+pub(super) fn emit_pcode_for_state_with_bytes(
+    compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
+    address: u64,
+    memory_window: &[u8],
+    memory_base: u64,
+    decoded: &RuntimeConstructState,
+    flow: FlowEmitOptions,
+) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
+    let mut emitter = CompiledTableEmitter::new(
+        compiled,
+        native,
+        address,
+        memory_window,
+        memory_base,
+        flow,
+    );
+    // If the template uses InstNext2 (delay-slot architectures), pre-decode the
+    // delay-slot instruction to get its actual length.
+    if (uses_inst_next2(&decoded.constructor_template.ops)
+        || uses_delay_slot_indirect(&decoded.constructor_template.ops))
+        && !memory_window.is_empty()
+    {
+        emitter.precompute_delay_slot_length(decoded.length);
+    }
+    let details = RuntimeTemplateEvaluator::new(&mut emitter)
+        .emit(&compiled.entry_id, decoded)
+        .map_err(|err| template_emit_error(compiled, err))?;
+    Ok((emitter.finish(), details))
+}
+
+fn ptrsub_named_section_index(op: &CompiledOpTpl) -> Result<usize> {
+    let v1 = op
+        .inputs
+        .get(1)
+        .ok_or_else(|| anyhow!("PTRSUB/CROSSBUILD missing section index input"))?;
+    match v1 {
+        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+            CompiledConstTpl::Real { value } => usize::try_from(*value)
+                .map_err(|_| anyhow!("PTRSUB named section index does not fit usize")),
+            _ => bail!("PTRSUB section index must be ConstTpl::Real"),
+        },
+        _ => bail!("PTRSUB section index must be a VarnodeTpl"),
+    }
+}
+
+fn indirect_placeholder_delay_bytes(op: &CompiledOpTpl) -> Result<u32> {
+    let v0 = op
+        .inputs
+        .first()
+        .ok_or_else(|| anyhow!("INDIRECT delay-slot placeholder missing inputs"))?;
+    match v0 {
+        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+            CompiledConstTpl::Real { value } => u32::try_from(*value)
+                .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
+            _ => bail!("INDIRECT delay size must be ConstTpl::Real (Ghidra walkTemplates)"),
+        },
+        CompiledVarnodeTpl::Const(CompiledConstTpl::Real { value }) => u32::try_from(*value)
+            .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
+        _ => bail!("INDIRECT delay placeholder has unexpected varnode shape"),
+    }
+}
+
+fn uses_delay_slot_indirect(ops: &[CompiledOpTpl]) -> bool {
+    ops.iter()
+        .any(|op| op.opcode == CompiledOpTplOpcode::DelaySlotIndirect)
+}
+
+/// Returns true if the template contains an InstNext2 constant, meaning this
+/// is a delay-slot instruction and we need the delay slot's actual length.
+fn uses_inst_next2(ops: &[CompiledOpTpl]) -> bool {
+    ops.iter().any(|op| {
+        let check_const = |c: &CompiledConstTpl| matches!(c, CompiledConstTpl::InstNext2);
+        let check_varnode = |v: &CompiledVarnodeTpl| match v {
+            CompiledVarnodeTpl::Varnode { offset, size, .. } => {
+                check_const(offset) || check_const(size)
+            }
+            _ => false,
+        };
+        op.output.as_ref().map(check_varnode).unwrap_or(false)
+            || op.inputs.iter().any(check_varnode)
+    })
+}
+
+pub(super) fn template_emit_error(compiled: &CompiledFrontend, err: anyhow::Error) -> anyhow::Error {
+    let msg = err.to_string();
+    if msg.contains("HandleTpl")
+        || msg.contains("ConstTpl")
+        || msg.contains("unsupported")
+        || msg.contains("compatibility varnode template")
+    {
+        RuntimeSleighError::UnsupportedPcodeTemplate {
+            language: compiled.entry_id.clone(),
+            reason: format!("emission_time_template_resolution_failed: {msg}"),
+        }
+        .into()
+    } else {
+        err
+    }
+}
+
+
+/// Sentinel used to tag branch targets that reference pcode-internal relative labels.
+/// Convention follows Ghidra: `-(label_num + 1)` as i64, stored as u64.
+/// Any branch target constant with value > RELATIVE_LABEL_SENTINEL_THRESHOLD is a sentinel.
+const RELATIVE_LABEL_SENTINEL_THRESHOLD: u64 = u64::MAX - 0x10000;
+
+fn encode_relative_sentinel(label_num: u64) -> u64 {
+    (-(label_num as i64 + 1)) as u64
+}
+
+fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
+    if sentinel > RELATIVE_LABEL_SENTINEL_THRESHOLD {
+        let label_num = (-(sentinel as i64) - 1) as u64;
+        Some(label_num)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CompiledTableEmitter<'c> {
+    compiled: &'c CompiledFrontend,
+    native: Option<&'c Arc<NativeBackend>>,
+    /// Byte window for the current decode; `memory_window[0]` is at `memory_base`.
+    memory_window: &'c [u8],
+    memory_base: u64,
+    emitter: RuntimePcodeEmitter,
+    address: u64,
+    built_operands: std::collections::BTreeSet<usize>,
+    /// Exported varnodes produced by BUILD subconstructors. Ghidra templates
+    /// reference these through negative handle indices in parent templates.
+    exported_build_varnodes: std::collections::BTreeMap<i64, Varnode>,
+    /// Index of the unique (temporary) address space, derived from `.sla` metadata.
+    unique_space_index: u64,
+    /// Mapping from space index to space reference, derived from `.sla` metadata.
+    sla_spaces: std::collections::BTreeMap<u64, CompiledSpaceRef>,
+    /// Label positions: `label_num` → emitter op count at the time the Label was seen.
+    /// Used for `resolveRelatives()` post-processing.
+    label_positions: std::collections::BTreeMap<u64, u32>,
+    /// Pre-computed delay slot instruction length in bytes (first slot only).
+    /// Used for `InstNext2 = inst_next + delay_slot_length`.
+    delay_slot_length: Option<u32>,
+    flow: FlowEmitOptions,
+    /// Ghidra `PcodeEmit.build(construct, secnum)` — named-section pcode uses secnum ≥ 0.
+    pcode_build_secnum: i32,
+    in_delay_slot: bool,
+    uniq_mask: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct DynamicMemoryTarget {
+    space: Varnode,
+    ptr: Varnode,
+    temp: Varnode,
+    size: u32,
+}
+
+impl<'c> CompiledTableEmitter<'c> {
+    fn new(
+        compiled: &'c CompiledFrontend,
+        native: Option<&'c Arc<NativeBackend>>,
+        address: u64,
+        memory_window: &'c [u8],
+        memory_base: u64,
+        flow: FlowEmitOptions,
+    ) -> Self {
+        let uniqbase = compiled.sla_uniqbase;
+        Self {
+            compiled,
+            native,
+            memory_window,
+            memory_base,
+            address,
+            emitter: RuntimePcodeEmitter::new(address, uniqbase),
+            built_operands: std::collections::BTreeSet::new(),
+            exported_build_varnodes: std::collections::BTreeMap::new(),
+            unique_space_index: compiled.sla_unique_space_index,
+            sla_spaces: compiled.sla_spaces.clone(),
+            label_positions: std::collections::BTreeMap::new(),
+            delay_slot_length: None,
+            flow,
+            pcode_build_secnum: -1,
+            in_delay_slot: false,
+            uniq_mask: compiled.sla_uniqmask,
+        }
+    }
+
+    /// Pre-compute the delay slot instruction length. Called from the emit wrapper
+    /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
+    /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
+    fn precompute_delay_slot_length(
+        &mut self,
+        inst_length: usize,
+    ) {
+        let inst_next_offset = (self.address + inst_length as u64)
+            .checked_sub(self.memory_base)
+            .unwrap_or(0) as usize;
+        let inst_next_address = self.address.saturating_add(inst_length as u64);
+        let len = decode_instruction_length(
+            self.compiled,
+            self.native,
+            self.memory_window,
+            inst_next_address,
+            inst_next_offset,
+        );
+        if len > 0 {
+            self.delay_slot_length = Some(len);
+        }
+    }
+
+    fn truncate_to_pointer_size(space: &CompiledSpaceRef, offset: u64) -> u64 {
+        let bits = (space.addr_size as u32).saturating_mul(8);
+        if space.addr_size == 0 || bits >= 64 {
+            offset
+        } else {
+            offset & ((1u64 << bits) - 1)
+        }
+    }
+
+    fn crossbuild_flat_address(
+        &mut self,
+        tpl: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<(CompiledSpaceRef, u64)> {
+        match tpl {
+            CompiledVarnodeTpl::Varnode {
+                space: space_tpl,
+                offset: off_tpl,
+                ..
+            } => {
+                let space = self.resolve_space_tpl(space_tpl, state)?;
+                let offset = self.resolve_const_value(off_tpl, state)?;
+                Ok((space, offset))
+            }
+            _ => bail!("CROSSBUILD address input must be a plain varnode template"),
+        }
+    }
+
+    fn finish(self) -> Vec<PcodeOp> {
+        let label_positions = self.label_positions;
+        let mut ops = self.emitter.finish();
+        // resolveRelatives: replace sentinel branch targets with actual relative offsets.
+        // Follows Ghidra's PcodeCacher::resolveRelatives() convention.
+        for i in 0..ops.len() {
+            let opcode = ops[i].opcode;
+            if !matches!(opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                continue;
+            }
+            // Branch: input[0] is the target. CBranch: input[0] is target, input[1] is cond.
+            if let Some(target_vn) = ops[i].inputs.first() {
+                if !target_vn.is_constant {
+                    continue;
+                }
+                let raw = target_vn.constant_val as u64;
+                if let Some(label_num) = decode_relative_sentinel(raw) {
+                    if let Some(&label_op_count) = label_positions.get(&label_num) {
+                        // Relative offset = label_op_count - (branch_op_index + 1)
+                        // Ghidra convention: positive = forward, negative = backward.
+                        let branch_op = i as i64;
+                        let label_pos = label_op_count as i64;
+                        let relative = label_pos - branch_op;
+                        ops[i].inputs[0] = Varnode::constant(relative, 8);
+                    }
+                }
+            }
+        }
+        ops
+    }
+
+    fn emit_op_template(
+        &mut self,
+        state: &RuntimeConstructState,
+        op: &CompiledOpTpl,
+    ) -> Result<()> {
+        let mnemonic = op.opcode.as_str();
+        if !matches!(self.flow.flow_override, RuntimeFlowOverride::None)
+            && !self.in_delay_slot
+            && matches!(
+                op.opcode,
+                CompiledOpTplOpcode::Branch
+                    | CompiledOpTplOpcode::BranchInd
+                    | CompiledOpTplOpcode::Call
+                    | CompiledOpTplOpcode::CallInd
+                    | CompiledOpTplOpcode::Return
+            )
+        {
+            bail!(
+                "FlowOverride {:?} pcode substitution is not supported yet",
+                self.flow.flow_override
+            );
+        }
+        match op.opcode {
+            CompiledOpTplOpcode::Label => {
+                // Record the current emitter op count as this label's position.
+                // Labels themselves don't emit pcode ops; they are position markers.
+                // The label number is encoded in the output varnode's offset field.
+                let label_num = op.output.as_ref().and_then(|out| {
+                    if let CompiledVarnodeTpl::Varnode { offset, .. } = out {
+                        if let CompiledConstTpl::Real { value } = offset.as_ref() {
+                            return Some(*value);
+                        }
+                    }
+                    None
+                }).unwrap_or(0);
+                // Use the emitter's actual op count so even recursively emitted ops
+                // (via BUILD) are accounted for correctly.
+                self.label_positions.insert(label_num, self.emitter.op_count());
+                Ok(())
+            }
+            CompiledOpTplOpcode::Return => {
+                if op.output.is_some() || op.inputs.len() > 1 {
+                    bail!("RETURN template shape is unsupported");
+                }
+                if let Some(target_tpl) = op.inputs.first() {
+                    // Use size 0 (no constraint): address size varies by architecture.
+                    let target = self.read_template_varnode(target_tpl, state, 0)?;
+                    self.emitter.emit_return_target(target, mnemonic)
+                } else {
+                    self.emitter.emit_return(mnemonic)
+                }
+            }
+            CompiledOpTplOpcode::Call => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("CALL template requires one input"))?;
+                // Use size 0: address size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
+                self.emitter.emit_call(target, mnemonic)
+            }
+            CompiledOpTplOpcode::CallInd => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("CALLIND template requires one input"))?;
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
+                self.emitter.emit_call_ind(target, mnemonic)
+            }
+            CompiledOpTplOpcode::Branch => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("BRANCH template requires one input"))?;
+                // Ghidra principle: BRANCH vs BRANCHIND is determined solely by the
+                // SLA template opcode, NOT by the target's address space. A direct
+                // jmp with a RAM-space absolute target is still a BRANCH.
+                // Use size 0: address size is architecture-dependent.
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
+                self.emitter.emit_branch(target, mnemonic)
+            }
+            CompiledOpTplOpcode::BranchInd => {
+                let target_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("BRANCHIND template requires one input"))?;
+                let target = self.read_template_varnode(target_tpl, state, 0)?;
+                self.emitter.emit_branch_ind(target, mnemonic)
+            }
+            CompiledOpTplOpcode::Copy => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("COPY template requires output"))?;
+                let out_size = self.template_varnode_size(out_tpl, state)?;
+                let input_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("COPY template requires one input"))?;
+
+                // Read input at its natural size (pass 0 = accept any size).
+                // The SUBPIECE path below handles any size mismatch.
+                let value = self.read_template_varnode(input_tpl, state, 0)?;
+
+                if let Some(target) = self.dynamic_memory_target(out_tpl, state)? {
+                    let store_value = if value.is_constant {
+                        self.emitter
+                            .emit_copy(target.temp.clone(), value, mnemonic)?;
+                        target.temp
+                    } else {
+                        value
+                    };
+                    if store_value.size != target.size {
+                        bail!(
+                            "dynamic memory STORE value size {} did not match target size {}",
+                            store_value.size,
+                            target.size
+                        );
+                    }
+                    self.emitter
+                        .emit_store(target.space, target.ptr, store_value, mnemonic)
+                } else if value.size > out_size && out_size > 0 {
+                    // Size mismatch: source is wider than destination.
+                    // Emit SUBPIECE to truncate (matches Ghidra's behavior).
+                    let out = self.template_write_target(out_tpl, state)?;
+                    let trunc_const = Varnode::constant(0, 4);
+                    self.emitter.append_checked(
+                        fission_pcode::PcodeOpcode::SubPiece,
+                        Some(out.clone()),
+                        vec![value, trunc_const],
+                        "SUBPIECE",
+                    )?;
+                    Ok(())
+                } else {
+                    self.write_template_target(out_tpl, value, state, mnemonic)
+                }
+            }
+            CompiledOpTplOpcode::IntZExt
+            | CompiledOpTplOpcode::IntSExt
+            | CompiledOpTplOpcode::BoolNegate
+            | CompiledOpTplOpcode::PopCount => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
+                let input_tpl = op
+                    .inputs
+                    .first()
+                    .ok_or_else(|| anyhow!("{} template requires one input", mnemonic))?;
+                let input = self.read_template_varnode(input_tpl, state, 0)?;
+                let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                let opcode = self.unary_pcode_opcode(op.opcode)?;
+                self.emitter
+                    .emit_int_unop(opcode, out.clone(), input, mnemonic)?;
+                self.commit_template_write_target(out_tpl, out, state, mnemonic)
+            }
+            CompiledOpTplOpcode::IntAdd
+            | CompiledOpTplOpcode::IntSub
+            | CompiledOpTplOpcode::IntCarry
+            | CompiledOpTplOpcode::IntSCarry
+            | CompiledOpTplOpcode::IntSBorrow
+            | CompiledOpTplOpcode::IntAnd
+            | CompiledOpTplOpcode::IntOr
+            | CompiledOpTplOpcode::IntXor
+            | CompiledOpTplOpcode::IntMult
+            | CompiledOpTplOpcode::IntLeft
+            | CompiledOpTplOpcode::IntRight
+            | CompiledOpTplOpcode::IntSRight
+            | CompiledOpTplOpcode::IntEqual
+            | CompiledOpTplOpcode::IntNotEqual
+            | CompiledOpTplOpcode::IntLess
+            | CompiledOpTplOpcode::IntSLess
+            | CompiledOpTplOpcode::BoolAnd
+            | CompiledOpTplOpcode::BoolOr => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
+                if op.inputs.len() != 2 {
+                    bail!("{mnemonic} template requires two inputs");
+                }
+                let mut lhs = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let mut rhs = self.read_template_varnode(&op.inputs[1], state, 0)?;
+
+                // Enforce P-code invariants: binary op inputs should generally match in size.
+                // Ghidra's SLEIGH compiler implicitly folds constants to the required size,
+                // but Fission bypasses subconstructors, so we must promote constants here.
+                if lhs.is_constant && rhs.size > lhs.size {
+                    lhs.size = rhs.size;
+                } else if rhs.is_constant && lhs.size > rhs.size {
+                    rhs.size = lhs.size;
+                }
+
+                let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                let opcode = self.binary_pcode_opcode(op.opcode)?;
+                self.emitter
+                    .emit_int_binop(opcode, out.clone(), lhs, rhs, mnemonic)?;
+                self.commit_template_write_target(out_tpl, out, state, mnemonic)
+            }
+            CompiledOpTplOpcode::Load => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("LOAD template requires output"))?;
+                if op.inputs.len() != 2 {
+                    bail!("LOAD template requires two inputs");
+                }
+                let _out_size = self.template_varnode_size(out_tpl, state)?;
+                // Space and pointer sizes are architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let space = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 0)?;
+                let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                self.emitter.emit_load(out.clone(), space, ptr, mnemonic)?;
+                self.commit_template_write_target(out_tpl, out, state, mnemonic)
+            }
+            CompiledOpTplOpcode::Store => {
+                if op.output.is_some() || op.inputs.len() != 3 {
+                    bail!("STORE template requires three inputs and no output");
+                }
+                // Space and pointer sizes are architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                let space = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                let ptr = self.read_template_varnode(&op.inputs[1], state, 0)?;
+                let value_size = self.template_varnode_size(&op.inputs[2], state)?;
+                let value = self.read_template_varnode(&op.inputs[2], state, value_size)?;
+                self.emitter.emit_store(space, ptr, value, mnemonic)
+            }
+            CompiledOpTplOpcode::Piece
+            | CompiledOpTplOpcode::Subpiece
+            | CompiledOpTplOpcode::CBranch => {
+                let out_tpl = op.output.as_ref();
+                if matches!(op.opcode, CompiledOpTplOpcode::CBranch) {
+                    if out_tpl.is_some() || op.inputs.len() != 2 {
+                        bail!("CBRANCH template requires two inputs and no output");
+                    }
+                    // Target size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
+                    let target = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                    let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
+                    self.emitter.emit_cbranch(target, cond, mnemonic)
+                } else {
+                    let out_tpl =
+                        out_tpl.ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
+                    if op.inputs.len() != 2 {
+                        bail!("{mnemonic} template requires two inputs");
+                    }
+                    let out_size = self.template_varnode_size(out_tpl, state)?;
+                    let lhs_expected_size = if matches!(op.opcode, CompiledOpTplOpcode::Subpiece)
+                    {
+                        0
+                    } else {
+                        out_size
+                    };
+                    let lhs = self.read_template_varnode(&op.inputs[0], state, lhs_expected_size)?;
+                    let rhs_size = self.template_varnode_size(&op.inputs[1], state)?;
+                    let rhs = self.read_template_varnode(&op.inputs[1], state, rhs_size)?;
+                    let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                    let opcode = self.binary_pcode_opcode(op.opcode)?;
+                    self.emitter
+                        .emit_int_binop(opcode, out.clone(), lhs, rhs, mnemonic)?;
+                    self.commit_template_write_target(out_tpl, out, state, mnemonic)
+                }
+            }
+            // Build: subtable inlining directive. Ghidra executes the matched
+            // operand/sub-constructor template; it does not synthesize an
+            // architecture-specific effective-address expression from the
+            // already decoded display operand.
+            CompiledOpTplOpcode::Build => {
+                let operand_index = if let Some(input_tpl) = op.inputs.first() {
+                    match input_tpl {
+                        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
+                            CompiledConstTpl::Real { value } => Some(*value as usize),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(idx) = operand_index {
+                    if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                        let handle = state.handles.get(idx);
+                        let has_sub = handle.as_ref().and_then(|h| h.subtable_state.as_ref()).is_some();
+                        let template_src = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                            .map(|s| format!("{:?}", s.constructor_template.template_source))
+                            .unwrap_or_else(|| "None".to_string());
+                        let ops_count = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                            .map(|s| s.constructor_template.ops.len())
+                            .unwrap_or(0);
+                        eprintln!(
+                            "[BUILD] operand={idx} has_sub={has_sub} template_src={template_src} ops={ops_count} already_built={}",
+                            self.built_operands.contains(&idx)
+                        );
+                    }
+                    self.emit_build_operand(state, idx)?;
+                }
+                Ok(())
+            }
+            // CallOther: user-defined pcodeop. Ghidra emits this as a real
+            // CALLOTHER P-code op. Input[0] is the pcodeop index.
+            CompiledOpTplOpcode::CallOther => {
+                let mut inputs = Vec::new();
+                for input in &op.inputs {
+                    let size = self.template_varnode_size(input, state).unwrap_or(8);
+                    inputs.push(self.read_template_varnode(input, state, size)?);
+                }
+                let output = if let Some(ref out_ref) = op.output {
+                    Some(self.materialize_write_varnode(out_ref, state, mnemonic)?)
+                } else {
+                    None
+                };
+                self.emitter.emit_callother(output, inputs, mnemonic)
+            }
+            CompiledOpTplOpcode::CrossBuild => {
+                if self.pcode_build_secnum >= 0 {
+                    bail!(
+                        "CROSSBUILD (PTRSUB) while emitting named pcode section {} (Ghidra recursion guard)",
+                        self.pcode_build_secnum
+                    );
+                }
+                if op.inputs.len() < 2 {
+                    bail!("CROSSBUILD (PTRSUB) requires two varnode inputs");
+                }
+                let (target_space, target_offset) =
+                    self.crossbuild_flat_address(&op.inputs[0], state)?;
+                let target_pc = Self::truncate_to_pointer_size(&target_space, target_offset);
+                let section = ptrsub_named_section_index(op)?;
+                let ctx_reg = self.flow.instruction_context_register;
+                let ctx_mask = self.flow.instruction_context_known_mask;
+                let cross_state = try_bind_runtime_state_at(
+                    self.compiled,
+                    self.native,
+                    self.memory_window,
+                    self.memory_base,
+                    target_pc,
+                    ctx_reg,
+                    ctx_mask,
+                )?;
+                let unique_seed =
+                    RuntimePcodeEmitter::unique_seed_for_address(self.uniq_mask, target_pc);
+                let saved_emit = self.emitter.emit_context();
+                let saved_labels = std::mem::take(&mut self.label_positions);
+                let saved_built = std::mem::take(&mut self.built_operands);
+                self.emitter.set_emit_context(target_pc, unique_seed);
+                let emit_result = (|| -> Result<()> {
+                    let Some(Some(named)) = cross_state.named_templates.get(section) else {
+                        bail!(
+                            "crossbuild: named template section {section} missing at target 0x{target_pc:x}"
+                        );
+                    };
+                    for cop in &named.ops {
+                        self.emit_op_template(&cross_state, cop)?;
+                    }
+                    Ok(())
+                })();
+                self.built_operands = saved_built;
+                self.label_positions = saved_labels;
+                self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
+                emit_result
+            }
+            CompiledOpTplOpcode::DelaySlotIndirect => {
+                if self.in_delay_slot {
+                    bail!(
+                        "INDIRECT delay-slot recursion at pcode address 0x{:x}",
+                        self.address
+                    );
+                }
+                let delay_total = indirect_placeholder_delay_bytes(op)?;
+                self.in_delay_slot = true;
+                let ctx_reg = self.flow.instruction_context_register;
+                let ctx_mask = self.flow.instruction_context_known_mask;
+                let emit_result = (|| -> Result<()> {
+                    let mut fall_offset = state.length as u64;
+                    let mut byte_count: u32 = 0;
+                    while byte_count < delay_total {
+                        let slot_pc = self.address.saturating_add(fall_offset);
+                        let slot_state = try_bind_runtime_state_at(
+                            self.compiled,
+                            self.native,
+                            self.memory_window,
+                            self.memory_base,
+                            slot_pc,
+                            ctx_reg,
+                            ctx_mask,
+                        )?;
+                        let slot_len = slot_state.length as u32;
+                        if slot_len == 0 {
+                            bail!("delay slot decode returned zero length at 0x{slot_pc:x}");
+                        }
+                        let unique_seed =
+                            RuntimePcodeEmitter::unique_seed_for_address(self.uniq_mask, slot_pc);
+                        let saved_emit = self.emitter.emit_context();
+                        let saved_labels = std::mem::take(&mut self.label_positions);
+                        let saved_built = std::mem::take(&mut self.built_operands);
+                        self.emitter.set_emit_context(slot_pc, unique_seed);
+                        let inner = (|| -> Result<()> {
+                            for cop in &slot_state.constructor_template.ops {
+                                self.emit_op_template(&slot_state, cop)?;
+                            }
+                            Ok(())
+                        })();
+                        self.built_operands = saved_built;
+                        self.label_positions = saved_labels;
+                        self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
+                        inner?;
+                        fall_offset = fall_offset.saturating_add(u64::from(slot_len));
+                        byte_count = byte_count
+                            .checked_add(slot_len)
+                            .ok_or_else(|| anyhow!("delay slot byte count overflow"))?;
+                    }
+                    Ok(())
+                })();
+                self.in_delay_slot = false;
+                emit_result
+            }
+            CompiledOpTplOpcode::Unsupported => bail!(
+                "compiled op template {} is not executable in compiled-table cutover",
+                mnemonic
+            ),
+        }
+    }
+
+    fn emit_build_operand(
+        &mut self,
+        state: &RuntimeConstructState,
+        operand_index: usize,
+    ) -> Result<()> {
+        if !self.built_operands.insert(operand_index) {
+            return Ok(());
+        }
+        let saved_sec = self.pcode_build_secnum;
+        let result = (|| -> Result<()> {
+            let handle = state
+                .handles
+                .get(operand_index)
+                .ok_or_else(|| anyhow!("BUILD operand {operand_index} has no bound handle"))?;
+            let Some(child) = handle.subtable_state.as_deref() else {
+                return Ok(());
+            };
+            if child.constructor_template.template_source != CompiledTemplateSource::SpecDerived {
+                bail!("BUILD operand {operand_index} is not backed by a SpecDerived subconstructor");
+            }
+            if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                eprintln!(
+                    "[emit_build_operand] operand={operand_index} mnemonic={} child_ops_count={}",
+                    child.mnemonic,
+                    child.constructor_template.ops.len()
+                );
+                for (i, child_op) in child.constructor_template.ops.iter().enumerate() {
+                    eprintln!("  [child_op {}] {:?}", i, child_op.opcode);
+                }
+            }
+            // Ghidra: each sub-constructor's BUILD scope is independent. Save and
+            // restore `built_operands` so that child operand indices (e.g. 0 for the
+            // base register within a memory-addressing subtable) are not mistakenly
+            // treated as "already built" because the parent used the same numeric
+            // index for a different operand (e.g. 0 for the memory operand itself).
+            let saved_built = std::mem::take(&mut self.built_operands);
+            if child.constructor_template.ops.is_empty() {
+                // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
+                // fall back to the parent's named section indexed by the operand number.
+                // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
+                self.pcode_build_secnum = operand_index as i32;
+                if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
+                    for named_op in &named_tpl.ops {
+                        self.emit_op_template(child, named_op)?;
+                    }
+                }
+            } else {
+                self.pcode_build_secnum = -1;
+                for child_op in &child.constructor_template.ops {
+                    self.emit_op_template(child, child_op)?;
+                }
+            }
+            self.built_operands = saved_built;
+            if let Some(exported) = child.exported_handle.as_ref() {
+                if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
+                    let handle_key = -((operand_index as i64) + 1);
+                    self.exported_build_varnodes.insert(handle_key, varnode);
+                }
+            }
+            Ok(())
+        })();
+        self.pcode_build_secnum = saved_sec;
+        result
+    }
+
+    fn template_varnode_size(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<u32> {
+        match template {
+            CompiledVarnodeTpl::Varnode { size, .. } => {
+                let value = self.resolve_const_value(size, state)?;
+                u32::try_from(value).map_err(|_| anyhow!("VarnodeTpl size {value} exceeds u32"))
+            }
+            CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
+                if let Some(size) = &handle_tpl.size {
+                    let value = self.resolve_const_value(size, state)?;
+                    u32::try_from(value).map_err(|_| anyhow!("HandleTpl size {value} exceeds u32"))
+                } else {
+                    Ok(0)
+                }
+            }
+            _ => bail!("compiled-table executor rejects compatibility varnode template"),
+        }
+    }
+
+    fn read_template_varnode(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+        expected_size: u32,
+    ) -> Result<Varnode> {
+        match template {
+            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
+                // Ghidra: check isDynamic before resolving — emit LOAD for dynamic memory inputs.
+                if let Some(loaded) = self.dynamic_memory_source(template, state)? {
+                    if expected_size > 0 && loaded.size != expected_size {
+                        bail!(
+                            "dynamic memory source size {} did not match expected size {expected_size}",
+                            loaded.size
+                        );
+                    }
+                    return Ok(loaded);
+                }
+                let varnode = self.resolve_varnode_tpl(template, state)?;
+                if expected_size > 0 && varnode.size != expected_size {
+                    bail!(
+                        "VarnodeTpl size {} did not match expected size {expected_size}",
+                        varnode.size
+                    );
+                }
+                Ok(varnode)
+            }
+            CompiledVarnodeTpl::ConditionPredicate => {
+                bail!("ConditionPredicate is display/compatibility-only and cannot emit raw P-code")
+            }
+            _ => bail!(
+                "compiled-table executor rejects compatibility varnode template: {:?}",
+                template
+            ),
+        }
+    }
+
+    fn materialize_write_varnode(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+        _mnemonic: &str,
+    ) -> Result<Varnode> {
+        self.template_write_target(template, state)
+    }
+
+    fn commit_template_write_target(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        value: Varnode,
+        state: &RuntimeConstructState,
+        mnemonic: &str,
+    ) -> Result<()> {
+        let _ = (value, mnemonic);
+        self.template_write_target(template, state).map(|_| ())
+    }
+
+    fn write_template_target(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        value: Varnode,
+        state: &RuntimeConstructState,
+        mnemonic: &str,
+    ) -> Result<()> {
+        let out = self.template_write_target(template, state)?;
+        self.emitter.emit_copy(out, value, mnemonic)
+    }
+
+    fn template_write_target(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Varnode> {
+        match template {
+            CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
+                self.resolve_varnode_tpl(template, state)
+            }
+            _ => bail!("compiled-table executor rejects compatibility varnode template"),
+        }
+    }
+
+    fn dynamic_memory_target(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<DynamicMemoryTarget>> {
+        let CompiledVarnodeTpl::Varnode {
+            space,
+            offset,
+            size,
+        } = template
+        else {
+            return Ok(None);
+        };
+        let Some(handle_index) =
+            handle_selector_index_in_space(space, CompiledHandleSelector::Space)
+        else {
+            return Ok(None);
+        };
+        if !matches_handle_selector(offset, handle_index, CompiledHandleSelector::Offset) {
+            return Ok(None);
+        }
+        let handle = state
+            .handles
+            .get(handle_index)
+            .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+        if !handle
+            .fixed
+            .space
+            .as_ref()
+            .is_some_and(|space| space.index == 0x1b1 || space.name == "ram")
+        {
+            return Ok(None);
+        }
+        if handle.fixed.offset_space.is_none() {
+            return Ok(None);
+        }
+        if !handle.fixed.fixable {
+            bail!("dynamic memory handle {handle_index} is not fixable");
+        }
+        let space = handle
+            .fixed
+            .space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic memory handle {handle_index} missing space"))?;
+        let offset_space =
+            handle.fixed.offset_space.as_ref().ok_or_else(|| {
+                anyhow!("dynamic memory handle {handle_index} missing offset space")
+            })?;
+        let temp_space =
+            handle.fixed.temp_space.as_ref().ok_or_else(|| {
+                anyhow!("dynamic memory handle {handle_index} missing temp space")
+            })?;
+        let target_size = u32::try_from(self.resolve_const_value(size, state)?)
+            .map_err(|_| anyhow!("dynamic memory target size exceeds u32"))?;
+        let ptr = Varnode {
+            space_id: offset_space.index,
+            offset: handle.fixed.offset_offset,
+            size: handle.fixed.offset_size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        Ok(Some(DynamicMemoryTarget {
+            space: Varnode::constant(space.index as i64, 4),
+            ptr,
+            temp: Varnode {
+                space_id: temp_space.index,
+                offset: handle.fixed.temp_offset,
+                size: target_size,
+                is_constant: false,
+                constant_val: 0,
+            },
+            size: target_size,
+        }))
+    }
+
+    /// Ghidra `VarnodeTpl.isDynamic(walker)` path for **input** varnodes.
+    ///
+    /// When the offset ConstTpl of a VarnodeTpl is a HANDLE reference (selector=Offset)
+    /// and the resolved FixedHandle has a non-null `offset_space`, Ghidra's `PcodeEmit.dump()`
+    /// emits a synthetic LOAD op to materialise the value before the parent op.
+    ///
+    /// Returns the temp varnode (LOAD output) if a LOAD was emitted; `None` otherwise.
+    fn dynamic_memory_source(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<Varnode>> {
+        // Only `Varnode { space, offset, size }` can be dynamic (matches Ghidra's VarnodeTpl).
+        let CompiledVarnodeTpl::Varnode { offset, size, .. } = template else {
+            return Ok(None);
+        };
+
+        // isDynamic condition 1: offset.getType() == ConstTpl.HANDLE (selector = Offset)
+        let Some(handle_index) = handle_selector_index(offset, CompiledHandleSelector::Offset)
+        else {
+            return Ok(None);
+        };
+
+        let handle = state
+            .handles
+            .get(handle_index)
+            .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+
+        // isDynamic condition 2: fixedHandle.offset_space != null
+        if handle.fixed.offset_space.is_none() {
+            return Ok(None);
+        }
+
+        let space = handle
+            .fixed
+            .space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing space", handle_index))?;
+        let offset_space = handle
+            .fixed
+            .offset_space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing offset_space", handle_index))?;
+        let temp_space = handle
+            .fixed
+            .temp_space
+            .as_ref()
+            .ok_or_else(|| anyhow!("dynamic source handle {} missing temp_space", handle_index))?;
+
+        let data_size = u32::try_from(self.resolve_const_value(size, state)?)
+            .map_err(|_| anyhow!("dynamic memory source size exceeds u32"))?;
+
+        // Ghidra: generateLocation → incache[i] = (temp_space, temp_offset, size)
+        //         generatePointer  → dyncache[1] = (offset_space, offset_offset, offset_size)
+        //         dump LOAD(ram_id, ptr) → temp
+        let space_id = Varnode::constant(space.index as i64, 4);
+        let ptr = Varnode {
+            space_id: offset_space.index,
+            offset: handle.fixed.offset_offset,
+            size: handle.fixed.offset_size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let temp = Varnode {
+            space_id: temp_space.index,
+            offset: handle.fixed.temp_offset,
+            size: data_size,
+            is_constant: false,
+            constant_val: 0,
+        };
+
+        self.emitter.emit_load(temp.clone(), space_id, ptr, "LOAD")?;
+
+        Ok(Some(temp))
+    }
+
+    fn resolve_varnode_tpl(
+        &mut self,
+        template: &CompiledVarnodeTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Varnode> {
+        match template {
+            CompiledVarnodeTpl::Varnode {
+                space,
+                offset,
+                size,
+            } => {
+                if let Some(exported_vn) =
+                    self.exported_build_varnode(space, offset, size, state)?
+                {
+                    return Ok(exported_vn);
+                }
+                let space = self.resolve_space_tpl(space, state)?;
+                if (space.index == 0 || space.name == "const")
+                    && handle_selector_index(offset, CompiledHandleSelector::Offset).is_some()
+                {
+                    let handle_index = handle_selector_index(offset, CompiledHandleSelector::Offset)
+                        .expect("checked above");
+                    let handle = state
+                        .handles
+                        .get(handle_index)
+                        .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+                    if let Some(offset_space) = &handle.fixed.offset_space {
+                        let size = u32::try_from(self.resolve_const_value(size, state)?)
+                            .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
+                        if offset_space.index == 0 || offset_space.name == "const" {
+                            return Ok(Varnode::constant(handle.fixed.offset_offset as i64, size));
+                        }
+                        return Ok(Varnode {
+                            space_id: offset_space.index,
+                            offset: handle.fixed.offset_offset,
+                            size,
+                            is_constant: false,
+                            constant_val: 0,
+                        });
+                    }
+                }
+                let offset = self.resolve_const_value(offset, state)?;
+                let size = u32::try_from(self.resolve_const_value(size, state)?)
+                    .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
+                if space.index == 0 || space.name == "const" {
+                    let value = i64::try_from(offset)
+                        .map_err(|_| anyhow!("constant VarnodeTpl offset {offset} exceeds i64"))?;
+                    return Ok(Varnode::constant(value, size));
+                }
+                Ok(Varnode {
+                    space_id: space.index,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                })
+            }
+            CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
+                if let Some(ptr_space_tpl) = &handle_tpl.ptr_space {
+                    let ptr_space = self.resolve_space_tpl(ptr_space_tpl, state)?;
+                    let ptr_offset = handle_tpl
+                        .ptr_offset
+                        .as_ref()
+                        .map(|offset| self.resolve_const_value(offset, state))
+                        .transpose()?
+                        .unwrap_or(0);
+                    let ptr_size = handle_tpl
+                        .ptr_size
+                        .as_ref()
+                        .map(|size| self.resolve_const_value(size, state))
+                        .transpose()?
+                        .and_then(|size| u32::try_from(size).ok())
+                        .unwrap_or(0);
+                    if ptr_space.index == 0 || ptr_space.name == "const" {
+                        let value = i64::try_from(ptr_offset).map_err(|_| {
+                            anyhow!("constant HandleTpl ptr_offset {ptr_offset} exceeds i64")
+                        })?;
+                        return Ok(Varnode::constant(value, ptr_size));
+                    }
+                    return Ok(Varnode {
+                        space_id: ptr_space.index,
+                        offset: ptr_offset,
+                        size: ptr_size,
+                        is_constant: false,
+                        constant_val: 0,
+                    });
+                }
+                let space = if let Some(space) = &handle_tpl.space {
+                    self.resolve_space_tpl(space, state)?
+                } else {
+                    bail!("HandleTpl missing space")
+                };
+                let offset = if let Some(offset) = &handle_tpl.ptr_offset {
+                    self.resolve_const_value(offset, state)?
+                } else {
+                    bail!("HandleTpl missing ptr_offset")
+                };
+                let size = if let Some(size) = &handle_tpl.size {
+                    u32::try_from(self.resolve_const_value(size, state)?)
+                        .map_err(|_| anyhow!("HandleTpl size exceeds u32"))?
+                } else {
+                    0
+                };
+                if space.index == 0 || space.name == "const" {
+                    return Ok(Varnode::constant(offset as i64, size));
+                }
+                Ok(Varnode {
+                    space_id: space.index,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                })
+            }
+            _ => bail!("expected Ghidra VarnodeTpl or HandleTpl"),
+        }
+    }
+
+    fn exported_build_varnode(
+        &mut self,
+        space: &CompiledSpaceTpl,
+        offset: &CompiledConstTpl,
+        size: &CompiledConstTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<Option<Varnode>> {
+        let Some(handle_index) =
+            negative_handle_selector_index_in_space(space, CompiledHandleSelector::Space)
+        else {
+            return Ok(None);
+        };
+        if !matches_negative_handle_selector(offset, handle_index, CompiledHandleSelector::Offset)
+            || !matches_negative_handle_selector(size, handle_index, CompiledHandleSelector::Size)
+        {
+            return Ok(None);
+        }
+        let varnode = self
+            .exported_build_varnodes
+            .get(&handle_index)
+            .cloned()
+            .ok_or_else(|| anyhow!("exported BUILD handle {handle_index} is missing"))?;
+        let _ = (size, state);
+        Ok(Some(varnode))
+    }
+
+    fn resolve_space_tpl(
+        &mut self,
+        template: &CompiledSpaceTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<CompiledSpaceRef> {
+        match template {
+            CompiledSpaceTpl::SpaceRef(space) => Ok(space.clone()),
+            CompiledSpaceTpl::Const(const_tpl) => {
+                let space_id = self.resolve_const_value(const_tpl, state)?;
+                // Look up the space name from the SLA-derived space table instead
+                // of using a hardcoded architecture-specific mapping.
+                if let Some(space_ref) = self.sla_spaces.get(&space_id) {
+                    return Ok(space_ref.clone());
+                }
+                // Const space (ID 0) is always the constant space regardless of
+                // architecture. Fall back to index-only for unknown spaces.
+                let name = if space_id == 0 { "const" } else { "unknown" };
+                Ok(CompiledSpaceRef {
+                    name: name.to_string(),
+                    index: space_id,
+                    word_size: 0,
+                    addr_size: 0,
+                })
+            }
+        }
+    }
+
+    fn resolve_const_value(
+        &mut self,
+        template: &CompiledConstTpl,
+        state: &RuntimeConstructState,
+    ) -> Result<u64> {
+        match template {
+            CompiledConstTpl::Real { value } => Ok(*value),
+            CompiledConstTpl::Integer { value, .. } if *value >= 0 => Ok(*value as u64),
+            CompiledConstTpl::Integer { value, .. } => {
+                Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
+            }
+            CompiledConstTpl::InstStart => Ok(self.address),
+            CompiledConstTpl::InstNext => Ok(self.address.saturating_add(state.length as u64)),
+            CompiledConstTpl::SpaceId(space) => Ok(space.index),
+            CompiledConstTpl::Handle {
+                handle_index,
+                selector,
+                plus,
+            } => {
+                let handle = state
+                    .handles
+                    .get(*handle_index as usize)
+                    .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+
+                if matches!(selector, CompiledHandleSelector::OffsetPlus) {
+                    return Ok(resolve_offset_plus(handle, plus.unwrap_or(0)));
+                }
+
+                let val = self.resolve_fixed_handle_selector(handle, *selector)?;
+                if let Some(plus) = plus {
+                    Ok(val.wrapping_add(*plus))
+                } else {
+                    Ok(val)
+                }
+            }
+            CompiledConstTpl::Relative { value: label_num } => {
+                // Emit a sentinel value; resolveRelatives() in finish() will replace it
+                // with the actual relative op offset after all ops are emitted.
+                // Uses Ghidra's convention: -(label_num + 1) so the value is in the
+                // RELATIVE_LABEL_SENTINEL_THRESHOLD range (large unsigned values).
+                Ok(encode_relative_sentinel(*label_num))
+            }
+            CompiledConstTpl::RelativeAddress => {
+                // RelativeAddress is a backward-compat form of Relative without an
+                // explicit label num; treat as label 0.
+                Ok(encode_relative_sentinel(0))
+            }
+            CompiledConstTpl::InstNext2 => {
+                // Ghidra: inst_next2 = inst_next + delay_slot_instruction_length.
+                // `inst_next` = address of the instruction after the current one.
+                // `delay_slot_length` = actual length of the instruction in the delay slot,
+                // pre-decoded in `precompute_delay_slot_length`.
+                let inst_next = self.address.saturating_add(state.length as u64);
+                let delay_len = self.delay_slot_length.unwrap_or(0) as u64;
+                Ok(inst_next.saturating_add(delay_len))
+            }
+            CompiledConstTpl::CurSpace => self.compiled.sla_default_cur_space_index(),
+            CompiledConstTpl::CurSpaceSize => self
+                .compiled
+                .sla_default_cur_space_pointer_size()
+                .map(|s| s as u64),
+            CompiledConstTpl::FlowRef => self
+                .flow
+                .flow_ref_addr
+                .ok_or_else(|| anyhow!("ConstTpl FlowRef requires FlowEmitOptions.flow_ref_addr")),
+            CompiledConstTpl::FlowRefSize => {
+                let idx = self
+                    .flow
+                    .flow_ref_space_index
+                    .ok_or_else(|| anyhow!("ConstTpl FlowRefSize requires FlowEmitOptions.flow_ref_space_index"))?;
+                let space = self
+                    .compiled
+                    .sla_spaces
+                    .get(&idx)
+                    .ok_or_else(|| anyhow!("FlowRefSize space index {idx} missing from sla_spaces"))?;
+                if space.addr_size == 0 {
+                    bail!("FlowRefSize space {} has addr_size=0", space.name);
+                }
+                Ok(space.addr_size as u64)
+            }
+            CompiledConstTpl::FlowDest => self
+                .flow
+                .flow_dest_addr
+                .ok_or_else(|| anyhow!("ConstTpl FlowDest requires FlowEmitOptions.flow_dest_addr")),
+            CompiledConstTpl::FlowDestSize => {
+                let idx = self
+                    .flow
+                    .flow_dest_space_index
+                    .ok_or_else(|| anyhow!("ConstTpl FlowDestSize requires FlowEmitOptions.flow_dest_space_index"))?;
+                let space = self
+                    .compiled
+                    .sla_spaces
+                    .get(&idx)
+                    .ok_or_else(|| anyhow!("FlowDestSize space index {idx} missing from sla_spaces"))?;
+                if space.addr_size == 0 {
+                    bail!("FlowDestSize space {} has addr_size=0", space.name);
+                }
+                Ok(space.addr_size as u64)
+            }
+        }
+    }
+
+    fn resolve_fixed_handle_selector(
+        &self,
+        handle: &RuntimeHandle,
+        selector: CompiledHandleSelector,
+    ) -> Result<u64> {
+        match selector {
+            CompiledHandleSelector::Space => {
+                // Ghidra: ConstTpl.fixSpace() — when offset_space != null (dynamic),
+                // returns temp_space rather than the primary space.
+                if handle.fixed.offset_space.is_some() {
+                    handle
+                        .fixed
+                        .temp_space
+                        .as_ref()
+                        .map(|s| s.index)
+                        .ok_or_else(|| anyhow!("dynamic handle missing temp_space for Space selector"))
+                } else {
+                    handle
+                        .fixed
+                        .space
+                        .as_ref()
+                        .map(|space| space.index)
+                        .ok_or_else(|| anyhow!("fixed handle missing space"))
+                }
+            }
+            CompiledHandleSelector::Offset => {
+                // Ghidra: ConstTpl.fix() for V_OFFSET — when offset_space != null (dynamic),
+                // returns temp_offset (the output temp of the implicit LOAD) rather than
+                // offset_offset (the pointer location).
+                if handle.fixed.offset_space.is_some() {
+                    Ok(handle.fixed.temp_offset)
+                } else {
+                    Ok(handle.fixed.offset_offset)
+                }
+            }
+            CompiledHandleSelector::Size => Ok(handle.fixed.size as u64),
+            CompiledHandleSelector::OffsetPlus => {
+                unreachable!("OffsetPlus is handled before calling resolve_fixed_handle_selector")
+            }
+        }
+    }
+
+    fn unary_pcode_opcode(&self, opcode: CompiledOpTplOpcode) -> Result<PcodeOpcode> {
+        Ok(match opcode {
+            CompiledOpTplOpcode::IntZExt => PcodeOpcode::IntZExt,
+            CompiledOpTplOpcode::IntSExt => PcodeOpcode::IntSExt,
+            CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
+            CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
+            _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
+        })
+    }
+
+    fn binary_pcode_opcode(&self, opcode: CompiledOpTplOpcode) -> Result<PcodeOpcode> {
+        Ok(match opcode {
+            CompiledOpTplOpcode::IntAdd => PcodeOpcode::IntAdd,
+            CompiledOpTplOpcode::IntSub => PcodeOpcode::IntSub,
+            CompiledOpTplOpcode::IntCarry => PcodeOpcode::IntCarry,
+            CompiledOpTplOpcode::IntSCarry => PcodeOpcode::IntSCarry,
+            CompiledOpTplOpcode::IntSBorrow => PcodeOpcode::IntSBorrow,
+            CompiledOpTplOpcode::IntAnd => PcodeOpcode::IntAnd,
+            CompiledOpTplOpcode::IntOr => PcodeOpcode::IntOr,
+            CompiledOpTplOpcode::IntXor => PcodeOpcode::IntXor,
+            CompiledOpTplOpcode::IntMult => PcodeOpcode::IntMult,
+            CompiledOpTplOpcode::IntLeft => PcodeOpcode::IntLeft,
+            CompiledOpTplOpcode::IntRight => PcodeOpcode::IntRight,
+            CompiledOpTplOpcode::IntSRight => PcodeOpcode::IntSRight,
+            CompiledOpTplOpcode::IntEqual => PcodeOpcode::IntEqual,
+            CompiledOpTplOpcode::IntNotEqual => PcodeOpcode::IntNotEqual,
+            CompiledOpTplOpcode::IntLess => PcodeOpcode::IntLess,
+            CompiledOpTplOpcode::IntSLess => PcodeOpcode::IntSLess,
+            CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
+            CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
+            CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,
+            CompiledOpTplOpcode::Subpiece => PcodeOpcode::SubPiece,
+            _ => bail!("unsupported binary compiled opcode {}", opcode.as_str()),
+        })
+    }
+}
+
+impl RuntimeTemplateExecutor for CompiledTableEmitter<'_> {
+    fn emit_op_template(
+        &mut self,
+        state: &RuntimeConstructState,
+        op: &CompiledOpTpl,
+    ) -> Result<()> {
+        CompiledTableEmitter::emit_op_template(self, state, op)
+    }
+}

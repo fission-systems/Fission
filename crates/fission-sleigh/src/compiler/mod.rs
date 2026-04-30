@@ -1,6 +1,5 @@
 mod ast;
 mod codegen;
-pub mod decode_metadata;
 mod discovery;
 mod equivalence;
 mod ir;
@@ -42,7 +41,6 @@ pub use ir::{
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
     CompiledHandleTemplate, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
-    SlaOperandSymbolMeta,
     CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
     CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher,
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,

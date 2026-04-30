@@ -303,7 +303,6 @@ pub mod sla_format {
     pub const ATTR_SPACE: u32 = 4;
     pub const ATTR_S: u32 = 5;
     pub const ATTR_OFF: u32 = 6;
-    /// Ghidra `OperandSymbol.encode` — `ATTRIB_CODE` when `isCodeAddress()` (see `SlaFormat.java` id()).
     pub const ATTR_CODE: u32 = 7;
     pub const ATTR_MASK: u32 = 8;
     pub const ATTR_INDEX: u32 = 9;
@@ -315,7 +314,6 @@ pub mod sla_format {
     pub const ATTR_SIZE: u32 = 15;
     pub const ATTR_TABLE: u32 = 16;
     pub const ATTR_CT: u32 = 17;
-    /// Ghidra `OperandSymbol.encode` — always writes `ATTRIB_MINLEN` (`minimumlength`).
     pub const ATTR_MINLEN: u32 = 18;
     pub const ATTR_BASE: u32 = 19;
     pub const ATTR_NUMBER: u32 = 20;
@@ -331,19 +329,10 @@ pub mod sla_format {
     pub const ATTR_SIGNBIT: u32 = 31;
     pub const ATTR_ENDBYTE: u32 = 32;
     pub const ATTR_STARTBYTE: u32 = 33;
-    /// Ghidra `SlaFormat.ATTRIB_VERSION` — present on root `sleigh` element.
-    pub const ATTR_VERSION: u32 = 34;
     pub const ATTR_BIGENDIAN: u32 = 35;
     pub const ATTR_ALIGN: u32 = 36;
     pub const ATTR_UNIQBASE: u32 = 37;
-    /// Ghidra `SlaFormat.ATTRIB_MAXDELAY` — root `sleigh` / space metadata.
-    pub const ATTR_MAXDELAY: u32 = 38;
     pub const ATTR_UNIQMASK: u32 = 39;
-    pub const ATTR_NUMSECTIONS: u32 = 40;
-    /// Ghidra `SlaFormat.ATTRIB_DEFAULTSPACE` — default data space **name** on `spaces`.
-    pub const ATTR_DEFAULTSPACE: u32 = 41;
-    /// Ghidra `SlaFormat.ATTRIB_DELAY` — on `space`: `delay > 0` implies `TYPE_RAM`, else register class.
-    pub const ATTR_DELAY: u32 = 42;
     pub const ATTR_WORDSIZE: u32 = 43;
     pub const ATTR_I: u32 = 52;
     pub const ATTR_SECTION: u32 = 54;

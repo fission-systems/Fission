@@ -66,26 +66,6 @@ fn decodes_real_x86_64_sla_construct_templates() {
 }
 
 #[test]
-fn decodes_defaultspace_index_from_real_x86_64_sla() {
-    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
-    let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
-    assert_ne!(
-        library.default_space_index,
-        u64::MAX,
-        "Ghidra defaultspace should resolve to an index in spaces"
-    );
-    assert!(
-        library.spaces.contains_key(&library.default_space_index),
-        "default_space_index must exist in spaces map"
-    );
-}
-
-#[test]
 fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
     let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
         return;

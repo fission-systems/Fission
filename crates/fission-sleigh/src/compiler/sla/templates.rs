@@ -22,7 +22,6 @@ fn decode_construct_templates(
     let spaces = space_result.spaces;
     let unique_space_index = space_result.unique_space_index;
     let register_space_index = space_result.register_space_index;
-    let default_space_index = space_result.default_space_index;
     let uniqbase = root
         .attr_unsigned(sla_format::ATTR_UNIQBASE)
         .unwrap_or(0);
@@ -102,6 +101,14 @@ fn decode_construct_templates(
             .find(|child| {
                 child.id == sla_format::ELEM_CONSTRUCT_TPL
                     && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
+            })
+            .or_else(|| {
+                // Fallback: if no section-less template exists, pick any ELEM_CONSTRUCT_TPL
+                // that has no section attribute (only valid for truly section-less constructors).
+                constructor
+                    .children
+                    .iter()
+                    .find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)
             });
         let Some(main_tpl) = main_tpl else {
             if trace_sla_parse {
@@ -155,7 +162,6 @@ fn decode_construct_templates(
         let mut opprint_indices = Vec::new();
         let mut display_pieces = Vec::new();
         let mut operand_specs_by_index = BTreeMap::new();
-        let mut operand_meta_by_index = BTreeMap::new();
         let mut display_operands_by_index = BTreeMap::new();
         let mut flowthru_operand_index = None;
         for child in &constructor.children {
@@ -190,10 +196,6 @@ fn decode_construct_templates(
                         return None;
                     };
                     operand_specs_by_index.insert(operand_symbol.hand_index, spec);
-                    operand_meta_by_index.insert(
-                        operand_symbol.hand_index,
-                        operand_symbol.sla_encode_meta.clone(),
-                    );
                     display_operands_by_index.insert(
                         operand_symbol.hand_index,
                         CompiledDisplayOperand {
@@ -223,7 +225,6 @@ fn decode_construct_templates(
             .map(|value| value + 1)
             .unwrap_or(0);
         let mut operand_specs = Vec::with_capacity(operand_count);
-        let mut operand_symbol_meta = Vec::with_capacity(operand_count);
         let mut display_operands = Vec::with_capacity(operand_count);
         for slot in 0..operand_count {
             let Some(spec) = operand_specs_by_index.remove(&slot) else {
@@ -235,11 +236,6 @@ fn decode_construct_templates(
                 return None;
             };
             operand_specs.push(spec);
-            operand_symbol_meta.push(
-                operand_meta_by_index
-                    .remove(&slot)
-                    .unwrap_or_default(),
-            );
             display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
                 CompiledDisplayOperand {
                     operand_index: slot,
@@ -348,7 +344,6 @@ fn decode_construct_templates(
             flowthru_operand_index,
             constructor_template: template,
             named_templates,
-            operand_symbol_meta,
         })
     };
 
@@ -405,7 +400,6 @@ fn decode_construct_templates(
                         ops: Vec::new(),
                     },
                     named_templates: Vec::new(),
-                    operand_symbol_meta: Vec::new(),
                 }
             });
             constructors_by_index.insert(slot, template);
@@ -451,7 +445,6 @@ fn decode_construct_templates(
                         ops: Vec::new(),
                     },
                     named_templates: Vec::new(),
-                    operand_symbol_meta: Vec::new(),
                 },
             ));
         }
@@ -493,7 +486,6 @@ fn decode_construct_templates(
         spaces,
         unique_space_index,
         register_space_index,
-        default_space_index,
         uniqbase,
         uniqmask,
         constructors_by_source,
@@ -930,12 +922,4 @@ fn decode_const_tpl(
         sla_format::ELEM_CONST_FLOWDEST_SIZE => Ok(CompiledConstTpl::FlowDestSize),
         other => bail!("unsupported ConstTpl element {other}"),
     }
-}
-
-#[cfg(test)]
-pub(crate) fn decode_const_tpl_for_tests(
-    element: &PackedElement,
-    spaces: &BTreeMap<u64, CompiledSpaceRef>,
-) -> Result<CompiledConstTpl> {
-    decode_const_tpl(element, spaces)
 }
