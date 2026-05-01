@@ -81,6 +81,7 @@ Fission maintains comprehensive, role-based documentation:
 
 ### For Operators & Users
 - [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
+- [`wiki/DOCUMENTATION_HUB.md`](./wiki/DOCUMENTATION_HUB.md) — Wiki vs repository doc split (browse in-tree); mirrors [Documentation Hub](https://github.com/sjkim1127/Fission/wiki/DOCUMENTATION_HUB) on GitHub Wiki
 - [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
 - [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
 - [`docs/EVALUATION.md`](./docs/EVALUATION.md) — External headless evaluation path for CLI-first users
