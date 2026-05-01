@@ -72,7 +72,8 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
   └─ fission-loader
 
 ✓ CLI smoke (Linux, after core tests)
-  └─ `fission_cli` on `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` (tracked C source cross-compiles with MinGW on the runner; `.exe` is gitignored) — `info`, `list --json`, then `decomp --json` at an address from the list or the documented fallback
+  ├─ `fission_cli` on `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` (tracked C source cross-compiles with MinGW on the runner; `.exe` is gitignored) — `info`, `list --json`, then `decomp --json` at an address from the list or the documented fallback
+  └─ MinGW APT deps cached via `awalsh128/cache-apt-pkgs-action` in `reusable-cli-smoke.yml` / `reusable-benchmark.yml` (bump `version` input if runner image invalidates restore)
 
 ✓ Platform Builds
   ├─ Linux (ubuntu-latest)

@@ -55,14 +55,14 @@ jobs:
       - name: Build fission-cli (release)
         run: cargo build -p fission-cli --locked --release
 
-      - name: Setup benchmark binary build toolchain
-        run: |
-          # Install MinGW-w64 for Windows cross-compilation
-          apt-get update
-          apt-get install -y mingw-w64
-          
-          # Add Rust Windows target
-          rustup target add x86_64-pc-windows-gnu
+      - name: Cache & install MinGW (benchmark PE builds)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: mingw-w64
+          version: mingw-benchmark-v1
+
+      - name: Add Rust Windows GNU target
+        run: rustup target add x86_64-pc-windows-gnu
 
       - name: Build benchmark binaries (small, medium, large)
         run: |
