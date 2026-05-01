@@ -525,3 +525,60 @@
 - Existing audit counters still show no-export fallback involvement in x86 32-bit vendor smoke rows. This commit does not purge that path because the prior broad purge regressed parity.
 - The next safe step is owner-by-owner replacement of no-export fallback with exact `.sla` exported-handle/guard-only classification while keeping the canonical 1.0 gate intact.
 - No generated benchmark artifacts, target-generated frontend files, Ghidra project DB files, or copied sample binaries are staged.
+
+## AArch64 Exported Handle Raw P-code Parity
+
+- Closed the AArch64 `llvm_smoke.o @ 0x100000` raw p-code gap by following the Ghidra SLEIGH owner chain: `DecisionNode -> ParserWalker/ConstructState -> HandleTpl.fix -> ConstructTpl -> PcodeEmit`.
+- The mismatch owner was exported constant handle propagation. `movk ... LSL #16/#32/#48` subconstructors computed shifted constant handles, but parent pattern/template evaluation could still read the unshifted debug scalar.
+- Runtime pattern expression evaluation now prefers exact exported constant fixed handles before display/debug numeric operands.
+- Same-token `.sla` token fields no longer advance the operand cursor when the field is inside the selected constructor minimum byte extent. This keeps AArch64 token-field decoding aligned without adding table-name, mnemonic, opcode, or architecture-specific policy.
+- `InstNext` pattern expression handling now uses the later of the current operand cursor and selected constructor minimum extent, preserving x86 rel32 call target calculation while avoiding double-counting cursor progress.
+- Added regressions for:
+  - AArch64 `movk x12, #0x5060, LSL #16` using `INT_OR ..., const(0x50600000,8)`.
+  - x86 PE `CALL rel32` target `0x402200`.
+  - Existing x86 PE `C7 /0` moffs32 immediate extent remains length 10 and exact.
+
+## AArch64 Validation
+
+- Baseline AArch64 row before this change:
+  - Manifest: `benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json`, row `llvm-aarch64-baremetal`.
+  - `full_match = 5/8`
+  - `input_varnode_mismatch = 3`
+  - `average_similarity_score = 0.9902500000000001`
+  - `average_parity_ratio = 0.625`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+- Added AArch64 focused manifest: `benchmark/raw_p_code_benchmark/aarch64_rows.json`.
+- AArch64 focused report: `benchmark/artifacts/raw_p_code_benchmark/aarch64_exported_handle_parity/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 8`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 8`
+- x86-64 canonical guard report: `benchmark/artifacts/raw_p_code_benchmark/aarch64_work_x86_64_guard/aggregate_raw_pcode_parity_report.json`
+  - `perfect_canonical_gate = passed`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+- Vendor smoke report: `benchmark/artifacts/raw_p_code_benchmark/aarch64_work_vendor_guard/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 16`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+
+## AArch64 Notes
+
+- No AArch64 opcode, mnemonic, table-name, source-line, binary-identity, or manual mapping branch was added.
+- `BoundOperand` remains display/debug data; raw p-code success continues to require decoded `.sla ConstructTpl` execution.
+- Native backend role remains candidate acceleration only; final success is still common Rust terminal verification plus checked `.sla ConstructTpl` execution.
+- Benchmark output artifacts, Ghidra project DB state, generated target cache, and copied sample binaries remain uncommitted.

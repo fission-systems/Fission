@@ -1,0 +1,20 @@
+{
+  "name": "aarch64-raw-pcode-smoke",
+  "notes": "AArch64 executable rows for raw p-code parity. Rows are admitted only after loader preflight succeeds; unsupported/container inputs are not included.",
+  "rows": [
+    {
+      "name": "llvm-aarch64-baremetal",
+      "entry_id": "AARCH64",
+      "binary": "benchmark/binary/AARCH64/baremetal/small/binary/c/llvm_smoke.o",
+      "addr": "0x100000",
+      "count": 8,
+      "language": "AARCH64:LE:64:v8A",
+      "compiler": "default",
+      "disassemble_missing": true,
+      "feature_group": "architecture",
+      "feature": "aarch64_llvm_baremetal_smoke",
+      "owner": "raw_pcode_aarch64_lane",
+      "notes": "AArch64 LLVM baremetal smoke row with movk shifted-immediate coverage."
+    }
+  ]
+}

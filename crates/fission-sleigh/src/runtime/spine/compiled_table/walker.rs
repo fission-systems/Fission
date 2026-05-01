@@ -625,6 +625,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
                 if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
                     .uses_shared_token_cursor()
+                    && !self.sla_field_is_within_constructor_minimum(token_base, encoded_size)
                 {
                     self.cursor = self.cursor.max(token_base + encoded_size as usize);
                 }
@@ -727,6 +728,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
                 if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
                     .uses_shared_token_cursor()
+                    && !self.sla_field_is_within_constructor_minimum(token_base, encoded_size)
                 {
                     self.cursor = self.cursor.max(token_base + encoded_size as usize);
                 }
@@ -806,7 +808,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         *shift,
                     )? as i64;
                     encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                    if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
+                        self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                    }
                     raw
                 } else {
                     self.eval_pattern_expression(expr)?
@@ -1045,8 +1049,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             // point as sequential operands are consumed, while operand
             // `reloffset` anchors subconstructors at an instruction-relative
             // point. Use the later of the current construct point and the
-            // explicit reloffset anchor; this is data-driven by the decoded
-            // operand metadata and does not inspect table names.
+            // explicit reloffset anchor; same-token fields avoid advancing the
+            // cursor via `sla_field_is_within_constructor_minimum`.
             let reloffset_base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
             return self.cursor.max(reloffset_base);
         }
@@ -1086,12 +1090,23 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
+    fn sla_field_is_within_constructor_minimum(&self, token_base: usize, encoded_size: u32) -> bool {
+        let constructor_end =
+            self.ctx.cursor + self.selection.constructor.minimum_length as usize;
+        token_base == self.ctx.cursor && token_base + encoded_size as usize <= constructor_end
+    }
+
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
             CompiledPatternExpression::InstStart => Ok(self.ctx.address as i64),
             CompiledPatternExpression::InstNext => {
-                Ok(self.ctx.address.saturating_add(self.cursor as u64) as i64)
+                let construct_end = self
+                    .ctx
+                    .cursor
+                    .saturating_add(self.selection.constructor.minimum_length as usize);
+                let next_offset = self.cursor.max(construct_end);
+                Ok(self.ctx.address.saturating_add(next_offset as u64) as i64)
             }
             CompiledPatternExpression::InstNext2 => {
                 bail!("pattern expression inst_next2 requires delayed instruction context")
@@ -1147,6 +1162,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .ok_or_else(|| {
                         anyhow!("operand {} was not decoded for pattern expression", index)
                     })?;
+                let fixed = &handle.fixed;
+                if fixed.offset_space.is_none()
+                    && fixed
+                        .space
+                        .as_ref()
+                        .is_some_and(|space| space.name == "const" || space.index == 0)
+                {
+                    return Ok(fixed.offset_offset as i64);
+                }
                 let Some(debug_value) = handle.debug_value.clone() else {
                     bail!("operand {index} has no debug numeric value for pattern expression");
                 };

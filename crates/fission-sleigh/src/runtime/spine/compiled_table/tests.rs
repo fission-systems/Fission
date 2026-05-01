@@ -208,6 +208,32 @@ fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
 }
 
 #[test]
+fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
+    let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
+    let bytes = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x4014ed).expect("decode call rel32");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "call");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x4014ed)
+        .expect("lift call rel32");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+    let call = ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::Call)
+        .expect("call p-code op");
+    assert_eq!(call.inputs[0].space_id, 3);
+    assert_eq!(call.inputs[0].offset, 0x402200);
+}
+
+#[test]
 fn generated_runtime_records_decision_trace_for_startup_store() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
@@ -409,6 +435,34 @@ fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
     assert_ne!(
         decoded.mnemonic, "udf",
         "expected terminal verification to avoid udf fallback"
+    );
+}
+
+#[test]
+fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle() {
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+    let bytes = [0x0c, 0x0c, 0xaa, 0xf2];
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x10000c).expect("decode movk");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "movk");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x10000c)
+        .expect("lift movk shifted immediate");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+    assert!(
+        ops.iter()
+            .any(|op| op.opcode == PcodeOpcode::IntOr
+                && op.inputs
+                    .get(1)
+                    .is_some_and(|input| input.is_constant && input.constant_val == 0x5060_0000)),
+        "expected movk INT_OR to use exported shifted immediate; ops={ops:?}"
     );
 }
 
