@@ -21,8 +21,7 @@ use super::super::wave_stats::{
 };
 use super::{
     callsite_type_prop::{api_signature, is_known_api_signature, win_type_name_to_nir},
-    summarize_wrapper_hir_function,
-    summary_soundness_for_wrapper,
+    summarize_wrapper_hir_function, summary_soundness_for_wrapper,
 };
 
 fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {

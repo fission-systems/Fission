@@ -94,7 +94,9 @@ impl RuntimeSleighFrontend {
             }
 
             // Collect context commits from this instruction and queue them.
-            for (target_addr, word_index, mask_u32, value_u32) in &instruction.pending_context_commits {
+            for (target_addr, word_index, mask_u32, value_u32) in
+                &instruction.pending_context_commits
+            {
                 let mask_u64 = (u64::from(*mask_u32)) << (word_index * 32);
                 let value_u64 = (u64::from(*value_u32)) << (word_index * 32);
                 let entry = pending_overrides.entry(*target_addr).or_insert((0, 0));

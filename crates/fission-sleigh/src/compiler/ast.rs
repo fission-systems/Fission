@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
 use super::preprocessor::{ExpandedSpec, PreprocessedLine};
 
@@ -455,16 +455,14 @@ mod tests {
     fn parse_expanded_spec_finds_with_blocks_and_constructors() {
         let expanded = expand_entry_spec(&x86_64_entry_spec_path()).expect("expand spec");
         let ast = parse_expanded_spec(&expanded).expect("parse ast");
-        assert!(
-            ast.items
-                .iter()
-                .any(|item| matches!(item, AstItem::WithBlock(_)))
-        );
-        assert!(
-            ast.items
-                .iter()
-                .any(|item| matches!(item, AstItem::Constructor(_)))
-        );
+        assert!(ast
+            .items
+            .iter()
+            .any(|item| matches!(item, AstItem::WithBlock(_))));
+        assert!(ast
+            .items
+            .iter()
+            .any(|item| matches!(item, AstItem::Constructor(_))));
     }
 
     #[test]
@@ -503,11 +501,9 @@ mod tests {
                 _ => None,
             })
             .expect("with block");
-        assert!(
-            with_block
-                .items
-                .iter()
-                .any(|item| matches!(item, AstItem::Constructor(_)))
-        );
+        assert!(with_block
+            .items
+            .iter()
+            .any(|item| matches!(item, AstItem::Constructor(_))));
     }
 }

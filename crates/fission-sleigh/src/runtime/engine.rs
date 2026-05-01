@@ -63,15 +63,13 @@ pub(crate) fn decode_instruction_with_context(
     context_override: Option<(u64, u64)>,
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
-        Some(ExecutionEngineKey::CompiledTable) => {
-            compiled_table::decode_instruction_with_context(
-                compiled,
-                native,
-                bytes,
-                address,
-                context_override,
-            )
-        }
+        Some(ExecutionEngineKey::CompiledTable) => compiled_table::decode_instruction_with_context(
+            compiled,
+            native,
+            bytes,
+            address,
+            context_override,
+        ),
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
             reason: format!(

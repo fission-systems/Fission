@@ -1090,9 +1090,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn sla_field_is_within_constructor_minimum(&self, token_base: usize, encoded_size: u32) -> bool {
-        let constructor_end =
-            self.ctx.cursor + self.selection.constructor.minimum_length as usize;
+    fn sla_field_is_within_constructor_minimum(
+        &self,
+        token_base: usize,
+        encoded_size: u32,
+    ) -> bool {
+        let constructor_end = self.ctx.cursor + self.selection.constructor.minimum_length as usize;
         token_base == self.ctx.cursor && token_base + encoded_size as usize <= constructor_end
     }
 

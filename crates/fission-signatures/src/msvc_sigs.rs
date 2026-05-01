@@ -64,10 +64,7 @@ pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     let crt_json = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
     let crt_items: Vec<JsonCrtSignature> = serde_json::from_str(&crt_json)
-        .unwrap_or_else(|e| panic!(
-            "Failed to parse {}: {e}",
-            path.display()
-        ));
+        .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", path.display()));
     for item in crt_items {
         let pattern = crt_pattern_to_vec(&item.pattern, &item.mask);
         let sig = FunctionSignature {

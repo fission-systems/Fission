@@ -63,7 +63,10 @@ mod tests {
         std::fs::write(&path, b"SQLite format 3\0legacy").expect("write sqlite marker");
 
         let err = parse_fidbf(&path).expect_err("sqlite fidbf should be typed unsupported");
-        assert!(matches!(err, FidbfParseError::UnsupportedSqliteFidDatabase(_)));
+        assert!(matches!(
+            err,
+            FidbfParseError::UnsupportedSqliteFidDatabase(_)
+        ));
 
         let _ = std::fs::remove_file(path);
     }
@@ -115,11 +118,15 @@ mod tests {
 
     #[test]
     fn packed_fidb_is_typed_unsupported() {
-        let path = std::path::Path::new("../../utils/signatures/fidb_java/gcc-x86.LE.64.default.fidb");
+        let path =
+            std::path::Path::new("../../utils/signatures/fidb_java/gcc-x86.LE.64.default.fidb");
         if !path.exists() {
             return;
         }
         let err = parse_fidbf(path).expect_err("packed fidb should be typed unsupported");
-        assert!(matches!(err, FidbfParseError::UnsupportedPackedFidDatabase(_)));
+        assert!(matches!(
+            err,
+            FidbfParseError::UnsupportedPackedFidDatabase(_)
+        ));
     }
 }

@@ -29,11 +29,7 @@ pub(crate) fn parse_raw_fidbf_database(
 
     let strings = parse_strings(&handle, required_table(&tables, STRINGS_TABLE)?)?;
     let libraries = parse_libraries(&handle, required_table(&tables, LIBRARIES_TABLE)?)?;
-    let functions = parse_functions(
-        &handle,
-        required_table(&tables, FUNCTIONS_TABLE)?,
-        &strings,
-    )?;
+    let functions = parse_functions(&handle, required_table(&tables, FUNCTIONS_TABLE)?, &strings)?;
     let mut relations = parse_relation_table(
         &handle,
         required_table(&tables, INFERIOR_TABLE)?,
@@ -148,10 +144,7 @@ fn parse_libraries(
     )?;
     let records = handle.read_table_records(table.root_buffer_id, &table.schema)?;
     validate_record_count(table, records.len())?;
-    records
-        .into_iter()
-        .map(decode_library)
-        .collect()
+    records.into_iter().map(decode_library).collect()
 }
 
 fn decode_library(record: RawRecord) -> Result<FidbfLibrary, FidbfParseError> {
@@ -203,9 +196,10 @@ fn decode_function(
     strings: &HashMap<i64, String>,
 ) -> Result<FidbfFunction, FidbfParseError> {
     let mut values = record.values.into_iter();
-    let code_unit_size = u32::try_from(expect_short(values.next(), "code unit size")?).map_err(
-        |_| FidbfParseError::MalformedRawFidDatabase("negative code unit size".to_string()),
-    )?;
+    let code_unit_size =
+        u32::try_from(expect_short(values.next(), "code unit size")?).map_err(|_| {
+            FidbfParseError::MalformedRawFidDatabase("negative code unit size".to_string())
+        })?;
     let full_hash = expect_long(values.next(), "full hash")? as u64;
     let specific_hash_additional_size =
         u8::try_from(expect_byte(values.next(), "specific hash additional size")?).map_err(

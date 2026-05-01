@@ -9,9 +9,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
     load_construct_templates_from_sla, resolve_ghidra_install_paths, CompiledSpaceRef,
 };
-use fission_sleigh::runtime::{
-    DecodedInstruction, RuntimeLegacyPathAudit, RuntimeSleighFrontend,
-};
+use fission_sleigh::runtime::{DecodedInstruction, RuntimeLegacyPathAudit, RuntimeSleighFrontend};
 use serde::Serialize;
 
 /// Maps Fission's internal dense `space_id` → Ghidra-native `CompiledSpaceRef`.
@@ -152,9 +150,7 @@ fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<Stri
                 .or_insert(0) += 1;
         }
         if audit.direct_token_parser {
-            *totals
-                .entry("direct_token_parser".to_string())
-                .or_insert(0) += 1;
+            *totals.entry("direct_token_parser".to_string()).or_insert(0) += 1;
         }
         if audit.compatibility_template_source {
             *totals

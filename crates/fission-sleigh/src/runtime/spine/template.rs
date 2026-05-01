@@ -163,10 +163,7 @@ where
             }
             .into());
         }
-        if let Some(reason) = state
-            .constructor_template
-            .ghidra_template_shape_error()
-        {
+        if let Some(reason) = state.constructor_template.ghidra_template_shape_error() {
             return Err(RuntimeSleighError::UnsupportedPcodeTemplate {
                 language: language.to_string(),
                 reason: format!("spec_derived_construct_tpl_contains_{reason}"),

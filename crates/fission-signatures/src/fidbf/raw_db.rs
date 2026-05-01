@@ -1,7 +1,5 @@
 use super::parser::FidbfParseError;
-use super::raw_fields::{
-    RawFieldType, RawValue, checked_slice, read_i32, read_i64, read_value,
-};
+use super::raw_fields::{RawFieldType, RawValue, checked_slice, read_i32, read_i64, read_value};
 use std::collections::{HashMap, HashSet};
 
 const LOCAL_BUFFER_FILE_MAGIC: u64 = 0x2f30_312c_3429_2c2a;
@@ -311,8 +309,8 @@ impl<'a> RawDbHandle<'a> {
             .map_err(|_| FidbfParseError::MalformedRawFidDatabase("buffer id".to_string()))?
             + 1;
         let block_offset = block_index.checked_mul(self.block_size).ok_or_else(|| {
-                FidbfParseError::MalformedRawFidDatabase("block offset overflow".to_string())
-            })?;
+            FidbfParseError::MalformedRawFidDatabase("block offset overflow".to_string())
+        })?;
         let block = checked_slice(self.bytes, block_offset, self.block_size)?;
         let stored_id = read_i32(block, 1)?;
         if stored_id != buffer_id {
@@ -363,11 +361,7 @@ pub(crate) fn schema_from_encoded(
     })
 }
 
-fn decode_record(
-    key: i64,
-    schema: &RawSchema,
-    bytes: &[u8],
-) -> Result<RawRecord, FidbfParseError> {
+fn decode_record(key: i64, schema: &RawSchema, bytes: &[u8]) -> Result<RawRecord, FidbfParseError> {
     if schema.key_type != RawFieldType::Long {
         return Err(FidbfParseError::UnsupportedRawFidDatabase(format!(
             "unsupported non-long table key type {:?}",
@@ -384,9 +378,7 @@ fn decode_record(
     Ok(RawRecord { key, values })
 }
 
-pub(crate) fn primary_tables_by_name(
-    tables: Vec<RawTableMeta>,
-) -> HashMap<String, RawTableMeta> {
+pub(crate) fn primary_tables_by_name(tables: Vec<RawTableMeta>) -> HashMap<String, RawTableMeta> {
     tables
         .into_iter()
         .filter(|table| table.index_column < 0)
@@ -422,19 +414,29 @@ pub(crate) fn expect_long(value: Option<RawValue>, name: &str) -> Result<i64, Fi
     }
 }
 
-pub(crate) fn expect_string(value: Option<RawValue>, name: &str) -> Result<String, FidbfParseError> {
+pub(crate) fn expect_string(
+    value: Option<RawValue>,
+    name: &str,
+) -> Result<String, FidbfParseError> {
     match value {
         Some(RawValue::String(value)) => value.ok_or_else(|| {
-            FidbfParseError::MalformedRawFidDatabase(format!("required string field {name} is null"))
+            FidbfParseError::MalformedRawFidDatabase(format!(
+                "required string field {name} is null"
+            ))
         }),
         other => Err(type_error(name, "String", other)),
     }
 }
 
-pub(crate) fn expect_binary(value: Option<RawValue>, name: &str) -> Result<Vec<u8>, FidbfParseError> {
+pub(crate) fn expect_binary(
+    value: Option<RawValue>,
+    name: &str,
+) -> Result<Vec<u8>, FidbfParseError> {
     match value {
         Some(RawValue::Binary(value)) => value.ok_or_else(|| {
-            FidbfParseError::MalformedRawFidDatabase(format!("required binary field {name} is null"))
+            FidbfParseError::MalformedRawFidDatabase(format!(
+                "required binary field {name} is null"
+            ))
         }),
         other => Err(type_error(name, "Binary", other)),
     }
@@ -448,16 +450,15 @@ fn type_error(name: &str, expected: &str, actual: Option<RawValue>) -> FidbfPars
 
 fn xor_chained_data(bytes: &mut [u8], buffer_offset: usize) {
     const XOR_MASK_BYTES: [u8; 128] = [
-        0x59, 0xea, 0x67, 0x23, 0xda, 0xb8, 0x00, 0xb8, 0xc3, 0x48, 0xdd, 0x8b, 0x21, 0xd6,
-        0x94, 0x78, 0x35, 0xab, 0x2b, 0x7e, 0xb2, 0x4f, 0x82, 0x4e, 0x0e, 0x16, 0xc4, 0x57,
-        0x12, 0x8e, 0x7e, 0xe6, 0xb6, 0xbd, 0x56, 0x91, 0x57, 0x72, 0xe6, 0x91, 0xdc, 0x52,
-        0x2e, 0xf2, 0x1a, 0xb7, 0xd6, 0x6f, 0xda, 0xde, 0xe8, 0x48, 0xb1, 0xbb, 0x50, 0x6f,
-        0xf4, 0xdd, 0x11, 0xee, 0xf2, 0x67, 0xfe, 0x48, 0x8d, 0xae, 0x69, 0x1a, 0xe0, 0x26,
-        0x8c, 0x24, 0x8e, 0x17, 0x76, 0x51, 0xe2, 0x60, 0xd7, 0xe6, 0x83, 0x65, 0xd5, 0xf0,
-        0x7f, 0xf2, 0xa0, 0xd6, 0x4b, 0xbd, 0x24, 0xd8, 0xab, 0xea, 0x9e, 0xa6, 0x48, 0x94,
-        0x3e, 0x7b, 0x2c, 0xf4, 0xce, 0xdc, 0x69, 0x11, 0xf8, 0x3c, 0xa7, 0x3f, 0x5d, 0x77,
-        0x94, 0x3f, 0xe4, 0x8e, 0x48, 0x20, 0xdb, 0x56, 0x32, 0xc1, 0x87, 0x01, 0x2e, 0xe3,
-        0x7f, 0x40,
+        0x59, 0xea, 0x67, 0x23, 0xda, 0xb8, 0x00, 0xb8, 0xc3, 0x48, 0xdd, 0x8b, 0x21, 0xd6, 0x94,
+        0x78, 0x35, 0xab, 0x2b, 0x7e, 0xb2, 0x4f, 0x82, 0x4e, 0x0e, 0x16, 0xc4, 0x57, 0x12, 0x8e,
+        0x7e, 0xe6, 0xb6, 0xbd, 0x56, 0x91, 0x57, 0x72, 0xe6, 0x91, 0xdc, 0x52, 0x2e, 0xf2, 0x1a,
+        0xb7, 0xd6, 0x6f, 0xda, 0xde, 0xe8, 0x48, 0xb1, 0xbb, 0x50, 0x6f, 0xf4, 0xdd, 0x11, 0xee,
+        0xf2, 0x67, 0xfe, 0x48, 0x8d, 0xae, 0x69, 0x1a, 0xe0, 0x26, 0x8c, 0x24, 0x8e, 0x17, 0x76,
+        0x51, 0xe2, 0x60, 0xd7, 0xe6, 0x83, 0x65, 0xd5, 0xf0, 0x7f, 0xf2, 0xa0, 0xd6, 0x4b, 0xbd,
+        0x24, 0xd8, 0xab, 0xea, 0x9e, 0xa6, 0x48, 0x94, 0x3e, 0x7b, 0x2c, 0xf4, 0xce, 0xdc, 0x69,
+        0x11, 0xf8, 0x3c, 0xa7, 0x3f, 0x5d, 0x77, 0x94, 0x3f, 0xe4, 0x8e, 0x48, 0x20, 0xdb, 0x56,
+        0x32, 0xc1, 0x87, 0x01, 0x2e, 0xe3, 0x7f, 0x40,
     ];
     for (idx, byte) in bytes.iter_mut().enumerate() {
         *byte ^= XOR_MASK_BYTES[(buffer_offset + idx) % XOR_MASK_BYTES.len()];

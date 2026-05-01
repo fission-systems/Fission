@@ -217,8 +217,8 @@ fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "call");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x4014ed)
-        .expect("lift call rel32");
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x4014ed).expect("lift call rel32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -457,11 +457,11 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
     );
     assert!(!details.compat_emitter_used);
     assert!(
-        ops.iter()
-            .any(|op| op.opcode == PcodeOpcode::IntOr
-                && op.inputs
-                    .get(1)
-                    .is_some_and(|input| input.is_constant && input.constant_val == 0x5060_0000)),
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntOr
+            && op
+                .inputs
+                .get(1)
+                .is_some_and(|input| input.is_constant && input.constant_val == 0x5060_0000)),
         "expected movk INT_OR to use exported shifted immediate; ops={ops:?}"
     );
 }

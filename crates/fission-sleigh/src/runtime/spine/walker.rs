@@ -51,7 +51,10 @@ impl RuntimeParserWalker {
             let bit_pos = start_bit + i;
             let byte_idx = (bit_pos / 8) as usize;
             let bit_in_byte = bit_pos % 8;
-            let bit = bytes.get(byte_idx).map(|b| (b >> bit_in_byte) & 1).unwrap_or(0);
+            let bit = bytes
+                .get(byte_idx)
+                .map(|b| (b >> bit_in_byte) & 1)
+                .unwrap_or(0);
             result |= u64::from(bit) << i;
         }
         result
