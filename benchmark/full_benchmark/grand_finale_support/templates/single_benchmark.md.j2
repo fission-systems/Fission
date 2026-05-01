@@ -38,6 +38,29 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+{% set attribution = (summary.similarity_attribution or {}).get("pyghidra_vs_fission", {}) or {} %}
+{% if attribution %}
+## Similarity Attribution
+
+Report-only row attribution for decompiler quality. These buckets do not repair pseudocode or change scoring.
+
+### Owner Buckets
+
+| Bucket | Rows |
+| --- | ---: |
+{% for key, value in (attribution.get("bucket_counts", {}) or {})|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% endfor %}
+
+### Surface Scores
+
+| Surface | Avg score |
+| --- | ---: |
+{% for key, value in (attribution.get("average_scores", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+{% endif %}
+
 {% set normalize_pass_metrics = (summary.normalize_pass_metrics or {}).get("fission", {}) or {} %}
 ## Normalize Pass Metrics
 

@@ -108,6 +108,22 @@ AUTO_VAR_RE = re.compile(
     r"\b(?:local|param|extraout|in|unaff|uStack|puStack|iVar|uVar|bVar|cVar|sVar|lVar|auStack)"
     r"[A-Za-z0-9_]*\b"
 )
+CALL_NAME_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_@$]*)\s*\(")
+STACK_LOCAL_RE = re.compile(
+    r"\b(?:rsp|rbp|esp|ebp|sp|bp|stack|home|local|param|uStack|puStack)[A-Za-z0-9_]*\b",
+    re.IGNORECASE,
+)
+CONTROL_FLOW_RE = re.compile(
+    r"\b(?:if|else|while|for|switch|case|break|continue|return|goto)\b|"
+    r"\b(?:LAB|label|bb)_[A-Za-z0-9_]+\b"
+)
+TYPE_NAME_RE = re.compile(
+    r"\b(?:undefined\d*|undefined|ulonglong|longlong|uint\d*_t|int\d*_t|uint|int|uchar|char|"
+    r"void|bool|size_t|local|param|uVar|iVar|bVar|cVar|sVar|lVar|FUN|sub|DAT|LAB)"
+    r"[A-Za-z0-9_]*\b"
+)
+LITERAL_RE = re.compile(r"\b0x[0-9a-fA-F]+\b|\b-?\d+\b")
+CALL_KEYWORDS = frozenset({"if", "for", "while", "switch", "return", "sizeof", "case"})
 SYNTHETIC_FAILURE_PREFIX = "// Decompilation failed:"
 SIMILARITY_BACKEND = "rapidfuzz" if _rapidfuzz_fuzz is not None else "difflib"
 
@@ -133,6 +149,119 @@ CORPUS_REPORT_ONLY_ROLES = frozenset({"smoke_sentinel", "diagnostic_only"})
 CORPUS_SUITE_TIERS = frozenset({"smoke", "release", "parity"})
 CORPUS_GATE_MODES = frozenset({"advisory", "blocking"})
 DEFAULT_DYNAMIC_WATCHLIST_LIMIT = 5
+
+
+def _surface_tokens(pattern: re.Pattern[str], code: str) -> list[str]:
+    tokens: list[str] = []
+    for match in pattern.finditer(code or ""):
+        value = match.group(1) if match.lastindex else match.group(0)
+        if not value:
+            continue
+        lowered = value.lower()
+        if pattern is CALL_NAME_RE and lowered in CALL_KEYWORDS:
+            continue
+        tokens.append(lowered)
+    return tokens
+
+
+def _multiset_similarity(left_tokens: list[str], right_tokens: list[str]) -> float:
+    if not left_tokens and not right_tokens:
+        return 100.0
+    if not left_tokens or not right_tokens:
+        return 0.0
+    left_counts: dict[str, int] = {}
+    right_counts: dict[str, int] = {}
+    for token in left_tokens:
+        left_counts[token] = left_counts.get(token, 0) + 1
+    for token in right_tokens:
+        right_counts[token] = right_counts.get(token, 0) + 1
+    overlap = sum(min(left_counts.get(token, 0), right_counts.get(token, 0)) for token in left_counts)
+    total = len(left_tokens) + len(right_tokens)
+    return round((2.0 * overlap / max(total, 1)) * 100.0, 3)
+
+
+def _surface_score(pattern: re.Pattern[str], left_code: str, right_code: str) -> float:
+    return _multiset_similarity(_surface_tokens(pattern, left_code), _surface_tokens(pattern, right_code))
+
+
+def build_similarity_attribution(
+    left_norm: str,
+    right_norm: str,
+    row: dict[str, Any],
+    right_label: str,
+) -> dict[str, Any]:
+    call_score = _surface_score(CALL_NAME_RE, left_norm, right_norm)
+    stack_score = _surface_score(STACK_LOCAL_RE, left_norm, right_norm)
+    control_score = _surface_score(CONTROL_FLOW_RE, left_norm, right_norm)
+    name_type_score = _surface_score(TYPE_NAME_RE, left_norm, right_norm)
+    literal_score = _surface_score(LITERAL_RE, left_norm, right_norm)
+
+    prefix = f"{right_label}_"
+    active_buckets: list[str] = []
+    if (
+        _safe_int(row.get(f"{prefix}call_target_unresolved_sub_fallback_count"), 0) > 0
+        or _safe_int(row.get(f"{prefix}call_target_context_missing_count"), 0) > 0
+        or call_score < 50.0
+    ):
+        active_buckets.append("call_target_missing")
+    if (
+        _safe_int(row.get(f"{prefix}call_prototype_signature_missing_count"), 0) > 0
+        or _safe_int(row.get(f"{prefix}call_prototype_unknown_target_kept_count"), 0) > 0
+    ):
+        active_buckets.append("prototype_arity_missing")
+    if _safe_int(row.get(f"{prefix}materialization_stabilized_count"), 0) > 0 and stack_score < 80.0:
+        active_buckets.append("stack_local_unmerged")
+    if (
+        _safe_int(row.get(f"{prefix}goto_total"), 0) > 0
+        or _safe_int(row.get(f"{prefix}top_level_label_total"), 0) > 0
+        or control_score < 60.0
+    ):
+        active_buckets.append("control_flow_goto_heavy")
+    if (
+        _safe_int(row.get(f"{prefix}generic_local_name_sum"), 0) > 0
+        or _safe_int(row.get(f"{prefix}generic_param_name_sum"), 0) > 0
+        or _safe_int(row.get(f"{prefix}unknown_type_var_total"), 0) > 0
+        or name_type_score < 60.0
+    ):
+        active_buckets.append("type_name_surface")
+    if literal_score < 70.0:
+        active_buckets.append("literal_or_const_surface")
+
+    return {
+        "call_surface_score": call_score,
+        "stack_local_score": stack_score,
+        "control_flow_score": control_score,
+        "name_type_score": name_type_score,
+        "literal_score": literal_score,
+        "similarity_owner_bucket": active_buckets[0] if active_buckets else "no_dominant_owner",
+        "similarity_owner_buckets": active_buckets,
+    }
+
+
+def summarize_similarity_attribution(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    bucket_counts: dict[str, int] = {}
+    score_keys = (
+        "call_surface_score",
+        "stack_local_score",
+        "control_flow_score",
+        "name_type_score",
+        "literal_score",
+    )
+    score_values: dict[str, list[float]] = {key: [] for key in score_keys}
+    for row in rows:
+        buckets = row.get("similarity_owner_buckets") or [row.get("similarity_owner_bucket")]
+        for bucket in buckets:
+            if bucket:
+                bucket_counts[str(bucket)] = bucket_counts.get(str(bucket), 0) + 1
+        for key in score_keys:
+            score_values[key].append(_safe_float(row.get(key), 0.0))
+    return {
+        "bucket_counts": bucket_counts,
+        "average_scores": {
+            key: round(statistics.fmean(values), 3) if values else 0.0
+            for key, values in score_values.items()
+        },
+    }
 
 OWNER_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("procedure_summary_contracted_count", "procedure_summary_contracted"),
@@ -445,6 +574,25 @@ def _merge_named_metric_totals(metric_maps: dict[str, dict[str, float]]) -> dict
     return {
         key: int(value) if abs(value - round(value)) <= 1e-9 else round(value, 6)
         for key, value in sorted(totals.items())
+    }
+
+
+def _merge_similarity_attribution_totals(
+    attribution_maps: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    bucket_counts: dict[str, int] = {}
+    score_values: dict[str, list[float]] = {}
+    for attribution in attribution_maps.values():
+        for key, value in (attribution.get("bucket_counts", {}) or {}).items():
+            bucket_counts[str(key)] = bucket_counts.get(str(key), 0) + _safe_int(value, 0)
+        for key, value in (attribution.get("average_scores", {}) or {}).items():
+            score_values.setdefault(str(key), []).append(_safe_float(value, 0.0))
+    return {
+        "bucket_counts": dict(sorted(bucket_counts.items())),
+        "average_scores": {
+            key: round(statistics.fmean(values), 3) if values else 0.0
+            for key, values in sorted(score_values.items())
+        },
     }
 
 
@@ -3988,6 +4136,8 @@ def build_pairwise_engine_comparison(
         )
         left_norm = left_entry.get("normalized_code", "")
         right_norm = right_entry.get("normalized_code", "")
+        left_code = left_entry.get("code", "")
+        right_code = right_entry.get("code", "")
         normalized_similarity = similarity_percent(left_norm, right_norm)
         both_success = bool(left_entry.get("success") and right_entry.get("success"))
         row = {
@@ -4092,8 +4242,25 @@ def build_pairwise_engine_comparison(
             row[f"{label}_memory_fact_prefilter_skip_count"] = _safe_int(
                 preview_build_stats.get("memory_fact_prefilter_skip_count"), 0
             )
+            for metric_name in (
+                "call_prototype_exact_api_arity_pruned_count",
+                "call_prototype_unknown_target_kept_count",
+                "call_prototype_wrapper_resolved_count",
+                "call_prototype_signature_missing_count",
+                "call_target_import_resolved_count",
+                "call_target_direct_symbol_resolved_count",
+                "call_target_unresolved_sub_fallback_count",
+                "call_target_context_missing_count",
+                "goto_total",
+                "top_level_label_total",
+                "generic_local_name_sum",
+                "generic_param_name_sum",
+                "unknown_type_var_total",
+            ):
+                row[f"{label}_{metric_name}"] = _safe_int(preview_build_stats.get(metric_name), 0)
             for flag_name, flag_value in _canonical_indirect_flags(preview_build_stats).items():
                 row[f"{label}_{flag_name}"] = flag_value
+        row.update(build_similarity_attribution(left_code, right_code, row, right_label))
         rows.append(row)
         if both_success:
             successful_rows.append(row)
@@ -4127,6 +4294,7 @@ def build_pairwise_engine_comparison(
         "comparisons": rows,
         "left_only": left_only,
         "right_only": right_only,
+        "similarity_attribution": summarize_similarity_attribution(successful_rows),
         "summary": {
             "left_total_count": len(left_addrs),
             "right_total_count": len(right_addrs),
@@ -4292,6 +4460,9 @@ def build_comparison(
     residue_families = {
         "pyghidra_vs_fission": build_residue_family_summary(pair_py_fission),
     }
+    similarity_attribution = {
+        "pyghidra_vs_fission": pair_py_fission.get("similarity_attribution", {}),
+    }
     row_fidelity_targets = {
         "pyghidra_vs_fission": build_row_fidelity_targets_snapshot(
             pair_py_fission,
@@ -4384,6 +4555,7 @@ def build_comparison(
         "quality_layers": layered_quality,
         "proof_fidelity": proof_fidelity,
         "residue_families": residue_families,
+        "similarity_attribution": similarity_attribution,
         "row_fidelity_targets": row_fidelity_targets,
         "resources": {
             "pyghidra": py_resources,
@@ -4878,6 +5050,7 @@ def build_corpus_assessment(
     blockgraph_region_metrics_per_binary: dict[str, dict[str, float]] = {}
     alias_interleave_metrics_per_binary: dict[str, dict[str, float]] = {}
     cpu_metrics_per_binary: dict[str, dict[str, float]] = {}
+    similarity_attribution_per_binary: dict[str, dict[str, Any]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
     watchlist_source_per_binary: dict[str, str] = {}
     watchlist_reason_counts: dict[str, int] = {}
@@ -5051,6 +5224,13 @@ def build_corpus_assessment(
             )
             else {}
         )
+        similarity_attribution = _lookup_path(
+            benchmark,
+            ("summary", "similarity_attribution", "pyghidra_vs_fission"),
+            {},
+        )
+        if not isinstance(similarity_attribution, dict):
+            similarity_attribution = {}
         target_structuring_rows = list(
             _lookup_path(benchmark, ("summary", "target_structuring_rows"), []) or []
         )
@@ -5123,6 +5303,7 @@ def build_corpus_assessment(
         blockgraph_region_metrics_per_binary[binary_id] = blockgraph_region_metrics
         alias_interleave_metrics_per_binary[binary_id] = alias_interleave_metrics
         cpu_metrics_per_binary[binary_id] = cpu_metrics
+        similarity_attribution_per_binary[binary_id] = similarity_attribution
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
             giant_function_diagnostics["giant_function_speed_family_counts"]
         )
@@ -5341,6 +5522,7 @@ def build_corpus_assessment(
                 "blockgraph_region_metrics": blockgraph_region_metrics,
                 "alias_interleave_metrics": alias_interleave_metrics,
                 "cpu_metrics": cpu_metrics,
+                "similarity_attribution": similarity_attribution,
                 "target_structuring_rows": target_structuring_rows,
                 "giant_function_candidates": giant_function_diagnostics[
                     "giant_function_candidates"
@@ -5386,6 +5568,9 @@ def build_corpus_assessment(
         alias_interleave_metrics_per_binary
     )
     cpu_metric_totals = _merge_cpu_metric_totals(cpu_metrics_per_binary)
+    similarity_attribution_totals = _merge_similarity_attribution_totals(
+        similarity_attribution_per_binary
+    )
     giant_function_speed_family_totals = _merge_count_maps(
         giant_function_speed_family_counts_per_binary
     )
@@ -5673,6 +5858,7 @@ def build_corpus_assessment(
             "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
             "alias_interleave_metric_totals": alias_interleave_metric_totals,
             "cpu_metric_totals": cpu_metric_totals,
+            "similarity_attribution_totals": similarity_attribution_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
             "blockgraph_region_rejection_totals": {
                 key: value
@@ -5707,6 +5893,8 @@ def build_corpus_assessment(
         "alias_interleave_metrics_per_binary": alias_interleave_metrics_per_binary,
         "cpu_metric_totals": cpu_metric_totals,
         "cpu_metrics_per_binary": cpu_metrics_per_binary,
+        "similarity_attribution_totals": similarity_attribution_totals,
+        "similarity_attribution_per_binary": similarity_attribution_per_binary,
         "blockgraph_region_rejection_totals": {
             key: value
             for key, value in blockgraph_region_metric_totals.items()

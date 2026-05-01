@@ -27,6 +27,7 @@ from grand_finale_support.benchmark_core import (
     _extract_shape_drift_metrics_from_engine_summary,
     _refresh_single_summary_target_rows_from_row_gate,
     _resolve_binary_watchlist,
+    build_pairwise_engine_comparison,
     build_corpus_assessment,
     compare_with_previous_summary,
     load_corpus_manifest,
@@ -576,6 +577,60 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["call_target_import_resolved"], 0.0)
         self.assertEqual(metrics["call_target_unresolved_sub_fallback"], 0.0)
         self.assertEqual(metrics["dead_temp"], 0.0)
+
+    def test_pairwise_similarity_attribution_adds_owner_buckets(self) -> None:
+        pair = build_pairwise_engine_comparison(
+            "pyghidra",
+            {
+                "entries": {
+                    "0x1000": {
+                        "present": True,
+                        "success": True,
+                        "name": "FUN_1000",
+                        "code": "int FUN_1000(void) { return CloseHandle(1); }",
+                        "normalized_code": "int fun void return closehandle 1",
+                        "preview_build_stats": {},
+                    }
+                }
+            },
+            "fission",
+            {
+                "entries": {
+                    "0x1000": {
+                        "present": True,
+                        "success": True,
+                        "name": "FUN_1000",
+                        "code": "undefined FUN_1000(void) { goto LAB_1; }",
+                        "normalized_code": "undefined fun void goto lab_1",
+                        "preview_build_stats": {
+                            "call_target_unresolved_sub_fallback_count": 1,
+                            "materialization_stabilized_count": 1,
+                            "goto_total": 1,
+                            "generic_local_name_sum": 1,
+                        },
+                    }
+                }
+            },
+            pairwise_similarity_mode="shared-full",
+            pairwise_sample_size=5,
+            pairwise_auto_shared_full_max=100,
+            compute_raw_similarity=False,
+            aggregate_similarity_mode="weighted",
+        )
+
+        row = pair["comparisons"][0]
+        self.assertIn("call_surface_score", row)
+        self.assertIn("stack_local_score", row)
+        self.assertIn("control_flow_score", row)
+        self.assertIn("name_type_score", row)
+        self.assertIn("literal_score", row)
+        self.assertIn("call_target_missing", row["similarity_owner_buckets"])
+        self.assertIn("control_flow_goto_heavy", row["similarity_owner_buckets"])
+        self.assertEqual(row["similarity_owner_bucket"], "call_target_missing")
+        self.assertGreaterEqual(
+            pair["similarity_attribution"]["bucket_counts"]["call_target_missing"],
+            1,
+        )
 
     def test_extract_shape_drift_metrics_from_engine_summary(self) -> None:
         engine_summary = {

@@ -47,6 +47,7 @@ class VerboseSingleSummary(FlexibleModel):
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
     alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     cpu_metrics: dict[str, Any] = Field(default_factory=dict)
+    similarity_attribution: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
@@ -79,6 +80,7 @@ class VerboseCorpusBinaryRow(FlexibleModel):
     blockgraph_region_metrics: dict[str, Any] = Field(default_factory=dict)
     alias_interleave_metrics: dict[str, Any] = Field(default_factory=dict)
     cpu_metrics: dict[str, Any] = Field(default_factory=dict)
+    similarity_attribution: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
     giant_function_speed_family_counts: dict[str, Any] = Field(default_factory=dict)
@@ -127,6 +129,8 @@ class VerboseCorpusBenchmarkArtifact(FlexibleModel):
     alias_interleave_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
     cpu_metric_totals: dict[str, Any] = Field(default_factory=dict)
     cpu_metrics_per_binary: dict[str, Any] = Field(default_factory=dict)
+    similarity_attribution_totals: dict[str, Any] = Field(default_factory=dict)
+    similarity_attribution_per_binary: dict[str, Any] = Field(default_factory=dict)
     blockgraph_region_rejection_totals: dict[str, Any] = Field(default_factory=dict)
     target_structuring_rows: list[dict[str, Any]] = Field(default_factory=list)
     unchanged_target_rows: list[dict[str, Any]] = Field(default_factory=list)
@@ -167,6 +171,7 @@ class CompactBinaryRow(FlexibleModel):
     blockgraph_region_metrics: dict[str, float] = Field(default_factory=dict)
     alias_interleave_metrics: dict[str, float] = Field(default_factory=dict)
     cpu_metrics: dict[str, float] = Field(default_factory=dict)
+    similarity_attribution: dict[str, Any] = Field(default_factory=dict)
     eligibility_reason: str = "unknown"
 
 
@@ -231,6 +236,7 @@ class CompactCorpusBenchmarkSummary(FlexibleModel):
     blockgraph_region_metric_totals: dict[str, float] = Field(default_factory=dict)
     alias_interleave_metric_totals: dict[str, float] = Field(default_factory=dict)
     cpu_metric_totals: dict[str, float] = Field(default_factory=dict)
+    similarity_attribution_totals: dict[str, Any] = Field(default_factory=dict)
     giant_function_speed_family_totals: dict[str, int] = Field(default_factory=dict)
     watchlist_reason_counts: dict[str, int] = Field(default_factory=dict)
     top_degraded_rows: list[CompactRowExample] = Field(default_factory=list)

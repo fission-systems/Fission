@@ -429,6 +429,7 @@ def build_corpus_compact_summary(
                     row.cpu_metrics,
                     allowed_keys=SELECTED_CPU_KEYS,
                 ),
+                "similarity_attribution": dict(row.similarity_attribution or {}),
                 "eligibility_reason": str((row.eligibility or {}).get("reason") or "unknown"),
                 "weight": _safe_float(row.weight, 0.0),
             }
@@ -482,6 +483,7 @@ def build_corpus_compact_summary(
                         record["cpu_metrics"],
                         allowed_keys=SELECTED_CPU_KEYS,
                     ),
+                    similarity_attribution=dict(record.get("similarity_attribution") or {}),
                     eligibility_reason=str(record["eligibility_reason"]),
                 )
             )
@@ -587,6 +589,7 @@ def build_corpus_compact_summary(
         blockgraph_region_metric_totals=blockgraph_region_totals,
         alias_interleave_metric_totals=alias_interleave_totals,
         cpu_metric_totals=cpu_metric_totals,
+        similarity_attribution_totals=dict(artifact.similarity_attribution_totals or {}),
         giant_function_speed_family_totals=giant_function_speed_family_totals,
         watchlist_reason_counts={
             str(key): _safe_int(value, 0)

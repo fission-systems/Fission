@@ -283,3 +283,78 @@
 - `cargo test -p fission-loader -- --test-threads=1`
 - `cargo build --release -p fission-cli`
 - `python3 -m py_compile benchmark/asm_benchmark/*.py`
+
+## Decompiler Quality V4: Similarity Attribution
+
+### Summary
+
+- Added report-only row-level decompiler similarity attribution for the sqlite3 focused lane.
+- Kept this wave diagnostic-only: no stack rewrite, call rewrite expansion, printer repair, benchmark repair, or binary-specific rule was added.
+- Added a new focused manifest at `benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json`.
+- The attribution connects rendered-code surface scores and existing owner metrics to owner buckets so low similarity can be triaged before semantic changes.
+
+### Implementation
+
+- Added additive per-row scores to full-benchmark pairwise rows:
+  - `call_surface_score`
+  - `stack_local_score`
+  - `control_flow_score`
+  - `name_type_score`
+  - `literal_score`
+- Added report-only owner buckets:
+  - `call_target_missing`
+  - `prototype_arity_missing`
+  - `stack_local_unmerged`
+  - `control_flow_goto_heavy`
+  - `type_name_surface`
+  - `literal_or_const_surface`
+- Added corpus/single benchmark summary aggregation for bucket counts and average scores.
+- Updated compact artifacts and markdown templates so attribution appears in generated reports.
+- Added unit coverage for attribution fields and owner bucket extraction.
+
+### Decompiler Sentinel
+
+- Command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v4_similarity_attribution`
+- Result:
+  - `avg_norm_sim=27.610%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+- Attribution bucket counts:
+  - `call_target_missing=20`
+  - `prototype_arity_missing=16`
+  - `stack_local_unmerged=16`
+  - `control_flow_goto_heavy=15`
+  - `type_name_surface=20`
+  - `literal_or_const_surface=19`
+- Average surface scores:
+  - `call_surface_score=0.000`
+  - `stack_local_score=15.000`
+  - `control_flow_score=44.089`
+  - `name_type_score=1.137`
+  - `literal_score=13.819`
+- Interpretation:
+  - The remaining gap is now clearly decompiler-quality work, not loader seed mismatch.
+  - The first exact owner candidates are call-target/prototype materialization and stack-local merging, but they need semantic evidence before promotion.
+
+### Assembly Guard
+
+- Command:
+  - `python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks_v4_guard`
+- Result:
+  - `full_match=3/3`
+  - `average_similarity_score=1.0`
+  - `average_address_score=1.0`
+  - `average_bytes_score=1.0`
+  - `average_text_score=1.0`
+
+### Validation
+
+- `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py`
+- `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_pairwise_similarity_attribution_adds_owner_buckets benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_extract_owner_metrics_from_engine_summary`
+- `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_pairwise_similarity_attribution_adds_owner_buckets benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_build_corpus_compact_summary_keeps_capped_binary_rows benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_render_corpus_markdown_and_console_smoke`
+- `cargo test -p fission-pcode call_target -- --test-threads=1`
+- `cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1`
+- `cargo test -p fission-pcode type_hints_imports -- --test-threads=1`
+- `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
+- `cargo build --release -p fission-cli`

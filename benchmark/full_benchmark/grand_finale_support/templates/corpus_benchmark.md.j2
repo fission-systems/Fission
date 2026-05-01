@@ -45,6 +45,29 @@ Presentation-oriented proxies only; these are not semantic truth.
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
+{% set attribution = payload.get("similarity_attribution_totals", {}) or {} %}
+{% if attribution %}
+## Similarity Attribution
+
+Report-only row attribution for decompiler quality. These buckets do not repair pseudocode or change scoring.
+
+### Owner Buckets
+
+| Bucket | Rows |
+| --- | ---: |
+{% for key, value in (attribution.get("bucket_counts", {}) or {})|dictsort %}
+| `{{ key }}` | {{ value }} |
+{% endfor %}
+
+### Surface Scores
+
+| Surface | Avg score |
+| --- | ---: |
+{% for key, value in (attribution.get("average_scores", {}) or {})|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+{% endif %}
+
 ## Normalize Pass Totals
 
 | Metric | Total |
