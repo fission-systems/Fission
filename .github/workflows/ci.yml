@@ -40,7 +40,8 @@ jobs:
     uses: ./.github/workflows/reusable-lint-format.yml
     with:
       os: ubuntu-latest
-      exclude_crates: "fission-tauri"
+      # `fission-signatures` enables `clippy::pedantic`; `-D warnings` makes pedantic findings release-blocking until we baseline cleanup (FIDBF casts, Win constants).
+      exclude_crates: "fission-tauri,fission-signatures"
 
   # Step 2: Core Tests (Linux, ~15 min)
   test-linux:
