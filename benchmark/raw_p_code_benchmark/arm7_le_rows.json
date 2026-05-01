@@ -1,0 +1,20 @@
+{
+  "name": "arm7-le-raw-pcode-smoke",
+  "notes": "ARM7_le ARM-mode executable rows only. Thumb rows require explicit context proof and live in a separate future manifest.",
+  "rows": [
+    {
+      "name": "arm7-le-not-packed-elf32-init-arm-mode",
+      "entry_id": "ARM7_le",
+      "binary": "benchmark/binary/ARM7_le/vendor_binaries/armhf/not_packed_elf32",
+      "addr": "0x102e8",
+      "count": 3,
+      "language": "ARM:LE:32:v7",
+      "compiler": "default",
+      "disassemble_missing": false,
+      "feature_group": "architecture",
+      "feature": "arm7_le_arm_mode_init",
+      "owner": "raw_pcode_arm7_le_lane",
+      "notes": "ARM mode .init row selected from an executable ELF mapping-symbol $a range; Thumb rows are intentionally excluded."
+    }
+  ]
+}

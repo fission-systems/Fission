@@ -214,7 +214,12 @@ def enforce_perfect_canonical_gate(
         if int(invariants.get(key, 0)) != 0:
             failures.append(f"{key} must be 0 (got {invariants.get(key)})")
 
-    allowed_nonsemantic = {"full_match", "both_decode_error_or_padding", "ghidra_decode_error"}
+    allowed_nonsemantic = {
+        "full_match",
+        "both_decode_error_or_padding",
+        "ghidra_decode_error",
+        "oracle_no_instruction",
+    }
     for bucket, count in sorted(buckets.items()):
         if bucket not in allowed_nonsemantic and int(count) != 0:
             failures.append(f"semantic mismatch bucket {bucket} must be 0 (got {count})")

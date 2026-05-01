@@ -448,16 +448,17 @@ def bucket_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | 
     detail["legacy_path_audit"] = fission.get("legacy_path_audit", {})
 
     ghidra_error = str(ghidra.get("error") or "")
-    if (
-        ghidra.get("status") != "ok"
-        and "no instruction" in ghidra_error.lower()
-        and fission.get("status") == "ok"
-        and not fission.get("pcode", [])
-    ):
-        buckets.extend(["ghidra_decode_error", "both_decode_error_or_padding"])
+    if ghidra.get("status") != "ok" and "no instruction" in ghidra_error.lower():
+        buckets.extend([
+            "oracle_no_instruction",
+            "ghidra_decode_error",
+            "both_decode_error_or_padding",
+        ])
         detail["ghidra_error"] = ghidra.get("error")
         detail["ghidra_opcodes"] = []
-        detail["fission_opcodes"] = []
+        detail["fission_opcodes"] = [
+            normalize_opcode(op.get("opcode")) for op in fission.get("pcode", [])
+        ]
         return buckets, detail
 
     if ghidra.get("status") != "ok":

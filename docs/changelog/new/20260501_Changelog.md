@@ -582,3 +582,61 @@
 - `BoundOperand` remains display/debug data; raw p-code success continues to require decoded `.sla ConstructTpl` execution.
 - Native backend role remains candidate acceleration only; final success is still common Rust terminal verification plus checked `.sla ConstructTpl` execution.
 - Benchmark output artifacts, Ghidra project DB state, generated target cache, and copied sample binaries remain uncommitted.
+
+## ARM7_le ARM-mode Raw P-code Lane
+
+- Added the first ARM7_le raw p-code parity manifest: `benchmark/raw_p_code_benchmark/arm7_le_rows.json`.
+- Scope is intentionally ARM mode only. Thumb rows remain excluded until an exact context source is available; no low-bit, symbol-name, table-name, mnemonic, or binary-specific ARM/Thumb guessing was added.
+- The prior `llvm-arm7-le-baremetal @ 0x100000` row is now treated as an oracle admission failure rather than a semantic mismatch when Ghidra cannot create an instruction at the row start.
+- `compare_raw_pcode.py` now emits an `oracle_no_instruction` bucket for `no instruction` Ghidra oracle rows, and the perfect canonical gate allows that bucket as nonsemantic alongside existing decode-error/padding buckets.
+- Added targeted runtime regression `generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template` using `ARM7_le.slaspec` from the ARM processor directory and the ARM-mode `stmdb`/push bytes from the admitted ELF row.
+
+## ARM7_le Validation
+
+- Invalid-oracle baseline report: `benchmark/artifacts/raw_p_code_benchmark/arm7_le_oracle_no_instruction_baseline/aggregate_raw_pcode_parity_report.json`
+  - `bucket_totals.oracle_no_instruction = 1`
+  - `bucket_totals.ghidra_decode_error = 1`
+  - `bucket_totals.both_decode_error_or_padding = 1`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+- Admitted ARM-mode row: `benchmark/binary/ARM7_le/vendor_binaries/armhf/not_packed_elf32 @ 0x102e8`, `count = 3`.
+- ARM7_le focused report: `benchmark/artifacts/raw_p_code_benchmark/arm7_le_arm_mode_parity/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 3`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 3`
+- AArch64 guard report: `benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_aarch64_guard/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 8`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 8`
+- x86-64 canonical guard report: `benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_x86_64_guard/aggregate_raw_pcode_parity_report.json`
+  - `perfect_canonical_gate = passed`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+- Vendor smoke report: `benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_vendor_guard/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 16`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+
+## ARM7_le Notes
+
+- This wave adds row admission and regression coverage; it does not add ARM-specific runtime/compiler policy.
+- Successful p-code remains decoded `.sla ConstructTpl` only.
+- No architecture-specific Rust branch, mnemonic/table-name/source-line remap, manual mapping, or approximate p-code was introduced.
+- Benchmark output artifacts, Ghidra project DB state, generated target cache, and copied sample binaries remain uncommitted.

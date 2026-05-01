@@ -467,6 +467,27 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
 }
 
 #[test]
+fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
+    let arm_spec = spec_root_for_arch("ARM").join("ARM7_le.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM7_le");
+    let bytes = [0x08, 0x40, 0x2d, 0xe9];
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x102e8).expect("decode stmdb");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "stmdb");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x102e8)
+        .expect("lift ARM mode stmdb");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
+}
+
+#[test]
 fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let files = [
