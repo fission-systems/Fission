@@ -431,8 +431,7 @@ impl OpinionDatabase {
                 query.loader.as_ref(),
                 query.primary.as_ref(),
                 query.processor.as_ref(),
-            )
-                && !loader.is_empty()
+            ) && !loader.is_empty()
                 && !primary.is_empty()
                 && !processor.is_empty()
             {
