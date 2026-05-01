@@ -55,8 +55,13 @@ jobs:
           else
             PROFILE_DIR="debug"
           fi
-          
-          TARGET_DIR="${{ inputs.target && format('target/{0}/release', inputs.target) || format('target/{0}', PROFILE_DIR) }}"
+
+          TARGET="${{ inputs.target }}"
+          if [ -n "$TARGET" ]; then
+            TARGET_DIR="target/$TARGET/$PROFILE_DIR"
+          else
+            TARGET_DIR="target/$PROFILE_DIR"
+          fi
           
           if [ "${{ runner.os }}" = "Windows" ]; then
             BINARY_NAME="fission_cli.exe"
