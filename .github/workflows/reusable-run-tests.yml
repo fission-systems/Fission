@@ -69,8 +69,18 @@ jobs:
 
       - name: Run Full Test Suite (All Crates)
         if: ${{ inputs.crates == '' }}
+        shell: bash
         run: |
-          cargo test --workspace ${{ format('--exclude {0}', inputs.exclude_crates) }} --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+          exclude_flags=()
+          if [ -n "${{ inputs.exclude_crates }}" ]; then
+            IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
+            for c in "${EX[@]}"; do
+              c="$(echo "$c" | tr -d '[:space:]')"
+              [ -z "$c" ] && continue
+              exclude_flags+=(--exclude "$c")
+            done
+          fi
+          cargo test --workspace "${exclude_flags[@]}" --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
           # Also test excluded crates separately if needed
           cargo test -p fission-static --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
 

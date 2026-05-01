@@ -37,4 +37,15 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint with Clippy (Deny Warnings)
-        run: cargo clippy --workspace ${{ format('--exclude {0}', inputs.exclude_crates) }} --locked -- -D warnings
+        shell: bash
+        run: |
+          exclude_flags=()
+          if [ -n "${{ inputs.exclude_crates }}" ]; then
+            IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
+            for c in "${EX[@]}"; do
+              c="$(echo "$c" | tr -d '[:space:]')"
+              [ -z "$c" ] && continue
+              exclude_flags+=(--exclude "$c")
+            done
+          fi
+          cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings

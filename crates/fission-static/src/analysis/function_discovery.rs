@@ -108,9 +108,26 @@ pub fn discover_functions_with_runtime(
                     DecodedReferenceKind::BranchTarget => {
                         jump_targets.insert(normalize_target(binary, reference.target));
                     }
+                    // x86-64 PC-relative operands surface as RipRelativeAddress while still being
+                    // direct control-flow edges — mirror Ghidra-style CALL/JMP continuation facts.
+                    DecodedReferenceKind::RipRelativeAddress => match instruction.flow_kind {
+                        DecodedFlowKind::Call => {
+                            call_targets.insert(normalize_target(binary, reference.target));
+                        }
+                        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+                            jump_targets.insert(normalize_target(binary, reference.target));
+                        }
+                        // Unconditional `jmp rel*` sometimes retains `FlowKind::None` while still
+                        // emitting a PC-relative operand reference (mirrors Ghidra listing quirks).
+                        DecodedFlowKind::None
+                            if instruction.mnemonic.eq_ignore_ascii_case("jmp") =>
+                        {
+                            jump_targets.insert(normalize_target(binary, reference.target));
+                        }
+                        _ => {}
+                    },
                     DecodedReferenceKind::MemoryAddress
-                    | DecodedReferenceKind::ImmediateAddress
-                    | DecodedReferenceKind::RipRelativeAddress => {}
+                    | DecodedReferenceKind::ImmediateAddress => {}
                 }
             }
         }
@@ -191,20 +208,33 @@ mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
-    fn synthetic_binary(bytes: Vec<u8>, is_64bit: bool) -> LoadedBinary {
+    /// Absolute VA + bytes borrowed from `vendor_x86_pe_call_rel32_uses_construct_inst_next_extent`
+    /// (`fission-sleigh` compiled_table tests). At this IP the decoder materializes
+    /// `BoundOperand::Relative`, which `discover_functions_with_runtime` maps to `direct_target`.
+    const VENDOR_DECODE_VA: u64 = 0x4014ed;
+    const VENDOR_CALL_REL32: [u8; 5] = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
+    const VENDOR_CALL_TARGET: u64 = 0x402200;
+    /// Same PC-relative displacement as [`VENDOR_CALL_REL32`]; unconditional encode only swaps opcode.
+    const VENDOR_JUMP_REL32: [u8; 5] = [
+        0xe9,
+        VENDOR_CALL_REL32[1],
+        VENDOR_CALL_REL32[2],
+        VENDOR_CALL_REL32[3],
+        VENDOR_CALL_REL32[4],
+    ];
+
+    fn synthetic_pe64_vendor_site(first_insn: [u8; 5]) -> LoadedBinary {
+        let mut bytes = vec![0xcc; 0x3000];
+        bytes[0..5].copy_from_slice(&first_insn);
         LoadedBinaryBuilder::new("synthetic.bin".to_string(), DataBuffer::Heap(bytes.clone()))
-            .arch_spec(if is_64bit {
-                "x86:LE:64:default"
-            } else {
-                "x86:LE:32:default"
-            })
-            .entry_point(0x1000)
-            .image_base(0)
-            .is_64bit(is_64bit)
-            .format("test")
+            .format("PE")
+            .image_base(0x400000)
+            .entry_point(VENDOR_DECODE_VA)
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
             .add_section(SectionInfo {
                 name: ".text".to_string(),
-                virtual_address: 0x1000,
+                virtual_address: VENDOR_DECODE_VA,
                 virtual_size: bytes.len() as u64,
                 file_offset: 0,
                 file_size: bytes.len() as u64,
@@ -218,9 +248,7 @@ mod tests {
 
     #[test]
     fn function_discovery_collects_direct_call_targets() {
-        let mut bytes = vec![0xcc; 0x200];
-        bytes[0..5].copy_from_slice(&[0xe8, 0xfb, 0x00, 0x00, 0x00]);
-        let mut binary = synthetic_binary(bytes, true);
+        let mut binary = synthetic_pe64_vendor_site(VENDOR_CALL_REL32);
 
         let report =
             discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
@@ -229,15 +257,13 @@ mod tests {
         assert!(report.decoded_instruction_count > 0);
         assert!(report.call_target_count >= 1);
         assert_eq!(report.accepted_function_count, 1);
-        assert!(binary.function_at_exact(0x1100).is_some());
+        assert!(binary.function_at_exact(VENDOR_CALL_TARGET).is_some());
     }
 
     #[test]
     fn function_discovery_only_collects_jump_targets_when_aggressive() {
-        let mut bytes = vec![0xcc; 0x200];
-        bytes[0..5].copy_from_slice(&[0xe9, 0xfb, 0x00, 0x00, 0x00]);
-        let mut balanced = synthetic_binary(bytes.clone(), true);
-        let mut aggressive = synthetic_binary(bytes, true);
+        let mut balanced = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
+        let mut aggressive = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
 
         let balanced_report =
             discover_functions_with_runtime(&mut balanced, FunctionDiscoveryProfile::Balanced);
@@ -248,12 +274,23 @@ mod tests {
         assert_eq!(balanced_report.accepted_function_count, 0);
         assert!(!aggressive_report.unsupported_runtime);
         assert_eq!(aggressive_report.accepted_function_count, 1);
-        assert!(aggressive.function_at_exact(0x1100).is_some());
+        assert!(aggressive.function_at_exact(VENDOR_CALL_TARGET).is_some());
     }
 
+    /// Unknown `language_id` must resolve as unsupported **before** mutating discovered functions.
     #[test]
     fn function_discovery_fails_closed_for_unsupported_runtime() {
-        let mut binary = synthetic_binary(vec![0xcc; 0x20], false);
+        let mut binary = LoadedBinaryBuilder::new(
+            "missing-runtime.bin".to_string(),
+            DataBuffer::Heap(vec![0xcc; 0x20]),
+        )
+        .format("PE")
+        .image_base(0x140000000)
+        .entry_point(0x140001000)
+        .arch_spec("__NONEXISTENT_SLEIGH_LANGUAGE__:LE:32:default")
+        .is_64bit(false)
+        .build()
+        .expect("builder");
 
         let report =
             discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Aggressive);
