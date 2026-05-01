@@ -1014,6 +1014,18 @@ pub struct NirBuildStats {
     /// Call targets/signatures tightened beyond anonymous `sub_/FUN_` defaults.
     #[serde(default)]
     pub call_signature_refined_count: usize,
+    /// Extra call arguments removed only because an exact API prototype arity was available.
+    #[serde(default)]
+    pub call_prototype_exact_api_arity_pruned_count: usize,
+    /// Calls whose arguments were kept because the target has no known identity.
+    #[serde(default)]
+    pub call_prototype_unknown_target_kept_count: usize,
+    /// Calls resolved through a wrapper summary before prototype lookup / target rewrite.
+    #[serde(default)]
+    pub call_prototype_wrapper_resolved_count: usize,
+    /// Calls with a target identity but no exact API/provider prototype.
+    #[serde(default)]
+    pub call_prototype_signature_missing_count: usize,
     /// Security-cookie setup/check pairs folded into semantic form.
     #[serde(default)]
     pub security_cookie_fold_count: usize,
@@ -1431,6 +1443,12 @@ impl NirBuildStats {
         self.home_slot_promoted_count += other.home_slot_promoted_count;
         self.va_start_recovered_count += other.va_start_recovered_count;
         self.call_signature_refined_count += other.call_signature_refined_count;
+        self.call_prototype_exact_api_arity_pruned_count +=
+            other.call_prototype_exact_api_arity_pruned_count;
+        self.call_prototype_unknown_target_kept_count +=
+            other.call_prototype_unknown_target_kept_count;
+        self.call_prototype_wrapper_resolved_count += other.call_prototype_wrapper_resolved_count;
+        self.call_prototype_signature_missing_count += other.call_prototype_signature_missing_count;
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.object_shape_recovered_count += other.object_shape_recovered_count;

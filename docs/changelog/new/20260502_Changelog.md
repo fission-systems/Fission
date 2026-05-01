@@ -68,3 +68,69 @@
 - Promote stack locals only when the owner proof and row-fidelity result both improve.
 - Add the `UnknownKiller.sys @ 0x140003360` malware sentinel once the sample is present locally.
 - Extend call/prototype telemetry so future benchmark reports can show exact prototype hits, rejected unknown targets, and stack-local merge outcomes separately.
+
+## Decompiler Quality V2: Call/Prototype Telemetry Gate
+
+### Summary
+
+- Added measurement-first call/prototype owner telemetry without changing call rewrite semantics.
+- `UnknownKiller.sys` remains an external qualitative reference only because the sample is not present locally.
+- Kept sqlite3 as the focused decompiler sentinel and preserved the existing no-repair boundary: no printer, CLI, GUI, or benchmark semantic fixes.
+
+### Implementation
+
+- Added additive `NirBuildStats` counters:
+  - `call_prototype_exact_api_arity_pruned_count`
+  - `call_prototype_unknown_target_kept_count`
+  - `call_prototype_wrapper_resolved_count`
+  - `call_prototype_signature_missing_count`
+- Wired the counters through normalize wave stats and `merge_assign`.
+- Recorded exact API arity pruning only when the existing signature provider proves the API signature.
+- Recorded wrapper resolution, missing signature, and unknown-target keep cases without pruning or dropping arguments.
+- Exposed the new counters through `benchmark/full_benchmark` owner metrics:
+  - `call_proto_exact_arity_pruned`
+  - `call_proto_unknown_target_kept`
+  - `call_proto_wrapper_resolved`
+  - `call_proto_signature_missing`
+
+### Validation
+
+- Targeted tests:
+  - `cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1`
+  - `cargo test -p fission-pcode callsite_type_prop_keeps_args_when_summary_signature_missing -- --test-threads=1`
+  - `cargo test -p fission-pcode type_hints_imports -- --test-threads=1`
+  - `cargo test -p fission-pcode type_hints_stack_slots -- --test-threads=1`
+- Build/check:
+  - `cargo check -p fission-pcode -p fission-static -p fission-cli`
+  - `cargo build --release -p fission-cli`
+  - `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/raw_p_code_benchmark/*.py`
+
+### Decompiler Sentinel
+
+- Command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v2_telemetry`
+- Result:
+  - `avg_norm_sim=19.910%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+  - new owner metrics present in the report
+  - sqlite3 focused counters were all `0.000`, which is expected for this measurement-only smoke when no exact prototype pruning is exercised by the selected rows.
+
+### Raw P-code Guard
+
+- Command:
+  - `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/decompiler_v2_x86_64_guard`
+- Result:
+  - `perfect_canonical_gate=passed`
+  - `full_match=44`
+  - `average_similarity_score=1.0`
+  - `average_parity_ratio=1.0`
+  - `compat_emitter_used=0`
+  - `fake_placeholder_op=0`
+  - `invalid_pcode_shape=0`
+  - success source: `sla_construct_tpl`
+
+### Remaining Work
+
+- Use the new owner counters to decide whether the next decompiler wave should target prototype coverage, wrapper summaries, or stack-local materialization.
+- Keep stack-local promotion gated by row-fidelity improvement, not internal trace success alone.

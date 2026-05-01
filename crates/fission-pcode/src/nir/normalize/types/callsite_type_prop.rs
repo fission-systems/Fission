@@ -1,4 +1,6 @@
 use super::super::wave_stats::{
+    add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
+    add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
     add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
 };
 /// Call-site inter-procedural type propagation pass.
@@ -229,17 +231,24 @@ fn resolve_call_target_symbol<'a>(
     target: &'a str,
     summaries: &'a indexmap::IndexMap<String, CallSummary>,
 ) -> &'a str {
+    resolve_call_target_symbol_with_wrapper(target, summaries).0
+}
+
+fn resolve_call_target_symbol_with_wrapper<'a>(
+    target: &'a str,
+    summaries: &'a indexmap::IndexMap<String, CallSummary>,
+) -> (&'a str, bool) {
     summaries
         .get(target)
-        .and_then(|summary| {
-            summary
-                .effect_summary
-                .wrapper_of
-                .as_ref()
-                .map(|wrapped| wrapped.symbol.as_str())
-                .or(Some(summary.target.symbol.as_str()))
+        .map(|summary| {
+            if let Some(wrapped) = summary.effect_summary.wrapper_of.as_ref() {
+                let symbol = wrapped.symbol.as_str();
+                (symbol, symbol != target)
+            } else {
+                (summary.target.symbol.as_str(), false)
+            }
         })
-        .unwrap_or(target)
+        .unwrap_or((target, false))
 }
 
 fn build_call_target_rewrites(
@@ -450,6 +459,9 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
     let mut rename_candidates = HashMap::<String, String>::new();
     let mut rename_conflicts = HashSet::<String>::new();
+    let mut wrapper_resolved_count = 0usize;
+    let mut signature_missing_count = 0usize;
+    let mut unknown_target_kept_count = 0usize;
 
     // Collect call sites: (receiver_name_opt, callee_name, arg_var_names)
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
@@ -457,13 +469,21 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     let call_target_rewrites = build_call_target_rewrites(&func.callee_summaries);
 
     for (receiver, callee, arg_vars) in &callsites {
-        let resolved_callee = resolve_call_target_symbol(callee, &func.callee_summaries);
+        let (resolved_callee, resolved_through_wrapper) =
+            resolve_call_target_symbol_with_wrapper(callee, &func.callee_summaries);
+        if resolved_through_wrapper {
+            wrapper_resolved_count += 1;
+        }
         let summary = func
             .callee_summaries
             .get(callee)
             .or_else(|| func.callee_summaries.get(resolved_callee));
-        let Some(sig) = api_signature(resolved_callee).or_else(|| api_signature(callee))
-        else {
+        let Some(sig) = api_signature(resolved_callee).or_else(|| api_signature(callee)) else {
+            if summary.is_some() {
+                signature_missing_count += 1;
+            } else {
+                unknown_target_kept_count += 1;
+            }
             if let Some(summary) = summary {
                 let mut refined_here = false;
                 if let Some(recv_name) = receiver
@@ -563,8 +583,12 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     let pruned_count = prune_known_api_call_args_stmts(&mut func.body, &func.callee_summaries);
     if pruned_count > 0 {
         add_call_signature_refinements(pruned_count);
+        add_call_prototype_exact_api_arity_pruned(pruned_count);
         changed = true;
     }
+    add_call_prototype_wrapper_resolved(wrapper_resolved_count);
+    add_call_prototype_signature_missing(signature_missing_count);
+    add_call_prototype_unknown_target_kept(unknown_target_kept_count);
     if !call_target_rewrites.is_empty()
         && rewrite_call_targets_stmts(&mut func.body, &call_target_rewrites)
     {
@@ -796,6 +820,7 @@ fn collect_callsites_expr(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
     use super::*;
     use crate::nir::support::CallingConvention;
 
@@ -906,6 +931,7 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_prunes_extra_args_only_for_exact_api_signature() {
+        reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
             params: vec![],
@@ -942,6 +968,11 @@ mod tests {
         };
 
         assert!(apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 2);
+        assert_eq!(stats.call_prototype_unknown_target_kept_count, 1);
+        assert_eq!(stats.call_prototype_signature_missing_count, 0);
+        assert_eq!(stats.call_prototype_wrapper_resolved_count, 0);
         match &func.body[0] {
             HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
             other => panic!("unexpected first stmt: {other:?}"),
@@ -954,6 +985,7 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_prunes_wrapper_args_after_resolving_import_summary() {
+        reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
             params: vec![],
@@ -1012,11 +1044,79 @@ mod tests {
         };
 
         assert!(apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 1);
+        assert_eq!(stats.call_prototype_wrapper_resolved_count, 1);
+        assert_eq!(stats.call_prototype_signature_missing_count, 0);
+        assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
         match &func.body[0] {
             HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
                 assert_eq!(target, "MessageBoxA");
                 assert_eq!(args.len(), 4);
             }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_keeps_args_when_summary_signature_missing() {
+        reset_normalize_wave_stats();
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "known_without_signature".to_string(),
+                args: vec![
+                    HirExpr::Const(0, NirType::Unknown),
+                    HirExpr::Const(1, NirType::Unknown),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([(
+                "known_without_signature".to_string(),
+                CallSummary {
+                    target: CallTargetRef {
+                        address: None,
+                        symbol: "known_without_signature".to_string(),
+                        provenance: CallTargetProvenance::Reference,
+                        edge_kind: CallEdgeKind::Reference,
+                        confidence: 128,
+                    },
+                    prototype: PrototypeSummary {
+                        min_arity: 0,
+                        max_arity: 2,
+                        locked_exact_arity: None,
+                        return_lattice: NirType::Unknown,
+                        param_lattices: vec![],
+                        soundness: SummarySoundness::Optimistic,
+                    },
+                    effect_summary: CallEffectSummary {
+                        reads_memory: None,
+                        writes_memory: None,
+                        escapes_args: None,
+                        regions: vec![],
+                        wrapper_class: WrapperClass::None,
+                        wrapper_of: None,
+                        confidence: 0,
+                    },
+                },
+            )]),
+        };
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
+        assert_eq!(stats.call_prototype_wrapper_resolved_count, 0);
+        assert_eq!(stats.call_prototype_signature_missing_count, 1);
+        assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 2),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }

@@ -58,6 +58,34 @@ pub(super) fn add_call_signature_refinements(n: usize) {
     WAVE.with(|w| w.borrow_mut().call_signature_refined_count += n);
 }
 
+pub(super) fn add_call_prototype_exact_api_arity_pruned(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_prototype_exact_api_arity_pruned_count += n);
+}
+
+pub(super) fn add_call_prototype_unknown_target_kept(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_prototype_unknown_target_kept_count += n);
+}
+
+pub(super) fn add_call_prototype_wrapper_resolved(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_prototype_wrapper_resolved_count += n);
+}
+
+pub(super) fn add_call_prototype_signature_missing(n: usize) {
+    if n == 0 {
+        return;
+    }
+    WAVE.with(|w| w.borrow_mut().call_prototype_signature_missing_count += n);
+}
+
 pub(super) fn add_security_cookie_folds(n: usize) {
     if n == 0 {
         return;
