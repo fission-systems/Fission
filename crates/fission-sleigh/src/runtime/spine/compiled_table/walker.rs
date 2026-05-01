@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn bind_instruction<'a>(
     compiled: &'a CompiledFrontend,
     strategy: RuntimeDecodeStrategy<'a>,
@@ -20,6 +22,7 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     shared_token_operand_end: usize,
     token_fields: Option<TokenFieldBundle>,
     handles: Vec<Option<RuntimeHandle>>,
+    handle_reference_bitmap: Vec<bool>,
     walker: spine::RuntimeParserWalker,
     legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit,
 }
@@ -58,99 +61,6 @@ impl OperandBinding {
             requires_fixed: false,
         }
     }
-}
-
-fn constructor_references_handle(
-    template: &crate::compiler::CompiledConstructorTemplate,
-    handle_index: usize,
-) -> bool {
-    template
-        .result
-        .as_ref()
-        .is_some_and(|handle| handle_tpl_references_handle(handle, handle_index))
-        || template.ops.iter().any(|op| op_references_handle(op, handle_index))
-}
-
-fn op_references_handle(op: &CompiledOpTpl, handle_index: usize) -> bool {
-    op.output
-        .as_ref()
-        .is_some_and(|varnode| varnode_tpl_references_handle(varnode, handle_index))
-        || op
-            .inputs
-            .iter()
-            .any(|varnode| varnode_tpl_references_handle(varnode, handle_index))
-}
-
-fn varnode_tpl_references_handle(varnode: &CompiledVarnodeTpl, handle_index: usize) -> bool {
-    match varnode {
-        CompiledVarnodeTpl::Varnode {
-            space,
-            offset,
-            size,
-        } => {
-            space_tpl_references_handle(space, handle_index)
-                || const_tpl_references_handle(offset, handle_index)
-                || const_tpl_references_handle(size, handle_index)
-        }
-        CompiledVarnodeTpl::HandleTpl(handle) => handle_tpl_references_handle(handle, handle_index),
-        CompiledVarnodeTpl::Handle { operand_index }
-        | CompiledVarnodeTpl::EffectiveAddress { operand_index } => *operand_index == handle_index,
-        CompiledVarnodeTpl::Const(value) => const_tpl_references_handle(value, handle_index),
-        CompiledVarnodeTpl::Space(_)
-        | CompiledVarnodeTpl::Temp { .. }
-        | CompiledVarnodeTpl::Register { .. }
-        | CompiledVarnodeTpl::FixedRegister { .. }
-        | CompiledVarnodeTpl::Flag { .. }
-        | CompiledVarnodeTpl::ConditionPredicate => false,
-    }
-}
-
-fn handle_tpl_references_handle(handle: &CompiledHandleTpl, handle_index: usize) -> bool {
-    handle
-        .space
-        .as_ref()
-        .is_some_and(|space| space_tpl_references_handle(space, handle_index))
-        || handle
-            .size
-            .as_ref()
-            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
-        || handle
-            .ptr_space
-            .as_ref()
-            .is_some_and(|space| space_tpl_references_handle(space, handle_index))
-        || handle
-            .ptr_offset
-            .as_ref()
-            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
-        || handle
-            .ptr_size
-            .as_ref()
-            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
-        || handle
-            .temp_space
-            .as_ref()
-            .is_some_and(|space| space_tpl_references_handle(space, handle_index))
-        || handle
-            .temp_offset
-            .as_ref()
-            .is_some_and(|value| const_tpl_references_handle(value, handle_index))
-}
-
-fn space_tpl_references_handle(space: &CompiledSpaceTpl, handle_index: usize) -> bool {
-    match space {
-        CompiledSpaceTpl::SpaceRef(_) => false,
-        CompiledSpaceTpl::Const(value) => const_tpl_references_handle(value, handle_index),
-    }
-}
-
-fn const_tpl_references_handle(value: &CompiledConstTpl, handle_index: usize) -> bool {
-    matches!(
-        value,
-        CompiledConstTpl::Handle {
-            handle_index: actual,
-            ..
-        } if *actual == handle_index as i64
-    )
 }
 
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
@@ -202,17 +112,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
         if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
             let matcher_len = opcode_len_from_matcher(&selection.constructor.matcher);
-            let seq_bytes = constructor_consumes_sequential_operand_bytes(compiled, selection.constructor);
+            let seq_bytes =
+                constructor_consumes_sequential_operand_bytes(compiled, selection.constructor);
             eprintln!(
                 "[bind-instr] bucket={} opcode_len={opcode_len} ctx.cursor={} sel_src={:?} \
                  matcher_len={matcher_len} seq_bytes={seq_bytes} matcher={:?}",
-                selection.trace.root_bucket, ctx.cursor, selection.constructor.constructor_template.template_source,
+                selection.trace.root_bucket,
+                ctx.cursor,
+                selection.constructor.constructor_template.template_source,
                 selection.constructor.matcher
             );
         }
         let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
         let compatibility_template_source =
-            selection.constructor.constructor_template.template_source != CompiledTemplateSource::SpecDerived;
+            selection.constructor.constructor_template.template_source
+                != CompiledTemplateSource::SpecDerived;
+        let handle_reference_bitmap = constructor_template_handle_reference_bitmap(
+            &selection.constructor.constructor_template,
+        );
         Ok(Self {
             compiled,
             strategy,
@@ -225,6 +142,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             shared_token_operand_end: 0,
             token_fields: None,
             handles,
+            handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
                 legacy_shared_token_policy: token_policy.uses_shared_token_cursor(),
@@ -476,9 +394,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .map(|sr| sr.word_size.max(1) as u64)
                 })
                 .unwrap_or(1);
-            (None, offset_offset.wrapping_mul(addr_unit), 0u32, None, 0u64)
+            (
+                None,
+                offset_offset.wrapping_mul(addr_unit),
+                0u32,
+                None,
+                0u64,
+            )
         } else {
-            (offset_space, offset_offset, offset_size, temp_space, temp_offset)
+            (
+                offset_space,
+                offset_offset,
+                offset_size,
+                temp_space,
+                temp_offset,
+            )
         };
         let fixable = space.is_some()
             && (offset_space.is_none() || (offset_size != 0 && temp_space.is_some()));
@@ -693,7 +623,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
                 }
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
+                if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
+                    .uses_shared_token_cursor()
+                {
                     self.cursor = self.cursor.max(token_base + encoded_size as usize);
                 }
                 Ok(OperandBinding::with_fixed(
@@ -793,7 +725,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     )
                 })?;
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
+                if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
+                    .uses_shared_token_cursor()
+                {
                     self.cursor = self.cursor.max(token_base + encoded_size as usize);
                 }
                 Ok(OperandBinding::with_fixed(
@@ -918,10 +852,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase,
             } => {
                 let cursor_start = self.cursor;
-                let sub_state = self.decode_subtable(table_name, Some(*reloffset), Some(*offsetbase))?;
-                self.legacy_path_audit = self
-                    .legacy_path_audit
-                    .merge(sub_state.legacy_path_audit);
+                let sub_state =
+                    self.decode_subtable(table_name, Some(*reloffset), Some(*offsetbase))?;
+                self.legacy_path_audit = self.legacy_path_audit.merge(sub_state.legacy_path_audit);
                 if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
                     && (shared_token_cursor_policy_shared_token_subtable(table_name)
                         || shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name))
@@ -981,17 +914,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 // handle resolution instead of inventing dummy handles.
                 let exported = match sub_state.exported_handle.as_ref() {
                     Some(exported) => exported,
-	                    None => {
-	                        if constructor_references_handle(
-	                            &self.selection.constructor.constructor_template,
-	                            template.operand_index,
-	                        ) {
-	                            bail!(
+                    None => {
+                        if constructor_template_references_handle(
+                            &self.handle_reference_bitmap,
+                            template.operand_index,
+                        ) {
+                            bail!(
 	                                "missing_sla_exported_fixed_handle: subtable {table_name} did not export handle for referenced operand {}",
 	                                template.operand_index
 	                            );
-	                        }
-	                        self.legacy_path_audit.no_export_subtable_fallback = true;
+                        }
+                        self.legacy_path_audit.no_export_subtable_fallback = true;
                         return Ok(OperandBinding::guard_only(sub_state));
                     }
                 };
@@ -1338,8 +1271,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             )
         {
             self.cursor.saturating_add(1)
-        } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
-            .uses_shared_token_cursor()
+        } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && reloffset.is_some_and(|rel| rel >= 0)
             && offsetbase.unwrap_or(-1) < 0
         {

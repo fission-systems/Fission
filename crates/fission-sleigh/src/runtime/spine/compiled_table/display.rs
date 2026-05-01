@@ -1,15 +1,16 @@
+use super::*;
+
 pub(super) fn display_value_for_exported_handle(
     exported: &RuntimeHandle,
     sub_state: &RuntimeConstructState,
 ) -> BoundOperand {
-    let exported_value = exported
-        .debug_value
-        .clone()
-        .unwrap_or_else(|| bound_operand_from_fixed_handle(&exported.fixed).unwrap_or(BoundOperand::Immediate {
+    let exported_value = exported.debug_value.clone().unwrap_or_else(|| {
+        bound_operand_from_fixed_handle(&exported.fixed).unwrap_or(BoundOperand::Immediate {
             value: 0,
             encoded_size: 0,
             signed: false,
-        }));
+        })
+    });
     let exported_is_direct_memory = matches!(
         exported_value,
         BoundOperand::Memory {
@@ -133,7 +134,9 @@ pub(super) fn render_display_template_parts(state: &RuntimeConstructState) -> (S
         .first_whitespace
         .unwrap_or(state.display_template.pieces.len());
     let mnemonic = render_display_pieces(state, &state.display_template.pieces[..split]);
-    let body = if state.display_template.first_whitespace.is_some() && split < state.display_template.pieces.len() {
+    let body = if state.display_template.first_whitespace.is_some()
+        && split < state.display_template.pieces.len()
+    {
         render_display_pieces(state, &state.display_template.pieces[split + 1..])
     } else {
         String::new()
@@ -157,7 +160,10 @@ pub(super) fn render_display_pieces(
     rendered
 }
 
-pub(super) fn render_operand_display(state: &RuntimeConstructState, operand_index: usize) -> String {
+pub(super) fn render_operand_display(
+    state: &RuntimeConstructState,
+    operand_index: usize,
+) -> String {
     let Some(handle) = state.handles.get(operand_index) else {
         return String::new();
     };
@@ -173,14 +179,13 @@ pub(super) fn render_operand_display(state: &RuntimeConstructState, operand_inde
         .display_operands
         .get(operand_index)
         .map(|operand| &operand.kind);
-    let value = handle
-        .debug_value
-        .clone()
-        .unwrap_or_else(|| bound_operand_from_fixed_handle(&handle.fixed).unwrap_or(BoundOperand::Immediate {
+    let value = handle.debug_value.clone().unwrap_or_else(|| {
+        bound_operand_from_fixed_handle(&handle.fixed).unwrap_or(BoundOperand::Immediate {
             value: 0,
             encoded_size: 0,
             signed: false,
-        }));
+        })
+    });
     format_operand_with_display_kind(&value, display_kind)
 }
 
@@ -273,9 +278,13 @@ pub(super) fn operand_display_index(operand: &BoundOperand) -> Option<usize> {
         BoundOperand::Register { index, .. } => Some(*index as usize),
         BoundOperand::NamedVarnode { display_index, .. } => display_index.map(|idx| idx as usize),
         BoundOperand::Relative { target } => Some(*target as usize),
-        BoundOperand::Memory { absolute, displacement, .. } => {
-            absolute.map(|value| value as usize).or_else(|| usize::try_from(*displacement).ok())
-        }
+        BoundOperand::Memory {
+            absolute,
+            displacement,
+            ..
+        } => absolute
+            .map(|value| value as usize)
+            .or_else(|| usize::try_from(*displacement).ok()),
     }
 }
 
@@ -285,9 +294,11 @@ pub(super) fn operand_display_value(operand: &BoundOperand) -> Option<i64> {
         BoundOperand::Register { index, .. } => Some(i64::from(*index)),
         BoundOperand::NamedVarnode { display_index, .. } => display_index.map(i64::from),
         BoundOperand::Relative { target } => Some(*target as i64),
-        BoundOperand::Memory { absolute, displacement, .. } => {
-            absolute.map(|value| value as i64).or(Some(*displacement))
-        }
+        BoundOperand::Memory {
+            absolute,
+            displacement,
+            ..
+        } => absolute.map(|value| value as i64).or(Some(*displacement)),
     }
 }
 
@@ -303,11 +314,14 @@ pub(super) fn decoded_references(
     address: u64,
     length: usize,
     flow_kind: DecodedFlowKind,
-    operands: &[BoundOperand],
+    _operands: &[BoundOperand],
     handles: &[RuntimeHandle],
 ) -> Vec<DecodedReference> {
     let mut refs = Vec::new();
-    for (operand_index, operand) in operands.iter().enumerate() {
+    for (operand_index, handle) in handles.iter().enumerate() {
+        let Some(operand) = handle.debug_value.as_ref() else {
+            continue;
+        };
         match operand {
             BoundOperand::Relative { target } => {
                 let kind = match flow_kind {
@@ -337,6 +351,14 @@ pub(super) fn decoded_references(
                     .and_then(first_relative_target)
                     .or_else(|| {
                         absolute.and_then(|target| {
+                            handles
+                                .get(operand_index)
+                                .and_then(|handle| handle.subtable_state.as_deref())
+                                .and_then(|state| first_materialized_address_target(state, target))
+                        })
+                    })
+                    .or_else(|| {
+                        absolute.and_then(|target| {
                             handles.iter().find_map(|handle| {
                                 let relative = handle
                                     .subtable_state
@@ -345,18 +367,30 @@ pub(super) fn decoded_references(
                                 (relative == target).then_some(relative)
                             })
                         })
+                    })
+                    .or_else(|| {
+                        absolute.and_then(|target| {
+                            handles.iter().find_map(|handle| {
+                                let state = handle.subtable_state.as_deref()?;
+                                first_materialized_address_target(state, target)
+                            })
+                        })
                     });
                 let is_rip_relative = *rip_relative || subtable_relative_target.is_some();
                 let target = if is_rip_relative {
-                    subtable_relative_target.or(*absolute).or_else(|| Some(add_signed(
-                        address.saturating_add(length as u64),
-                        *displacement,
-                    )))
+                    subtable_relative_target.or(*absolute).or_else(|| {
+                        Some(add_signed(
+                            address.saturating_add(length as u64),
+                            *displacement,
+                        ))
+                    })
                 } else if *rip_relative {
-                    absolute.or_else(|| Some(add_signed(
-                        address.saturating_add(length as u64),
-                        *displacement,
-                    )))
+                    absolute.or_else(|| {
+                        Some(add_signed(
+                            address.saturating_add(length as u64),
+                            *displacement,
+                        ))
+                    })
                 } else if *displacement > 0 {
                     Some(*displacement as u64)
                 } else {
@@ -394,7 +428,15 @@ pub(super) fn first_rip_relative_memory(state: &RuntimeConstructState) -> Option
     state
         .operands
         .iter()
-        .find(|operand| matches!(operand, BoundOperand::Memory { rip_relative: true, .. }))
+        .find(|operand| {
+            matches!(
+                operand,
+                BoundOperand::Memory {
+                    rip_relative: true,
+                    ..
+                }
+            )
+        })
         .or_else(|| {
             state.handles.iter().find_map(|handle| {
                 handle
@@ -419,6 +461,28 @@ pub(super) fn first_relative_target(state: &RuntimeConstructState) -> Option<u64
                     .subtable_state
                     .as_deref()
                     .and_then(first_relative_target)
+            })
+        })
+}
+
+fn first_materialized_address_target(state: &RuntimeConstructState, target: u64) -> Option<u64> {
+    state
+        .operands
+        .iter()
+        .find_map(|operand| match operand {
+            BoundOperand::Immediate { value, .. } if *value == target => Some(target),
+            BoundOperand::Memory {
+                absolute: Some(value),
+                ..
+            } if *value == target => Some(target),
+            _ => None,
+        })
+        .or_else(|| {
+            state.handles.iter().find_map(|handle| {
+                handle
+                    .subtable_state
+                    .as_deref()
+                    .and_then(|state| first_materialized_address_target(state, target))
             })
         })
 }

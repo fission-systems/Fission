@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug, Clone)]
 pub(super) struct CompiledInstructionContext<'a> {
     pub(super) inner: RuntimeInstructionContext<'a>,
@@ -106,7 +108,11 @@ pub(super) fn set_packed_context_bits(
     Ok(())
 }
 
-pub(super) fn packed_context_bytes(context_register: u64, bytestart: u32, bytesize: u32) -> Result<u32> {
+pub(super) fn packed_context_bytes(
+    context_register: u64,
+    bytestart: u32,
+    bytesize: u32,
+) -> Result<u32> {
     if bytesize == 0 || bytesize > 4 {
         bail!("packed context byte read must be 1..=4 bytes, got {bytesize}");
     }
@@ -127,7 +133,11 @@ pub(super) fn packed_context_bytes(context_register: u64, bytestart: u32, bytesi
     Ok(res)
 }
 
-pub(super) fn packed_context_bits(context_register: u64, startbit: u32, bitsize: u32) -> Result<u32> {
+pub(super) fn packed_context_bits(
+    context_register: u64,
+    startbit: u32,
+    bitsize: u32,
+) -> Result<u32> {
     if bitsize == 0 {
         return Ok(0);
     }

@@ -369,3 +369,68 @@
 - `python3 -m json.tool utils/sleigh-specs/MANIFEST.sha256.json`
 - Snapshot size: approximately `14M`.
 - Snapshot file count: `698` files including the manifest.
+
+## fission-sleigh Module Boundary and Runtime Index Refactor
+
+- Converted the remaining `include!`-style SLEIGH implementation boundaries into explicit Rust submodules for:
+  - `compiler/ir`
+  - `compiler/sla`
+  - `runtime/spine/compiled_table`
+- Preserved the existing public facades while giving the hot-path runtime owners explicit files:
+  - `compiled_table/feature_audit.rs`
+  - `compiled_table/runtime_index.rs`
+  - explicit `legacy_token_policy` boundary for the existing token/cursor debt
+- Added a frontend-local runtime index helper for constructor-template handle-reference bitmaps.
+- Replaced repeated parent-template handle-reference scans in the walker with the precomputed bitmap.
+- Kept the index strictly `.sla ConstructTpl`-derived. No opcode, ModRM/SIB, table-name, mnemonic, source-line, or architecture-name policy was added.
+- Fixed decoded reference extraction to walk handle-indexed runtime handles instead of assuming compact display operand order matches the handle vector. This preserves RIP-relative decoded reference metadata without changing raw P-code generation.
+- Updated the IR unit test that validates `.sla ConstructTpl` preservation to use the public compiler orchestration path, because `.sla` template attachment is owned by `compile_frontend_for_entry_spec`, not the lower-level AST-only IR compile helper.
+
+## fission-sleigh Refactor Validation
+
+- `cargo fmt --package fission-sleigh`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo check -p fission-sleigh`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-targeted cargo test -p fission-sleigh compiler::ir::tests::compile_frontend_collects_pcode_ops_and_patterns -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_lea_negative_displacement_const_without_decode_error -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_rip_relative_mov32_without_decode_no_match -- --test-threads=1`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+- Attempted `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh -- --test-threads=1`; it was stopped after more than 13 minutes without new output while the checked-in entry-spec coverage test was still running.
+
+## fission-sleigh Refactor Raw P-code Gates
+
+- Canonical gate report: `benchmark/artifacts/raw_p_code_benchmark/sleigh_refactor_perf_gate/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 17`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+  - `decode_lift_sec = 0.005625834999999999`
+  - `frontend_load_sec = 14.360581624999998`
+  - `process_startup_sec = 16.635162710125552`
+- Vendor smoke report: `benchmark/artifacts/raw_p_code_benchmark/sleigh_refactor_perf_vendor/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 4`
+  - `binary_count = 4`
+  - `language_count = 2`
+  - `full_match = 16`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+  - `decode_lift_sec = 0.001552752`
+  - `frontend_load_sec = 3.3031671250000003`
+  - `process_startup_sec = 11.122277166021902`
+
+## fission-sleigh Refactor Notes
+
+- No generated SLEIGH frontend artifacts were intentionally regenerated.
+- No approximate P-code path was added.
+- No architecture-name semantic branch was added.
+- No table-name, source-line, pprint/opprint, mnemonic, or binary-specific mapping was added.
+- Benchmark output artifacts and Ghidra project DB state remain uncommitted.

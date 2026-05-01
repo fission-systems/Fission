@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
+
 use super::*;
-use flate2::Compression;
 use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use std::io::Write;
 
 fn packaged_sla_path(processor: &str, name: &str) -> Option<PathBuf> {

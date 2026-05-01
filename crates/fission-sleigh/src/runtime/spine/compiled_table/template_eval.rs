@@ -1,3 +1,5 @@
+use super::*;
+
 /// Ghidra ConstTpl::getReal() V_OFFSET_PLUS case.
 ///
 /// `plus` is value_real read from ATTR_PLUS in the SLA.
@@ -91,14 +93,8 @@ pub(super) fn emit_pcode_for_state_with_bytes(
     decoded: &RuntimeConstructState,
     flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    let mut emitter = CompiledTableEmitter::new(
-        compiled,
-        native,
-        address,
-        memory_window,
-        memory_base,
-        flow,
-    );
+    let mut emitter =
+        CompiledTableEmitter::new(compiled, native, address, memory_window, memory_base, flow);
     // If the template uses InstNext2 (delay-slot architectures), pre-decode the
     // delay-slot instruction to get its actual length.
     if (uses_inst_next2(&decoded.constructor_template.ops)
@@ -139,8 +135,9 @@ fn indirect_placeholder_delay_bytes(op: &CompiledOpTpl) -> Result<u32> {
                 .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
             _ => bail!("INDIRECT delay size must be ConstTpl::Real (Ghidra walkTemplates)"),
         },
-        CompiledVarnodeTpl::Const(CompiledConstTpl::Real { value }) => u32::try_from(*value)
-            .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
+        CompiledVarnodeTpl::Const(CompiledConstTpl::Real { value }) => {
+            u32::try_from(*value).map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32"))
+        }
         _ => bail!("INDIRECT delay placeholder has unexpected varnode shape"),
     }
 }
@@ -166,7 +163,10 @@ fn uses_inst_next2(ops: &[CompiledOpTpl]) -> bool {
     })
 }
 
-pub(super) fn template_emit_error(compiled: &CompiledFrontend, err: anyhow::Error) -> anyhow::Error {
+pub(super) fn template_emit_error(
+    compiled: &CompiledFrontend,
+    err: anyhow::Error,
+) -> anyhow::Error {
     let msg = err.to_string();
     if msg.contains("HandleTpl")
         || msg.contains("ConstTpl")
@@ -182,7 +182,6 @@ pub(super) fn template_emit_error(compiled: &CompiledFrontend, err: anyhow::Erro
         err
     }
 }
-
 
 /// Sentinel used to tag branch targets that reference pcode-internal relative labels.
 /// Convention follows Ghidra: `-(label_num + 1)` as i64, stored as u64.
@@ -273,10 +272,7 @@ impl<'c> CompiledTableEmitter<'c> {
     /// Pre-compute the delay slot instruction length. Called from the emit wrapper
     /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
     /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
-    fn precompute_delay_slot_length(
-        &mut self,
-        inst_length: usize,
-    ) {
+    fn precompute_delay_slot_length(&mut self, inst_length: usize) {
         let inst_next_offset = (self.address + inst_length as u64)
             .checked_sub(self.memory_base)
             .unwrap_or(0) as usize;
@@ -379,17 +375,22 @@ impl<'c> CompiledTableEmitter<'c> {
                 // Record the current emitter op count as this label's position.
                 // Labels themselves don't emit pcode ops; they are position markers.
                 // The label number is encoded in the output varnode's offset field.
-                let label_num = op.output.as_ref().and_then(|out| {
-                    if let CompiledVarnodeTpl::Varnode { offset, .. } = out {
-                        if let CompiledConstTpl::Real { value } = offset.as_ref() {
-                            return Some(*value);
+                let label_num = op
+                    .output
+                    .as_ref()
+                    .and_then(|out| {
+                        if let CompiledVarnodeTpl::Varnode { offset, .. } = out {
+                            if let CompiledConstTpl::Real { value } = offset.as_ref() {
+                                return Some(*value);
+                            }
                         }
-                    }
-                    None
-                }).unwrap_or(0);
+                        None
+                    })
+                    .unwrap_or(0);
                 // Use the emitter's actual op count so even recursively emitted ops
                 // (via BUILD) are accounted for correctly.
-                self.label_positions.insert(label_num, self.emitter.op_count());
+                self.label_positions
+                    .insert(label_num, self.emitter.op_count());
                 Ok(())
             }
             CompiledOpTplOpcode::Return => {
@@ -597,13 +598,13 @@ impl<'c> CompiledTableEmitter<'c> {
                         bail!("{mnemonic} template requires two inputs");
                     }
                     let out_size = self.template_varnode_size(out_tpl, state)?;
-                    let lhs_expected_size = if matches!(op.opcode, CompiledOpTplOpcode::Subpiece)
-                    {
+                    let lhs_expected_size = if matches!(op.opcode, CompiledOpTplOpcode::Subpiece) {
                         0
                     } else {
                         out_size
                     };
-                    let lhs = self.read_template_varnode(&op.inputs[0], state, lhs_expected_size)?;
+                    let lhs =
+                        self.read_template_varnode(&op.inputs[0], state, lhs_expected_size)?;
                     let rhs_size = self.template_varnode_size(&op.inputs[1], state)?;
                     let rhs = self.read_template_varnode(&op.inputs[1], state, rhs_size)?;
                     let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
@@ -632,11 +633,18 @@ impl<'c> CompiledTableEmitter<'c> {
                 if let Some(idx) = operand_index {
                     if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
                         let handle = state.handles.get(idx);
-                        let has_sub = handle.as_ref().and_then(|h| h.subtable_state.as_ref()).is_some();
-                        let template_src = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                        let has_sub = handle
+                            .as_ref()
+                            .and_then(|h| h.subtable_state.as_ref())
+                            .is_some();
+                        let template_src = handle
+                            .as_ref()
+                            .and_then(|h| h.subtable_state.as_ref())
                             .map(|s| format!("{:?}", s.constructor_template.template_source))
                             .unwrap_or_else(|| "None".to_string());
-                        let ops_count = handle.as_ref().and_then(|h| h.subtable_state.as_ref())
+                        let ops_count = handle
+                            .as_ref()
+                            .and_then(|h| h.subtable_state.as_ref())
                             .map(|s| s.constructor_template.ops.len())
                             .unwrap_or(0);
                         eprintln!(
@@ -790,7 +798,9 @@ impl<'c> CompiledTableEmitter<'c> {
                 return Ok(());
             };
             if child.constructor_template.template_source != CompiledTemplateSource::SpecDerived {
-                bail!("BUILD operand {operand_index} is not backed by a SpecDerived subconstructor");
+                bail!(
+                    "BUILD operand {operand_index} is not backed by a SpecDerived subconstructor"
+                );
             }
             if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
                 eprintln!(
@@ -1053,16 +1063,16 @@ impl<'c> CompiledTableEmitter<'c> {
             .space
             .as_ref()
             .ok_or_else(|| anyhow!("dynamic source handle {} missing space", handle_index))?;
-        let offset_space = handle
-            .fixed
-            .offset_space
-            .as_ref()
-            .ok_or_else(|| anyhow!("dynamic source handle {} missing offset_space", handle_index))?;
-        let temp_space = handle
-            .fixed
-            .temp_space
-            .as_ref()
-            .ok_or_else(|| anyhow!("dynamic source handle {} missing temp_space", handle_index))?;
+        let offset_space = handle.fixed.offset_space.as_ref().ok_or_else(|| {
+            anyhow!(
+                "dynamic source handle {} missing offset_space",
+                handle_index
+            )
+        })?;
+        let temp_space =
+            handle.fixed.temp_space.as_ref().ok_or_else(|| {
+                anyhow!("dynamic source handle {} missing temp_space", handle_index)
+            })?;
 
         let data_size = u32::try_from(self.resolve_const_value(size, state)?)
             .map_err(|_| anyhow!("dynamic memory source size exceeds u32"))?;
@@ -1086,7 +1096,8 @@ impl<'c> CompiledTableEmitter<'c> {
             constant_val: 0,
         };
 
-        self.emitter.emit_load(temp.clone(), space_id, ptr, "LOAD")?;
+        self.emitter
+            .emit_load(temp.clone(), space_id, ptr, "LOAD")?;
 
         Ok(Some(temp))
     }
@@ -1111,12 +1122,12 @@ impl<'c> CompiledTableEmitter<'c> {
                 if (space.index == 0 || space.name == "const")
                     && handle_selector_index(offset, CompiledHandleSelector::Offset).is_some()
                 {
-                    let handle_index = handle_selector_index(offset, CompiledHandleSelector::Offset)
-                        .expect("checked above");
-                    let handle = state
-                        .handles
-                        .get(handle_index)
-                        .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
+                    let handle_index =
+                        handle_selector_index(offset, CompiledHandleSelector::Offset)
+                            .expect("checked above");
+                    let handle = state.handles.get(handle_index).ok_or_else(|| {
+                        anyhow!("handle {} is missing or unresolved", handle_index)
+                    })?;
                     if let Some(offset_space) = &handle.fixed.offset_space {
                         let size = u32::try_from(self.resolve_const_value(size, state)?)
                             .map_err(|_| anyhow!("VarnodeTpl size exceeds u32"))?;
@@ -1323,34 +1334,27 @@ impl<'c> CompiledTableEmitter<'c> {
                 .flow_ref_addr
                 .ok_or_else(|| anyhow!("ConstTpl FlowRef requires FlowEmitOptions.flow_ref_addr")),
             CompiledConstTpl::FlowRefSize => {
-                let idx = self
-                    .flow
-                    .flow_ref_space_index
-                    .ok_or_else(|| anyhow!("ConstTpl FlowRefSize requires FlowEmitOptions.flow_ref_space_index"))?;
-                let space = self
-                    .compiled
-                    .sla_spaces
-                    .get(&idx)
-                    .ok_or_else(|| anyhow!("FlowRefSize space index {idx} missing from sla_spaces"))?;
+                let idx = self.flow.flow_ref_space_index.ok_or_else(|| {
+                    anyhow!("ConstTpl FlowRefSize requires FlowEmitOptions.flow_ref_space_index")
+                })?;
+                let space = self.compiled.sla_spaces.get(&idx).ok_or_else(|| {
+                    anyhow!("FlowRefSize space index {idx} missing from sla_spaces")
+                })?;
                 if space.addr_size == 0 {
                     bail!("FlowRefSize space {} has addr_size=0", space.name);
                 }
                 Ok(space.addr_size as u64)
             }
-            CompiledConstTpl::FlowDest => self
-                .flow
-                .flow_dest_addr
-                .ok_or_else(|| anyhow!("ConstTpl FlowDest requires FlowEmitOptions.flow_dest_addr")),
+            CompiledConstTpl::FlowDest => self.flow.flow_dest_addr.ok_or_else(|| {
+                anyhow!("ConstTpl FlowDest requires FlowEmitOptions.flow_dest_addr")
+            }),
             CompiledConstTpl::FlowDestSize => {
-                let idx = self
-                    .flow
-                    .flow_dest_space_index
-                    .ok_or_else(|| anyhow!("ConstTpl FlowDestSize requires FlowEmitOptions.flow_dest_space_index"))?;
-                let space = self
-                    .compiled
-                    .sla_spaces
-                    .get(&idx)
-                    .ok_or_else(|| anyhow!("FlowDestSize space index {idx} missing from sla_spaces"))?;
+                let idx = self.flow.flow_dest_space_index.ok_or_else(|| {
+                    anyhow!("ConstTpl FlowDestSize requires FlowEmitOptions.flow_dest_space_index")
+                })?;
+                let space = self.compiled.sla_spaces.get(&idx).ok_or_else(|| {
+                    anyhow!("FlowDestSize space index {idx} missing from sla_spaces")
+                })?;
                 if space.addr_size == 0 {
                     bail!("FlowDestSize space {} has addr_size=0", space.name);
                 }
@@ -1374,7 +1378,9 @@ impl<'c> CompiledTableEmitter<'c> {
                         .temp_space
                         .as_ref()
                         .map(|s| s.index)
-                        .ok_or_else(|| anyhow!("dynamic handle missing temp_space for Space selector"))
+                        .ok_or_else(|| {
+                            anyhow!("dynamic handle missing temp_space for Space selector")
+                        })
                 } else {
                     handle
                         .fixed

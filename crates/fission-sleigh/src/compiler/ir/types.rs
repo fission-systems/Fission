@@ -1,3 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledSubtableDefinition {
     pub name: String,
@@ -60,12 +64,12 @@ impl CompiledFrontend {
         }
         self.sla_spaces
             .iter()
-            .find(|(_, s)| {
-                s.name != "const" && s.name != "unique" && s.name != "register"
-            })
+            .find(|(_, s)| s.name != "const" && s.name != "unique" && s.name != "register")
             .map(|(idx, _)| *idx)
             .ok_or_else(|| {
-                anyhow::anyhow!("SLA space table has no ram or other default address space for CurSpace")
+                anyhow::anyhow!(
+                    "SLA space table has no ram or other default address space for CurSpace"
+                )
             })
     }
 
@@ -77,7 +81,10 @@ impl CompiledFrontend {
             .get(&idx)
             .ok_or_else(|| anyhow::anyhow!("CurSpace index {idx} missing from sla_spaces"))?;
         if space.addr_size == 0 {
-            anyhow::bail!("SLA space {} has addr_size=0 (cannot resolve CurSpaceSize)", space.name);
+            anyhow::bail!(
+                "SLA space {} has addr_size=0 (cannot resolve CurSpaceSize)",
+                space.name
+            );
         }
         Ok(space.addr_size)
     }
@@ -88,7 +95,9 @@ impl CompiledFrontend {
     pub fn sla_ram_address_size(&self) -> u32 {
         self.sla_spaces
             .values()
-            .find(|s| s.name == "ram" || (s.name != "const" && s.name != "unique" && s.name != "register"))
+            .find(|s| {
+                s.name == "ram" || (s.name != "const" && s.name != "unique" && s.name != "register")
+            })
             .map(|s| s.addr_size)
             .filter(|&sz| sz > 0)
             .unwrap_or(8)

@@ -1,3 +1,14 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+
+use anyhow::{anyhow, Context, Result};
+
+use super::*;
+use crate::compiler::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
+use crate::compiler::preprocessor::{ExpandedSpec, PreprocessedLine};
+use crate::compiler::sla::CompiledSlaTemplateLibrary;
+
 pub fn compile_frontend(
     arch: &str,
     expanded: &ExpandedSpec,
@@ -319,9 +330,7 @@ pub fn build_frontend_from_sla_native_model(
     updated
 }
 
-fn constructors_by_sla_id(
-    constructors: &[CompiledExecutableConstructor],
-) -> BTreeMap<u32, usize> {
+fn constructors_by_sla_id(constructors: &[CompiledExecutableConstructor]) -> BTreeMap<u32, usize> {
     constructors
         .iter()
         .enumerate()
@@ -449,22 +458,22 @@ pub enum FieldKind {
     Context,
 }
 
-struct FieldBitRange {
-    bit_offset: u32,
-    bit_width: u32,
-    kind: FieldKind,
+pub(super) struct FieldBitRange {
+    pub(super) bit_offset: u32,
+    pub(super) bit_width: u32,
+    pub(super) kind: FieldKind,
 }
 
-struct Collector {
-    definitions: Vec<CompiledSpecDefinition>,
-    macros: Vec<CompiledMacro>,
-    constructors: Vec<CompiledConstructor>,
-    subtable_executables: BTreeMap<String, Vec<CompiledExecutableConstructor>>,
-    pcode_ops: BTreeSet<String>,
-    pcode_op_sources: BTreeMap<String, String>,
-    default_context: u64,
-    pattern_nodes: Vec<CompiledPatternNode>,
-    field_info: BTreeMap<String, FieldBitRange>,
+pub(super) struct Collector {
+    pub(super) definitions: Vec<CompiledSpecDefinition>,
+    pub(super) macros: Vec<CompiledMacro>,
+    pub(super) constructors: Vec<CompiledConstructor>,
+    pub(super) subtable_executables: BTreeMap<String, Vec<CompiledExecutableConstructor>>,
+    pub(super) pcode_ops: BTreeSet<String>,
+    pub(super) pcode_op_sources: BTreeMap<String, String>,
+    pub(super) default_context: u64,
+    pub(super) pattern_nodes: Vec<CompiledPatternNode>,
+    pub(super) field_info: BTreeMap<String, FieldBitRange>,
 }
 
 impl Collector {
@@ -947,7 +956,7 @@ impl Collector {
         None
     }
 
-    fn parse_define_bits(&mut self, statement: &str, kind_str: &str) {
+    pub(super) fn parse_define_bits(&mut self, statement: &str, kind_str: &str) {
         let trimmed = strip_comments(statement).trim();
         let kind = match kind_str {
             "token" => FieldKind::Instruction,
@@ -1288,7 +1297,11 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
                     }
                 }
             }
-            if found { vec![val] } else { Vec::new() }
+            if found {
+                vec![val]
+            } else {
+                Vec::new()
+            }
         }
         _ => Vec::new(),
     }

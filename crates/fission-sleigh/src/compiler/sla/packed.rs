@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+
+use anyhow::{anyhow, bail, Context, Result};
+
 pub struct PackedElement {
     pub id: u32,
     pub attrs: BTreeMap<u32, PackedAttrValue>,
@@ -98,7 +102,10 @@ impl<'a> PackedParser<'a> {
     fn parse_element(&mut self) -> Result<PackedElement> {
         let (kind, id) = self.read_header()?;
         if kind != packed::ELEMENT_START {
-            bail!("expected element start, found header kind {kind:#x} at offset {}", self.offset - 1);
+            bail!(
+                "expected element start, found header kind {kind:#x} at offset {}",
+                self.offset - 1
+            );
         }
         let mut attrs = BTreeMap::new();
         loop {
@@ -126,7 +133,10 @@ impl<'a> PackedParser<'a> {
                     break;
                 }
                 packed::ATTRIBUTE => bail!("attribute appeared after child in element {id}"),
-                other => bail!("unsupported packed header kind {other:#x} at offset {}", self.offset),
+                other => bail!(
+                    "unsupported packed header kind {other:#x} at offset {}",
+                    self.offset
+                ),
             }
         }
         Ok(PackedElement {

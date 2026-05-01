@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TokenFieldBundle {
     pub(super) operand_mode: u8,

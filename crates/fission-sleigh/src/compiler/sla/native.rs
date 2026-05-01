@@ -1,3 +1,11 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use anyhow::{bail, Result};
+
+use super::*;
+use crate::compiler::ir::*;
+
 /// Decoded Ghidra `.sla` owner model.
 ///
 /// This model is deliberately shaped after Ghidra's compiled artifact owners:
@@ -87,7 +95,7 @@ pub struct SlaConstructTpl {
 }
 
 impl SlaLanguage {
-    fn from_compiled_library(library: &CompiledSlaTemplateLibrary) -> Self {
+    pub(super) fn from_compiled_library(library: &CompiledSlaTemplateLibrary) -> Self {
         let subtables = library
             .subtables
             .iter()

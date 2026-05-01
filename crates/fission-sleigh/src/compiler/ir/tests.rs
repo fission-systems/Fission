@@ -1,16 +1,13 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::lowering::Collector;
 use super::*;
-use crate::compiler::{
-    expand_entry_spec, infer_arch_from_entry_spec, parse_expanded_spec, x86_64_entry_spec_path,
-};
+use crate::compiler::{compile_frontend_for_entry_spec, x86_64_entry_spec_path};
 
 #[test]
 fn compile_frontend_collects_pcode_ops_and_patterns() {
     let entry_spec = x86_64_entry_spec_path();
-    let expanded = expand_entry_spec(&entry_spec).expect("expand spec");
-    let ast_result = parse_expanded_spec(&expanded);
-    let arch = infer_arch_from_entry_spec(&entry_spec).expect("infer arch");
-    let compiled =
-        compile_frontend(&arch, &expanded, ast_result, &entry_spec).expect("compile frontend");
+    let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile frontend");
     assert!(
         compiled
             .construct_templates
@@ -19,27 +16,27 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
         "compiled frontend should preserve decoded .sla ConstructTpl ops"
     );
     assert!(!compiled.pattern_nodes.is_empty());
-    assert!(
-        compiled
-            .subtables
-            .values()
-            .flat_map(|subtable| subtable.constructors.iter())
-            .any(|item| item.mnemonic.eq_ignore_ascii_case("RET"))
-    );
+    assert!(compiled
+        .subtables
+        .values()
+        .flat_map(|subtable| subtable.constructors.iter())
+        .any(|item| item.mnemonic.eq_ignore_ascii_case("RET")));
     assert!(!compiled.language_layout.address_spaces.is_empty());
     assert!(!compiled.language_layout.registers.is_empty());
     assert!(!compiled.language_layout.display_templates.is_empty());
     assert!(!compiled.construct_templates.is_empty());
-    assert!(
-        compiled
-            .subtables
-            .get("instruction")
-            .unwrap()
-            .decision_tree
-            .nodes
-            .iter()
-            .any(|node| matches!(node.probe, CompiledDecisionProbe::ContextBitSlice { .. }))
-    );
+    assert!(compiled
+        .subtables
+        .get("instruction")
+        .unwrap()
+        .decision_tree
+        .nodes
+        .iter()
+        .any(|node| matches!(
+            node.probe,
+            CompiledDecisionProbe::SlaInstructionBits { .. }
+                | CompiledDecisionProbe::SlaContextBits { .. }
+        )));
 }
 
 #[test]

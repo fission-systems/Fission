@@ -1,3 +1,11 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use anyhow::{bail, Result};
+
+use super::*;
+use crate::compiler::ir::*;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledSlaArtifact {
     pub path: PathBuf,
@@ -54,45 +62,45 @@ pub struct CompiledSlaConstructorTemplate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DecodedOperandSymbol {
-    hand_index: usize,
+pub(super) struct DecodedOperandSymbol {
+    pub(super) hand_index: usize,
     /// Byte offset of this operand's token from the start of the parent constructor.
     /// Corresponds to `ATTRIB_OFF` in Ghidra's SLA format (OperandSymbol.reloffset).
-    reloffset: i32,
+    pub(super) reloffset: i32,
     /// Index of the base operand for the offset calculation, or -1 if relative to
     /// the constructor's own start. Corresponds to `ATTRIB_BASE` (OperandSymbol.offsetbase).
-    offsetbase: i32,
-    subtable_name: Option<String>,
-    display_kind: CompiledDisplayOperandKind,
-    token_field: Option<DecodedTokenField>,
-    pattern_expression: Option<CompiledPatternExpression>,
-    varnode_list: Option<Vec<CompiledResolvedVarnode>>,
-    value_map: Option<Vec<i64>>,
-    fixed_varnode: Option<CompiledResolvedVarnode>,
+    pub(super) offsetbase: i32,
+    pub(super) subtable_name: Option<String>,
+    pub(super) display_kind: CompiledDisplayOperandKind,
+    pub(super) token_field: Option<DecodedTokenField>,
+    pub(super) pattern_expression: Option<CompiledPatternExpression>,
+    pub(super) varnode_list: Option<Vec<CompiledResolvedVarnode>>,
+    pub(super) value_map: Option<Vec<i64>>,
+    pub(super) fixed_varnode: Option<CompiledResolvedVarnode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DecodedTokenField {
-    big_endian: bool,
-    sign_bit: bool,
-    bit_start: u32,
-    bit_end: u32,
-    byte_start: u32,
-    byte_end: u32,
-    shift: i32,
+pub(super) struct DecodedTokenField {
+    pub(super) big_endian: bool,
+    pub(super) sign_bit: bool,
+    pub(super) bit_start: u32,
+    pub(super) bit_end: u32,
+    pub(super) byte_start: u32,
+    pub(super) byte_end: u32,
+    pub(super) shift: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DecodedContextField {
-    sign_bit: bool,
-    bit_start: u32,
-    bit_end: u32,
-    byte_start: u32,
-    byte_end: u32,
-    shift: i32,
+pub(super) struct DecodedContextField {
+    pub(super) sign_bit: bool,
+    pub(super) bit_start: u32,
+    pub(super) bit_end: u32,
+    pub(super) byte_start: u32,
+    pub(super) byte_end: u32,
+    pub(super) shift: i32,
 }
 
-fn decode_source_files(root: &PackedElement) -> Result<BTreeMap<u64, String>> {
+pub(super) fn decode_source_files(root: &PackedElement) -> Result<BTreeMap<u64, String>> {
     let mut out = BTreeMap::new();
     for source in root.descendants_with_id(sla_format::ELEM_SOURCEFILE) {
         let index = source
@@ -112,7 +120,7 @@ pub(super) struct SlaSpaceDecodeResult {
     pub register_space_index: u64,
 }
 
-fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
+pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
     let mut spaces = BTreeMap::new();
     spaces.insert(
         0,
@@ -161,9 +169,7 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
         let index = space
             .attr_unsigned(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("unique space missing index"))?;
-        let name = space
-            .attr_string(sla_format::ATTR_NAME)
-            .unwrap_or("unique");
+        let name = space.attr_string(sla_format::ATTR_NAME).unwrap_or("unique");
         unique_space_index = index;
         spaces.insert(
             index,
@@ -182,7 +188,7 @@ fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
     })
 }
 
-fn decode_operand_symbols(
+pub(super) fn decode_operand_symbols(
     root: &PackedElement,
     display_symbols: &BTreeMap<u32, DecodedDisplaySymbol>,
 ) -> Result<BTreeMap<u32, DecodedOperandSymbol>> {
@@ -194,12 +200,8 @@ fn decode_operand_symbols(
         let hand_index = operand
             .attr_signed(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("operand_sym missing index"))? as usize;
-        let reloffset = operand
-            .attr_signed(sla_format::ATTR_OFF)
-            .unwrap_or(0) as i32;
-        let offsetbase = operand
-            .attr_signed(sla_format::ATTR_BASE)
-            .unwrap_or(-1) as i32;
+        let reloffset = operand.attr_signed(sla_format::ATTR_OFF).unwrap_or(0) as i32;
+        let offsetbase = operand.attr_signed(sla_format::ATTR_BASE).unwrap_or(-1) as i32;
         let direct_pattern_expression = operand
             .children
             .iter()
@@ -314,7 +316,7 @@ fn decode_operand_symbols(
     Ok(out)
 }
 
-fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
+pub(super) fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
     Ok(DecodedTokenField {
         big_endian: element.attr_bool(sla_format::ATTR_BIGENDIAN),
         sign_bit: element.attr_bool(sla_format::ATTR_SIGNBIT),
@@ -336,7 +338,7 @@ fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
     })
 }
 
-fn compiled_operand_spec_for_symbol(
+pub(super) fn compiled_operand_spec_for_symbol(
     symbol: &DecodedOperandSymbol,
     _subtable_names_by_id: &BTreeMap<u32, String>,
 ) -> Option<CompiledOperandSpec> {
@@ -399,7 +401,7 @@ fn compiled_operand_spec_for_symbol(
         })
 }
 
-fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
+pub(super) fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
     let word_index = element
         .attr_signed(sla_format::ATTR_I)
         .ok_or_else(|| anyhow!("context_op missing word index"))? as u32;
@@ -425,7 +427,9 @@ fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
     })
 }
 
-fn decode_pattern_expression(element: &PackedElement) -> Result<CompiledPatternExpression> {
+pub(super) fn decode_pattern_expression(
+    element: &PackedElement,
+) -> Result<CompiledPatternExpression> {
     let mut binary = |ctor: fn(
         Box<CompiledPatternExpression>,
         Box<CompiledPatternExpression>,
@@ -505,7 +509,7 @@ fn decode_pattern_expression(element: &PackedElement) -> Result<CompiledPatternE
     }
 }
 
-fn pattern_expression_references_operand(
+pub(super) fn pattern_expression_references_operand(
     expr: &CompiledPatternExpression,
     operand_index: usize,
 ) -> bool {
@@ -535,7 +539,7 @@ fn pattern_expression_references_operand(
     }
 }
 
-fn decode_context_field(element: &PackedElement) -> Result<DecodedContextField> {
+pub(super) fn decode_context_field(element: &PackedElement) -> Result<DecodedContextField> {
     Ok(DecodedContextField {
         sign_bit: element.attr_bool(sla_format::ATTR_SIGNBIT),
         bit_start: element
@@ -556,7 +560,7 @@ fn decode_context_field(element: &PackedElement) -> Result<DecodedContextField> 
     })
 }
 
-fn decode_space_ref(
+pub(super) fn decode_space_ref(
     element: &PackedElement,
     spaces: &BTreeMap<u64, CompiledSpaceRef>,
 ) -> Result<CompiledSpaceRef> {

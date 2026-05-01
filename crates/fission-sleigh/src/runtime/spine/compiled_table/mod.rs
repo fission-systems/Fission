@@ -6,12 +6,12 @@ use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
-    CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe,
-    CompiledDisjointPattern, CompiledExecutableConstructor, CompiledFixedRegister,
-    CompiledFrontend, CompiledHandleSelector, CompiledHandleTemplate, CompiledHandleTpl,
-    CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep, CompiledOperandSpec,
-    CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher, CompiledSpaceRef,
-    CompiledSpaceTpl, CompiledTemplateSource, CompiledTokenFieldRef, CompiledVarnodeTpl,
+    CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe, CompiledDisjointPattern,
+    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
+    CompiledHandleTemplate, CompiledHandleTpl, CompiledOpTpl, CompiledOpTplOpcode,
+    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternBlock,
+    CompiledPatternExpression, CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl,
+    CompiledTemplateSource, CompiledTokenFieldRef, CompiledVarnodeTpl,
 };
 use crate::runtime::spine::{
     self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeFixedHandle,
@@ -23,134 +23,30 @@ use crate::runtime::{
     RuntimeExecutionDetails, RuntimeSleighError,
 };
 
-mod context {
-    use super::*;
-    include!("context.rs");
-}
+mod context;
+mod display;
+mod feature_audit;
+mod handles;
+#[path = "token.rs"]
+mod legacy_token_policy;
+mod runtime_index;
+mod selection;
+mod strategy;
+mod template_eval;
+mod walker;
 
-mod legacy_token_policy {
-    use super::*;
-    include!("token.rs");
-}
-
-mod selection {
-    use super::*;
-    include!("selection.rs");
-}
-
-mod strategy {
-    use super::*;
-    include!("strategy.rs");
-}
-
-mod walker {
-    use super::*;
-    include!("walker.rs");
-}
-
-mod display {
-    use super::*;
-    include!("display.rs");
-}
-
-mod handles {
-    use super::*;
-    include!("handles.rs");
-}
-
-mod template_eval {
-    use super::*;
-    include!("template_eval.rs");
-}
-
+pub use feature_audit::{audit_sla_template_features, SlaTemplateFeatureAudit};
 pub use template_eval::{FlowEmitOptions, RuntimeFlowOverride};
 
 use context::*;
 use display::*;
 use handles::*;
 use legacy_token_policy::*;
+use runtime_index::*;
 use selection::*;
 use strategy::*;
 use template_eval::*;
 use walker::*;
-
-/// Counts cross-build / delay-slot / flow-const usage across all `.sla`-lowered constructor templates.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct SlaTemplateFeatureAudit {
-    pub opcode_cross_build: u64,
-    pub opcode_delay_slot_indirect: u64,
-    pub const_flow_ref: u64,
-    pub const_flow_ref_size: u64,
-    pub const_flow_dest: u64,
-    pub const_flow_dest_size: u64,
-}
-
-/// Scan `compiled` subtable constructors for template features that need Ghidra `PcodeEmit` parity.
-pub fn audit_sla_template_features(compiled: &CompiledFrontend) -> SlaTemplateFeatureAudit {
-    let mut audit = SlaTemplateFeatureAudit::default();
-    for sub in compiled.subtables.values() {
-        for ctor in &sub.constructors {
-            audit_construct_tpl_ops(&ctor.constructor_template.ops, &mut audit);
-            for named in &ctor.named_templates {
-                if let Some(tpl) = named {
-                    audit_construct_tpl_ops(&tpl.ops, &mut audit);
-                }
-            }
-        }
-    }
-    audit
-}
-
-fn audit_construct_tpl_ops(ops: &[CompiledOpTpl], audit: &mut SlaTemplateFeatureAudit) {
-    for op in ops {
-        match op.opcode {
-            CompiledOpTplOpcode::CrossBuild => audit.opcode_cross_build += 1,
-            CompiledOpTplOpcode::DelaySlotIndirect => audit.opcode_delay_slot_indirect += 1,
-            _ => {}
-        }
-        if let Some(out) = &op.output {
-            audit_varnode_tpl_flow_consts(out, audit);
-        }
-        for inp in &op.inputs {
-            audit_varnode_tpl_flow_consts(inp, audit);
-        }
-    }
-}
-
-fn audit_varnode_tpl_flow_consts(vn: &CompiledVarnodeTpl, audit: &mut SlaTemplateFeatureAudit) {
-    match vn {
-        CompiledVarnodeTpl::Const(c) => audit_const_tpl_flow(c, audit),
-        CompiledVarnodeTpl::Varnode { space, offset, size } => {
-            if let CompiledSpaceTpl::Const(c) = space {
-                audit_const_tpl_flow(c, audit);
-            }
-            audit_const_tpl_flow(offset, audit);
-            audit_const_tpl_flow(size, audit);
-        }
-        CompiledVarnodeTpl::HandleTpl(ht) => {
-            if let Some(s) = &ht.size {
-                audit_const_tpl_flow(s, audit);
-            }
-            if let Some(o) = &ht.ptr_offset {
-                audit_const_tpl_flow(o, audit);
-            }
-            if let Some(o) = &ht.temp_offset {
-                audit_const_tpl_flow(o, audit);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn audit_const_tpl_flow(ct: &CompiledConstTpl, audit: &mut SlaTemplateFeatureAudit) {
-    match ct {
-        CompiledConstTpl::FlowRef => audit.const_flow_ref += 1,
-        CompiledConstTpl::FlowRefSize => audit.const_flow_ref_size += 1,
-        CompiledConstTpl::FlowDest => audit.const_flow_dest += 1,
-        CompiledConstTpl::FlowDestSize => audit.const_flow_dest_size += 1,
-        _ => {}
-    }
-}
 
 #[cfg(test)]
 mod tests;
@@ -239,7 +135,8 @@ pub(crate) fn decode_instruction_with_context(
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     if let Some((override_ctx, override_mask)) = context_override {
-        ctx.context_register = (ctx.context_register & !override_mask) | (override_ctx & override_mask);
+        ctx.context_register =
+            (ctx.context_register & !override_mask) | (override_ctx & override_mask);
         ctx.context_known_mask |= override_mask;
     }
     decode_instruction_inner(compiled, native, bytes, address, ctx)
@@ -264,7 +161,6 @@ fn decode_instruction_inner(
     address: u64,
     ctx: CompiledInstructionContext<'_>,
 ) -> Result<DecodedInstruction> {
-
     let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
     let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
     let mut fallback_state = None;
@@ -416,13 +312,9 @@ pub(super) fn try_bind_runtime_state_at(
     context_register: u64,
     context_known_mask: u64,
 ) -> Result<RuntimeConstructState> {
-    let offset = target_address
-        .checked_sub(memory_base)
-        .ok_or_else(|| {
-            anyhow!(
-                "bind target 0x{target_address:x} precedes memory base 0x{memory_base:x}"
-            )
-        })? as usize;
+    let offset = target_address.checked_sub(memory_base).ok_or_else(|| {
+        anyhow!("bind target 0x{target_address:x} precedes memory base 0x{memory_base:x}")
+    })? as usize;
     let slice = memory_window.get(offset..).ok_or_else(|| {
         anyhow!(
             "bind target 0x{target_address:x} past memory window (base=0x{memory_base:x}, len={})",
@@ -449,9 +341,8 @@ pub(super) fn try_bind_runtime_state_at(
             }
         }
     }
-    Err(first_err.unwrap_or_else(|| {
-        anyhow!("decode bind failed at target_address=0x{target_address:x}")
-    }))
+    Err(first_err
+        .unwrap_or_else(|| anyhow!("decode bind failed at target_address=0x{target_address:x}")))
 }
 
 /// Resolved deferred context commit: Ghidra's SleighParserContext.applyCommits().
@@ -500,7 +391,10 @@ pub(crate) fn apply_context_commits(
                 let addr_unit = compiled
                     .sla_spaces
                     .values()
-                    .find(|s| s.name == "ram" || (s.name != "const" && s.name != "unique" && s.name != "register"))
+                    .find(|s| {
+                        s.name == "ram"
+                            || (s.name != "const" && s.name != "unique" && s.name != "register")
+                    })
                     .map(|s| s.word_size as u64)
                     .unwrap_or(1);
                 offset.wrapping_mul(addr_unit)

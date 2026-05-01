@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn candidate_selections<'a>(
     compiled: &'a CompiledFrontend,
     strategy: &RuntimeDecodeStrategy<'a>,
@@ -119,18 +121,14 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 CompiledTokenFieldRef::InstructionWidthProfile,
             ) => vec![self.ctx.instruction_width_profile],
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                vec![
-                    ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                        .map(|bundle| bundle.operand_mode)
-                        .unwrap_or(0),
-                ]
+                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                    .map(|bundle| bundle.operand_mode)
+                    .unwrap_or(0)]
             }
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                vec![
-                    ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                        .map(|bundle| bundle.reg)
-                        .unwrap_or(0),
-                ]
+                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
+                    .map(|bundle| bundle.reg)
+                    .unwrap_or(0)]
             }
             CompiledDecisionProbe::SlaInstructionBits {
                 start_bit,

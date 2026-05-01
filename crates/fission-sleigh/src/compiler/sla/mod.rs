@@ -1,30 +1,24 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
-use fission_pcode::PcodeOpcode;
+use anyhow::{anyhow, bail, Context, Result};
 use flate2::read::ZlibDecoder;
-
-use super::ir::{
-    CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextOp,
-    CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
-    CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
-    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledOpTpl,
-    CompiledOpTplOpcode, CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression,
-    CompiledResolvedVarnode, CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl,
-    CompiledVarnodeTpl,
-};
 
 pub const GHIDRA_SLA_MAGIC: &[u8; 3] = b"sla";
 pub const GHIDRA_SLA_FORMAT_VERSION: u8 = 4;
 
-include!("symbols.rs");
-include!("display.rs");
-include!("native.rs");
-include!("templates.rs");
-include!("packed.rs");
+mod display;
+mod native;
+mod packed;
+mod symbols;
+mod templates;
+
+pub use display::*;
+pub use native::*;
+pub use packed::*;
+pub use symbols::*;
+pub use templates::*;
 
 #[cfg(test)]
 mod tests;

@@ -1,3 +1,5 @@
+use super::*;
+
 pub(super) fn compiled_space(name: &str, index: u64) -> CompiledSpaceRef {
     CompiledSpaceRef {
         name: name.to_string(),

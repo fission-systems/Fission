@@ -1,4 +1,20 @@
-fn decode_construct_templates(
+use std::collections::BTreeMap;
+
+use anyhow::{anyhow, bail, Result};
+use fission_pcode::PcodeOpcode;
+
+use super::*;
+use crate::compiler::ir::{
+    CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextOp,
+    CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
+    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledOpTpl,
+    CompiledOpTplOpcode, CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression,
+    CompiledResolvedVarnode, CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl,
+    CompiledVarnodeTpl,
+};
+
+pub(super) fn decode_construct_templates(
     artifact: &CompiledSlaArtifact,
 ) -> Result<CompiledSlaTemplateLibrary> {
     if artifact.version != GHIDRA_SLA_FORMAT_VERSION {
@@ -22,9 +38,7 @@ fn decode_construct_templates(
     let spaces = space_result.spaces;
     let unique_space_index = space_result.unique_space_index;
     let register_space_index = space_result.register_space_index;
-    let uniqbase = root
-        .attr_unsigned(sla_format::ATTR_UNIQBASE)
-        .unwrap_or(0);
+    let uniqbase = root.attr_unsigned(sla_format::ATTR_UNIQBASE).unwrap_or(0);
     let uniqmask = root
         .attr_unsigned(sla_format::ATTR_UNIQMASK)
         .unwrap_or(u64::MAX);
