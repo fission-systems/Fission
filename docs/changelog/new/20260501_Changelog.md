@@ -480,3 +480,48 @@
 - No heuristic load-spec selection, symbol-name repair, source-line remap, or architecture-specific fallback was added.
 - Remaining `full_benchmark` divergence is now NIR/materialization quality work, not ELF byte-read failure.
 - Benchmark output artifacts and Ghidra project DB state remain uncommitted.
+
+## x86 32-bit SLEIGH Native Backend Generation Gate
+
+- Added single-entry generation support to `generate_sleigh_frontends`.
+- New usage: `cargo run -p fission-sleigh --example generate_sleigh_frontends -- --entry x86 --native`.
+- The command writes only the requested entry into the normal `target/fission-sleigh/generated` cache and can compile that entry's native backend without forcing a full frontend regeneration.
+- Used the Ghidra 12.0.4 SLEIGH owner chain as the structural reference: `.sla` language data, constructor/template payloads, `ParserWalker` state, `HandleTpl.fix`, and `ConstructTpl -> PcodeEmit`.
+- This change is tooling-only for generated frontend promotion. It does not add architecture-specific semantic branches, mnemonic repair, table-name fallback, source-line remap, or approximate P-code.
+- Generated target-cache artifacts remain uncommitted.
+
+## x86 32-bit SLEIGH Validation
+
+- Generated and compiled the x86 32-bit native backend:
+  - `cargo run -p fission-sleigh --example generate_sleigh_frontends -- --entry x86 --native`
+  - output cache: `target/fission-sleigh/generated/x86/x86`
+- Vendor binary smoke report: `benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_vendor_baseline/aggregate_raw_pcode_parity_report.json`
+  - `row_count = 4`
+  - `binary_count = 4`
+  - `language_count = 2`
+  - `full_match = 16`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 16`
+- x86 32-bit per-binary outcome:
+  - `vendor-x86-elf-fauxware`: `4/4` full match, `x86:LE:32:default`.
+  - `vendor-x86-pe-not-packed`: `4/4` full match, `x86:LE:32:default`.
+- x86-64 canonical guard report: `benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_x86_64_guard/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+  - `perfect_canonical_gate = passed`
+- LLVM architecture smoke was also run as a broader multi-architecture diagnostic under `benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_llvm_arch_smoke`; its aggregate includes non-x86 rows and is not treated as the x86 32-bit promotion gate.
+
+## x86 32-bit SLEIGH Notes
+
+- Existing audit counters still show no-export fallback involvement in x86 32-bit vendor smoke rows. This commit does not purge that path because the prior broad purge regressed parity.
+- The next safe step is owner-by-owner replacement of no-export fallback with exact `.sla` exported-handle/guard-only classification while keeping the canonical 1.0 gate intact.
+- No generated benchmark artifacts, target-generated frontend files, Ghidra project DB files, or copied sample binaries are staged.
