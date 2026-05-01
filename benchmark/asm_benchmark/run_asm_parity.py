@@ -8,6 +8,7 @@ instruction parity without following thunks or repairing semantic output.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import subprocess
@@ -145,24 +146,97 @@ def normalize_text(text: str | None) -> str:
     return " ".join((text or "").lower().replace(",", " , ").split())
 
 
+def sequence_similarity(left: str, right: str) -> float:
+    if not left and not right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+    return difflib.SequenceMatcher(None, left, right, autojunk=False).ratio()
+
+
+def bytes_similarity(left: str | None, right: str | None) -> float:
+    left_tokens = normalize_text(left).split()
+    right_tokens = normalize_text(right).split()
+    if not left_tokens and not right_tokens:
+        return 1.0
+    if not left_tokens or not right_tokens:
+        return 0.0
+    max_len = max(len(left_tokens), len(right_tokens))
+    matches = sum(1 for lhs, rhs in zip(left_tokens, right_tokens) if lhs == rhs)
+    return matches / max_len
+
+
 def compare_instruction(ghidra: dict[str, Any] | None, fission: dict[str, Any] | None) -> dict[str, Any]:
     if ghidra is None:
-        return {"bucket": "missing_ghidra_instruction"}
+        return {
+            "bucket": "missing_ghidra_instruction",
+            "similarity_score": 0.0,
+            "address_score": 0.0,
+            "bytes_score": 0.0,
+            "text_score": 0.0,
+        }
     if fission is None:
-        return {"bucket": "missing_fission_instruction"}
+        return {
+            "bucket": "missing_fission_instruction",
+            "similarity_score": 0.0,
+            "address_score": 0.0,
+            "bytes_score": 0.0,
+            "text_score": 0.0,
+        }
     if ghidra.get("status") != "ok":
-        return {"bucket": "ghidra_decode_error", "ghidra_error": ghidra.get("error")}
+        return {
+            "bucket": "ghidra_decode_error",
+            "ghidra_error": ghidra.get("error"),
+            "similarity_score": 0.0,
+            "address_score": 0.0,
+            "bytes_score": 0.0,
+            "text_score": 0.0,
+        }
     address_match = ghidra.get("address") == fission.get("address")
     bytes_match = normalize_text(ghidra.get("bytes")) == normalize_text(fission.get("bytes"))
     text_match = normalize_text(ghidra.get("instruction")) == normalize_text(fission.get("instruction"))
+    address_score = 1.0 if address_match else 0.0
+    byte_score = bytes_similarity(ghidra.get("bytes"), fission.get("bytes"))
+    text_score = sequence_similarity(
+        normalize_text(ghidra.get("instruction")),
+        normalize_text(fission.get("instruction")),
+    )
+    similarity_score = (address_score + byte_score + text_score) / 3.0
     bucket = "full_match" if address_match and bytes_match and text_match else "asm_mismatch"
     return {
         "bucket": bucket,
         "address_match": address_match,
         "bytes_match": bytes_match,
         "text_match": text_match,
+        "address_score": address_score,
+        "bytes_score": byte_score,
+        "text_score": text_score,
+        "similarity_score": similarity_score,
         "ghidra": ghidra,
         "fission": fission,
+    }
+
+
+def average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def similarity_summary(comparisons: list[dict[str, Any]]) -> dict[str, float]:
+    return {
+        "average_similarity_score": average(
+            [float(comparison.get("similarity_score", 0.0)) for comparison in comparisons]
+        ),
+        "average_address_score": average(
+            [float(comparison.get("address_score", 0.0)) for comparison in comparisons]
+        ),
+        "average_bytes_score": average(
+            [float(comparison.get("bytes_score", 0.0)) for comparison in comparisons]
+        ),
+        "average_text_score": average(
+            [float(comparison.get("text_score", 0.0)) for comparison in comparisons]
+        ),
     }
 
 
@@ -192,6 +266,7 @@ def run_row(
     bucket_totals: dict[str, int] = {}
     for comparison in comparisons:
         bucket_totals[comparison["bucket"]] = bucket_totals.get(comparison["bucket"], 0) + 1
+    row_similarity = similarity_summary(comparisons)
     report = {
         "entry_id": entry.get("id"),
         "row_id": row.get("id"),
@@ -201,6 +276,7 @@ def run_row(
         "count": count,
         "elapsed_sec": elapsed,
         "bucket_totals": bucket_totals,
+        **row_similarity,
         "ghidra": ghidra,
         "fission": fission,
         "comparisons": comparisons,
@@ -243,6 +319,13 @@ def main() -> int:
     for row in rows:
         for bucket, count in row["bucket_totals"].items():
             aggregate["bucket_totals"][bucket] = aggregate["bucket_totals"].get(bucket, 0) + count
+    all_comparisons = [
+        comparison
+        for row in rows
+        for comparison in row.get("comparisons", [])
+        if isinstance(comparison, dict)
+    ]
+    aggregate.update(similarity_summary(all_comparisons))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "aggregate_asm_parity_report.json").write_text(
         json.dumps(aggregate, indent=2, sort_keys=True) + "\n"

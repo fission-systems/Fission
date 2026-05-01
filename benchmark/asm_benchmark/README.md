@@ -12,6 +12,13 @@ full decompilation:
 The first use case is separating export jump-thunk seed problems from actual
 decompiler quality regressions.
 
+Reports include both parity buckets and additive similarity scores:
+
+- `average_similarity_score`: mean of address, byte, and text scores.
+- `average_address_score`: exact address match ratio.
+- `average_bytes_score`: byte-token match ratio.
+- `average_text_score`: normalized instruction-text similarity.
+
 Example:
 
 ```bash

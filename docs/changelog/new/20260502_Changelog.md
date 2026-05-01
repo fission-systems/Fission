@@ -248,10 +248,19 @@
   - `benchmark/asm_benchmark/run_asm_parity.py`
   - `benchmark/asm_benchmark/sqlite3_export_thunks.json`
   - `benchmark/asm_benchmark/README.md`
+- Added assembly similarity metrics:
+  - `average_similarity_score`
+  - `average_address_score`
+  - `average_bytes_score`
+  - `average_text_score`
 - Command:
   - `python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks`
 - Result:
   - `full_match=3/3`
+  - `average_similarity_score=1.0`
+  - `average_address_score=1.0`
+  - `average_bytes_score=1.0`
+  - `average_text_score=1.0`
   - rows: `0x18000104b`, `0x1800013fc`, `0x18000140b`
 
 ### Full Benchmark After Loader Fix
