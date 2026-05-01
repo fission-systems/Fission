@@ -37,6 +37,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
@@ -94,6 +95,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
@@ -149,6 +151,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
@@ -196,6 +199,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
@@ -230,6 +234,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
     let context = PreviewTypeContext {
         call_targets: HashMap::new(),
         call_target_refs: HashMap::new(),
+        ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {

@@ -358,3 +358,73 @@
 - `cargo test -p fission-pcode type_hints_imports -- --test-threads=1`
 - `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
 - `cargo build --release -p fission-cli`
+
+## Decompiler Quality V5: Exact Call Target Identity
+
+### Summary
+
+- Added an exact `CallTargetIndex` owner in `fission-decompiler-core` so HIR call targets are promoted only from loader/fact-proven identities.
+- Matched the Ghidra owner boundary inspected in `Features/Decompiler/src/decompile/cpp`:
+  - `Scope::queryFunction`
+  - `Scope::queryExternalRefFunction`
+  - `ActionDeindirect`
+  - `ActionDefaultParams`
+- Kept printer, benchmark, and CLI surfaces out of semantic repair. `HirExpr::Call.target` must already be exact before output improves.
+
+### Implementation
+
+- Exact call-target provenance priority is now:
+  - `Import/IAT`
+  - `Export thunk/export`
+  - `Fact/debug-style resolved name`
+  - `Direct loader function`
+  - `Global symbol`
+- Export thunk identity is connected to both thunk VA and exact thunk target VA when `FunctionInfo.thunk_target` is present.
+- Same-rank conflicting names are recorded as ambiguous and are not promoted to HIR call targets.
+- Generic loader names such as `sub_*`, `FUN_*`, and `tmp_*` are not treated as exact identities.
+- HIR call lowering now uses exact `call_target_refs` hits for promotion. Legacy `call_targets` no longer promotes names.
+- `CALLIND` can resolve through a COPY-only constant chain. Load-derived or non-constant indirect calls remain unresolved.
+- Added additive telemetry:
+  - `call_target_exact_index_hit_count`
+  - `call_target_exact_index_ambiguous_count`
+  - `call_target_export_thunk_target_resolved_count`
+  - `call_target_indirect_const_resolved_count`
+  - `call_target_unresolved_no_exact_identity_count`
+
+### Benchmarks
+
+- Command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v5_call_target_identity`
+- Result:
+  - `avg_norm_sim=27.610%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+- Note:
+  - The current sqlite3 first-20 focused rows did not exercise call-target lowering counters; owner metrics are exposed and unit-gated, but benchmark counters remained `0`.
+
+### Assembly Guard
+
+- Command:
+  - `python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks_v5_guard`
+- Result:
+  - `full_match=3/3`
+  - `average_similarity_score=1.0`
+  - `average_address_score=1.0`
+  - `average_bytes_score=1.0`
+  - `average_text_score=1.0`
+
+### Validation
+
+- `cargo test -p fission-pcode call_target --target-dir /tmp/fission-target-v5 -- --test-threads=1`
+- `cargo test -p fission-pcode preview_callind_copy_only_constant_chain_resolves_exact_target --target-dir /tmp/fission-target-v5 -- --test-threads=1`
+- `cargo test -p fission-pcode type_hints_imports --target-dir /tmp/fission-target-v5 -- --test-threads=1`
+- `cargo test -p fission-pcode callsite_type_prop_prunes --target-dir /tmp/fission-target-v5 -- --test-threads=1`
+- `cargo test -p fission-decompiler-core call_target --target-dir /tmp/fission-target-v5 -- --test-threads=1`
+- `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli --target-dir /tmp/fission-target-v5`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/asm_benchmark/*.py`
+
+### Notes
+
+- The default debug target directory had a stale rustc process during this run, so targeted Rust tests/checks used `/tmp/fission-target-v5`. Release build to `target/release/fission_cli` succeeded and was used for benchmarks.
+- No stack-local, FID, byte-pattern, DIE, GDT, printer-only, or binary-specific repair was added.

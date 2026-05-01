@@ -1,6 +1,6 @@
 use fission_loader::loader::LoadedBinary;
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use super::support::CallingConvention;
@@ -270,6 +270,8 @@ pub enum CarrierClass {
 pub enum CallTargetProvenance {
     Direct,
     Import,
+    Export,
+    ExportThunkTarget,
     Fact,
     Global,
     Intrinsic,
@@ -1038,6 +1040,21 @@ pub struct NirBuildStats {
     /// Direct call targets encountered without a type context.
     #[serde(default)]
     pub call_target_context_missing_count: usize,
+    /// Call targets resolved by the exact loader/fact call-target index.
+    #[serde(default)]
+    pub call_target_exact_index_hit_count: usize,
+    /// Call targets excluded because exact identities tied at the same provenance rank.
+    #[serde(default)]
+    pub call_target_exact_index_ambiguous_count: usize,
+    /// Export thunk targets resolved through exact loader thunk metadata.
+    #[serde(default)]
+    pub call_target_export_thunk_target_resolved_count: usize,
+    /// Indirect calls resolved only after a COPY-only constant chain proof.
+    #[serde(default)]
+    pub call_target_indirect_const_resolved_count: usize,
+    /// Call targets left unresolved because no exact identity was available.
+    #[serde(default)]
+    pub call_target_unresolved_no_exact_identity_count: usize,
     /// Security-cookie setup/check pairs folded into semantic form.
     #[serde(default)]
     pub security_cookie_fold_count: usize,
@@ -1467,6 +1484,15 @@ impl NirBuildStats {
         self.call_target_unresolved_sub_fallback_count +=
             other.call_target_unresolved_sub_fallback_count;
         self.call_target_context_missing_count += other.call_target_context_missing_count;
+        self.call_target_exact_index_hit_count += other.call_target_exact_index_hit_count;
+        self.call_target_exact_index_ambiguous_count +=
+            other.call_target_exact_index_ambiguous_count;
+        self.call_target_export_thunk_target_resolved_count +=
+            other.call_target_export_thunk_target_resolved_count;
+        self.call_target_indirect_const_resolved_count +=
+            other.call_target_indirect_const_resolved_count;
+        self.call_target_unresolved_no_exact_identity_count +=
+            other.call_target_unresolved_no_exact_identity_count;
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.object_shape_recovered_count += other.object_shape_recovered_count;
@@ -1894,6 +1920,8 @@ impl TargetProfile {
 pub struct NirTypeContext {
     pub call_targets: HashMap<u64, String>,
     pub call_target_refs: HashMap<u64, CallTargetRef>,
+    #[serde(default)]
+    pub ambiguous_call_targets: HashSet<u64>,
     pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,

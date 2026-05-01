@@ -10,69 +10,34 @@ use fission_pcode::{
 use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::win_types::WindowsStructures;
 use fission_static::analysis::decomp::facts::FactStore;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
     fact_store: &FactStore,
     address: u64,
 ) -> NirTypeContext {
-    let mut call_targets = HashMap::new();
-    let mut call_target_refs = HashMap::new();
+    let mut index = CallTargetIndex::default();
 
     for func in binary.imports() {
         if func.address == 0 || func.name.is_empty() {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(&func.name);
-        call_targets.insert(func.address, sanitized.clone());
-        call_target_refs.insert(
-            func.address,
-            CallTargetRef {
-                address: Some(func.address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Import,
-                edge_kind: CallEdgeKind::Import,
-                confidence: 255,
-            },
-        );
+        index.add(func.address, &func.name, CandidateClass::Import);
     }
 
     for (resolved_address, name) in &binary.inner().iat_symbols {
         if *resolved_address == 0 || name.is_empty() {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(name);
-        call_targets.insert(*resolved_address, sanitized.clone());
-        call_target_refs.insert(
-            *resolved_address,
-            CallTargetRef {
-                address: Some(*resolved_address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Import,
-                edge_kind: CallEdgeKind::Import,
-                confidence: 255,
-            },
-        );
+        index.add(*resolved_address, name, CandidateClass::Import);
     }
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
         if resolved_address == 0 || fact.name.is_empty() {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(&fact.name);
-        call_targets
-            .entry(resolved_address)
-            .or_insert_with(|| sanitized.clone());
-        call_target_refs
-            .entry(resolved_address)
-            .or_insert(CallTargetRef {
-                address: Some(resolved_address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Fact,
-                edge_kind: CallEdgeKind::Reference,
-                confidence: 255,
-            });
+        index.add(resolved_address, &fact.name, CandidateClass::Fact);
     }
 
     for func in &binary.functions {
@@ -82,47 +47,183 @@ pub(crate) fn build_nir_type_context(
         if func.is_import {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(&func.name);
-        call_targets
-            .entry(func.address)
-            .or_insert_with(|| sanitized.clone());
-        call_target_refs
-            .entry(func.address)
-            .or_insert(CallTargetRef {
-                address: Some(func.address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Direct,
-                edge_kind: CallEdgeKind::Direct,
-                confidence: 224,
-            });
+        let class = if func.is_export && func.is_thunk_like {
+            CandidateClass::ExportThunk
+        } else if func.is_export {
+            CandidateClass::Export
+        } else {
+            CandidateClass::Direct
+        };
+        index.add(func.address, &func.name, class);
+        if func.is_export
+            && func.is_thunk_like
+            && let Some(thunk_target) = func.thunk_target
+            && thunk_target != 0
+        {
+            index.add(thunk_target, &func.name, CandidateClass::ExportThunkTarget);
+        }
     }
 
     for (resolved_address, name) in &binary.inner().global_symbols {
         if *resolved_address == 0 || name.is_empty() {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(name);
-        call_targets
-            .entry(*resolved_address)
-            .or_insert_with(|| sanitized.clone());
-        call_target_refs
-            .entry(*resolved_address)
-            .or_insert(CallTargetRef {
-                address: Some(*resolved_address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Global,
-                edge_kind: CallEdgeKind::Reference,
-                confidence: 192,
-            });
+        index.add(*resolved_address, name, CandidateClass::Global);
     }
+    let resolved_index = index.finish();
+    let call_target_refs = resolved_index.call_target_refs;
+    let call_targets = call_target_refs
+        .iter()
+        .map(|(address, target_ref)| (*address, target_ref.symbol.clone()))
+        .collect::<HashMap<_, _>>();
 
     NirTypeContext {
         call_targets,
         call_target_refs: call_target_refs.clone(),
+        ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&call_target_refs),
         call_param_rules: build_nir_call_param_rules(&call_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CandidateClass {
+    Import,
+    Fact,
+    ExportThunk,
+    ExportThunkTarget,
+    Export,
+    Direct,
+    Global,
+}
+
+impl CandidateClass {
+    fn rank(self) -> u8 {
+        match self {
+            CandidateClass::Import => 7,
+            CandidateClass::ExportThunk | CandidateClass::ExportThunkTarget => 6,
+            CandidateClass::Export => 5,
+            CandidateClass::Fact => 4,
+            CandidateClass::Direct => 3,
+            CandidateClass::Global => 2,
+        }
+    }
+
+    fn provenance(self) -> CallTargetProvenance {
+        match self {
+            CandidateClass::Import => CallTargetProvenance::Import,
+            CandidateClass::Fact => CallTargetProvenance::Fact,
+            CandidateClass::ExportThunk => CallTargetProvenance::Export,
+            CandidateClass::ExportThunkTarget => CallTargetProvenance::ExportThunkTarget,
+            CandidateClass::Export => CallTargetProvenance::Export,
+            CandidateClass::Direct => CallTargetProvenance::Direct,
+            CandidateClass::Global => CallTargetProvenance::Global,
+        }
+    }
+
+    fn edge_kind(self) -> CallEdgeKind {
+        match self {
+            CandidateClass::Import => CallEdgeKind::Import,
+            CandidateClass::Direct => CallEdgeKind::Direct,
+            _ => CallEdgeKind::Reference,
+        }
+    }
+
+    fn confidence(self) -> u8 {
+        match self {
+            CandidateClass::Import | CandidateClass::Fact => 255,
+            CandidateClass::ExportThunk | CandidateClass::ExportThunkTarget => 240,
+            CandidateClass::Export => 232,
+            CandidateClass::Direct => 224,
+            CandidateClass::Global => 192,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CallTargetCandidate {
+    symbol: String,
+    class: CandidateClass,
+}
+
+#[derive(Debug, Default)]
+struct CallTargetIndex {
+    candidates: BTreeMap<u64, Vec<CallTargetCandidate>>,
+}
+
+#[derive(Debug, Default)]
+struct ResolvedCallTargetIndex {
+    call_target_refs: HashMap<u64, CallTargetRef>,
+    ambiguous_call_targets: HashSet<u64>,
+}
+
+impl CallTargetIndex {
+    fn add(&mut self, address: u64, name: &str, class: CandidateClass) {
+        let sanitized = sanitize_nir_symbol_name(name);
+        if sanitized.is_empty() || is_generic_loader_symbol(&sanitized) {
+            return;
+        }
+        self.candidates
+            .entry(address)
+            .or_default()
+            .push(CallTargetCandidate {
+                symbol: sanitized,
+                class,
+            });
+    }
+
+    fn finish(self) -> ResolvedCallTargetIndex {
+        let mut resolved = ResolvedCallTargetIndex::default();
+        for (address, mut candidates) in self.candidates {
+            candidates.sort_by(|left, right| {
+                right
+                    .class
+                    .rank()
+                    .cmp(&left.class.rank())
+                    .then_with(|| left.symbol.cmp(&right.symbol))
+            });
+            let Some(best) = candidates.first() else {
+                continue;
+            };
+            let best_rank = best.class.rank();
+            let same_rank_symbols = candidates
+                .iter()
+                .filter(|candidate| candidate.class.rank() == best_rank)
+                .map(|candidate| candidate.symbol.as_str())
+                .collect::<BTreeSet<_>>();
+            if same_rank_symbols.len() > 1 {
+                resolved.ambiguous_call_targets.insert(address);
+                continue;
+            }
+            resolved.call_target_refs.insert(
+                address,
+                CallTargetRef {
+                    address: Some(address),
+                    symbol: best.symbol.clone(),
+                    provenance: best.class.provenance(),
+                    edge_kind: best.class.edge_kind(),
+                    confidence: best.class.confidence(),
+                },
+            );
+        }
+        resolved
+    }
+}
+
+fn is_generic_loader_symbol(name: &str) -> bool {
+    let stripped = name.strip_prefix('_').unwrap_or(name);
+    is_generic_symbol_with_prefix(stripped, "sub_")
+        || is_generic_symbol_with_prefix(stripped, "FUN_0x")
+        || is_generic_symbol_with_prefix(stripped, "FUN_")
+        || is_generic_symbol_with_prefix(stripped, "tmp_")
+}
+
+fn is_generic_symbol_with_prefix(name: &str, prefix: &str) -> bool {
+    let Some(rest) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn build_nir_call_effect_summaries(

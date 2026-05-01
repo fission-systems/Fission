@@ -19,16 +19,25 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
         if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
-            if matches!(target_ref.provenance, CallTargetProvenance::Import) {
-                self.call_target_import_resolved_count += 1;
-            } else {
-                self.call_target_direct_symbol_resolved_count += 1;
+            self.call_target_exact_index_hit_count += 1;
+            match target_ref.provenance {
+                CallTargetProvenance::Import => {
+                    self.call_target_import_resolved_count += 1;
+                }
+                CallTargetProvenance::ExportThunkTarget => {
+                    self.call_target_direct_symbol_resolved_count += 1;
+                    self.call_target_export_thunk_target_resolved_count += 1;
+                }
+                _ => {
+                    self.call_target_direct_symbol_resolved_count += 1;
+                }
             }
             return Some(target_ref.symbol.clone());
         }
-        if let Some(name) = ctx.call_targets.get(&addr) {
-            self.call_target_direct_symbol_resolved_count += 1;
-            return Some(name.clone());
+        if ctx.ambiguous_call_targets.contains(&addr) {
+            self.call_target_exact_index_ambiguous_count += 1;
+        } else {
+            self.call_target_unresolved_no_exact_identity_count += 1;
         }
         None
     }
@@ -138,19 +147,47 @@ impl<'a> PreviewBuilder<'a> {
         recovered_args: Option<Vec<HirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
-        let target = if let Some(target) = self.resolve_call_target_from_asm(op) {
-            target
-        } else if let Some(target) = op.inputs.first() {
+        let target = if let Some(target) = op.inputs.first() {
             match self.lower_varnode(target, visiting) {
                 Ok(HirExpr::Const(val, _)) => {
                     let addr = val as u64;
-                    self.resolve_call_target_by_address(addr)
-                        .unwrap_or_else(|| {
+                    if let Some(name) = self.resolve_call_target_by_address(addr) {
+                        if matches!(op.opcode, PcodeOpcode::CallInd) {
+                            self.call_target_indirect_const_resolved_count += 1;
+                        }
+                        name
+                    } else {
+                        self.call_target_unresolved_sub_fallback_count += 1;
+                        format!("sub_{addr:x}")
+                    }
+                }
+                Ok(HirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
+                    if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
+                        if let Some(name) = self.resolve_call_target_by_address(addr) {
+                            self.call_target_indirect_const_resolved_count += 1;
+                            name
+                        } else {
                             self.call_target_unresolved_sub_fallback_count += 1;
                             format!("sub_{addr:x}")
-                        })
+                        }
+                    } else {
+                        name
+                    }
                 }
                 Ok(HirExpr::Var(name)) => name,
+                Ok(other) if matches!(op.opcode, PcodeOpcode::CallInd) => {
+                    if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
+                        if let Some(name) = self.resolve_call_target_by_address(addr) {
+                            self.call_target_indirect_const_resolved_count += 1;
+                            name
+                        } else {
+                            self.call_target_unresolved_sub_fallback_count += 1;
+                            format!("sub_{addr:x}")
+                        }
+                    } else {
+                        print_expr(&other)
+                    }
+                }
                 Ok(other) => print_expr(&other),
                 Err(MlilPreviewError::UnsupportedPattern("opcode"))
                     if matches!(op.opcode, PcodeOpcode::CallInd) =>
@@ -238,19 +275,6 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn resolve_call_target_from_asm(&mut self, op: &PcodeOp) -> Option<String> {
-        let asm = op.asm_mnemonic.as_deref()?;
-        let addr = parse_call_target_address(asm)?;
-        if let Some(name) = self.resolve_call_target_by_address(addr) {
-            return Some(name);
-        }
-        if matches!(op.opcode, PcodeOpcode::Call) {
-            self.call_target_unresolved_sub_fallback_count += 1;
-            return Some(format!("sub_{addr:x}"));
-        }
-        None
-    }
-
     pub(in crate::nir) fn lower_intrinsic_call(
         &mut self,
         op: &PcodeOp,
@@ -288,6 +312,25 @@ impl<'a> PreviewBuilder<'a> {
         let target = format!("((code *)swi({swi_num}))");
         self.debug_callind_target_recovery("callind_target_recovered_trap_stub");
         Some(target)
+    }
+
+    fn resolve_copy_only_constant_chain(&self, target: &Varnode) -> Option<u64> {
+        let mut current = target.clone();
+        let mut visited = HashSet::new();
+        for _ in 0..16 {
+            if current.is_constant {
+                return Some(current.constant_val as u64);
+            }
+            if !visited.insert(VarnodeKey::from(&current)) {
+                return None;
+            }
+            let (_, producer) = self.lookup_def_site(&current)?;
+            if producer.opcode != PcodeOpcode::Copy {
+                return None;
+            }
+            current = producer.inputs.first()?.clone();
+        }
+        None
     }
 
     fn debug_callind_target_recovery(&self, label: &str) {
@@ -748,16 +791,4 @@ impl<'a> PreviewBuilder<'a> {
             ty,
         })
     }
-}
-
-fn parse_call_target_address(asm: &str) -> Option<u64> {
-    let start = asm.find("0x")?;
-    let hex = asm[start + 2..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_hexdigit())
-        .collect::<String>();
-    if hex.is_empty() {
-        return None;
-    }
-    u64::from_str_radix(&hex, 16).ok()
 }

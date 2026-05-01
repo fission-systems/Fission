@@ -230,6 +230,14 @@ impl<'a> PreviewBuilder<'a> {
             call_target_direct_symbol_resolved_count: self.call_target_direct_symbol_resolved_count,
             call_target_unresolved_sub_fallback_count: self.call_target_unresolved_sub_fallback_count,
             call_target_context_missing_count: self.call_target_context_missing_count,
+            call_target_exact_index_hit_count: self.call_target_exact_index_hit_count,
+            call_target_exact_index_ambiguous_count: self.call_target_exact_index_ambiguous_count,
+            call_target_export_thunk_target_resolved_count: self
+                .call_target_export_thunk_target_resolved_count,
+            call_target_indirect_const_resolved_count: self
+                .call_target_indirect_const_resolved_count,
+            call_target_unresolved_no_exact_identity_count: self
+                .call_target_unresolved_no_exact_identity_count,
             security_cookie_fold_count: 0,
             call_artifact_removed_count: 0,
             object_shape_recovered_count: 0,

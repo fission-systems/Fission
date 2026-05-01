@@ -149,6 +149,7 @@ mod tests {
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
                 call_target_refs: HashMap::new(),
+                ambiguous_call_targets: Default::default(),
                 call_effect_summaries: HashMap::new(),
                 call_param_rules: vec![PreviewCallParamRule {
                     callee_address: None,
@@ -352,6 +353,104 @@ mod tests {
     }
 
     #[test]
+    fn export_thunk_target_gets_exact_call_target_identity() {
+        let binary = LoadedBinaryBuilder::new("sample.dll".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "sqlite3_open".to_string(),
+                address: 0x180001000,
+                is_export: true,
+                is_import: false,
+                is_thunk_like: true,
+                thunk_target: Some(0x180002000),
+                ..Default::default()
+            })
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0x180002000);
+        let target = context
+            .call_target_refs
+            .get(&0x180002000)
+            .expect("export thunk target ref");
+
+        assert_eq!(target.symbol, "sqlite3_open");
+        assert_eq!(target.provenance, CallTargetProvenance::ExportThunkTarget);
+        assert_eq!(target.edge_kind, CallEdgeKind::Reference);
+    }
+
+    #[test]
+    fn equal_rank_export_thunk_conflict_is_ambiguous() {
+        let binary = LoadedBinaryBuilder::new("sample.dll".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "export_a".to_string(),
+                address: 0x180001000,
+                is_export: true,
+                is_import: false,
+                is_thunk_like: true,
+                thunk_target: Some(0x180002000),
+                ..Default::default()
+            })
+            .add_function(FunctionInfo {
+                name: "export_b".to_string(),
+                address: 0x180001010,
+                is_export: true,
+                is_import: false,
+                is_thunk_like: true,
+                thunk_target: Some(0x180002000),
+                ..Default::default()
+            })
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0x180002000);
+
+        assert!(!context.call_target_refs.contains_key(&0x180002000));
+        assert!(context.ambiguous_call_targets.contains(&0x180002000));
+    }
+
+    #[test]
+    fn generic_loader_names_are_not_exact_call_targets() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "sub_401000".to_string(),
+                address: 0x401000,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            })
+            .add_function(FunctionInfo {
+                name: "FUN_402000".to_string(),
+                address: 0x402000,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            })
+            .add_function(FunctionInfo {
+                name: "tmp_403000".to_string(),
+                address: 0x403000,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            })
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0x401000);
+
+        assert!(context.call_target_refs.is_empty());
+        assert!(context.call_targets.is_empty());
+    }
+
+    #[test]
     fn preview_context_builder_preserves_call_param_rules() {
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
@@ -379,6 +478,7 @@ mod tests {
         let type_context = NirTypeContext {
             call_targets: HashMap::from([(0x401000, "KnownName".to_string())]),
             call_target_refs: HashMap::new(),
+            ambiguous_call_targets: Default::default(),
             call_effect_summaries: HashMap::new(),
             call_param_rules: vec![PreviewCallParamRule {
                 callee_address: None,
