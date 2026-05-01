@@ -27,10 +27,10 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
 
-      - name: Cargo Deny: Check Advisories, Bans, Licenses, Sources
+      - name: "Cargo Deny: Check Advisories, Bans, Licenses, Sources"
         run: cargo deny check all
 
-      - name: Cargo Audit: Check for Known Security Vulnerabilities
+      - name: "Cargo Audit: Check for Known Security Vulnerabilities"
         run: |
           cargo install cargo-audit
           cargo audit --deny warnings
