@@ -264,6 +264,7 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
                 source_section: None,
                 external_library: None,
                 is_thunk_like: false,
+                thunk_target: None,
             });
             external_index += 1;
             continue;
@@ -293,6 +294,7 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
             source_section: Some(section.name.clone()),
             external_library: None,
             is_thunk_like: false,
+            thunk_target: None,
         });
     }
     functions.sort_by_key(|function| (function.is_import, function.address, function.name.clone()));

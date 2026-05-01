@@ -62,6 +62,7 @@ fn build_raw_binary(
         source_section: Some("image".to_string()),
         external_library: None,
         is_thunk_like: false,
+        thunk_target: None,
     };
     let section = SectionInfo {
         name: "image".to_string(),

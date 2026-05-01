@@ -184,6 +184,7 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                     "source_section": f.source_section,
                     "external_library": f.external_library,
                     "is_thunk_like": f.is_thunk_like,
+                    "thunk_target": f.thunk_target.map(|target| format!("0x{target:x}")),
                 })
             })
             .collect();
@@ -223,6 +224,7 @@ pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()>
                     "source_section": f.source_section,
                     "external_library": f.external_library,
                     "is_thunk_like": f.is_thunk_like,
+                    "thunk_target": f.thunk_target.map(|target| format!("0x{target:x}")),
                 })
             })
             .collect();

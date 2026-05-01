@@ -54,6 +54,7 @@ pub(super) fn parse_pdata(
             source_section: Some(".pdata".to_string()),
             external_library: None,
             is_thunk_like: false,
+            thunk_target: None,
         });
     }
 

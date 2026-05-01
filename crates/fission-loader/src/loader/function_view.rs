@@ -143,6 +143,7 @@ mod tests {
             source_section: Some(".text".to_string()),
             external_library: None,
             is_thunk_like: false,
+            thunk_target: None,
         }
     }
 

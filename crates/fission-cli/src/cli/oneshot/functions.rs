@@ -20,6 +20,7 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
                     "source_section": f.source_section,
                     "external_library": f.external_library,
                     "is_thunk_like": f.is_thunk_like,
+                    "thunk_target": f.thunk_target.map(|target| format!("0x{target:x}")),
                 })
             })
             .collect();
@@ -38,6 +39,8 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
         for func in functions {
             let marker = if func.is_import {
                 " [import]"
+            } else if func.is_thunk_like {
+                " [thunk]"
             } else if func.is_export {
                 " [export]"
             } else {

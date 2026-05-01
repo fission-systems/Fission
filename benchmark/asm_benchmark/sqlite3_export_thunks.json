@@ -1,0 +1,29 @@
+{
+  "name": "sqlite3-export-thunk-asm",
+  "entries": [
+    {
+      "id": "sqlite3-export-thunks",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll",
+      "rows": [
+        {
+          "id": "sqlite3_backup_init_export",
+          "address": "0x18000104b",
+          "count": 1,
+          "role": "export_thunk"
+        },
+        {
+          "id": "sqlite3_keyword_count_export",
+          "address": "0x1800013fc",
+          "count": 1,
+          "role": "export_thunk"
+        },
+        {
+          "id": "sqlite3_busy_handler_export",
+          "address": "0x18000140b",
+          "count": 1,
+          "role": "export_thunk"
+        }
+      ]
+    }
+  ]
+}

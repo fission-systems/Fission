@@ -24,6 +24,8 @@ pub struct FunctionInfo {
     pub external_library: Option<String>,
     /// Whether this function entry is a thunk/stub and should not be used as a decompile seed.
     pub is_thunk_like: bool,
+    /// Exact control-flow target for loader-proven thunks, when available.
+    pub thunk_target: Option<u64>,
 }
 
 /// Information about a section in the binary

@@ -227,6 +227,7 @@ impl MachoLoader {
                             source_section: None,
                             external_library: None,
                             is_thunk_like: false,
+                            thunk_target: None,
                         });
                         new_count += 1;
                     }
@@ -416,6 +417,7 @@ impl MachoLoader {
                         source_section: Some(format!("section_{}", sect_index)),
                         external_library: None,
                         is_thunk_like: false,
+                        thunk_target: None,
                     });
                 }
             } else {
@@ -549,6 +551,7 @@ impl MachoLoader {
                 source_section: Some(format!("section_{}", sect_index)),
                 external_library: None,
                 is_thunk_like: false,
+                thunk_target: None,
             });
         }
     }
@@ -671,6 +674,7 @@ fn push_macho_import(functions: &mut Vec<FunctionInfo>, address: u64, name: Stri
         source_section: Some(section.to_string()),
         external_library: None,
         is_thunk_like: true,
+        thunk_target: None,
     });
 }
 

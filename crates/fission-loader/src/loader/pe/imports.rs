@@ -105,6 +105,7 @@ pub(super) fn parse_imports(
                     source_section: None,
                     external_library: Some(dll_name.clone()),
                     is_thunk_like: false,
+                    thunk_target: None,
                 });
 
                 symbol_map.insert(iat_addr, full_name);

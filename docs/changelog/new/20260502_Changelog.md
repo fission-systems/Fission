@@ -211,3 +211,66 @@
 
 - Choose a decompiler sentinel row that contains real lowered call expressions so corpus metrics can show nonzero import/direct/fallback target counters.
 - Continue stack-local and argument materialization only when exact owner proof and row-fidelity both improve.
+
+## Loader Accuracy: PE Export Thunks and Assembly Parity Lane
+
+### Summary
+
+- Fixed the sqlite3 decompiler sentinel seed mismatch at the loader owner.
+- PE exports that are exact x86 relative jump thunks are now classified as `export_thunk` instead of user-facing code seeds.
+- Added an additive `FunctionInfo.thunk_target` field and surfaced it in CLI JSON output.
+- Added a Python assembly parity benchmark so instruction listing regressions can be measured separately from raw p-code and decompiler quality.
+
+### Implementation
+
+- Added exact PE export thunk target detection for `E9 rel32` and `EB rel8` entries.
+- Classification is gated by the resolved Ghidra-style load spec language id and requires the target VA to land in an executable section.
+- No p-code, HIR, printer, or benchmark-side semantic repair was added.
+- Export thunks remain visible through `info --exports --json` with:
+  - `kind = "export_thunk"`
+  - `is_thunk_like = true`
+  - `thunk_target = <exact target VA>`
+- Canonical function listing excludes these thunk-like exports through the existing function view filter.
+
+### sqlite3.dll Evidence
+
+- Command:
+  - `target/release/fission_cli info benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll --exports --json`
+- Result:
+  - total exports: `378`
+  - export thunks: `375`
+  - example: `0x18000104b sqlite3_backup_init -> 0x180017170`
+- Canonical `list --json` now starts at implementation/code seeds such as `_start` and `.pdata`/code functions instead of sqlite3 export jump stubs.
+
+### Assembly Parity Benchmark
+
+- Added:
+  - `benchmark/asm_benchmark/run_asm_parity.py`
+  - `benchmark/asm_benchmark/sqlite3_export_thunks.json`
+  - `benchmark/asm_benchmark/README.md`
+- Command:
+  - `python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks`
+- Result:
+  - `full_match=3/3`
+  - rows: `0x18000104b`, `0x1800013fc`, `0x18000140b`
+
+### Full Benchmark After Loader Fix
+
+- Command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_calls_loader_thunks`
+- Result:
+  - `avg_norm_sim=27.610%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+- Interpretation:
+  - The prior low similarity was partly caused by comparing Fission export thunk skeletons against Ghidra-followed implementation bodies.
+  - After thunk classification, both sides are seeded on implementation functions; remaining similarity gap belongs to decompiler/NIR/HIR/structuring quality, not loader seed mismatch.
+
+### Validation
+
+- `cargo check -p fission-loader -p fission-core -p fission-cli`
+- `cargo check -p fission-loader -p fission-core -p fission-cli -p fission-tauri -p fission-static -p fission-dynamic`
+- `cargo test -p fission-loader pe_export_relative_jump_thunk -- --test-threads=1`
+- `cargo test -p fission-loader -- --test-threads=1`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/asm_benchmark/*.py`

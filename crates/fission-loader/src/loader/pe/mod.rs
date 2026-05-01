@@ -156,6 +156,7 @@ impl PeLoader {
             data: bytes,
             sections: &sections_info,
             is_64bit,
+            language_id: load_spec.pair.language_id.as_str().to_string(),
         };
 
         let mut functions_info = Vec::new();
@@ -242,6 +243,7 @@ impl PeLoader {
                 source_section: None,
                 external_library: None,
                 is_thunk_like: false,
+                thunk_target: None,
             });
         }
 
@@ -434,6 +436,7 @@ struct PeLoaderImpl<'a> {
     data: &'a [u8],
     sections: &'a [SectionInfo],
     is_64bit: bool,
+    language_id: String,
 }
 
 impl<'a> PeLoaderImpl<'a> {
@@ -465,6 +468,43 @@ impl<'a> PeLoaderImpl<'a> {
 
     fn read_u64(&self, offset: u64) -> Result<u64> {
         self.reader().u64(offset as usize)
+    }
+
+    fn is_x86_language(&self) -> bool {
+        self.language_id.starts_with("x86:")
+    }
+
+    fn executable_section_contains(&self, va: u64) -> bool {
+        self.sections.iter().any(|section| {
+            section.is_executable
+                && va >= section.virtual_address
+                && va < section.virtual_address.saturating_add(section.virtual_size)
+        })
+    }
+
+    fn exact_relative_jump_export_target(&self, func_rva: u32, image_base: u64) -> Option<u64> {
+        if !self.is_x86_language() {
+            return None;
+        }
+        let file_offset = self.rva_to_file_offset(func_rva, image_base)? as usize;
+        let bytes = self.data.get(file_offset..)?;
+        let source_va = image_base.checked_add(u64::from(func_rva))?;
+        let target = match bytes.first().copied()? {
+            0xe9 => {
+                let disp_bytes: [u8; 4] = bytes.get(1..5)?.try_into().ok()?;
+                source_va
+                    .checked_add(5)?
+                    .checked_add_signed(i64::from(i32::from_le_bytes(disp_bytes)))?
+            }
+            0xeb => {
+                let disp = i8::from_ne_bytes([*bytes.get(1)?]);
+                source_va
+                    .checked_add(2)?
+                    .checked_add_signed(i64::from(disp))?
+            }
+            _ => return None,
+        };
+        self.executable_section_contains(target).then_some(target)
     }
 
     fn read_import_descriptor(&self, offset: u64) -> Result<ImportDescriptor> {
@@ -583,6 +623,9 @@ impl<'a> PeLoaderImpl<'a> {
                             let func_rva = self.read_u32(entry_offset).unwrap_or(0);
 
                             if func_rva != 0 {
+                                let thunk_target =
+                                    self.exact_relative_jump_export_target(func_rva, image_base);
+                                let is_thunk_like = thunk_target.is_some();
                                 functions.push(crate::loader::types::FunctionInfo {
                                     name,
                                     address: image_base + func_rva as u64,
@@ -590,10 +633,18 @@ impl<'a> PeLoaderImpl<'a> {
                                     is_export: true,
                                     is_import: false,
                                     origin: Some("pe-export-table".to_string()),
-                                    kind: Some("export".to_string()),
+                                    kind: Some(
+                                        if is_thunk_like {
+                                            "export_thunk"
+                                        } else {
+                                            "export"
+                                        }
+                                        .to_string(),
+                                    ),
                                     source_section: None,
                                     external_library: None,
-                                    is_thunk_like: false,
+                                    is_thunk_like,
+                                    thunk_target,
                                 });
                             }
                         }
@@ -844,6 +895,68 @@ mod tests {
         let err = format!("{}", result.expect_err("unknown machine must fail"));
         assert!(err.contains("unsupported machine"));
         assert!(!err.contains("defaulting to x86"));
+    }
+
+    #[test]
+    fn pe_export_relative_jump_thunk_target_is_exact() {
+        let image_base = 0x180000000;
+        let mut data = vec![0u8; 0x800];
+        let thunk_rva = 0x100u64;
+        let target_rva = 0x180u64;
+        let thunk_file = 0x200usize;
+        let disp = ((image_base + target_rva) as i64 - (image_base + thunk_rva + 5) as i64) as i32;
+        data[thunk_file] = 0xe9;
+        data[thunk_file + 1..thunk_file + 5].copy_from_slice(&disp.to_le_bytes());
+        let sections = vec![SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: image_base + 0x100,
+            virtual_size: 0x200,
+            file_offset: 0x200,
+            file_size: 0x200,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        }];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        assert_eq!(
+            loader.exact_relative_jump_export_target(thunk_rva as u32, image_base),
+            Some(image_base + target_rva)
+        );
+    }
+
+    #[test]
+    fn pe_export_relative_jump_thunk_requires_x86_language() {
+        let image_base = 0x140000000;
+        let mut data = vec![0u8; 0x400];
+        data[0x200] = 0xe9;
+        data[0x201..0x205].copy_from_slice(&0x10i32.to_le_bytes());
+        let sections = vec![SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: image_base + 0x100,
+            virtual_size: 0x100,
+            file_offset: 0x200,
+            file_size: 0x100,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        }];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "AARCH64:LE:64:v8A".to_string(),
+        };
+
+        assert_eq!(
+            loader.exact_relative_jump_export_target(0x100, image_base),
+            None
+        );
     }
 
     #[test]

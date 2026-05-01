@@ -191,6 +191,7 @@ impl ElfLoader {
                 source_section: None,
                 external_library: None,
                 is_thunk_like: false,
+                thunk_target: None,
             });
         }
 
@@ -336,6 +337,7 @@ impl ElfLoader {
                 source_section: None,
                 external_library: None,
                 is_thunk_like: false,
+                thunk_target: None,
             });
         }
 
@@ -431,6 +433,7 @@ impl ElfLoader {
                             source_section: None,
                             external_library: None,
                             is_thunk_like: false,
+                            thunk_target: None,
                         },
                     );
                 }
@@ -476,6 +479,7 @@ impl ElfLoader {
                     source_section: section_names.get(section_index).cloned(),
                     external_library: None,
                     is_thunk_like: false,
+                    thunk_target: None,
                 },
             );
         }
@@ -561,6 +565,7 @@ impl ElfLoader {
                             source_section: None,
                             external_library: None,
                             is_thunk_like: false,
+                            thunk_target: None,
                         },
                     );
                 }
@@ -606,6 +611,7 @@ impl ElfLoader {
                     source_section: section_names.get(section_index).cloned(),
                     external_library: None,
                     is_thunk_like: false,
+                    thunk_target: None,
                 },
             );
         }

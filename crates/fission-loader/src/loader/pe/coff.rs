@@ -96,6 +96,7 @@ pub(super) fn parse_coff_symbols(
             source_section: Some(section.name.clone()),
             external_library: None,
             is_thunk_like: false,
+            thunk_target: None,
         });
 
         i += aux_count as u32;
