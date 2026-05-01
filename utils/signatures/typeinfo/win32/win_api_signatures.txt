@@ -32,6 +32,7 @@ FindWindowA|HWND|lpClassName:LPCSTR,lpWindowName:LPCSTR
 FindWindowW|HWND|lpClassName:LPCWSTR,lpWindowName:LPCWSTR
 FreeLibrary|BOOL|hLibModule:HMODULE
 GetAsyncKeyState|SHORT|vKey:int
+GetClientRect|BOOL|hWnd:HWND,lpRect:LPRECT
 GetCommandLineA|LPSTR|
 GetCurrentProcess|HANDLE|
 GetCurrentProcessId|DWORD|
@@ -42,6 +43,8 @@ GetEnvironmentVariableA|DWORD|lpName:LPCSTR,lpBuffer:LPSTR,nSize:DWORD
 GetForegroundWindow|HWND|
 GetKeyState|SHORT|nVirtKey:int
 GetLastError|DWORD|
+GetMessageA|BOOL|lpMsg:LPMSG,hWnd:HWND,wMsgFilterMin:UINT,wMsgFilterMax:UINT
+GetMessageW|BOOL|lpMsg:LPMSG,hWnd:HWND,wMsgFilterMin:UINT,wMsgFilterMax:UINT
 GetModuleFileNameA|DWORD|hModule:HMODULE,lpFilename:LPSTR,nSize:DWORD
 GetModuleHandleA|HMODULE|lpModuleName:LPCSTR
 GetModuleHandleW|HMODULE|lpModuleName:LPCWSTR
@@ -52,6 +55,7 @@ GetTempPathA|DWORD|nBufferLength:DWORD,lpBuffer:LPSTR
 GetThreadContext|BOOL|hThread:HANDLE,lpContext:LPCONTEXT
 GetTickCount|DWORD|
 GetTickCount64|ULONGLONG|
+GetWindowRect|BOOL|hWnd:HWND,lpRect:LPRECT
 GetWindowTextA|int|hWnd:HWND,lpString:LPSTR,nMaxCount:int
 GetWindowThreadProcessId|DWORD|hWnd:HWND,lpdwProcessId:LPDWORD
 GetWindowsDirectoryA|UINT|lpBuffer:LPSTR,uSize:UINT

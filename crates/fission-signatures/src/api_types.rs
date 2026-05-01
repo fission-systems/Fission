@@ -164,6 +164,9 @@ mod tests {
         assert!(db.get("CloseHandle").is_some());
         assert!(db.get("VirtualAlloc").is_some());
         assert!(db.get("BCryptOpenAlgorithmProvider").is_some());
+        assert!(db.get("GetClientRect").is_some());
+        assert!(db.get("GetWindowRect").is_some());
+        assert!(db.get("GetMessageW").is_some());
         assert!(db.len() > 100);
     }
 }
