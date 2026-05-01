@@ -419,16 +419,22 @@ class CorpusBenchmarkTests(unittest.TestCase):
             self.assertIn(payload["gate_mode"], {"advisory", "blocking"})
             self.assertGreater(int(payload["dynamic_watchlist_limit"]), 0)
 
-    def test_checked_in_corpus_manifests_use_windows_samples_only(self) -> None:
-        repo_root = Path(__file__).resolve().parents[3]
-        manifest_dir = repo_root / "benchmark" / "config" / "benchmark_corpus"
+    def test_checked_in_corpus_manifests_use_repo_relative_benchmark_or_samples_paths(self) -> None:
+        manifest_dir = Path(__file__).resolve().parents[3] / "benchmark" / "config" / "benchmark_corpus"
 
         for manifest_name in ("smoke_corpus.json", "release_corpus.json", "parity_corpus.json"):
             payload = json.loads((manifest_dir / manifest_name).read_text())
             for entry in payload["entries"]:
+                bp = Path(entry["binary_path"])
+                self.assertFalse(
+                    bp.is_absolute(),
+                    f"{manifest_name}:{entry['id']} must use repo-relative binary_path",
+                )
+                posix = bp.as_posix()
                 self.assertTrue(
-                    str(entry["binary_path"]).startswith(str(repo_root / "samples" / "windows")),
-                    f"{manifest_name}:{entry['id']} escaped samples/windows",
+                    posix.startswith("samples/windows/")
+                    or posix.startswith("benchmark/binary/"),
+                    f"{manifest_name}:{entry['id']} must live under samples/windows or benchmark/binary",
                 )
                 self.assertIn(
                     _derive_binary_arch(entry),
@@ -438,7 +444,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
 
     def test_default_output_naming_contract_uses_latest_suffix(self) -> None:
         binary_name = _default_binary_output_name(
-            Path("/repo/samples/windows/x64/putty.exe"),
+            Path("/repo/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"),
             profile="balanced",
             timestamped=False,
         )
@@ -449,7 +455,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
             timestamped=False,
         )
 
-        self.assertEqual(binary_name, "putty-balanced-latest")
+        self.assertEqual(binary_name, "test_functions-balanced-latest")
         self.assertEqual(corpus_name, "fission-smoke-windows-samples-balanced-latest")
 
     def test_load_corpus_manifest_accepts_suite_metadata(self) -> None:
@@ -818,6 +824,21 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             _derive_binary_arch({"tags": [], "binary_path": "/repo/samples/windows/x64/foo.exe"}),
             "x64",
+        )
+        self.assertEqual(
+            _derive_binary_arch(
+                {"tags": [], "binary_path": "benchmark/binary/x86-64/window/small/binary/c/foo.exe"}
+            ),
+            "x64",
+        )
+        self.assertEqual(
+            _derive_binary_arch(
+                {
+                    "tags": [],
+                    "binary_path": "benchmark/binary/x86/vendor_binaries/x86/windows/foo.exe",
+                }
+            ),
+            "x86",
         )
 
     def test_derive_dynamic_row_targets_prefers_degraded_rows(self) -> None:

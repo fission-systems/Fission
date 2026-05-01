@@ -3,61 +3,64 @@
   "suite_tier": "parity",
   "gate_mode": "advisory",
   "dynamic_watchlist_limit": 5,
-  "notes": "Reference-guided Windows-only x86/x64 parity corpus for stack-relative addresses, merge/binding, alias-sensitive consumers, and flag/control surfacing.",
+  "notes": "Parity-focused paths mapped onto benchmark/binary fixtures (small C suite + vendor PE). Addresses rows assume MSVC-style PE64 defaults from window/small builds.",
   "entries": [
     {
-      "id": "putty",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/putty.exe",
-      "ghidra_project_key": "putty",
-      "tags": ["windows", "pe", "x64", "gui", "large", "dispatcher-heavy", "indirect-heavy"],
+      "id": "test-functions",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "ghidra_project_key": "test_functions",
+      "tags": ["windows", "pe", "x64", "small-c", "dispatcher-heavy", "indirect-heavy"],
       "seed_limit": 40,
-      "role": "primary_canary"
+      "role": "primary_canary",
+      "canonical_quality_rows": [
+        {"address": "0x140001470", "name": "fibonacci", "role": "canonical_quality"}
+      ]
     },
     {
-      "id": "string-memory-win-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_string_memory_x64_O2.exe",
-      "ghidra_project_key": "test_string_memory_x64_o2",
-      "tags": ["windows", "pe", "x64", "synthetic", "stack-heavy", "alias-heavy"],
+      "id": "function-pointers-strings",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/function_pointers_and_strings.exe",
+      "ghidra_project_key": "function_pointers_and_strings",
+      "tags": ["windows", "pe", "x64", "small-c", "stack-heavy", "alias-heavy", "string-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
     {
-      "id": "controlflow-win-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_control_flow_x64_O2.exe",
-      "ghidra_project_key": "test_control_flow_x64_o2",
-      "tags": ["windows", "pe", "x64", "synthetic", "merge-heavy", "cfg-heavy"],
+      "id": "bitops-control-flow",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/bitops_and_control_flow.exe",
+      "ghidra_project_key": "bitops_and_control_flow",
+      "tags": ["windows", "pe", "x64", "small-c", "merge-heavy", "cfg-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
     {
-      "id": "arith-idioms-win-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_arithmetic_idioms_x64_O2.exe",
-      "ghidra_project_key": "test_arithmetic_idioms_x64_o2",
-      "tags": ["windows", "pe", "x64", "synthetic", "flag-heavy", "idiom-heavy"],
+      "id": "math-operations",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/math_operations.exe",
+      "ghidra_project_key": "math_operations",
+      "tags": ["windows", "pe", "x64", "small-c", "flag-heavy", "idiom-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
     {
-      "id": "cmake",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/cmake.exe",
-      "ghidra_project_key": "cmake",
-      "tags": ["windows", "pe", "x64", "console", "real-world", "alias-heavy", "address-heavy"],
+      "id": "array-operations",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/array_operations.exe",
+      "ghidra_project_key": "array_operations",
+      "tags": ["windows", "pe", "x64", "small-c", "alias-heavy", "address-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
     {
-      "id": "structs-win-o2",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x64/test_structs_classes_x64_O2.exe",
-      "ghidra_project_key": "test_structs_classes_x64_o2",
-      "tags": ["windows", "pe", "x64", "synthetic", "struct-heavy"],
+      "id": "structs-pointers",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/structs_and_pointers.exe",
+      "ghidra_project_key": "structs_and_pointers",
+      "tags": ["windows", "pe", "x64", "small-c", "struct-heavy"],
       "seed_limit": 30,
       "role": "release_candidate"
     },
     {
-      "id": "7zr-x86",
-      "binary_path": "/Users/sjkim1127/Fission/samples/windows/x86/7zr.exe",
-      "ghidra_project_key": "7zr_x86",
-      "tags": ["windows", "pe", "x86", "cli", "real-world", "dispatcher-heavy", "x86-canary"],
+      "id": "not-packed-pe32",
+      "binary_path": "benchmark/binary/x86/vendor_binaries/x86/windows/not_packed_pe32.exe",
+      "ghidra_project_key": "not_packed_pe32",
+      "tags": ["windows", "pe", "x86", "vendor", "dispatcher-heavy", "x86-canary"],
       "seed_limit": 30,
       "role": "release_candidate"
     }

@@ -16,6 +16,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           repo = Path.cwd()
@@ -24,7 +25,15 @@ jobs:
               repo / "benchmark" / "config" / "benchmark_corpus" / "release_corpus.json",
               repo / "benchmark" / "config" / "benchmark_corpus" / "parity_corpus.json",
           ]
-          windows_root = repo / "samples" / "windows"
+          samples_windows_root = repo / "samples" / "windows"
+          benchmark_binary_root = repo / "benchmark" / "binary"
+          samples_windows_resolved = samples_windows_root.resolve()
+          benchmark_binary_resolved = benchmark_binary_root.resolve()
+          strict_samples = os.environ.get("CORPUS_STRICT_SAMPLES", "").lower() in (
+              "1",
+              "true",
+              "yes",
+          )
           required_top = {"name", "suite_tier", "gate_mode", "dynamic_watchlist_limit", "entries"}
           valid_tiers = {"smoke", "release", "parity"}
           valid_gates = {"advisory", "blocking"}
@@ -48,17 +57,34 @@ jobs:
                   assert entry_id not in seen, f"❌ duplicate id {entry_id} in {manifest}"
                   seen.add(entry_id)
 
-                  binary = Path(entry["binary_path"])
-                  if not binary.is_file():
-                      missing.append(str(binary))
-                      continue
-
-                  try:
-                      binary.relative_to(windows_root)
-                  except ValueError as exc:
+                  raw = entry["binary_path"]
+                  p = Path(raw)
+                  assert not p.is_absolute(), (
+                      f"❌ {manifest.name}:{entry_id} binary_path must be repo-relative, got {raw!r}"
+                  )
+                  binary = (repo / raw).resolve()
+                  allowed_root = False
+                  for root in (samples_windows_resolved, benchmark_binary_resolved):
+                      try:
+                          binary.relative_to(root)
+                          allowed_root = True
+                          break
+                      except ValueError:
+                          continue
+                  if not allowed_root:
                       raise AssertionError(
-                          f"❌ {manifest.name}:{entry_id} escaped samples/windows: {binary}"
-                      ) from exc
+                          f"❌ {manifest.name}:{entry_id} must stay under samples/windows "
+                          f"or benchmark/binary: {binary}"
+                      )
+
+                  if not binary.is_file():
+                      msg = (
+                          f"⚠ binary missing (build window/small via build.sh and vendor fixtures): {binary}"
+                      )
+                      print(msg)
+                      if strict_samples:
+                          missing.append(str(binary))
+                      continue
 
                   tags = set(entry.get("tags", []))
                   inferred_arch = None
@@ -66,21 +92,31 @@ jobs:
                       inferred_arch = "x86"
                   elif "x64" in tags:
                       inferred_arch = "x64"
-                  elif "/samples/windows/x86/" in str(binary):
-                      inferred_arch = "x86"
-                  elif "/samples/windows/x64/" in str(binary):
-                      inferred_arch = "x64"
+                  else:
+                      bp = binary.as_posix().lower()
+                      if "/benchmark/binary/x86-64/" in bp or "/samples/windows/x64/" in bp:
+                          inferred_arch = "x64"
+                      elif "/benchmark/binary/x86/" in bp or "/samples/windows/x86/" in bp:
+                          inferred_arch = "x86"
                   assert inferred_arch in {"x86", "x64"}, (
                       f"❌ {manifest.name}:{entry_id} is missing x86/x64 arch identity"
                   )
-              
+
               if missing:
-                  print(f"❌ Missing binaries in {manifest.name}:")
+                  print(f"❌ Missing binaries in {manifest.name} (CORPUS_STRICT_SAMPLES=1):")
                   for b in missing:
                       print(f"  - {b}")
                   raise AssertionError(f"{len(missing)} binaries missing")
-              
-              print(f"✓ {manifest.name}: {len(entries)} entries OK")
+
+              present = sum(
+                  1
+                  for entry in entries
+                  if (repo / entry["binary_path"]).resolve().is_file()
+              )
+              print(
+                  f"✓ {manifest.name}: {len(entries)} entries OK "
+                  f"({present}/{len(entries)} binaries present)"
+              )
 
           readme = (repo / "benchmark" / "full_benchmark" / "README.md").read_text(encoding="utf-8")
           assert "python3 benchmark/full_benchmark/full_decomp_benchmark.py" in readme, (

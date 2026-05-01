@@ -23,7 +23,7 @@ Primary operator guide:
 
 Current scope:
 
-- Windows-only corpus entries under [`samples/windows/`](/Users/sjkim1127/Fission/samples/windows)
+- Primary corpus binaries live under [`benchmark/binary/`](/Users/sjkim1127/Fission/benchmark/binary) (window/small C builds + vendor PE fixtures); optional local-only corpora may still reference [`samples/windows/`](/Users/sjkim1127/Fission/samples/windows).
 - explicit `smoke`, `release`, and `parity` suites
 - advisory-first corpus gating
 - compact summary JSON as the preferred AI-facing artifact

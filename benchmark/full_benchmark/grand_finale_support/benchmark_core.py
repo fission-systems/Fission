@@ -1034,11 +1034,15 @@ def _derive_binary_arch(manifest_entry: dict[str, Any]) -> str:
     if "x64" in tags:
         return "x64"
 
-    binary_path = str(manifest_entry.get("binary_path", "")).lower()
-    if "/samples/windows/x86/" in binary_path:
-        return "x86"
-    if "/samples/windows/x64/" in binary_path:
+    binary_path = str(manifest_entry.get("binary_path", "")).lower().replace("\\", "/")
+    if binary_path and not binary_path.startswith("/"):
+        binary_path = "/" + binary_path
+    # Prefer explicit benchmark/binary layout before legacy samples/windows paths.
+    # Note: `/benchmark/binary/x86/` must not match `x86-64` (next char is `-`, not `/`).
+    if "/benchmark/binary/x86-64/" in binary_path or "/samples/windows/x64/" in binary_path:
         return "x64"
+    if "/benchmark/binary/x86/" in binary_path or "/samples/windows/x86/" in binary_path:
+        return "x86"
     return "unknown"
 
 
