@@ -560,6 +560,11 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     if !rename_conflicts.is_empty() {
         add_typed_fact_conflicts(rename_conflicts.len());
     }
+    let pruned_count = prune_known_api_call_args_stmts(&mut func.body, &func.callee_summaries);
+    if pruned_count > 0 {
+        add_call_signature_refinements(pruned_count);
+        changed = true;
+    }
     if !call_target_rewrites.is_empty()
         && rewrite_call_targets_stmts(&mut func.body, &call_target_rewrites)
     {
@@ -567,6 +572,103 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     }
 
     changed
+}
+
+fn exact_api_arity_for_target(
+    target: &str,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+) -> Option<usize> {
+    let resolved_target = resolve_call_target_symbol(target, summaries);
+    api_signature(resolved_target)
+        .or_else(|| api_signature(target))
+        .map(|sig| sig.params.len())
+}
+
+fn prune_known_api_call_args_stmts(
+    stmts: &mut [HirStmt],
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+) -> usize {
+    let mut pruned = 0usize;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+                pruned += prune_known_api_call_args_expr(rhs, summaries);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                pruned += prune_known_api_call_args_expr(va_list, summaries);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                pruned += prune_known_api_call_args_stmts(body, summaries);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                pruned += prune_known_api_call_args_expr(expr, summaries);
+                for case in cases {
+                    pruned += prune_known_api_call_args_stmts(&mut case.body, summaries);
+                }
+                pruned += prune_known_api_call_args_stmts(default, summaries);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                pruned += prune_known_api_call_args_expr(cond, summaries);
+                pruned += prune_known_api_call_args_stmts(then_body, summaries);
+                pruned += prune_known_api_call_args_stmts(else_body, summaries);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    pruned
+}
+
+fn prune_known_api_call_args_expr(
+    expr: &mut HirExpr,
+    summaries: &indexmap::IndexMap<String, CallSummary>,
+) -> usize {
+    let mut pruned = 0usize;
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            for arg in args.iter_mut() {
+                pruned += prune_known_api_call_args_expr(arg, summaries);
+            }
+            if let Some(exact_arity) = exact_api_arity_for_target(target, summaries)
+                && args.len() > exact_arity
+            {
+                let removed = args.len() - exact_arity;
+                args.truncate(exact_arity);
+                pruned += removed;
+            }
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            pruned += prune_known_api_call_args_expr(lhs, summaries);
+            pruned += prune_known_api_call_args_expr(rhs, summaries);
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            pruned += prune_known_api_call_args_expr(expr, summaries);
+        }
+        HirExpr::Index { base, index, .. } => {
+            pruned += prune_known_api_call_args_expr(base, summaries);
+            pruned += prune_known_api_call_args_expr(index, summaries);
+        }
+        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+    pruned
 }
 
 fn binding_by_name_mut<'a>(
@@ -797,6 +899,123 @@ mod tests {
         match &func.body[0] {
             HirStmt::Expr(HirExpr::Call { target, .. }) => {
                 assert_eq!(target, "MessageBoxA");
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_prunes_extra_args_only_for_exact_api_signature() {
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Call {
+                    target: "MessageBoxA".to_string(),
+                    args: vec![
+                        HirExpr::Const(0, NirType::Unknown),
+                        HirExpr::Const(1, NirType::Unknown),
+                        HirExpr::Const(2, NirType::Unknown),
+                        HirExpr::Const(3, NirType::Unknown),
+                        HirExpr::Const(4, NirType::Unknown),
+                        HirExpr::Const(5, NirType::Unknown),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+                HirStmt::Expr(HirExpr::Call {
+                    target: "unresolved_target".to_string(),
+                    args: vec![
+                        HirExpr::Const(0, NirType::Unknown),
+                        HirExpr::Const(1, NirType::Unknown),
+                        HirExpr::Const(2, NirType::Unknown),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
+            other => panic!("unexpected first stmt: {other:?}"),
+        }
+        match &func.body[1] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
+            other => panic!("unexpected second stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_prunes_wrapper_args_after_resolving_import_summary() {
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "wrapper_message_box".to_string(),
+                args: vec![
+                    HirExpr::Const(0, NirType::Unknown),
+                    HirExpr::Const(1, NirType::Unknown),
+                    HirExpr::Const(2, NirType::Unknown),
+                    HirExpr::Const(3, NirType::Unknown),
+                    HirExpr::Const(4, NirType::Unknown),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([(
+                "wrapper_message_box".to_string(),
+                CallSummary {
+                    target: CallTargetRef {
+                        address: None,
+                        symbol: "wrapper_message_box".to_string(),
+                        provenance: CallTargetProvenance::Reference,
+                        edge_kind: CallEdgeKind::Reference,
+                        confidence: 128,
+                    },
+                    prototype: PrototypeSummary {
+                        min_arity: 0,
+                        max_arity: 0,
+                        locked_exact_arity: Some(0),
+                        return_lattice: NirType::Unknown,
+                        param_lattices: vec![],
+                        soundness: SummarySoundness::Optimistic,
+                    },
+                    effect_summary: CallEffectSummary {
+                        reads_memory: None,
+                        writes_memory: None,
+                        escapes_args: Some(false),
+                        regions: vec![],
+                        wrapper_class: WrapperClass::TailForwarder,
+                        wrapper_of: Some(CallTargetRef {
+                            address: None,
+                            symbol: "MessageBoxA".to_string(),
+                            provenance: CallTargetProvenance::Import,
+                            edge_kind: CallEdgeKind::Import,
+                            confidence: 224,
+                        }),
+                        confidence: 160,
+                    },
+                },
+            )]),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+                assert_eq!(target, "MessageBoxA");
+                assert_eq!(args.len(), 4);
             }
             other => panic!("unexpected stmt: {other:?}"),
         }
