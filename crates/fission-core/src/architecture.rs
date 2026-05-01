@@ -1,20 +1,27 @@
 //! Ghidra-style language/compiler selection contracts.
 //!
-//! This module mirrors Ghidra's loader-facing `LoadSpec` boundary: binary
-//! format metadata is resolved to a language/compiler pair before any SLEIGH
-//! runtime is selected.
+//! Binary format metadata is resolved through Ghidra opinion data before any
+//! SLEIGH runtime is selected. This mirrors the loader-facing boundary:
+//! `Loader.findSupportedLoadSpecs -> QueryOpinionService -> *.opinion ->
+//! LanguageService/*.ldefs -> LoadSpec`.
 
 use crate::constants::binary_format::{
     MACHO_CPU_TYPE_ARM, MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_X86, MACHO_CPU_TYPE_X86_64,
 };
-use crate::core_constants::{
-    ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_386, EM_AARCH64, EM_ARM, EM_BPF,
-    EM_LOONGARCH, EM_MIPS, EM_PPC, EM_PPC64, EM_RISCV, EM_SPARCV9, EM_X86_64,
-    IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARM64,
-    IMAGE_FILE_MACHINE_I386,
-};
+use crate::core_constants::{ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB};
 use rkyv::{Archive, Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use thiserror::Error;
+
+const PE_LOADER_NAME: &str = "Portable Executable (PE)";
+const COFF_LOADER_NAME: &str = "Common Object File Format (COFF)";
+const MS_COFF_LOADER_NAME: &str = "MS Common Object File Format (COFF)";
+const ELF_LOADER_NAME: &str = "Executable and Linking Format (ELF)";
+const MACHO_LOADER_NAME: &str = "Mac OS X Mach-O";
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
@@ -138,425 +145,384 @@ impl ArchitectureDescriptor {
 pub type ArchitectureSelectionResult =
     Result<(ArchitectureDescriptor, BinaryLoadSpec), ArchitectureSelectionError>;
 
+#[derive(Debug, Clone, Default)]
+struct OpinionQuery {
+    loader: Option<String>,
+    primary: Option<String>,
+    secondary: Option<String>,
+    processor: Option<String>,
+    endian: Option<String>,
+    size: Option<u8>,
+    variant: Option<String>,
+    compiler_spec_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OpinionEntry {
+    loader: String,
+    primary: String,
+    secondary: Option<String>,
+    query: OpinionQuery,
+}
+
+#[derive(Debug, Clone)]
+struct LanguageDescription {
+    processor: String,
+    endian: String,
+    size: u8,
+    variant: String,
+    id: String,
+    compiler_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryResult {
+    pub language_id: String,
+    pub compiler_spec_id: String,
+    pub preferred: bool,
+}
+
+#[derive(Debug)]
+struct OpinionDatabase {
+    opinions: Vec<OpinionEntry>,
+    languages: Vec<LanguageDescription>,
+}
+
+#[derive(Debug, Clone)]
+struct SelectionCandidate {
+    language: LanguageDescription,
+    compiler_spec_id: String,
+    preferred: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
-struct LoadSpecMapping {
-    machine: u32,
-    bitness: u8,
-    endian: &'static str,
-    processor: &'static str,
-    variant: &'static str,
-    abi: Option<&'static str>,
-    language_id: &'static str,
-    compiler_spec_id: &'static str,
-    flags_mask: u32,
-    flags_value: u32,
+struct ExpectedLanguageFacts {
+    bitness: Option<u8>,
+    endian: Option<&'static str>,
 }
 
-impl LoadSpecMapping {
-    const fn exact(
-        machine: u32,
-        bitness: u8,
-        endian: &'static str,
-        processor: &'static str,
-        variant: &'static str,
-        abi: Option<&'static str>,
-        language_id: &'static str,
-        compiler_spec_id: &'static str,
-    ) -> Self {
+static OPINION_DATABASE: OnceLock<Result<OpinionDatabase, String>> = OnceLock::new();
+
+impl OpinionDatabase {
+    fn load() -> Result<Self, String> {
+        let mut db = Self {
+            opinions: Vec::new(),
+            languages: Vec::new(),
+        };
+
+        for path in collect_files_with_extension(&ghidra_data_root(), "opinion") {
+            db.parse_opinion_file(&path)?;
+        }
+        for path in collect_files_with_extension(&sleigh_specs_root().join("languages"), "ldefs") {
+            db.parse_ldefs_file(&path)?;
+        }
+
+        if db.languages.is_empty() {
+            return Err("no Ghidra language definitions were loaded".to_string());
+        }
+        Ok(db)
+    }
+
+    pub fn query(
+        &self,
+        loader: &str,
+        primary_key: &str,
+        secondary_key: Option<&str>,
+    ) -> Vec<QueryResult> {
+        self.resolve_candidates(
+            loader,
+            primary_key,
+            secondary_key,
+            ExpectedLanguageFacts::any(),
+        )
+        .into_iter()
+        .map(|candidate| QueryResult {
+            language_id: candidate.language.id,
+            compiler_spec_id: candidate.compiler_spec_id,
+            preferred: candidate.preferred,
+        })
+        .collect()
+    }
+
+    fn select(
+        &self,
+        loader: &str,
+        primary_key: &str,
+        secondary_key: Option<&str>,
+        expected: ExpectedLanguageFacts,
+        format: &str,
+        image_base: u64,
+        raw_machine: String,
+    ) -> ArchitectureSelectionResult {
+        let mut candidates = self.resolve_candidates(loader, primary_key, secondary_key, expected);
+        if candidates.is_empty() {
+            return Err(ArchitectureSelectionError::UnsupportedMachine {
+                format: format.to_string(),
+                machine: raw_machine,
+            });
+        }
+
+        let preferred_count = candidates
+            .iter()
+            .filter(|candidate| candidate.preferred)
+            .count();
+        if preferred_count > 0 {
+            candidates.retain(|candidate| candidate.preferred);
+        }
+        dedup_candidates(&mut candidates);
+
+        if candidates.len() != 1 {
+            return Err(ArchitectureSelectionError::AmbiguousLoadSpec {
+                format: format.to_string(),
+                machine: format!("{raw_machine}, candidates={}", candidates.len()),
+            });
+        }
+
+        let candidate = candidates.remove(0);
+        Ok(selection_from_candidate(
+            format,
+            image_base,
+            candidate,
+            raw_machine,
+            loader,
+            primary_key,
+            secondary_key,
+        ))
+    }
+
+    fn resolve_candidates(
+        &self,
+        loader: &str,
+        primary_key: &str,
+        secondary_key: Option<&str>,
+        expected: ExpectedLanguageFacts,
+    ) -> Vec<SelectionCandidate> {
+        let entries = self.matching_opinion_entries(loader, primary_key, secondary_key);
+        let mut candidates = Vec::new();
+        for entry in entries {
+            for language in self.languages_for_query(&entry.query, expected) {
+                for compiler_spec_id in &language.compiler_ids {
+                    candidates.push(SelectionCandidate {
+                        preferred: entry
+                            .query
+                            .compiler_spec_id
+                            .as_deref()
+                            .map(|preferred| preferred == compiler_spec_id)
+                            .unwrap_or(false),
+                        compiler_spec_id: compiler_spec_id.clone(),
+                        language: language.clone(),
+                    });
+                }
+            }
+        }
+        dedup_candidates(&mut candidates);
+        candidates
+    }
+
+    fn matching_opinion_entries(
+        &self,
+        loader: &str,
+        primary_key: &str,
+        secondary_key: Option<&str>,
+    ) -> Vec<&OpinionEntry> {
+        let primary_matches: Vec<&OpinionEntry> = self
+            .opinions
+            .iter()
+            .filter(|entry| entry.loader == loader && primary_matches(&entry.primary, primary_key))
+            .collect();
+
+        let secondary_exact: Vec<&OpinionEntry> = primary_matches
+            .iter()
+            .copied()
+            .filter(|entry| entry.secondary.as_deref() == secondary_key)
+            .collect();
+        if !secondary_exact.is_empty() {
+            return secondary_exact;
+        }
+
+        if let Some(secondary_key) = secondary_key {
+            let secondary_masked: Vec<&OpinionEntry> = primary_matches
+                .iter()
+                .copied()
+                .filter(|entry| {
+                    entry
+                        .secondary
+                        .as_deref()
+                        .map(|constraint| secondary_attribute_matches(secondary_key, constraint))
+                        .unwrap_or(false)
+                })
+                .collect();
+            if !secondary_masked.is_empty() {
+                return secondary_masked;
+            }
+        }
+
+        primary_matches
+            .into_iter()
+            .filter(|entry| entry.secondary.is_none())
+            .collect()
+    }
+
+    fn languages_for_query(
+        &self,
+        query: &OpinionQuery,
+        expected: ExpectedLanguageFacts,
+    ) -> Vec<LanguageDescription> {
+        self.languages
+            .iter()
+            .filter(|language| {
+                query
+                    .processor
+                    .as_deref()
+                    .map(|processor| processor == language.processor)
+                    .unwrap_or(true)
+                    && query
+                        .endian
+                        .as_deref()
+                        .map(|endian| normalize_endian(endian) == language.endian)
+                        .unwrap_or(true)
+                    && query.size.map(|size| size == language.size).unwrap_or(true)
+                    && query
+                        .variant
+                        .as_deref()
+                        .map(|variant| variant == language.variant)
+                        .unwrap_or(true)
+                    && expected
+                        .bitness
+                        .map(|bitness| bitness == language.size)
+                        .unwrap_or(true)
+                    && expected
+                        .endian
+                        .map(|endian| endian == language.endian)
+                        .unwrap_or(true)
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn parse_opinion_file(&mut self, path: &Path) -> Result<(), String> {
+        let contents = fs::read_to_string(path)
+            .map_err(|err| format!("read opinion {}: {err}", path.display()))?;
+        let mut stack = vec![OpinionQuery::default()];
+        for tag in scan_xml_tags(&contents) {
+            if tag.name != "constraint" {
+                continue;
+            }
+            if tag.closing {
+                if stack.len() > 1 {
+                    stack.pop();
+                }
+                continue;
+            }
+
+            let parent = stack.last().cloned().unwrap_or_default();
+            let query = merge_query(parent, &tag.attrs)?;
+            if let (Some(loader), Some(primary), Some(processor)) = (
+                query.loader.as_ref(),
+                query.primary.as_ref(),
+                query.processor.as_ref(),
+            ) {
+                if !loader.is_empty() && !primary.is_empty() && !processor.is_empty() {
+                    self.opinions.push(OpinionEntry {
+                        loader: loader.clone(),
+                        primary: primary.clone(),
+                        secondary: query.secondary.clone(),
+                        query: query.clone(),
+                    });
+                }
+            }
+            if !tag.self_closing {
+                stack.push(query);
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_ldefs_file(&mut self, path: &Path) -> Result<(), String> {
+        let contents = fs::read_to_string(path)
+            .map_err(|err| format!("read ldefs {}: {err}", path.display()))?;
+        let mut current: Option<LanguageDescription> = None;
+        for tag in scan_xml_tags(&contents) {
+            match tag.name.as_str() {
+                "language" if !tag.closing => {
+                    current = Some(LanguageDescription {
+                        processor: required_attr(&tag.attrs, "processor", path)?,
+                        endian: normalize_endian(&required_attr(&tag.attrs, "endian", path)?),
+                        size: required_attr(&tag.attrs, "size", path)?
+                            .parse::<u8>()
+                            .map_err(|err| {
+                                format!("invalid language size in {}: {err}", path.display())
+                            })?,
+                        variant: tag
+                            .attrs
+                            .get("variant")
+                            .cloned()
+                            .unwrap_or_else(|| "default".to_string()),
+                        id: required_attr(&tag.attrs, "id", path)?,
+                        compiler_ids: Vec::new(),
+                    });
+                }
+                "language" if tag.closing => {
+                    if let Some(language) = current.take() {
+                        self.languages.push(language);
+                    }
+                }
+                "compiler" if !tag.closing => {
+                    if let Some(language) = current.as_mut() {
+                        if let Some(id) = tag.attrs.get("id") {
+                            language.compiler_ids.push(id.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ExpectedLanguageFacts {
+    const fn any() -> Self {
         Self {
-            machine,
-            bitness,
-            endian,
-            processor,
-            variant,
-            abi,
-            language_id,
-            compiler_spec_id,
-            flags_mask: 0,
-            flags_value: 0,
+            bitness: None,
+            endian: None,
         }
     }
 
-    const fn with_flags(
-        machine: u32,
-        bitness: u8,
-        endian: &'static str,
-        processor: &'static str,
-        variant: &'static str,
-        abi: Option<&'static str>,
-        language_id: &'static str,
-        compiler_spec_id: &'static str,
-        flags_mask: u32,
-        flags_value: u32,
-    ) -> Self {
+    const fn new(bitness: u8, endian: &'static str) -> Self {
         Self {
-            machine,
-            bitness,
-            endian,
-            processor,
-            variant,
-            abi,
-            language_id,
-            compiler_spec_id,
-            flags_mask,
-            flags_value,
+            bitness: Some(bitness),
+            endian: Some(endian),
         }
-    }
-
-    fn matches(self, machine: u32, bitness: u8, endian: &str, flags: u32) -> bool {
-        self.machine == machine
-            && self.bitness == bitness
-            && self.endian == endian
-            && (flags & self.flags_mask) == self.flags_value
     }
 }
 
-const PE_LOAD_SPEC_MAPPINGS: &[LoadSpecMapping] = &[
-    LoadSpecMapping::exact(
-        IMAGE_FILE_MACHINE_AMD64 as u32,
-        64,
-        "little",
-        "x86",
-        "default",
-        Some("windows"),
-        "x86:LE:64:default",
-        "windows",
-    ),
-    LoadSpecMapping::exact(
-        IMAGE_FILE_MACHINE_I386 as u32,
-        32,
-        "little",
-        "x86",
-        "default",
-        Some("windows"),
-        "x86:LE:32:default",
-        "windows",
-    ),
-    LoadSpecMapping::exact(
-        IMAGE_FILE_MACHINE_ARM as u32,
-        32,
-        "little",
-        "ARM",
-        "v7",
-        Some("windows"),
-        "ARM:LE:32:v7",
-        "windows",
-    ),
-    LoadSpecMapping::exact(
-        IMAGE_FILE_MACHINE_ARM64 as u32,
-        64,
-        "little",
-        "AARCH64",
-        "v8A",
-        Some("windows"),
-        "AARCH64:LE:64:v8A",
-        "windows",
-    ),
-];
+#[derive(Debug)]
+struct XmlTag {
+    name: String,
+    attrs: BTreeMap<String, String>,
+    closing: bool,
+    self_closing: bool,
+}
 
-const ELF_LOAD_SPEC_MAPPINGS: &[LoadSpecMapping] = &[
-    LoadSpecMapping::exact(
-        EM_X86_64 as u32,
-        64,
-        "little",
-        "x86",
-        "default",
-        Some("gcc"),
-        "x86:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_386 as u32,
-        32,
-        "little",
-        "x86",
-        "default",
-        Some("gcc"),
-        "x86:LE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_AARCH64 as u32,
-        64,
-        "little",
-        "AARCH64",
-        "v8A",
-        Some("gcc"),
-        "AARCH64:LE:64:v8A",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_AARCH64 as u32,
-        64,
-        "big",
-        "AARCH64",
-        "v8A",
-        Some("gcc"),
-        "AARCH64:BE:64:v8A",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_ARM as u32,
-        32,
-        "little",
-        "ARM",
-        "v7",
-        Some("gcc"),
-        "ARM:LE:32:v7",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_ARM as u32,
-        32,
-        "big",
-        "ARM",
-        "v7",
-        Some("gcc"),
-        "ARM:BE:32:v7",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_RISCV as u32,
-        32,
-        "little",
-        "RISCV",
-        "default",
-        Some("gcc"),
-        "RISCV:LE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_RISCV as u32,
-        64,
-        "little",
-        "RISCV",
-        "default",
-        Some("gcc"),
-        "RISCV:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::with_flags(
-        EM_MIPS as u32,
-        32,
-        "little",
-        "MIPS",
-        "R6",
-        Some("gcc"),
-        "MIPS:LE:32:R6",
-        "gcc",
-        0x8000_0000,
-        0x8000_0000,
-    ),
-    LoadSpecMapping::with_flags(
-        EM_MIPS as u32,
-        32,
-        "big",
-        "MIPS",
-        "R6",
-        Some("gcc"),
-        "MIPS:BE:32:R6",
-        "gcc",
-        0x8000_0000,
-        0x8000_0000,
-    ),
-    LoadSpecMapping::exact(
-        EM_MIPS as u32,
-        32,
-        "little",
-        "MIPS",
-        "default",
-        Some("gcc"),
-        "MIPS:LE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_MIPS as u32,
-        32,
-        "big",
-        "MIPS",
-        "default",
-        Some("gcc"),
-        "MIPS:BE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_MIPS as u32,
-        64,
-        "little",
-        "MIPS",
-        "default",
-        Some("gcc"),
-        "MIPS:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_MIPS as u32,
-        64,
-        "big",
-        "MIPS",
-        "default",
-        Some("gcc"),
-        "MIPS:BE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_PPC as u32,
-        32,
-        "little",
-        "PowerPC",
-        "default",
-        Some("gcc"),
-        "PowerPC:LE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_PPC as u32,
-        32,
-        "big",
-        "PowerPC",
-        "default",
-        Some("gcc"),
-        "PowerPC:BE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_PPC64 as u32,
-        64,
-        "little",
-        "PowerPC",
-        "default",
-        Some("gcc"),
-        "PowerPC:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_PPC64 as u32,
-        64,
-        "big",
-        "PowerPC",
-        "default",
-        Some("gcc"),
-        "PowerPC:BE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_SPARCV9 as u32,
-        64,
-        "big",
-        "sparc",
-        "default",
-        Some("gcc"),
-        "sparc:BE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_BPF as u32,
-        64,
-        "little",
-        "eBPF",
-        "default",
-        Some("gcc"),
-        "eBPF:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_BPF as u32,
-        64,
-        "big",
-        "eBPF",
-        "default",
-        Some("gcc"),
-        "eBPF:BE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        EM_LOONGARCH as u32,
-        32,
-        "little",
-        "Loongarch",
-        "ilp32d",
-        Some("gcc"),
-        "Loongarch:LE:32:ilp32d",
-        "gcc",
-    ),
-    LoadSpecMapping::with_flags(
-        EM_LOONGARCH as u32,
-        64,
-        "little",
-        "Loongarch",
-        "lp64f",
-        Some("gcc"),
-        "Loongarch:LE:64:lp64f",
-        "gcc",
-        u32::MAX,
-        0x42,
-    ),
-    LoadSpecMapping::exact(
-        EM_LOONGARCH as u32,
-        64,
-        "little",
-        "Loongarch",
-        "lp64d",
-        Some("gcc"),
-        "Loongarch:LE:64:lp64d",
-        "gcc",
-    ),
-];
+fn opinion_database() -> Result<&'static OpinionDatabase, String> {
+    OPINION_DATABASE
+        .get_or_init(OpinionDatabase::load)
+        .as_ref()
+        .map_err(Clone::clone)
+}
 
-const MACHO_LOAD_SPEC_MAPPINGS: &[LoadSpecMapping] = &[
-    LoadSpecMapping::exact(
-        MACHO_CPU_TYPE_X86_64 as u32,
-        64,
-        "little",
-        "x86",
-        "default",
-        Some("macosx"),
-        "x86:LE:64:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        MACHO_CPU_TYPE_X86 as u32,
-        32,
-        "little",
-        "x86",
-        "default",
-        Some("macosx"),
-        "x86:LE:32:default",
-        "gcc",
-    ),
-    LoadSpecMapping::exact(
-        MACHO_CPU_TYPE_ARM64 as u32,
-        64,
-        "little",
-        "AARCH64",
-        "AppleSilicon",
-        Some("macosx"),
-        "AARCH64:LE:64:AppleSilicon",
-        "default",
-    ),
-    LoadSpecMapping::exact(
-        MACHO_CPU_TYPE_ARM as u32,
-        32,
-        "little",
-        "ARM",
-        "v7",
-        Some("macosx"),
-        "ARM:LE:32:v7",
-        "default",
-    ),
-];
-
-fn lookup_mapping(
-    mappings: &[LoadSpecMapping],
-    machine: u32,
-    bitness: u8,
-    endian: &str,
-    flags: u32,
-) -> Option<LoadSpecMapping> {
-    mappings
-        .iter()
-        .copied()
-        .find(|mapping| mapping.matches(machine, bitness, endian, flags))
+pub fn query_opinion_database(
+    loader: &str,
+    primary_key: &str,
+    secondary_key: Option<&str>,
+) -> Result<Vec<QueryResult>, ArchitectureSelectionError> {
+    Ok(opinion_database()
+        .map_err(|err| ArchitectureSelectionError::MissingLanguage {
+            format: loader.to_string(),
+            machine: err,
+        })?
+        .query(loader, primary_key, secondary_key))
 }
 
 pub fn select_pe_load_spec(
@@ -565,25 +531,16 @@ pub fn select_pe_load_spec(
     image_base: u64,
 ) -> ArchitectureSelectionResult {
     let bitness = if is_64bit { 64 } else { 32 };
-    if let Some(mapping) = lookup_mapping(
-        PE_LOAD_SPEC_MAPPINGS,
-        u32::from(machine),
-        bitness,
-        "little",
-        0,
-    ) {
-        Ok(selection_from_mapping(
-            "PE",
-            image_base,
-            mapping,
-            format!("PE Machine=0x{machine:04x}"),
-        ))
-    } else {
-        Err(ArchitectureSelectionError::UnsupportedMachine {
-            format: "PE".to_string(),
-            machine: format!("Machine=0x{machine:04x}, is_64bit={is_64bit}"),
-        })
-    }
+    let primary = u32::from(machine).to_string();
+    select_from_opinion(
+        PE_LOADER_NAME,
+        &primary,
+        None,
+        ExpectedLanguageFacts::new(bitness, "little"),
+        "PE",
+        image_base,
+        format!("PE Machine=0x{machine:04x}, is_64bit={is_64bit}"),
+    )
 }
 
 pub fn select_coff_load_spec(
@@ -591,16 +548,28 @@ pub fn select_coff_load_spec(
     is_64bit: bool,
     image_base: u64,
 ) -> ArchitectureSelectionResult {
-    let (mut architecture, mut load_spec) = select_pe_load_spec(machine, is_64bit, image_base)
-        .map_err(|_| ArchitectureSelectionError::UnsupportedMachine {
-            format: "COFF".to_string(),
-            machine: format!("Machine=0x{machine:04x}, is_64bit={is_64bit}"),
-        })?;
-    architecture.abi = Some("coff".to_string());
-    architecture.raw_machine = format!("COFF Machine=0x{machine:04x}");
-    load_spec.format = "COFF".to_string();
-    load_spec.source = format!("COFF Machine=0x{machine:04x}");
-    Ok((architecture, load_spec))
+    let bitness = if is_64bit { 64 } else { 32 };
+    let primary = i16::from_ne_bytes(machine.to_ne_bytes()).to_string();
+    select_from_opinion(
+        MS_COFF_LOADER_NAME,
+        &primary,
+        None,
+        ExpectedLanguageFacts::new(bitness, "little"),
+        "COFF",
+        image_base,
+        format!("COFF Machine=0x{machine:04x}, is_64bit={is_64bit}"),
+    )
+    .or_else(|_| {
+        select_from_opinion(
+            COFF_LOADER_NAME,
+            &primary,
+            None,
+            ExpectedLanguageFacts::new(bitness, "little"),
+            "COFF",
+            image_base,
+            format!("COFF Machine=0x{machine:04x}, is_64bit={is_64bit}"),
+        )
+    })
 }
 
 pub fn select_elf_load_spec(
@@ -631,27 +600,17 @@ pub fn select_elf_load_spec(
         }
     };
 
-    if let Some(mapping) = lookup_mapping(
-        ELF_LOAD_SPEC_MAPPINGS,
-        u32::from(machine),
-        bitness,
-        endian,
-        flags,
-    ) {
-        Ok(selection_from_mapping(
-            "ELF",
-            image_base,
-            mapping,
-            format!("ELF e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"),
-        ))
-    } else {
-        Err(ArchitectureSelectionError::UnsupportedMachine {
-            format: "ELF".to_string(),
-            machine: format!(
-                "class={class}, data_encoding={data_encoding}, machine=0x{machine:04x}, flags=0x{flags:08x}"
-            ),
-        })
-    }
+    select_from_opinion(
+        ELF_LOADER_NAME,
+        &u32::from(machine).to_string(),
+        Some(&flags.to_string()),
+        ExpectedLanguageFacts::new(bitness, endian),
+        "ELF",
+        image_base,
+        format!(
+            "ELF class={class}, data_encoding={data_encoding}, e_machine=0x{machine:04x}, e_flags=0x{flags:08x}"
+        ),
+    )
 }
 
 pub fn select_macho_load_spec(
@@ -661,62 +620,337 @@ pub fn select_macho_load_spec(
     image_base: u64,
 ) -> ArchitectureSelectionResult {
     let bitness = if is_64bit { 64 } else { 32 };
-    if let Some(mapping) = lookup_mapping(
-        MACHO_LOAD_SPEC_MAPPINGS,
-        cputype as u32,
-        bitness,
-        "little",
-        0,
-    ) {
-        Ok(selection_from_mapping(
-            "Mach-O",
-            image_base,
-            mapping,
-            format!("Mach-O cputype=0x{cputype:x}, cpusubtype=0x{cpusubtype:x}"),
-        ))
-    } else {
-        Err(ArchitectureSelectionError::UnsupportedMachine {
-            format: "Mach-O".to_string(),
-            machine: format!(
-                "cputype=0x{cputype:x}, cpusubtype=0x{cpusubtype:x}, is_64bit={is_64bit}"
-            ),
-        })
+    let primary = macho_primary_key(cputype, cpusubtype);
+    select_from_opinion(
+        MACHO_LOADER_NAME,
+        &primary,
+        None,
+        ExpectedLanguageFacts::new(bitness, "little"),
+        "Mach-O",
+        image_base,
+        format!("Mach-O cputype=0x{cputype:x}, cpusubtype=0x{cpusubtype:x}, is_64bit={is_64bit}"),
+    )
+}
+
+fn select_from_opinion(
+    loader: &str,
+    primary_key: &str,
+    secondary_key: Option<&str>,
+    expected: ExpectedLanguageFacts,
+    format: &str,
+    image_base: u64,
+    raw_machine: String,
+) -> ArchitectureSelectionResult {
+    let db = opinion_database().map_err(|err| ArchitectureSelectionError::MissingLanguage {
+        format: format.to_string(),
+        machine: err,
+    })?;
+    db.select(
+        loader,
+        primary_key,
+        secondary_key,
+        expected,
+        format,
+        image_base,
+        raw_machine,
+    )
+}
+
+fn selection_from_candidate(
+    format: &str,
+    image_base: u64,
+    candidate: SelectionCandidate,
+    raw_machine: String,
+    loader: &str,
+    primary_key: &str,
+    secondary_key: Option<&str>,
+) -> (ArchitectureDescriptor, BinaryLoadSpec) {
+    let language = candidate.language;
+    let architecture = ArchitectureDescriptor::new(
+        language.processor,
+        language.endian,
+        language.size,
+        language.variant,
+        Some(candidate.compiler_spec_id.clone()),
+        raw_machine.clone(),
+    );
+    let mut load_spec = BinaryLoadSpec::new(
+        format,
+        image_base,
+        language.id,
+        candidate.compiler_spec_id,
+        format!(
+            "opinion: loader={loader}, primary={primary_key}, secondary={}",
+            secondary_key.unwrap_or("<none>")
+        ),
+    );
+    load_spec.preferred = candidate.preferred;
+    (architecture, load_spec)
+}
+
+fn merge_query(
+    mut parent: OpinionQuery,
+    attrs: &BTreeMap<String, String>,
+) -> Result<OpinionQuery, String> {
+    assign_string(&mut parent.loader, attrs, "loader");
+    assign_string(&mut parent.primary, attrs, "primary");
+    assign_string(&mut parent.secondary, attrs, "secondary");
+    assign_string(&mut parent.processor, attrs, "processor");
+    assign_string(&mut parent.endian, attrs, "endian");
+    assign_string(&mut parent.variant, attrs, "variant");
+    assign_string(&mut parent.compiler_spec_id, attrs, "compilerSpecID");
+    if let Some(size) = attrs.get("size") {
+        parent.size = Some(
+            size.parse::<u8>()
+                .map_err(|err| format!("invalid opinion size {size}: {err}"))?,
+        );
+    }
+    Ok(parent)
+}
+
+fn assign_string(target: &mut Option<String>, attrs: &BTreeMap<String, String>, key: &str) {
+    if let Some(value) = attrs.get(key) {
+        *target = Some(value.clone());
     }
 }
 
-fn selection_from_mapping(
-    format: &str,
-    image_base: u64,
-    mapping: LoadSpecMapping,
-    raw_machine: String,
-) -> (ArchitectureDescriptor, BinaryLoadSpec) {
-    let architecture = ArchitectureDescriptor::new(
-        mapping.processor,
-        mapping.endian,
-        mapping.bitness,
-        mapping.variant,
-        mapping.abi.map(str::to_string),
-        raw_machine.clone(),
-    );
-    let load_spec = BinaryLoadSpec::new(
-        format,
-        image_base,
-        mapping.language_id,
-        mapping.compiler_spec_id,
-        raw_machine,
-    );
-    (architecture, load_spec)
+fn scan_xml_tags(contents: &str) -> Vec<XmlTag> {
+    let mut tags = Vec::new();
+    let bytes = contents.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        let Some(end) = contents[i + 1..].find('>').map(|offset| i + 1 + offset) else {
+            break;
+        };
+        let raw = contents[i + 1..end].trim();
+        i = end + 1;
+        if raw.is_empty()
+            || raw.starts_with('?')
+            || raw.starts_with("!--")
+            || raw.starts_with("!DOCTYPE")
+        {
+            continue;
+        }
+        let closing = raw.starts_with('/');
+        let body = raw.trim_start_matches('/').trim();
+        let self_closing = body.ends_with('/');
+        let body = body.trim_end_matches('/').trim();
+        let (name, attrs) = parse_tag_body(body);
+        if !name.is_empty() {
+            tags.push(XmlTag {
+                name,
+                attrs,
+                closing,
+                self_closing,
+            });
+        }
+    }
+    tags
+}
+
+fn parse_tag_body(body: &str) -> (String, BTreeMap<String, String>) {
+    let mut chars = body.char_indices();
+    let name_end = chars
+        .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
+        .unwrap_or(body.len());
+    let name = body[..name_end].to_string();
+    let mut attrs = BTreeMap::new();
+    let mut rest = body[name_end..].trim();
+    while !rest.is_empty() {
+        let Some(eq_idx) = rest.find('=') else {
+            break;
+        };
+        let key = rest[..eq_idx].trim();
+        let after_eq = rest[eq_idx + 1..].trim_start();
+        if !after_eq.starts_with('"') {
+            break;
+        }
+        let Some(value_end) = after_eq[1..].find('"') else {
+            break;
+        };
+        let value = &after_eq[1..1 + value_end];
+        if !key.is_empty() {
+            attrs.insert(key.to_string(), unescape_xml_attr(value));
+        }
+        rest = after_eq[1 + value_end + 1..].trim_start();
+    }
+    (name, attrs)
+}
+
+fn unescape_xml_attr(value: &str) -> String {
+    value
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn required_attr(
+    attrs: &BTreeMap<String, String>,
+    key: &str,
+    path: &Path,
+) -> Result<String, String> {
+    attrs
+        .get(key)
+        .cloned()
+        .ok_or_else(|| format!("missing {key} in {}", path.display()))
+}
+
+fn primary_matches(constraint: &str, primary_key: &str) -> bool {
+    constraint
+        .replace(char::is_whitespace, "")
+        .split(',')
+        .any(|token| token == primary_key)
+}
+
+fn secondary_attribute_matches(secondary_key: &str, constraint: &str) -> bool {
+    let Ok(secondary_key_int) = secondary_key.parse::<u32>() else {
+        return false;
+    };
+    let cleaned = constraint
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '_')
+        .collect::<String>()
+        .to_lowercase();
+    if let Some(hex) = cleaned.strip_prefix("0x") {
+        return u32::from_str_radix(hex, 16)
+            .map(|value| value == secondary_key_int)
+            .unwrap_or(false);
+    }
+    if let Some(binary) = cleaned.strip_prefix("0b") {
+        let key_bits = format!("{secondary_key_int:032b}");
+        let constraint_bits = format!("{binary:0>32}");
+        return constraint_bits
+            .chars()
+            .zip(key_bits.chars())
+            .all(|(constraint_bit, key_bit)| constraint_bit == '.' || constraint_bit == key_bit);
+    }
+    false
+}
+
+fn dedup_candidates(candidates: &mut Vec<SelectionCandidate>) {
+    let mut seen = HashSet::new();
+    candidates.retain(|candidate| {
+        seen.insert((
+            candidate.language.id.clone(),
+            candidate.compiler_spec_id.clone(),
+            candidate.preferred,
+        ))
+    });
+}
+
+fn normalize_endian(endian: &str) -> String {
+    match endian {
+        "LE" | "le" | "little" => "little".to_string(),
+        "BE" | "be" | "big" => "big".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn macho_primary_key(cputype: i32, cpusubtype: i32) -> String {
+    match cputype {
+        MACHO_CPU_TYPE_ARM => format!("{cputype}.{cpusubtype}"),
+        MACHO_CPU_TYPE_X86 | MACHO_CPU_TYPE_X86_64 | MACHO_CPU_TYPE_ARM64 => cputype.to_string(),
+        _ => cputype.to_string(),
+    }
+}
+
+fn ghidra_data_root() -> PathBuf {
+    if let Some(path) = env::var_os("FISSION_GHIDRA_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    repo_root().join("utils").join("ghidra-data")
+}
+
+fn sleigh_specs_root() -> PathBuf {
+    if let Some(path) = env::var_os("FISSION_SLEIGH_SPEC_DIR") {
+        let path = PathBuf::from(path);
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == "languages")
+            .unwrap_or(false)
+        {
+            return path.parent().unwrap_or(&path).to_path_buf();
+        }
+        return path;
+    }
+    repo_root().join("utils").join("sleigh-specs")
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root")
+        .to_path_buf()
+}
+
+fn collect_files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&path) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext == extension)
+                .unwrap_or(false)
+            {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::binary_format::MACHO_CPU_TYPE_ARM64;
+    use crate::core_constants::{
+        ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_AARCH64, EM_ARM, EM_LOONGARCH,
+        EM_MIPS, EM_PPC64, EM_RISCV, EM_X86_64, IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64,
+        IMAGE_FILE_MACHINE_I386,
+    };
 
     #[test]
-    fn selects_pe_amd64() {
+    fn selects_pe_amd64_from_opinion_data() {
         let (_, spec) = select_pe_load_spec(IMAGE_FILE_MACHINE_AMD64, true, 0x140000000)
             .expect("select PE amd64");
         assert_eq!(spec.pair.language_id.as_str(), "x86:LE:64:default");
+        assert_eq!(spec.pair.compiler_spec_id.as_str(), "windows");
+        assert!(
+            spec.source
+                .starts_with("opinion: loader=Portable Executable (PE)")
+        );
+    }
+
+    #[test]
+    fn selects_pe_i386_from_opinion_data() {
+        let (_, spec) =
+            select_pe_load_spec(IMAGE_FILE_MACHINE_I386, false, 0x400000).expect("select PE i386");
+        assert_eq!(spec.pair.language_id.as_str(), "x86:LE:32:default");
+        assert_eq!(spec.pair.compiler_spec_id.as_str(), "windows");
+    }
+
+    #[test]
+    fn selects_pe_aarch64_from_opinion_data() {
+        let (_, spec) =
+            select_pe_load_spec(IMAGE_FILE_MACHINE_ARM64, true, 0).expect("select PE arm64");
+        assert_eq!(spec.pair.language_id.as_str(), "AARCH64:LE:64:v8A");
         assert_eq!(spec.pair.compiler_spec_id.as_str(), "windows");
     }
 
@@ -729,10 +963,32 @@ mod tests {
     }
 
     #[test]
-    fn selects_elf_aarch64_little_endian() {
+    fn selects_elf_x86_64_from_opinion_data() {
+        let (_, spec) =
+            select_elf_load_spec(EM_X86_64, ELFCLASS64, ELFDATA2LSB, 0, 0).expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "x86:LE:64:default");
+        assert_eq!(spec.pair.compiler_spec_id.as_str(), "gcc");
+    }
+
+    #[test]
+    fn selects_elf_aarch64_little_endian_from_opinion_data() {
         let (_, spec) =
             select_elf_load_spec(EM_AARCH64, ELFCLASS64, ELFDATA2LSB, 0, 0).expect("select ELF");
         assert_eq!(spec.pair.language_id.as_str(), "AARCH64:LE:64:v8A");
+    }
+
+    #[test]
+    fn selects_elf_arm_secondary_mask_from_opinion_data() {
+        let (_, spec) =
+            select_elf_load_spec(EM_ARM, ELFCLASS32, ELFDATA2LSB, 0, 0).expect("select ELF");
+        assert_eq!(spec.pair.language_id.as_str(), "ARM:LE:32:v8");
+
+        let (_, be8_spec) = select_elf_load_spec(EM_ARM, ELFCLASS32, ELFDATA2MSB, 0x0080_0000, 0)
+            .expect("select ARM BE8 ELF");
+        assert_eq!(
+            be8_spec.pair.language_id.as_str(),
+            "ARM:LEBE:32:v8LEInstruction"
+        );
     }
 
     #[test]
@@ -750,10 +1006,11 @@ mod tests {
     }
 
     #[test]
-    fn selects_elf_ppc64_little_endian() {
-        let (_, spec) =
-            select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2LSB, 0x2, 0).expect("select ELF");
-        assert_eq!(spec.pair.language_id.as_str(), "PowerPC:LE:64:default");
+    fn ppc64_little_endian_fails_closed_when_opinion_is_ambiguous() {
+        assert!(matches!(
+            select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2LSB, 0x2, 0),
+            Err(ArchitectureSelectionError::AmbiguousLoadSpec { .. })
+        ));
     }
 
     #[test]
@@ -772,16 +1029,28 @@ mod tests {
     }
 
     #[test]
-    fn selects_macho_apple_silicon() {
+    fn selects_macho_apple_silicon_from_opinion_data() {
         let (_, spec) =
             select_macho_load_spec(MACHO_CPU_TYPE_ARM64, 0, true, 0).expect("select Mach-O");
         assert_eq!(spec.pair.language_id.as_str(), "AARCH64:LE:64:AppleSilicon");
     }
 
     #[test]
+    fn opinion_query_supports_secondary_binary_masks() {
+        let results =
+            query_opinion_database(ELF_LOADER_NAME, &u32::from(EM_ARM).to_string(), Some("0"))
+                .expect("query opinion");
+        assert!(
+            results
+                .iter()
+                .any(|result| result.language_id == "ARM:LE:32:v8")
+        );
+    }
+
+    #[test]
     fn checked_in_ghidra_manifest_keeps_expected_coverage() {
         let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../fission-sleigh/specs/ghidra_language_manifest.json"
+            "../../../utils/sleigh-specs/ghidra_language_manifest.json"
         ))
         .expect("parse Ghidra language manifest");
         assert_eq!(manifest["processor_count"], 38);

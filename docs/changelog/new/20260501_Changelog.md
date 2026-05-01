@@ -218,6 +218,46 @@
 - The collector queries GitHub release metadata, filters assets by explicit include/exclude regexes, emits a URL list, and only downloads binaries when `--download` is provided.
 - Downloaded assets are stored under `benchmark/binary/realworld/github` by default and are treated as local corpus artifacts, not source files.
 - Generated manifest entries include SHA-256, size, repository, release tag, asset name, asset URL, content type, and source config index.
+
+## Ghidra Opinion LoadSpec Selection
+
+- Replaced the active Rust machine-to-language mapping owner in `fission-core::architecture` with a Ghidra-style data query path.
+- New selection chain: binary loader metadata -> `*.opinion` query -> `*.ldefs` language/compiler resolution -> `BinaryLoadSpec`.
+- Added a repo-local `OpinionDatabase` over `utils/ghidra-data/**/*.opinion` and `utils/sleigh-specs/languages/**/*.ldefs`.
+- Supported Ghidra query semantics now include nested opinion constraints, primary comma-list matching, secondary exact matching, and secondary `0x...` / `0b...` wildcard matching.
+- PE, COFF, ELF, and Mach-O selection now use loader names and machine keys through the opinion index instead of active `PE_LOAD_SPEC_MAPPINGS`, `ELF_LOAD_SPEC_MAPPINGS`, or `MACHO_LOAD_SPEC_MAPPINGS`.
+- Fail-closed behavior is preserved:
+  - Unknown machines return `UnsupportedMachine`.
+  - Missing language definitions return `MissingLanguage`.
+  - Multiple unresolved preferred candidates return `AmbiguousLoadSpec`.
+  - PowerPC64 ELF little-endian currently fails closed as ambiguous because the checked-in Ghidra opinion does not constrain enough variant identity to select a single LE 64-bit PowerPC language without guessing.
+
+## Ghidra Opinion LoadSpec Validation
+
+- `CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo test -p fission-core architecture -- --test-threads=1`
+  - `15 passed`
+- `CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-core`
+- `CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-loader`
+- `CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo test -p fission-loader --lib -- --test-threads=1`
+  - `55 passed`
+- `CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-cli`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py`
+- Canonical raw P-code gate report: `benchmark/artifacts/raw_p_code_benchmark/ghidra_opinion_loadspec_selection/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+
+## Ghidra Opinion LoadSpec Notes
+
+- No bitness-only x86 fallback was added.
+- No binary-specific LoadSpec repair was added.
+- Exact file-format constants remain spec data, but architecture selection policy now comes from checked-in Ghidra data files.
+- Benchmark artifacts and downloaded sample binaries remain uncommitted.
 - Added `benchmark/config/benchmark_corpus/github_release_sources.example.json` as a non-binary example source config.
 - Updated `.gitignore` so `benchmark/binary/realworld/**` stays out of git while `benchmark/binary/realworld/.gitkeep` can keep the local corpus root.
 - Updated `benchmark/BENCHMARK_GUIDE.md` with the GitHub release collection command and the no-binary-staging policy.
