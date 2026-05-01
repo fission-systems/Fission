@@ -40,7 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 crossbeam-channel = { version = "0.5", optional = true }
 rkyv = { version = "0.7", features = ["validation"] }
 bytecheck = "0.6"
-regex = "1.10"
+regex = "1.12"
 lru = "0.16"
 dirs = "5.0"
 sysinfo = { version = "0.37.2", optional = true }
