@@ -7,6 +7,8 @@ Scope: repository root
 
 Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-native lifting feeds Rust-owned NIR/HIR normalization, structuring, rendering, and automation quality lanes.
 
+**Repository layout (directories + workspace crates):** see [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md). Use this file plus the tree below when navigating; avoid duplicating full crate lists in multiple docs.
+
 ## Structure
 
 ```text
@@ -101,6 +103,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 ## References
 
 - `docs/architecture/ARCHITECTURE.md`
+- `docs/adr/` — architectural decisions (ADR index lives alongside numbered entries)
 - `docs/build/BUILD.md`
 - `README.md`
 - `.github/workflows/ci.yml`

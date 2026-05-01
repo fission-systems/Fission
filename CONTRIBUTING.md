@@ -217,17 +217,11 @@ cargo clippy --fix
 
 ### Code Organization
 
-**Module structure:**
-```
-src/
-├── analysis/       # Static analysis (loaders, disasm, decomp)
-├── unpacker/       # Dynamic analysis (IAT, dumping, PE fixing)
-├── debug/          # Interactive debugger
-├── ui/             # GUI and CLI interfaces
-├── core/           # Core types and utilities
-├── plugin/         # Plugin system
-└── script/         # Scripting support
-```
+Fission is a **Cargo workspace**. There is **no** single-crate `src/analysis` layout; contributor-facing layout lives under [`crates/`](./crates/) per crate.
+
+**Authoritative map:** [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) — workspace members, `benchmark/`, `docs/`, `utils/`, `vendor/`, and CI roots.
+
+**Ownership table:** [`AGENTS.md`](./AGENTS.md) — where to implement fixes (“canonical owner”), anti-patterns, and automation alignment.
 
 ### Naming Conventions
 
@@ -494,7 +488,7 @@ Heavy checks may take longer and are intentionally offloaded to GitHub.
 
 ### Automation artifacts
 
-Heavy workflow uploads `artifacts/fission-automation/` so contributors can inspect:
+Heavy workflow uploads `benchmark/artifacts/automation/` so contributors can inspect:
 
 - `summary.json` / `summary.md`
 - `decision_insights.json`
@@ -602,8 +596,16 @@ cargo tarpaulin --out Html
 **When adding features, update:**
 - README.md (if user-facing)
 - docs/ folder (detailed guides)
+- [`docs/changelog/new/`](docs/changelog/new/) — dated entry when behavior users rely on changes (see [`docs/RELEASE.md`](docs/RELEASE.md) changelog policy)
 - Code examples
 - CLI help text
+
+**Orientation:**
+- Repo layout: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md)
+- Versioning / tags: [`docs/VERSIONING.md`](docs/VERSIONING.md)
+- Maintainer release gate: [`docs/RELEASE.md`](docs/RELEASE.md)
+- Issue taxonomy: [`docs/contributing/LABELS.md`](docs/contributing/LABELS.md)
+- New contributor paths: [`docs/onboarding/`](docs/onboarding/)
 
 ### Generating API Docs
 
@@ -621,7 +623,7 @@ cargo doc --document-private-items
 
 ### Getting Help
 
-- **GitHub Issues** - Bug reports and feature requests
+- **GitHub Issues** - Bug reports and feature requests (see [`docs/contributing/LABELS.md`](docs/contributing/LABELS.md) for the suggested label taxonomy)
 - **GitHub Discussions** - Questions and general discussion
 - **Matrix Chat** - Coming soon
 

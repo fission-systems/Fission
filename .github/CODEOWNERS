@@ -1,0 +1,11 @@
+# Default code owner (expand with teams as the org grows).
+* @sjkim1127
+
+# High-churn semantic areas — listed for future CODEOWNERS splits; all currently route to maintainer.
+/crates/fission-pcode/ @sjkim1127
+/crates/fission-static/ @sjkim1127
+/crates/fission-automation/ @sjkim1127
+/crates/fission-cli/ @sjkim1127
+/crates/fission-loader/ @sjkim1127
+/benchmark/config/ @sjkim1127
+/.github/workflows/ @sjkim1127

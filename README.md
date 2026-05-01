@@ -75,6 +75,7 @@ License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./
 Fission maintains comprehensive, role-based documentation:
 
 ### For Researchers & Architects
+- [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) — One-page repo layout (crates, `benchmark/`, `utils/`, `vendor/`)
 - [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
 - [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
 - [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Canonical decompilation benchmark workflow
@@ -84,11 +85,17 @@ Fission maintains comprehensive, role-based documentation:
 - [`wiki/DOCUMENTATION_HUB.md`](./wiki/DOCUMENTATION_HUB.md) — Wiki vs repository doc split (browse in-tree); mirrors [Documentation Hub](https://github.com/sjkim1127/Fission/wiki/DOCUMENTATION_HUB) on GitHub Wiki
 - [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
 - [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
+- [`docs/onboarding/FIRST_30_MINUTES.md`](./docs/onboarding/FIRST_30_MINUTES.md) — Contributor-oriented first-session checklist (repository docs)
 - [`docs/EVALUATION.md`](./docs/EVALUATION.md) — External headless evaluation path for CLI-first users
 - [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide
 
 ### Release & Changelog
+- [`docs/VERSIONING.md`](./docs/VERSIONING.md) — SemVer rules and tagging (`v*.*.*`)
+- [`docs/RELEASE.md`](./docs/RELEASE.md) — Maintainer checklist aligned with CD builds
+- [`THIRD_PARTY.md`](./THIRD_PARTY.md) — Vendored upstream provenance (CLA § third-party)
+- [`SECURITY.md`](./SECURITY.md) — Coordinated disclosure and sample-handling expectations
 - [`docs/changelog/Legacy/CHANGELOG.md`](./docs/changelog/Legacy/CHANGELOG.md) — Historical release log
+- [`docs/changelog/new/`](./docs/changelog/new/) — Dated development entries (consolidated per release policy)
 
 ---
 
