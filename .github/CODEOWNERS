@@ -7,5 +7,7 @@
 /crates/fission-automation/ @sjkim1127
 /crates/fission-cli/ @sjkim1127
 /crates/fission-loader/ @sjkim1127
-/benchmark/config/ @sjkim1127
+/benchmark/ @sjkim1127
+/utils/ @sjkim1127
+# vendor/ is gitignored and not pushed to GitHub — no CODEOWNERS entry.
 /.github/workflows/ @sjkim1127

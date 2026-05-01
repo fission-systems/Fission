@@ -18,17 +18,26 @@ Include:
 
 Allow a reasonable coordination window before public disclosure.
 
+## Crash, malformed binary, and parser bugs
+
+Fission parses untrusted binaries **locally**. Not every crash or rejection counts as a security vulnerability:
+
+- **File as a normal bug** (public GitHub issue is fine): deterministic failures on **benign or synthetic** fixtures; incorrect lifted output or automation deltas with **no plausible sandbox escape**; detector misclassification when impact stays analytical-only.
+- **Use coordinated disclosure first** (email, not a public issue): suspected memory corruption exploitable beyond fail-fast abort; confidentiality or integrity breaks outside “CLI user analyzes local file”; anything that looks like a viable sandbox/container escape.
+
+If you are unsure, email first—we can triage quickly.
+
 ## Samples and attachments
 
-Do **not** attach malware or unsolicited exploit binaries to issues or pull requests.
+Do **not** attach malware, live offensive samples, or unsolicited exploit binaries to issues or pull requests. Do **not** paste credential-bearing or sensitive binaries publicly.
 
 Preferred evidence:
 
-- **SHA256 hashes** of benign reproduction fixtures already in-repo (`benchmark/binary/`)
-- References to **publicly documented** benign corpora
-- For sensitive benign fixtures, **password-protected archives** arranged out-of-band after maintainer ACK
+- **SHA256 hashes** (and format/size metadata) rather than raw bytes when possible
+- References to **benign** reproduction fixtures already in-repo (`benchmark/binary/`) or **publicly documented** benign corpora
+- **Password-protected archives** or private links **only after maintainer acknowledgement**, never dropped unsolicited into threads
 
-Operational expectations for CI fixtures: [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md).
+Operational expectations for CI fixtures and escalation: [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md).
 
 ## Scope notes
 

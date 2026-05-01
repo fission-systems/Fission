@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose new capability or workflow improvements.
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What workflow or limitation prompted this?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: "Behavior, CLI flags, or APIs you want—and why canonical semantics belong there (see docs/adr/)."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / ownership hint (optional)
+      description: "Which crate or lane (fission-pcode, loader, automation, benchmark…) likely owns this?"
+    validations:
+      required: false

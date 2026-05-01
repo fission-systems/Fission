@@ -1,0 +1,68 @@
+name: Loader / detection bug
+description: Parsing, format detection, DIE signatures, or loader failures before/at lift.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use when **loading or detecting** format/features fails—or DIE-backed hints look wrong—before arguing about IR quality.
+
+        **Samples:** No malware attachments on public issues; follow [`SECURITY.md`](SECURITY.md) and [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md).
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Declared or suspected binary format
+      options:
+        - PE
+        - ELF
+        - Mach-O
+        - Archive / compound
+        - Unknown / misdetected
+    validations:
+      required: true
+
+  - type: input
+    id: arch
+    attributes:
+      label: Architecture (if applicable)
+    validations:
+      required: false
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: Primary symptom
+      options:
+        - Loader refuses / unsupported format
+        - Crash while parsing metadata
+        - Wrong DIE / detector classification (if observable)
+        - Missing sections / malformed-but-valid binary mishandled
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: cli
+    attributes:
+      label: Exact command / reproducer
+      description: "Include fission-cli invocation or smallest Rust test harness snippet."
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence (logs, hashes, paths)
+      description: Paste stderr; reference in-repo benign PE path if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Expected loader behavior
+    validations:
+      required: false

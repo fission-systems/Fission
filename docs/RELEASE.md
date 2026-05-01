@@ -4,6 +4,23 @@
 
 This checklist closes the loop between **tag-driven CD** ([`.github/workflows/cd.yml`](../.github/workflows/cd.yml)) and **documented expectations** for external evaluators ([`docs/EVALUATION.md`](EVALUATION.md)). A release is “ready” when the items below are satisfied for the tagged commit.
 
+## Minimum release gate
+
+A tagged release is eligible when:
+
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passes on the tagged commit.
+- [`.github/workflows/ci-heavy.yml`](../.github/workflows/ci-heavy.yml) passes on the tagged commit **or** on the latest `main` commit immediately preceding the tag.
+- [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
+  - `fission-linux-x64`
+  - `fission-macos-arm64`
+  - `fission-windows-x64`
+- The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.
+- If corpus-wide quality is claimed, attach or link `benchmark_compact_summary.json` and confirm:
+  - `release_promotion_allowed` is `true`, **or**
+  - any `promotion_blockers` are explicitly documented in release notes.
+
+The numbered sections below expand this gate into operational detail.
+
 ## 1. Version and changelog
 
 - [ ] Version matches [`docs/VERSIONING.md`](VERSIONING.md) rules and the git tag (`v*.*.*`).

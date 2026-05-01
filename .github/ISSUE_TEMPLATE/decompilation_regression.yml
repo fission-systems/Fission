@@ -1,0 +1,83 @@
+name: Decompilation regression
+description: Wrong lifted IR / structuring / printed output vs expectation on a binary.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when **decompiler output** (functions, CFG, pcode/NIR shape, printer) is wrong—not loader scan-only issues.
+
+        **Samples:** Do not attach malware. Use benign/synthetic fixtures, hashes, or coordinated paths per [`SECURITY.md`](SECURITY.md) and [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md).
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Input binary format
+      options:
+        - PE
+        - ELF
+        - Mach-O
+        - Raw / other
+    validations:
+      required: true
+
+  - type: input
+    id: arch
+    attributes:
+      label: Architecture / ISA
+      description: e.g. x86-64, aarch64, ARM thumb.
+    validations:
+      required: true
+
+  - type: input
+    id: target_addr
+    attributes:
+      label: Target address or symbol (optional)
+      description: VA or named symbol if scoped to one function.
+    validations:
+      required: false
+
+  - type: input
+    id: func_count
+    attributes:
+      label: Expected vs actual function count (optional)
+    validations:
+      required: false
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: Primary symptom
+      options:
+        - Crash / panic / abort
+        - Wrong output vs baseline
+        - Missing fallback / unsupported construct
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: cli
+    attributes:
+      label: Exact fission-cli command (and flags)
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifact paths / snapshots
+      description: "Paths under benchmark/artifacts/, gist snippets, or diff summaries—not raw malicious binaries."
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Baseline commit or release where behavior was correct, if known.
+    validations:
+      required: false
