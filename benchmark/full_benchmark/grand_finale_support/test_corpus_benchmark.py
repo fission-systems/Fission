@@ -573,6 +573,8 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["alias_unsafe"], 4.0)
         self.assertEqual(metrics["missing_merge"], 5.0)
         self.assertEqual(metrics["materialization_stabilized"], 6.0)
+        self.assertEqual(metrics["call_target_import_resolved"], 0.0)
+        self.assertEqual(metrics["call_target_unresolved_sub_fallback"], 0.0)
         self.assertEqual(metrics["dead_temp"], 0.0)
 
     def test_extract_shape_drift_metrics_from_engine_summary(self) -> None:

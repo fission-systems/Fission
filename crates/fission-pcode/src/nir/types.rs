@@ -1026,6 +1026,18 @@ pub struct NirBuildStats {
     /// Calls with a target identity but no exact API/provider prototype.
     #[serde(default)]
     pub call_prototype_signature_missing_count: usize,
+    /// Direct call targets resolved to loader-proven import/API identities.
+    #[serde(default)]
+    pub call_target_import_resolved_count: usize,
+    /// Direct call targets resolved to non-import loader/fact symbols.
+    #[serde(default)]
+    pub call_target_direct_symbol_resolved_count: usize,
+    /// Direct call targets that fell back to synthetic `sub_...` naming.
+    #[serde(default)]
+    pub call_target_unresolved_sub_fallback_count: usize,
+    /// Direct call targets encountered without a type context.
+    #[serde(default)]
+    pub call_target_context_missing_count: usize,
     /// Security-cookie setup/check pairs folded into semantic form.
     #[serde(default)]
     pub security_cookie_fold_count: usize,
@@ -1449,6 +1461,12 @@ impl NirBuildStats {
             other.call_prototype_unknown_target_kept_count;
         self.call_prototype_wrapper_resolved_count += other.call_prototype_wrapper_resolved_count;
         self.call_prototype_signature_missing_count += other.call_prototype_signature_missing_count;
+        self.call_target_import_resolved_count += other.call_target_import_resolved_count;
+        self.call_target_direct_symbol_resolved_count +=
+            other.call_target_direct_symbol_resolved_count;
+        self.call_target_unresolved_sub_fallback_count +=
+            other.call_target_unresolved_sub_fallback_count;
+        self.call_target_context_missing_count += other.call_target_context_missing_count;
         self.security_cookie_fold_count += other.security_cookie_fold_count;
         self.call_artifact_removed_count += other.call_artifact_removed_count;
         self.object_shape_recovered_count += other.object_shape_recovered_count;

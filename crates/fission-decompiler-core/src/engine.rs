@@ -113,8 +113,8 @@ mod tests {
     };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
     use fission_pcode::{
-        NirRenderOptions, NirTypeContext, PcodeFunction, PreviewCallParamRule,
-        StructuringEngineKind,
+        CallEdgeKind, CallTargetProvenance, NirRenderOptions, NirTypeContext, PcodeFunction,
+        PreviewCallParamRule, StructuringEngineKind,
     };
     use std::collections::HashMap;
 
@@ -313,6 +313,41 @@ mod tests {
         assert_eq!(
             context.call_targets.get(&0x401000).map(String::as_str),
             Some("RenamedTarget")
+        );
+    }
+
+    #[test]
+    fn loader_imports_drive_preview_call_target_refs_before_function_names() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "sub_401000".to_string(),
+                address: 0x401000,
+                size: 0,
+                is_export: false,
+                is_import: true,
+                kind: Some("import".to_string()),
+                external_library: Some("KERNEL32.dll".to_string()),
+                ..Default::default()
+            })
+            .add_iat_symbol(0x401000, "KERNEL32.dll!CloseHandle".to_string())
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0x401000);
+        let target = context
+            .call_target_refs
+            .get(&0x401000)
+            .expect("import target ref");
+
+        assert_eq!(target.symbol, "CloseHandle");
+        assert_eq!(target.provenance, CallTargetProvenance::Import);
+        assert_eq!(target.edge_kind, CallEdgeKind::Import);
+        assert_eq!(
+            context.call_targets.get(&0x401000).map(String::as_str),
+            Some("CloseHandle")
         );
     }
 

@@ -13,6 +13,26 @@ impl<'a> PreviewBuilder<'a> {
             .and_then(|mut f| std::io::Write::write_all(&mut f, message.as_bytes()));
     }
 
+    fn resolve_call_target_by_address(&mut self, addr: u64) -> Option<String> {
+        let Some(ctx) = self.type_context else {
+            self.call_target_context_missing_count += 1;
+            return None;
+        };
+        if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
+            if matches!(target_ref.provenance, CallTargetProvenance::Import) {
+                self.call_target_import_resolved_count += 1;
+            } else {
+                self.call_target_direct_symbol_resolved_count += 1;
+            }
+            return Some(target_ref.symbol.clone());
+        }
+        if let Some(name) = ctx.call_targets.get(&addr) {
+            self.call_target_direct_symbol_resolved_count += 1;
+            return Some(name.clone());
+        }
+        None
+    }
+
     pub(in crate::nir) fn lookup_def_site(
         &self,
         vn: &Varnode,
@@ -122,15 +142,14 @@ impl<'a> PreviewBuilder<'a> {
             target
         } else if let Some(target) = op.inputs.first() {
             match self.lower_varnode(target, visiting) {
-                Ok(HirExpr::Const(val, _)) => self
-                    .type_context
-                    .and_then(|ctx| {
-                        ctx.call_target_refs
-                            .get(&(val as u64))
-                            .map(|target_ref| target_ref.symbol.clone())
-                            .or_else(|| ctx.call_targets.get(&(val as u64)).cloned())
-                    })
-                    .unwrap_or_else(|| format!("sub_{:x}", val as u64)),
+                Ok(HirExpr::Const(val, _)) => {
+                    let addr = val as u64;
+                    self.resolve_call_target_by_address(addr)
+                        .unwrap_or_else(|| {
+                            self.call_target_unresolved_sub_fallback_count += 1;
+                            format!("sub_{addr:x}")
+                        })
+                }
                 Ok(HirExpr::Var(name)) => name,
                 Ok(other) => print_expr(&other),
                 Err(MlilPreviewError::UnsupportedPattern("opcode"))
@@ -219,18 +238,14 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn resolve_call_target_from_asm(&self, op: &PcodeOp) -> Option<String> {
+    fn resolve_call_target_from_asm(&mut self, op: &PcodeOp) -> Option<String> {
         let asm = op.asm_mnemonic.as_deref()?;
         let addr = parse_call_target_address(asm)?;
-        if let Some(name) = self.type_context.and_then(|ctx| {
-            ctx.call_target_refs
-                .get(&addr)
-                .map(|target_ref| target_ref.symbol.clone())
-                .or_else(|| ctx.call_targets.get(&addr).cloned())
-        }) {
+        if let Some(name) = self.resolve_call_target_by_address(addr) {
             return Some(name);
         }
         if matches!(op.opcode, PcodeOpcode::Call) {
+            self.call_target_unresolved_sub_fallback_count += 1;
             return Some(format!("sub_{addr:x}"));
         }
         None

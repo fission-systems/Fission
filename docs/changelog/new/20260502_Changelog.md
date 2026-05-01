@@ -134,3 +134,80 @@
 
 - Use the new owner counters to decide whether the next decompiler wave should target prototype coverage, wrapper summaries, or stack-local materialization.
 - Keep stack-local promotion gated by row-fidelity improvement, not internal trace success alone.
+
+## Decompiler Quality V3: Import Call Target Resolution Gate
+
+### Summary
+
+- Connected decompiler call target identity to exact loader import metadata and existing `NirTypeContext.call_target_refs`.
+- Kept `UnknownKiller.sys` as external qualitative evidence only; it is not present locally and is not a benchmark fixture.
+- Preserved the no-repair boundary: no printer-only API name substitution, no benchmark semantic repair, no binary-specific rule, and no heuristic argument deletion.
+
+### Implementation
+
+- Added additive `NirBuildStats` counters:
+  - `call_target_import_resolved_count`
+  - `call_target_direct_symbol_resolved_count`
+  - `call_target_unresolved_sub_fallback_count`
+  - `call_target_context_missing_count`
+- Exposed the counters through full-benchmark owner metrics:
+  - `call_target_import_resolved`
+  - `call_target_direct_symbol_resolved`
+  - `call_target_unresolved_sub_fallback`
+  - `call_target_context_missing`
+- Updated call lowering so direct constant call targets first consult `NirTypeContext.call_target_refs`.
+- Import provenance resolves to the loader/API symbol in `HirExpr::Call.target`; the printer only renders that semantic target.
+- Missing context or unresolved exact target keeps the existing `sub_<addr>` fallback and records telemetry.
+- Updated `fission-decompiler-core` context construction so loader imports and IAT symbols are inserted as `CallTargetRef { provenance: Import, edge_kind: Import }` before direct/global symbols.
+- Import symbols now win over same-address function names, avoiding cases where an import thunk name like `sub_401000` masks an exact loader import such as `CloseHandle`.
+- Added `benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json` as a focused sqlite3 reporting lane for call-target owner metrics.
+
+### Validation
+
+- Targeted tests:
+  - `cargo test -p fission-pcode call_target -- --test-threads=1`
+  - `cargo test -p fission-decompiler-core loader_imports_drive_preview_call_target_refs_before_function_names -- --test-threads=1`
+  - `cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1`
+  - `cargo test -p fission-pcode type_hints_imports -- --test-threads=1`
+- Benchmark/reporting tests:
+  - `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_extract_owner_metrics_from_engine_summary`
+  - `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/raw_p_code_benchmark/*.py`
+- Build/check:
+  - `CARGO_INCREMENTAL=0 cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
+  - `CARGO_INCREMENTAL=0 cargo build --release -p fission-cli`
+
+### Decompiler Sentinel
+
+- V1 guard command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_v1_guard`
+- V1 guard result:
+  - `weighted_avg_norm_sim=19.910%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+- V3 calls command:
+  - `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_calls`
+- V3 calls result:
+  - `weighted_avg_norm_sim=14.940%`
+  - `coverage=100.000%`
+  - failed binary rows: `0`
+  - new call-target owner metrics were present in the report.
+  - current sqlite3 selected rows did not exercise call lowering, so the new call-target counters remained `0.000`; exact resolution is covered by unit tests and the next benchmark lane should select rows that actually lower call expressions.
+
+### Raw P-code Guard
+
+- Command:
+  - `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/decompiler_v3_x86_64_guard`
+- Result:
+  - `perfect_canonical_gate=passed`
+  - `full_match=44`
+  - `average_similarity_score=1.0`
+  - `average_parity_ratio=1.0`
+  - `compat_emitter_used=0`
+  - `fake_placeholder_op=0`
+  - `invalid_pcode_shape=0`
+  - success source: `sla_construct_tpl`
+
+### Remaining Work
+
+- Choose a decompiler sentinel row that contains real lowered call expressions so corpus metrics can show nonzero import/direct/fallback target counters.
+- Continue stack-local and argument materialization only when exact owner proof and row-fidelity both improve.

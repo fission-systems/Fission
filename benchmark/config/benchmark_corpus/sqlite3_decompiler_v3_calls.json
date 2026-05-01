@@ -1,0 +1,44 @@
+{
+  "name": "fission-sqlite3-decompiler-v3-calls",
+  "suite_tier": "smoke",
+  "gate_mode": "advisory",
+  "dynamic_watchlist_limit": 5,
+  "notes": "Focused decompiler quality sentinel for exact loader import/API call-target resolution. UnknownKiller.sys remains an external qualitative reference only.",
+  "entries": [
+    {
+      "id": "sqlite3-x64-dll-calls",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll",
+      "ghidra_project_key": "sqlite3_x64_dll_calls",
+      "tags": [
+        "windows",
+        "pe",
+        "x64",
+        "dll",
+        "sqlite",
+        "real-world",
+        "decompiler-v3",
+        "call-targets"
+      ],
+      "canonical_quality_rows": [
+        {
+          "address": "0x180001140",
+          "name": "sqlite3_step",
+          "role": "call_target_canary"
+        },
+        {
+          "address": "0x1800012b7",
+          "name": "sqlite3_prepare_v3",
+          "role": "call_target_canary"
+        },
+        {
+          "address": "0x18000140b",
+          "name": "sqlite3_busy_handler",
+          "role": "call_target_canary"
+        }
+      ],
+      "seed_limit": 20,
+      "role": "primary_canary",
+      "weight": 1
+    }
+  ]
+}

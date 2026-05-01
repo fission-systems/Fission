@@ -20,26 +20,66 @@ pub(crate) fn build_nir_type_context(
     let mut call_targets = HashMap::new();
     let mut call_target_refs = HashMap::new();
 
-    for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
-        if resolved_address == 0 || fact.name.is_empty() {
+    for func in binary.imports() {
+        if func.address == 0 || func.name.is_empty() {
             continue;
         }
-        let sanitized = sanitize_nir_symbol_name(&fact.name);
-        call_targets.insert(resolved_address, sanitized.clone());
+        let sanitized = sanitize_nir_symbol_name(&func.name);
+        call_targets.insert(func.address, sanitized.clone());
         call_target_refs.insert(
-            resolved_address,
+            func.address,
             CallTargetRef {
-                address: Some(resolved_address),
+                address: Some(func.address),
                 symbol: sanitized,
-                provenance: CallTargetProvenance::Fact,
-                edge_kind: CallEdgeKind::Reference,
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
                 confidence: 255,
             },
         );
     }
 
+    for (resolved_address, name) in &binary.inner().iat_symbols {
+        if *resolved_address == 0 || name.is_empty() {
+            continue;
+        }
+        let sanitized = sanitize_nir_symbol_name(name);
+        call_targets.insert(*resolved_address, sanitized.clone());
+        call_target_refs.insert(
+            *resolved_address,
+            CallTargetRef {
+                address: Some(*resolved_address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
+                confidence: 255,
+            },
+        );
+    }
+
+    for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
+        if resolved_address == 0 || fact.name.is_empty() {
+            continue;
+        }
+        let sanitized = sanitize_nir_symbol_name(&fact.name);
+        call_targets
+            .entry(resolved_address)
+            .or_insert_with(|| sanitized.clone());
+        call_target_refs
+            .entry(resolved_address)
+            .or_insert(CallTargetRef {
+                address: Some(resolved_address),
+                symbol: sanitized,
+                provenance: CallTargetProvenance::Fact,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 255,
+            });
+    }
+
     for func in &binary.functions {
         if func.address == 0 || func.name.is_empty() {
+            continue;
+        }
+        if func.is_import {
             continue;
         }
         let sanitized = sanitize_nir_symbol_name(&func.name);
@@ -54,25 +94,6 @@ pub(crate) fn build_nir_type_context(
                 provenance: CallTargetProvenance::Direct,
                 edge_kind: CallEdgeKind::Direct,
                 confidence: 224,
-            });
-    }
-
-    for (resolved_address, name) in &binary.inner().iat_symbols {
-        if *resolved_address == 0 || name.is_empty() {
-            continue;
-        }
-        let sanitized = sanitize_nir_symbol_name(name);
-        call_targets
-            .entry(*resolved_address)
-            .or_insert_with(|| sanitized.clone());
-        call_target_refs
-            .entry(*resolved_address)
-            .or_insert(CallTargetRef {
-                address: Some(*resolved_address),
-                symbol: sanitized,
-                provenance: CallTargetProvenance::Import,
-                edge_kind: CallEdgeKind::Import,
-                confidence: 255,
             });
     }
 
