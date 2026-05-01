@@ -42,6 +42,14 @@ jobs:
       crates: "fission-pcode,fission-automation,fission-loader"
       profile: debug
 
+  # Real end-to-end CLI on checked-in PE (after Linux tests gate the stack)
+  cli-smoke-linux:
+    name: 🧭 CLI Smoke (Linux · PE sample)
+    needs: [test-linux]
+    uses: ./.github/workflows/reusable-cli-smoke.yml
+    with:
+      profile: debug
+
   # Step 3: Build & Test (Windows, ~20 min parallel)
   build-windows:
     name: 🪟 Build & Test (Windows)
@@ -83,7 +91,15 @@ jobs:
   # Final summary
   ci-summary:
     name: ✅ CI Summary
-    needs: [security-check, lint-format, test-linux, test-windows, test-macos]
+    needs:
+      [
+        security-check,
+        lint-format,
+        test-linux,
+        cli-smoke-linux,
+        test-windows,
+        test-macos,
+      ]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -99,6 +115,10 @@ jobs:
           fi
           if [ "${{ needs.test-linux.result }}" != "success" ]; then
             echo "❌ Linux tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.cli-smoke-linux.result }}" != "success" ]; then
+            echo "❌ CLI smoke failed"
             exit 1
           fi
           if [ "${{ needs.test-windows.result }}" != "success" ]; then

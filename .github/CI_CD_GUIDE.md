@@ -21,6 +21,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  - reusable-security-check.yml        │
 │  - reusable-lint-format.yml           │
 │  - reusable-run-tests.yml             │
+│  - reusable-cli-smoke.yml              │
 │  - reusable-build-cli.yml             │
 │  - reusable-build-tauri.yml           │
 │  - reusable-nir-check.yml             │
@@ -70,6 +71,9 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
   ├─ fission-automation
   └─ fission-loader
 
+✓ CLI smoke (Linux, after core tests)
+  └─ `fission_cli` on `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` (tracked C source cross-compiles with MinGW on the runner; `.exe` is gitignored) — `info`, `list --json`, then `decomp --json` at an address from the list or the documented fallback
+
 ✓ Platform Builds
   ├─ Linux (ubuntu-latest)
   ├─ Windows (windows-latest)
@@ -81,6 +85,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 - [ ] No formatting errors
 - [ ] No lint warnings (`-D warnings`)
 - [ ] All tests passed
+- [ ] CLI smoke passed (PE sample commands)
 - [ ] All platforms built successfully
 
 **If it fails:**

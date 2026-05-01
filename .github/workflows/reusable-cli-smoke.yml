@@ -1,0 +1,71 @@
+name: Reusable CLI Smoke
+
+on:
+  workflow_call:
+    inputs:
+      binary_relative_path:
+        type: string
+        required: false
+        default: benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+        description: "Path to sample binary (repo-relative); built on the runner if absent"
+      profile:
+        type: string
+        required: false
+        default: debug
+        description: "Cargo profile for fission_cli (debug|release)"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cli-smoke:
+    name: Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Deterministic sleigh specs on clean runners (ignores rogue local overrides)
+      FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # benchmark/binary/**/*.exe is gitignored — same path as wiki/docs; build locally on CI (~150KiB PE)
+      - name: Build PE smoke fixture (MinGW-w64)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          OUT="${{ inputs.binary_relative_path }}"
+          mkdir -p "$(dirname "${OUT}")"
+          x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            -o "${OUT}"
+          test -s "${OUT}"
+
+      - name: Build fission_cli
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.profile }}" = "release" ]; then
+            cargo build -p fission-cli --locked --release
+          else
+            cargo build -p fission-cli --locked
+          fi
+
+      - name: fission_cli info
+        run: |
+          set -euo pipefail
+          BIN="${{ inputs.binary_relative_path }}"
+          CLI="./target/${{ inputs.profile }}/fission_cli"
+          "${CLI}" info "${BIN}"
+
+      - name: fission_cli list --json + decomp --json (PE smoke)
+        run: |
+          set -euo pipefail
+          BIN="${{ inputs.binary_relative_path }}"
+          CLI="./target/${{ inputs.profile }}/fission_cli"
+          ADDR="$("${CLI}" list "${BIN}" --json | python3 -c 'import json,sys; fb="0x140001470"; d=json.load(sys.stdin); assert isinstance(d,list) and len(d)>0; print(next((f["address"] for f in d if not f.get("is_import") and isinstance(f.get("address"),str)), fb))')"
+          echo "decomp addr: ${ADDR}"
+          "${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json | python3 -c 'import json,sys; r=json.load(sys.stdin); e=r[0] if isinstance(r,list) else r; assert isinstance(e,dict); (sys.stderr.write("decomp error:\n%s\n"%e["error"]), sys.exit(1)) if e.get("error") else None; assert "code" in e and isinstance(e["code"],str) and e["code"].strip(), e; print("decomp_ok", e.get("name","?"))'
