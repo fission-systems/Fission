@@ -29,5 +29,5 @@ indexmap = "2"
 
 [dev-dependencies]
 criterion = "0.5"
-insta = "1.34"
+insta = "1.47"
 petgraph = "0.6"
