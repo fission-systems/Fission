@@ -6,7 +6,7 @@ The previous architecture-specific hand-lifter path has been removed.
 
 ## What this crate owns
 
-- Local language/spec path resolution from `specs/languages/<Processor>/**/*.slaspec`
+- Local language/spec path resolution from `utils/sleigh-specs/languages/<Processor>/**/*.slaspec`
 - Runtime registry and decode/lift contracts under `runtime/`
 - Typed fail-closed errors for generated front-ends that are not executable yet
 - Basic block reconstruction from p-code control flow (`build_cfg_blocks`)
@@ -22,7 +22,7 @@ The previous architecture-specific hand-lifter path has been removed.
 - Current mirror coverage:
   - `38` Ghidra processors
   - `146` checked-in `.slaspec` variants
-  - canonical processor/variant manifest: `specs/ghidra_language_manifest.json`
+  - canonical processor/variant manifest: `utils/sleigh-specs/ghidra_language_manifest.json`
 
 ## Public API surface
 
@@ -71,16 +71,6 @@ crates/fission-sleigh/
 │       │   ├── ...
 │       │   └── x86/
 │       │       └── generated.rs
-├── specs/
-│   ├── ghidra_language_manifest.json
-│   └── languages/
-│       ├── AARCH64/
-│       ├── ARM/
-│       ├── MIPS/
-│       ├── PowerPC/
-│       ├── RISCV/
-│       ├── ...
-│       └── x86/
 └── generated/
     ├── compiler_manifest.json
     ├── AARCH64/
@@ -98,7 +88,7 @@ crates/fission-sleigh/
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
 fn main() -> anyhow::Result<()> {
-    // Example language names available in specs/languages/<Processor>/:
+    // Example language names available in utils/sleigh-specs/languages/<Processor>/:
     // - "x86-64"
     // - "AARCH64"
     // - "AARCH64:LE:64:v8A" (if derivable from checked-in .ldefs)
@@ -120,9 +110,13 @@ fn main() -> anyhow::Result<()> {
 
 - `RuntimeSleighFrontend::new_for_language("<name>")` looks for:
   - exact entry-spec stem
-  - exact derived language id when present in `specs/ghidra_language_manifest.json`
+  - exact derived language id when present in `utils/sleigh-specs/ghidra_language_manifest.json`
   - compatibility aliases like `aarch64`, `arm32`, `powerpc`, `riscv`
-- The checked-in spec tree is mirrored from:
+- Spec root resolution order:
+  - `FISSION_SLEIGH_SPEC_DIR`
+  - repo-relative `utils/sleigh-specs`
+  - legacy crate-local `crates/fission-sleigh/specs`
+- The checked-in spec snapshot is mirrored from:
   - `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
 - `RuntimeSleighFrontend::new(path)` infers language name from the file stem.
 

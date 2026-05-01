@@ -296,3 +296,28 @@
 - `python3 scripts/corpus/collect_github_release_samples.py --help`
 - `git check-ignore -v benchmark/binary/realworld/github/example.bin`
 - `git check-ignore -q benchmark/binary/realworld/.gitkeep`
+
+## SLEIGH Specs Snapshot Migration
+
+- Added `utils/sleigh-specs` as the checked-in SLEIGH spec snapshot location for compiler/runtime language discovery.
+- Preserved the existing crate-local `crates/fission-sleigh/specs` tree as a legacy fallback while moving active resolution to repo-level utility data.
+- Added `utils/sleigh-specs/MANIFEST.sha256.json` with source path, size, and SHA-256 for every copied spec resource.
+- Added `utils/sleigh-specs/README.md` documenting snapshot ownership, refresh source, and resolution order.
+- Updated `fission-sleigh` discovery to resolve specs in this order:
+  - `FISSION_SLEIGH_SPEC_DIR`
+  - repo-relative `utils/sleigh-specs`
+  - legacy crate-local `crates/fission-sleigh/specs`
+- Updated runtime registry manifest embedding to use `utils/sleigh-specs/ghidra_language_manifest.json`.
+- Updated `fission-sleigh` README/AGENTS notes so SLEIGH spec ownership points at `utils/sleigh-specs`.
+
+## SLEIGH Specs Snapshot Validation
+
+- `cargo fmt -p fission-sleigh`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo check -p fission-sleigh`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh x86_64_entry_spec_exists_under_arch_tree -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh infer_arch_from_entry_spec_uses_arch_subdirectory -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh compile_frontend_for_entry_spec_collects_inventory -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo build --release -p fission-cli`
+- `python3 -m json.tool utils/sleigh-specs/MANIFEST.sha256.json`
+- Snapshot size: approximately `14M`.
+- Snapshot file count: `698` files including the manifest.

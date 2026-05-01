@@ -72,7 +72,7 @@ impl RuntimeSleighFrontend {
     }
 
     pub fn spec_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("specs/languages")
+        crate::compiler::sleigh_languages_root()
     }
 
     pub fn find_spec_path_for(language_name: &str) -> Option<PathBuf> {

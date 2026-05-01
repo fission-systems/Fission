@@ -9,7 +9,7 @@ Scope: crates/fission-sleigh
 
 Current ownership:
 
-- language/spec path resolution (`specs/languages/<Processor>/**/*.slaspec`)
+- language/spec path resolution (`utils/sleigh-specs/languages/<Processor>/**/*.slaspec`)
 - compiler-only Sleigh front-end generation (`src/compiler/`, `target/fission-sleigh/generated/<Processor>/<entry-id>/`)
 - compiled runtime registry and decode/lift contracts (`src/runtime/`)
 - typed fail-closed runtime errors while generated p-code execution is incomplete
@@ -62,15 +62,6 @@ crates/fission-sleigh/
 │               ├── display.rs # Display rendering
 │               ├── template_eval.rs # ConstructTpl execution/emitter adapter
 │               └── tests.rs   # Runtime tests
-└── specs/
-   └── languages/             # Local Sleigh spec set used for language resolution
-       ├── AARCH64/
-       ├── ARM/
-       ├── MIPS/
-       ├── PowerPC/
-       ├── RISCV/
-       ├── ...
-       └── x86/
 └── target/fission-sleigh/generated/
    ├── compiler_manifest.json # Build-cache .slaspec variant report
    ├── AARCH64/
@@ -87,8 +78,9 @@ crates/fission-sleigh/
 1. Keep this crate dependency-free for Sleigh execution.
    - Do not reintroduce `sleigh-rs` or equivalent runtime dependencies.
    - Treat `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
-     as the canonical spec source when refreshing checked-in SLEIGH files.
-   - Keep the checked-in mirror aligned with `specs/ghidra_language_manifest.json`.
+     as the canonical upstream reference when refreshing checked-in SLEIGH files.
+   - Keep the checked-in `utils/sleigh-specs` snapshot aligned with
+     `utils/sleigh-specs/ghidra_language_manifest.json`.
 2. Keep runtime behavior deterministic and fail-closed.
    - Do not emit fake p-code for generated front-ends that are not executable.
    - Unsupported generated semantics must return typed runtime errors.

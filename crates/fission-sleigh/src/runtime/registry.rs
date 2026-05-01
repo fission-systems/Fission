@@ -10,7 +10,7 @@ use crate::compiler::{EntrySpec, GhidraLanguageManifest, GhidraLanguageManifestE
 use crate::runtime::{RuntimeEndian, RuntimeFrontendStatus};
 
 const GHIDRA_LANGUAGE_MANIFEST_JSON: &str =
-    include_str!("../../specs/ghidra_language_manifest.json");
+    include_str!("../../../../utils/sleigh-specs/ghidra_language_manifest.json");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeSupportLevel {

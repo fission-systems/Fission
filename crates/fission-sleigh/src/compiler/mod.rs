@@ -13,7 +13,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use policy::{canonical_processor_name, compatibility_aliases_for, is_executable_candidate_entry};
 use serde::{Deserialize, Serialize};
 
@@ -22,22 +22,21 @@ pub use ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
 use discovery::generated_output_root_for_entry_spec;
 pub use discovery::{
-    GhidraInstallPaths, entry_id_from_path, entry_spec_from_path, generated_root,
-    generated_root_for_arch, generated_root_for_entry_spec, ghidra_language_manifest_path,
-    infer_arch_from_entry_spec, resolve_ghidra_install_paths, sleigh_build_cache_root,
-    spec_root_for_arch,
+    entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
+    generated_root_for_entry_spec, ghidra_language_manifest_path, infer_arch_from_entry_spec,
+    resolve_ghidra_install_paths, sleigh_build_cache_root, sleigh_languages_root,
+    sleigh_specs_root, spec_root_for_arch, GhidraInstallPaths,
 };
 pub use equivalence::{
-    EquivalenceMismatchKind, RuntimeParityFixture, RuntimeParityRecord, RuntimeParityReport,
-    RuntimeParityVarnodeShape, build_runtime_fixture_report,
+    build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
+    RuntimeParityRecord, RuntimeParityReport, RuntimeParityVarnodeShape,
 };
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
     CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
     CompiledContextCommit, CompiledContextField, CompiledContextFieldRef, CompiledContextOp,
-    CompiledDecisionBucket,
-    CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode, CompiledDecisionProbe,
-    CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode,
+    CompiledDecisionProbe, CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
     CompiledHandleTemplate, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
@@ -46,15 +45,15 @@ pub use ir::{
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
     CompiledSemanticTemplate, CompiledSlaConstructorIdentity, CompiledSlaDecodeStatus,
     CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable,
-    CompiledSubtableDefinition, CompiledTemplateSource, CompiledTokenField,
-    CompiledTokenFieldRef, CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
+    CompiledSubtableDefinition, CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef,
+    CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
 };
-pub use preprocessor::{ExpandedSpec, IncludeManifestEntry, PreprocessedLine, expand_entry_spec};
+pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{
-    CompiledSlaArtifact, CompiledSlaConstructorTemplate, CompiledSlaTemplateLibrary,
-    GHIDRA_SLA_MAGIC, SlaConstructTpl, SlaConstructor, SlaDecisionNode, SlaDecisionPair,
-    SlaDecisionTree, SlaDisjointPattern, SlaLanguage, SlaOperandSymbol, SlaSubtable,
     load_compiled_sla, load_construct_templates_from_sla, load_native_language_from_sla,
+    CompiledSlaArtifact, CompiledSlaConstructorTemplate, CompiledSlaTemplateLibrary,
+    SlaConstructTpl, SlaConstructor, SlaDecisionNode, SlaDecisionPair, SlaDecisionTree,
+    SlaDisjointPattern, SlaLanguage, SlaOperandSymbol, SlaSubtable, GHIDRA_SLA_MAGIC,
 };
 pub use token::{Token, TokenKind, TokenizedLine};
 
@@ -120,9 +119,7 @@ pub struct FrontendCompileManifest {
 }
 
 fn read_processors_from_spec_tree() -> Result<Vec<String>> {
-    let languages_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join("languages");
+    let languages_root = sleigh_languages_root();
     let mut processors = Vec::new();
     for entry in fs::read_dir(&languages_root)
         .with_context(|| format!("read languages root {}", languages_root.display()))?
@@ -744,7 +741,7 @@ mod tests {
     #[test]
     fn x86_64_entry_spec_exists_under_arch_tree() {
         let path = x86_64_entry_spec_path();
-        assert!(path.ends_with("specs/languages/x86/x86-64.slaspec"));
+        assert!(path.ends_with("languages/x86/x86-64.slaspec"));
         assert!(
             path.exists(),
             "expected x86-64 entry spec at {}",
@@ -766,12 +763,10 @@ mod tests {
         assert_eq!(compiled.arch, "x86");
         assert_eq!(compiled.entry_spec, "x86-64.slaspec");
         assert!(compiled.include_manifest.len() >= 3);
-        assert!(
-            compiled
-                .subtables
-                .values()
-                .any(|subtable| !subtable.constructors.is_empty())
-        );
+        assert!(compiled
+            .subtables
+            .values()
+            .any(|subtable| !subtable.constructors.is_empty()));
         assert!(!compiled.construct_templates.is_empty());
         assert!(!compiled.definitions.is_empty());
         assert!(!compiled.pattern_nodes.is_empty());
@@ -809,12 +804,10 @@ mod tests {
             .find(|entry| entry.processor == "x86" && entry.entry_id == "x86-64")
             .expect("x86-64 manifest entry");
         assert_eq!(x86_64.runtime_status, "executable_candidate");
-        assert!(
-            x86_64
-                .language_ids
-                .iter()
-                .any(|id| id == "x86:LE:64:default")
-        );
+        assert!(x86_64
+            .language_ids
+            .iter()
+            .any(|id| id == "x86:LE:64:default"));
         let aarch64 = manifest
             .entries
             .iter()
@@ -868,13 +861,7 @@ mod tests {
 
     #[test]
     fn force_regenerate_aarch64() {
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .unwrap()
-            .to_path_buf();
-        let aarch64_spec =
-            repo_root.join("crates/fission-sleigh/specs/languages/AARCH64/AARCH64.slaspec");
+        let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
         println!("Compiling spec: {}", aarch64_spec.display());
         let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
         println!("Compiled AARCH64: {} subtables", compiled.subtables.len());

@@ -1,6 +1,7 @@
 use super::*;
 use crate::compiler::{
-    compile_frontend_for_entry_spec, compile_x86_64_frontend, CompiledTemplateSource,
+    compile_frontend_for_entry_spec, compile_x86_64_frontend, spec_root_for_arch,
+    CompiledTemplateSource,
 };
 use std::path::PathBuf;
 
@@ -46,7 +47,10 @@ fn sla_template_feature_audit_smoke() {
         .values()
         .map(|s| s.constructors.len())
         .sum();
-    assert!(ctor_count > 0, "expected at least one executable constructor");
+    assert!(
+        ctor_count > 0,
+        "expected at least one executable constructor"
+    );
     let _ = audit.opcode_cross_build
         + audit.opcode_delay_slot_indirect
         + audit.const_flow_ref
@@ -176,17 +180,12 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
 
 #[test]
 fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("repo root")
-        .to_path_buf();
-    let x86_spec = repo_root.join("crates/fission-sleigh/specs/languages/x86/x86.slaspec");
+    let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
     let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
     let bytes = [0xc7, 0x05, 0x34, 0x50, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00];
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x4014e3)
-        .expect("decode mov moffs32, imm32");
+    let decoded =
+        decode_instruction(&compiled, None, &bytes, 0x4014e3).expect("decode mov moffs32, imm32");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
 
@@ -268,9 +267,8 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
 fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_error() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x41, 0xff];
-    let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_148e)
-            .expect("lift lea negative displacement");
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_148e)
+        .expect("lift lea negative displacement");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -399,13 +397,7 @@ fn packed_context_bit_reads_cross_word_boundaries_like_ghidra() {
 
 #[test]
 fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("repo root")
-        .to_path_buf();
-    let aarch64_spec =
-        repo_root.join("crates/fission-sleigh/specs/languages/AARCH64/AARCH64.slaspec");
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x0c, 0x10, 0x8e, 0xd2];
     let decoded = decode_instruction(&compiled, None, &bytes, 0x100000).expect("decode aarch64");

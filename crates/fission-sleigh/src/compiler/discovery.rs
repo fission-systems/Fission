@@ -2,16 +2,11 @@ use super::*;
 
 pub fn spec_root_for_arch(arch: &str) -> PathBuf {
     let arch = canonical_processor_name(arch).unwrap_or_else(|| arch.to_string());
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join("languages")
-        .join(arch)
+    sleigh_languages_root().join(arch)
 }
 
 pub fn ghidra_language_manifest_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join(GHIDRA_LANGUAGE_MANIFEST_FILE)
+    sleigh_specs_root().join(GHIDRA_LANGUAGE_MANIFEST_FILE)
 }
 
 fn repo_root() -> PathBuf {
@@ -20,6 +15,37 @@ fn repo_root() -> PathBuf {
         .nth(2)
         .expect("fission-sleigh crate should live under repo/crates/fission-sleigh")
         .to_path_buf()
+}
+
+pub fn sleigh_specs_root() -> PathBuf {
+    if let Some(path) = env::var_os("FISSION_SLEIGH_SPEC_DIR") {
+        let path = PathBuf::from(path);
+        return normalize_sleigh_specs_root(path);
+    }
+
+    let repo_root = repo_root();
+    let utils_root = repo_root.join("utils").join("sleigh-specs");
+    if utils_root.join("languages").exists() {
+        return utils_root;
+    }
+
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("specs")
+}
+
+pub fn sleigh_languages_root() -> PathBuf {
+    sleigh_specs_root().join("languages")
+}
+
+fn normalize_sleigh_specs_root(path: PathBuf) -> PathBuf {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name == "languages")
+        .unwrap_or(false)
+    {
+        return path.parent().unwrap_or(&path).to_path_buf();
+    }
+    path
 }
 
 pub fn sleigh_build_cache_root() -> PathBuf {
@@ -140,33 +166,37 @@ pub(super) fn generated_output_root_for_entry_spec(
 }
 
 pub fn infer_arch_from_entry_spec(entry_spec: &Path) -> Result<String> {
-    let languages_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("specs")
-        .join("languages");
     let parent = entry_spec.parent().ok_or_else(|| {
         anyhow!(
             "entry spec {} has no parent directory",
             entry_spec.display()
         )
     })?;
-    let arch_dir = parent
-        .strip_prefix(&languages_root)
-        .with_context(|| {
-            format!(
-                "entry spec {} is outside compiler spec root {}",
-                entry_spec.display(),
-                languages_root.display()
-            )
-        })?
-        .components()
-        .next()
-        .ok_or_else(|| {
-            anyhow!(
-                "missing arch directory for entry spec {}",
-                entry_spec.display()
-            )
-        })?;
-    Ok(arch_dir.as_os_str().to_string_lossy().into_owned())
+    let languages_roots = [
+        sleigh_languages_root(),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("specs")
+            .join("languages"),
+    ];
+    let mut last_error_root = None;
+    for languages_root in languages_roots {
+        last_error_root = Some(languages_root.clone());
+        if let Ok(relative) = parent.strip_prefix(&languages_root) {
+            let arch_dir = relative.components().next().ok_or_else(|| {
+                anyhow!(
+                    "missing arch directory for entry spec {}",
+                    entry_spec.display()
+                )
+            })?;
+            return Ok(arch_dir.as_os_str().to_string_lossy().into_owned());
+        }
+    }
+    let languages_root = last_error_root.unwrap_or_else(sleigh_languages_root);
+    bail!(
+        "entry spec {} is outside compiler spec root {}",
+        entry_spec.display(),
+        languages_root.display()
+    )
 }
 
 pub fn entry_spec_from_path(entry_spec: PathBuf) -> Result<EntrySpec> {
