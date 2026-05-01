@@ -367,9 +367,7 @@ fn is_weak_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::types::{DwarfLocalVar, DwarfLocation, DwarfParamInfo};
-    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn inferred_type(
         name: &str,

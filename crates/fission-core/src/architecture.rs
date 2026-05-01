@@ -201,6 +201,16 @@ struct ExpectedLanguageFacts {
     endian: Option<&'static str>,
 }
 
+struct OpinionSelectParams<'a> {
+    loader: &'a str,
+    primary_key: &'a str,
+    secondary_key: Option<&'a str>,
+    expected: ExpectedLanguageFacts,
+    format: &'a str,
+    image_base: u64,
+    raw_machine: String,
+}
+
 static OPINION_DATABASE: OnceLock<Result<OpinionDatabase, String>> = OnceLock::new();
 
 impl OpinionDatabase {
@@ -244,16 +254,16 @@ impl OpinionDatabase {
         .collect()
     }
 
-    fn select(
-        &self,
-        loader: &str,
-        primary_key: &str,
-        secondary_key: Option<&str>,
-        expected: ExpectedLanguageFacts,
-        format: &str,
-        image_base: u64,
-        raw_machine: String,
-    ) -> ArchitectureSelectionResult {
+    fn select(&self, params: OpinionSelectParams<'_>) -> ArchitectureSelectionResult {
+        let OpinionSelectParams {
+            loader,
+            primary_key,
+            secondary_key,
+            expected,
+            format,
+            image_base,
+            raw_machine,
+        } = params;
         let mut candidates = self.resolve_candidates(loader, primary_key, secondary_key, expected);
         if candidates.is_empty() {
             return Err(ArchitectureSelectionError::UnsupportedMachine {
@@ -421,15 +431,17 @@ impl OpinionDatabase {
                 query.loader.as_ref(),
                 query.primary.as_ref(),
                 query.processor.as_ref(),
-            ) {
-                if !loader.is_empty() && !primary.is_empty() && !processor.is_empty() {
-                    self.opinions.push(OpinionEntry {
-                        loader: loader.clone(),
-                        primary: primary.clone(),
-                        secondary: query.secondary.clone(),
-                        query: query.clone(),
-                    });
-                }
+            )
+                && !loader.is_empty()
+                && !primary.is_empty()
+                && !processor.is_empty()
+            {
+                self.opinions.push(OpinionEntry {
+                    loader: loader.clone(),
+                    primary: primary.clone(),
+                    secondary: query.secondary.clone(),
+                    query: query.clone(),
+                });
             }
             if !tag.self_closing {
                 stack.push(query);
@@ -468,10 +480,10 @@ impl OpinionDatabase {
                     }
                 }
                 "compiler" if !tag.closing => {
-                    if let Some(language) = current.as_mut() {
-                        if let Some(id) = tag.attrs.get("id") {
-                            language.compiler_ids.push(id.clone());
-                        }
+                    if let Some(language) = current.as_mut()
+                        && let Some(id) = tag.attrs.get("id")
+                    {
+                        language.compiler_ids.push(id.clone());
                     }
                 }
                 _ => {}
@@ -645,7 +657,7 @@ fn select_from_opinion(
         format: format.to_string(),
         machine: err,
     })?;
-    db.select(
+    db.select(OpinionSelectParams {
         loader,
         primary_key,
         secondary_key,
@@ -653,7 +665,7 @@ fn select_from_opinion(
         format,
         image_base,
         raw_machine,
-    )
+    })
 }
 
 fn selection_from_candidate(

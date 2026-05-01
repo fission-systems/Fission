@@ -207,10 +207,21 @@ fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+    use std::sync::{Mutex, OnceLock};
+
+    /// Serialize tests that construct `RuntimeSleighFrontend`; parallel harness runs have flaked
+    /// when multiple threads initialize/use the same x86-64 decode path concurrently.
+    fn sleigh_runtime_discovery_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("sleigh runtime test mutex poisoned")
+    }
 
     /// Absolute VA + bytes borrowed from `vendor_x86_pe_call_rel32_uses_construct_inst_next_extent`
-    /// (`fission-sleigh` compiled_table tests). At this IP the decoder materializes
-    /// `BoundOperand::Relative`, which `discover_functions_with_runtime` maps to `direct_target`.
+    /// (`fission-sleigh` compiled_table tests). At this IP the runtime often exposes the rel32
+    /// target as a PC-relative reference (`RipRelativeAddress`) rather than filling
+    /// `direct_target`; function discovery treats that operand as a direct CFG edge.
     const VENDOR_DECODE_VA: u64 = 0x4014ed;
     const VENDOR_CALL_REL32: [u8; 5] = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
     const VENDOR_CALL_TARGET: u64 = 0x402200;
@@ -248,6 +259,7 @@ mod tests {
 
     #[test]
     fn function_discovery_collects_direct_call_targets() {
+        let _guard = sleigh_runtime_discovery_lock();
         let mut binary = synthetic_pe64_vendor_site(VENDOR_CALL_REL32);
 
         let report =
@@ -262,6 +274,7 @@ mod tests {
 
     #[test]
     fn function_discovery_only_collects_jump_targets_when_aggressive() {
+        let _guard = sleigh_runtime_discovery_lock();
         let mut balanced = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
         let mut aggressive = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
 
@@ -280,6 +293,7 @@ mod tests {
     /// Unknown `language_id` must resolve as unsupported **before** mutating discovered functions.
     #[test]
     fn function_discovery_fails_closed_for_unsupported_runtime() {
+        let _guard = sleigh_runtime_discovery_lock();
         let mut binary = LoadedBinaryBuilder::new(
             "missing-runtime.bin".to_string(),
             DataBuffer::Heap(vec![0xcc; 0x20]),
