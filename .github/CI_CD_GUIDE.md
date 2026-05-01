@@ -12,18 +12,21 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 
 ```
 ┌─────────────────────────────────────────┐
-│  Reusable Workflows                     │
-│  (.github/workflows/_reusable/)         │
+│  Reusable workflows                     │
+│  (.github/workflows/reusable-*.yml)    │
+│  GitHub requires workflow_call files    │
+│  at the workflows directory root        │
 │                                         │
-│  - setup-rust.yml                      │
-│  - security-check.yml                  │
-│  - lint-format.yml                     │
-│  - run-tests.yml                       │
-│  - build-cli.yml                       │
-│  - build-tauri.yml                     │
-│  - nir-check.yml                       │
-│  - corpus-validation.yml               │
-│  - upload-artifacts.yml                │
+│  - reusable-setup-rust.yml             │
+│  - reusable-security-check.yml        │
+│  - reusable-lint-format.yml           │
+│  - reusable-run-tests.yml             │
+│  - reusable-build-cli.yml             │
+│  - reusable-build-tauri.yml           │
+│  - reusable-nir-check.yml             │
+│  - reusable-corpus-validation.yml     │
+│  - reusable-benchmark.yml             │
+│  - reusable-upload-artifacts.yml       │
 └─────────────────────────────────────────┘
          ↓ (uses)
 ┌─────────────────────────────────────────┐
@@ -194,7 +197,7 @@ git push origin v0.2.0
 test-new-module:
   name: 🧪 Test New Module
   needs: [security-check, lint-format]
-  uses: ./.github/workflows/_reusable/run-tests.yml
+  uses: ./.github/workflows/reusable-run-tests.yml
   with:
     os: ubuntu-latest
     crates: "fission-newmodule"
@@ -206,15 +209,16 @@ test-new-module:
 
 | Workflow | Inputs | Purpose |
 |----------|--------|---------|
-| `setup-rust.yml` | os, target, components | Initialize Rust environment |
-| `security-check.yml` | check_npm | Security validation |
-| `lint-format.yml` | os, exclude_crates | Code style checks |
-| `run-tests.yml` | os, crates, profile, coverage | Run tests |
-| `build-cli.yml` | os, target, profile | Build CLI |
-| `build-tauri.yml` | os | Build Tauri |
-| `nir-check.yml` | run_profile, functions_limit | NIR validation |
-| `corpus-validation.yml` | - | Corpus validation |
-| `upload-artifacts.yml` | artifact_name, paths | Upload artifacts |
+| `reusable-setup-rust.yml` | os, target, components | Initialize Rust environment |
+| `reusable-security-check.yml` | check_npm | Security validation |
+| `reusable-lint-format.yml` | os, exclude_crates | Code style checks |
+| `reusable-run-tests.yml` | os, crates, profile, coverage | Run tests |
+| `reusable-build-cli.yml` | os, target, profile | Build CLI |
+| `reusable-build-tauri.yml` | os | Build Tauri |
+| `reusable-nir-check.yml` | run_profile, functions_limit | NIR validation |
+| `reusable-corpus-validation.yml` | - | Corpus validation |
+| `reusable-benchmark.yml` | (see workflow) | Full benchmark lane |
+| `reusable-upload-artifacts.yml` | artifact_name, paths | Upload artifacts |
 
 ---
 
@@ -329,16 +333,8 @@ gh run view RUN_ID --log
 │   ├── cd.yml                  ← Release
 │   ├── ci-cd-monitor.yml       ← Monitoring
 │   ├── fuzz.yml                ← Fuzzing
-│   └── _reusable/              ← Reusable workflows
-│       ├── setup-rust.yml
-│       ├── security-check.yml
-│       ├── lint-format.yml
-│       ├── run-tests.yml
-│       ├── build-cli.yml
-│       ├── build-tauri.yml
-│       ├── nir-check.yml
-│       ├── corpus-validation.yml
-│       └── upload-artifacts.yml
+│   ├── reusable-*.yml        ← workflow_call reusables (repo root rule)
+│   └── ...
 ```
 
 ---

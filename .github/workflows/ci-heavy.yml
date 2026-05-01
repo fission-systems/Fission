@@ -21,13 +21,13 @@ jobs:
   # Step 1: Corpus Validation (~15 min)
   corpus-validation:
     name: 📦 Corpus Validation
-    uses: ./.github/workflows/_reusable/corpus-validation.yml
+    uses: ./.github/workflows/reusable-corpus-validation.yml
 
   # Step 2: Full Test Suite (Linux, ~25 min)
   test-linux-full:
     name: 🧪 Full Tests (Linux)
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
       crates: ""
@@ -37,7 +37,7 @@ jobs:
   test-linux-static:
     name: 🧪 Tests (fission-static)
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
       crates: "fission-static"
@@ -47,7 +47,7 @@ jobs:
   build-windows-heavy:
     name: 🪟 Heavy Build & Test (Windows)
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/build-cli.yml
+    uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
       profile: release
@@ -56,7 +56,7 @@ jobs:
   test-windows-heavy:
     name: 🧪 Heavy Tests (Windows)
     needs: build-windows-heavy
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
       crates: "fission-pcode,fission-automation"
@@ -66,7 +66,7 @@ jobs:
   build-macos-heavy:
     name: 🍎 Heavy Build & Test (macOS)
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/build-cli.yml
+    uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
       profile: release
@@ -76,7 +76,7 @@ jobs:
   build-tauri-linux:
     name: 🖥️ Build Tauri (Linux)
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/build-tauri.yml
+    uses: ./.github/workflows/reusable-build-tauri.yml
     with:
       os: ubuntu-latest
 
@@ -84,7 +84,7 @@ jobs:
   nir-check:
     name: 🔬 Automation NIR-Check
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/nir-check.yml
+    uses: ./.github/workflows/reusable-nir-check.yml
     with:
       run_profile: fast
       functions_limit: "10"
@@ -94,7 +94,7 @@ jobs:
   benchmark:
     name: 📊 Performance Benchmark
     needs: corpus-validation
-    uses: ./.github/workflows/_reusable/benchmark.yml
+    uses: ./.github/workflows/reusable-benchmark.yml
     with:
       upload_artifacts: true
       baseline_branch: 'main'
@@ -102,7 +102,15 @@ jobs:
   # Final summary
   heavy-summary:
     name: ✅ Heavy Validation Summary
-    needs: [corpus-validation, test-linux-full, test-linux-static, test-windows-heavy, build-tauri-linux, nir-check, benchmark]
+    needs:
+      - corpus-validation
+      - test-linux-full
+      - test-linux-static
+      - build-macos-heavy
+      - test-windows-heavy
+      - build-tauri-linux
+      - nir-check
+      - benchmark
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -120,6 +128,10 @@ jobs:
           fi
           if [ "${{ needs.test-linux-static.result }}" != "success" ]; then
             echo "❌ Linux fission-static tests failed"
+            FAILED=1
+          fi
+          if [ "${{ needs.build-macos-heavy.result }}" != "success" ]; then
+            echo "❌ macOS heavy build failed"
             FAILED=1
           fi
           if [ "${{ needs.test-windows-heavy.result }}" != "success" ]; then

@@ -21,13 +21,13 @@ jobs:
   # Step 1: Security & Lint (Ubuntu, ~10 min)
   security-check:
     name: 🔒 Security Check
-    uses: ./.github/workflows/_reusable/security-check.yml
+    uses: ./.github/workflows/reusable-security-check.yml
     with:
       check_npm: true
 
   lint-format:
     name: 📋 Lint & Format
-    uses: ./.github/workflows/_reusable/lint-format.yml
+    uses: ./.github/workflows/reusable-lint-format.yml
     with:
       os: ubuntu-latest
       exclude_crates: "fission-tauri"
@@ -36,7 +36,7 @@ jobs:
   test-linux:
     name: 🧪 Tests (Linux)
     needs: [security-check, lint-format]
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
       crates: "fission-pcode,fission-automation,fission-loader"
@@ -46,7 +46,7 @@ jobs:
   build-windows:
     name: 🪟 Build & Test (Windows)
     needs: [security-check, lint-format]
-    uses: ./.github/workflows/_reusable/build-cli.yml
+    uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
       profile: release
@@ -55,7 +55,7 @@ jobs:
   test-windows:
     name: 🧪 Tests (Windows)
     needs: build-windows
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
       crates: "fission-pcode,fission-automation"
@@ -65,7 +65,7 @@ jobs:
   build-macos:
     name: 🍎 Build & Test (macOS)
     needs: [security-check, lint-format]
-    uses: ./.github/workflows/_reusable/build-cli.yml
+    uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
       profile: release
@@ -74,7 +74,7 @@ jobs:
   test-macos:
     name: 🧪 Tests (macOS)
     needs: build-macos
-    uses: ./.github/workflows/_reusable/run-tests.yml
+    uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: macos-latest
       crates: "fission-pcode,fission-automation,fission-loader"

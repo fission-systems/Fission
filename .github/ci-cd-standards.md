@@ -232,11 +232,11 @@ permissions:
 ## Customization Guide
 
 ### Adding new jobs
-1. Create `.github/workflows/_reusable/new-task.yml`
+1. Create `.github/workflows/reusable-new-task.yml` (must live directly under `.github/workflows/`)
 2. Define input parameters (`on.workflow_call.inputs`)
 3. Call from main workflow:
    ```yaml
-   - uses: ./.github/workflows/_reusable/new-task.yml
+   - uses: ./.github/workflows/reusable-new-task.yml
      with:
        param: value
    ```
