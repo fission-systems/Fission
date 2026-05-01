@@ -125,6 +125,16 @@ impl LoadedBinaryBuilder {
     pub fn build(self) -> Result<LoadedBinary> {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
+        let mut sections = self.sections;
+        sections.sort_by(|left, right| {
+            left.virtual_address
+                .cmp(&right.virtual_address)
+                // Relocatable objects can have overlapping placeholder
+                // addresses. Prefer executable blocks for instruction fetch.
+                .then_with(|| right.is_executable.cmp(&left.is_executable))
+                .then_with(|| left.file_offset.cmp(&right.file_offset))
+                .then_with(|| left.name.cmp(&right.name))
+        });
 
         let mut function_addr_index = std::collections::HashMap::new();
         let mut function_name_index = std::collections::HashMap::new();
@@ -151,7 +161,7 @@ impl LoadedBinaryBuilder {
             global_symbols.insert(addr, demangled);
         }
 
-        let string_map = scan_ascii_strings_from_sections(self.data.as_slice(), &self.sections);
+        let string_map = scan_ascii_strings_from_sections(self.data.as_slice(), &sections);
 
         let inner = LoadedBinaryInner {
             path: self.path,
@@ -163,7 +173,7 @@ impl LoadedBinaryBuilder {
             entry_point: self.entry_point,
             image_base: self.image_base,
             functions,
-            sections: self.sections,
+            sections,
             is_64bit: self.is_64bit,
             format: self.format,
             iat_symbols,

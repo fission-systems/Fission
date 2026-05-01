@@ -77,6 +77,8 @@ def classify_failure_kind(message: str | None) -> str:
         return "timeout"
     if "out of memory" in lower or "oom" in lower:
         return "oom"
+    if "unable to read bytes" in lower:
+        return "loader_byte_read_failed"
     if "control flow" in lower or "followflow" in lower:
         return "control_flow"
     if "ptrsub" in lower or "printer" in lower or "print" in lower:

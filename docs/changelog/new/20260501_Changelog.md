@@ -434,3 +434,49 @@
 - No architecture-name semantic branch was added.
 - No table-name, source-line, pprint/opprint, mnemonic, or binary-specific mapping was added.
 - Benchmark output artifacts and Ghidra project DB state remain uncommitted.
+
+## ELF Relocatable Loader Byte Lookup Fix
+
+- Fixed the `full_benchmark` x86-64 compiler-option matrix ELF `.o` failures where Fission reported `rust_sleigh: unable to read bytes at 0x100000`.
+- Root cause: `LoadedBinaryBuilder` guaranteed sorted functions but not sorted sections, while `LoadedBinary::view_bytes` uses binary search over sections.
+- Change: builder output now sorts sections deterministically by virtual address, executable-section preference for overlapping relocatable ranges, file offset, and name.
+- This matches the Ghidra `ElfProgramBuilder.processSectionHeaders -> processSectionHeader -> RelocatableImageBaseProvider` ownership boundary: ELF relocatable sections receive synthetic load addresses, then byte lookup must resolve those memory blocks deterministically.
+- Added a benchmark failure classifier bucket for `loader_byte_read_failed` so future row failures are reported as loader mapping failures instead of generic explicit errors.
+- Added loader regression coverage for unsorted section binary-search lookup and the x86-64 clang ELF relocatable fixture addresses `0x100000`, `0x100140`, and `0x1001a0`.
+
+## ELF Relocatable Loader Validation
+
+- `cargo check -p fission-loader`
+- `cargo test -p fission-loader -- --test-threads=1`
+- `cargo check -p fission-core`
+- `cargo check -p fission-cli`
+- `cargo build --release -p fission-cli`
+- `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py`
+- Direct decompile smoke:
+  - `target/release/fission_cli ... sleigh_option_matrix.o --decomp 0x100000 --engine rust-sleigh --json --benchmark`
+  - result: `fission_option_matrix` produced code; no `unable to read bytes` error.
+- Full benchmark before/after:
+  - Before report: `benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_smoke_limit3/benchmark_compact_summary.json`
+  - After report: `benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_loader_fixed_limit3/benchmark_compact_summary.json`
+  - `weighted_avg_normalized_similarity`: `26.276666666666674 -> 38.226000000000006`
+  - `clang-elf-o0`: `direct_success 0/3 -> 3/3`, `avg_normalized_similarity 0.0 -> 31.41`
+  - `clang-elf-o2`: `direct_success 0/3 -> 3/3`, `avg_normalized_similarity 0.0 -> 37.19`
+  - `clang-elf-o2-frameptr`: `direct_success 0/3 -> 3/3`, `avg_normalized_similarity 0.0 -> 37.19`
+  - `clang-elf-o3`: `direct_success 0/3 -> 3/3`, `avg_normalized_similarity 0.0 -> 36.47`
+  - `clang-elf-os`: `direct_success 0/3 -> 3/3`, `avg_normalized_similarity 0.0 -> 36.98`
+- Raw P-code canonical gate:
+  - Report: `benchmark/artifacts/raw_p_code_benchmark/elf_loader_fix_canonical_gate/aggregate_raw_pcode_parity_report.json`
+  - `full_match = 44`
+  - `average_similarity_score = 1.0`
+  - `average_parity_ratio = 1.0`
+  - `compat_emitter_used = 0`
+  - `fake_placeholder_op = 0`
+  - `invalid_pcode_shape = 0`
+  - `template_source_totals.sla_construct_tpl = 46`
+
+## ELF Relocatable Loader Notes
+
+- This change does not alter SLEIGH semantics or raw P-code generation.
+- No heuristic load-spec selection, symbol-name repair, source-line remap, or architecture-specific fallback was added.
+- Remaining `full_benchmark` divergence is now NIR/materialization quality work, not ELF byte-read failure.
+- Benchmark output artifacts and Ghidra project DB state remain uncommitted.

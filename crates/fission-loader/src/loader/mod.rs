@@ -470,6 +470,67 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_sorts_sections_for_binary_search_lookup() {
+        let mut data = vec![0u8; 64];
+        data[0..4].copy_from_slice(b"CODE");
+        data[32..36].copy_from_slice(b"DATA");
+
+        let binary = LoadedBinaryBuilder::new("unsorted.o".to_string(), DataBuffer::Heap(data))
+            .format("ELF64")
+            .entry_point(0)
+            .image_base(0x100000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".data".to_string(),
+                virtual_address: 0x100100,
+                virtual_size: 4,
+                file_offset: 32,
+                file_size: 4,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x100000,
+                virtual_size: 4,
+                file_offset: 0,
+                file_size: 4,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
+
+        assert_eq!(binary.view_bytes(0x100000, 4), Some(&b"CODE"[..]));
+        assert_eq!(binary.view_bytes(0x100100, 4), Some(&b"DATA"[..]));
+    }
+
+    #[test]
+    fn test_elf_relocatable_function_addresses_read_executable_bytes() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o0/sleigh_option_matrix.o",
+        );
+        if !fixture.exists() {
+            eprintln!("skipping missing benchmark fixture: {}", fixture.display());
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(&fixture).expect("parse ELF relocatable fixture");
+        for address in [0x100000, 0x100140, 0x1001a0] {
+            assert!(
+                binary.view_executable_bytes(address, 1).is_some(),
+                "expected executable bytes at 0x{address:x}"
+            );
+            assert!(
+                binary.view_bytes(address, 1).is_some(),
+                "expected generic byte lookup at 0x{address:x}"
+            );
+        }
+    }
+
+    #[test]
     fn test_function_lookup_o1() {
         // Test that O(1) function lookups work correctly
         let builder =
