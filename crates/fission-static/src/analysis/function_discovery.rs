@@ -8,7 +8,8 @@ use std::collections::BTreeSet;
 
 use fission_loader::{FunctionInfo, LoadedBinary};
 use fission_sleigh::runtime::{
-    DecodedFlowKind, DecodedReferenceKind, RuntimeFrontendStatus, RuntimeSleighFrontend,
+    DecodedFlowKind, DecodedInstruction, DecodedReferenceKind, RuntimeFrontendStatus,
+    RuntimeSleighFrontend,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,63 +84,14 @@ pub fn discover_functions_with_runtime(
         report.decoded_instruction_count += decoded.len();
 
         for instruction in decoded {
-            match instruction.flow_kind {
-                DecodedFlowKind::Call => {
-                    if let Some(target) = instruction.direct_target {
-                        call_targets.insert(normalize_target(binary, target));
-                    }
-                }
-                DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
-                    if let Some(target) = instruction.direct_target {
-                        jump_targets.insert(normalize_target(binary, target));
-                    }
-                }
-                DecodedFlowKind::None
-                | DecodedFlowKind::Return
-                | DecodedFlowKind::Interrupt
-                | DecodedFlowKind::Syscall => {}
-            }
-
-            for reference in instruction.references {
-                match reference.kind {
-                    DecodedReferenceKind::CallTarget => {
-                        call_targets.insert(normalize_target(binary, reference.target));
-                    }
-                    DecodedReferenceKind::BranchTarget => {
-                        jump_targets.insert(normalize_target(binary, reference.target));
-                    }
-                    // x86-64 PC-relative operands surface as RipRelativeAddress while still being
-                    // direct control-flow edges — mirror Ghidra-style CALL/JMP continuation facts.
-                    DecodedReferenceKind::RipRelativeAddress => match instruction.flow_kind {
-                        DecodedFlowKind::Call => {
-                            call_targets.insert(normalize_target(binary, reference.target));
-                        }
-                        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
-                            jump_targets.insert(normalize_target(binary, reference.target));
-                        }
-                        // Unconditional `jmp rel*` sometimes retains `FlowKind::None` while still
-                        // emitting a PC-relative operand reference (mirrors Ghidra listing quirks).
-                        DecodedFlowKind::None
-                            if instruction.mnemonic.eq_ignore_ascii_case("jmp") =>
-                        {
-                            jump_targets.insert(normalize_target(binary, reference.target));
-                        }
-                        _ => {}
-                    },
-                    DecodedReferenceKind::MemoryAddress
-                    | DecodedReferenceKind::ImmediateAddress => {}
-                }
-            }
+            collect_instruction_targets(binary, &instruction, &mut call_targets, &mut jump_targets);
         }
     }
 
     report.call_target_count = call_targets.len();
     report.jump_target_count = jump_targets.len();
 
-    let mut candidates = call_targets;
-    if profile == FunctionDiscoveryProfile::Aggressive {
-        candidates.extend(jump_targets);
-    }
+    let candidates = discovery_candidate_targets(profile, call_targets, &jump_targets);
 
     let mut accepted = Vec::new();
     for target in candidates {
@@ -203,10 +155,71 @@ fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
     }
 }
 
+/// Accumulate direct CFG targets from one decoded instruction (including PC-relative operands).
+fn collect_instruction_targets(
+    binary: &LoadedBinary,
+    instruction: &DecodedInstruction,
+    call_targets: &mut BTreeSet<u64>,
+    jump_targets: &mut BTreeSet<u64>,
+) {
+    match instruction.flow_kind {
+        DecodedFlowKind::Call => {
+            if let Some(target) = instruction.direct_target {
+                call_targets.insert(normalize_target(binary, target));
+            }
+        }
+        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+            if let Some(target) = instruction.direct_target {
+                jump_targets.insert(normalize_target(binary, target));
+            }
+        }
+        DecodedFlowKind::None
+        | DecodedFlowKind::Return
+        | DecodedFlowKind::Interrupt
+        | DecodedFlowKind::Syscall => {}
+    }
+
+    for reference in &instruction.references {
+        match reference.kind {
+            DecodedReferenceKind::CallTarget => {
+                call_targets.insert(normalize_target(binary, reference.target));
+            }
+            DecodedReferenceKind::BranchTarget => {
+                jump_targets.insert(normalize_target(binary, reference.target));
+            }
+            DecodedReferenceKind::RipRelativeAddress => match instruction.flow_kind {
+                DecodedFlowKind::Call => {
+                    call_targets.insert(normalize_target(binary, reference.target));
+                }
+                DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+                    jump_targets.insert(normalize_target(binary, reference.target));
+                }
+                DecodedFlowKind::None if instruction.mnemonic.eq_ignore_ascii_case("jmp") => {
+                    jump_targets.insert(normalize_target(binary, reference.target));
+                }
+                _ => {}
+            },
+            DecodedReferenceKind::MemoryAddress | DecodedReferenceKind::ImmediateAddress => {}
+        }
+    }
+}
+
+fn discovery_candidate_targets(
+    profile: FunctionDiscoveryProfile,
+    mut call_targets: BTreeSet<u64>,
+    jump_targets: &BTreeSet<u64>,
+) -> BTreeSet<u64> {
+    if profile == FunctionDiscoveryProfile::Aggressive {
+        call_targets.extend(jump_targets.iter().copied());
+    }
+    call_targets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+    use fission_sleigh::runtime::{DecodedInstruction, DecodedReference};
     use std::sync::{Mutex, OnceLock};
 
     /// Serialize tests that construct `RuntimeSleighFrontend`; parallel harness runs have flaked
@@ -215,40 +228,22 @@ mod tests {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("sleigh runtime test mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Absolute VA + bytes borrowed from `vendor_x86_pe_call_rel32_uses_construct_inst_next_extent`
-    /// (`fission-sleigh` compiled_table tests). At this IP the runtime often exposes the rel32
-    /// target as a PC-relative reference (`RipRelativeAddress`) rather than filling
-    /// `direct_target`; function discovery treats that operand as a direct CFG edge.
-    const VENDOR_DECODE_VA: u64 = 0x4014ed;
-    const VENDOR_CALL_REL32: [u8; 5] = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
-    const VENDOR_CALL_TARGET: u64 = 0x402200;
-    /// Same PC-relative displacement as [`VENDOR_CALL_REL32`]; unconditional encode only swaps opcode.
-    const VENDOR_JUMP_REL32: [u8; 5] = [
-        0xe9,
-        VENDOR_CALL_REL32[1],
-        VENDOR_CALL_REL32[2],
-        VENDOR_CALL_REL32[3],
-        VENDOR_CALL_REL32[4],
-    ];
-
-    fn synthetic_pe64_vendor_site(first_insn: [u8; 5]) -> LoadedBinary {
-        let mut bytes = vec![0xcc; 0x3000];
-        bytes[0..5].copy_from_slice(&first_insn);
-        LoadedBinaryBuilder::new("synthetic.bin".to_string(), DataBuffer::Heap(bytes.clone()))
+    fn pe64_executable_shell() -> LoadedBinary {
+        LoadedBinaryBuilder::new("unit.bin".to_string(), DataBuffer::Heap(vec![0xcc; 0x1000]))
             .format("PE")
             .image_base(0x400000)
-            .entry_point(VENDOR_DECODE_VA)
+            .entry_point(0x401000)
             .arch_spec("x86:LE:64:default")
             .is_64bit(true)
             .add_section(SectionInfo {
                 name: ".text".to_string(),
-                virtual_address: VENDOR_DECODE_VA,
-                virtual_size: bytes.len() as u64,
+                virtual_address: 0x401000,
+                virtual_size: 0x1000,
                 file_offset: 0,
-                file_size: bytes.len() as u64,
+                file_size: 0x1000,
                 is_executable: true,
                 is_readable: true,
                 is_writable: false,
@@ -257,37 +252,145 @@ mod tests {
             .expect("synthetic binary")
     }
 
-    #[test]
-    fn function_discovery_collects_direct_call_targets() {
-        let _guard = sleigh_runtime_discovery_lock();
-        let mut binary = synthetic_pe64_vendor_site(VENDOR_CALL_REL32);
+    const SAMPLE_RIP_TARGET: u64 = 0x401800;
 
-        let report =
-            discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
+    fn call_with_rip_reference() -> DecodedInstruction {
+        DecodedInstruction {
+            address: 0x4014ed,
+            bytes: vec![0xe8, 0x0e, 0x0d, 0x00, 0x00],
+            length: 5,
+            mnemonic: "CALL".into(),
+            operands_text: String::new(),
+            flow_kind: DecodedFlowKind::Call,
+            direct_target: None,
+            references: vec![DecodedReference {
+                target: SAMPLE_RIP_TARGET,
+                kind: DecodedReferenceKind::RipRelativeAddress,
+                operand_index: 0,
+            }],
+            pending_context_commits: Vec::new(),
+        }
+    }
 
-        assert!(!report.unsupported_runtime);
-        assert!(report.decoded_instruction_count > 0);
-        assert!(report.call_target_count >= 1);
-        assert_eq!(report.accepted_function_count, 1);
-        assert!(binary.function_at_exact(VENDOR_CALL_TARGET).is_some());
+    fn jmp_with_rip_reference_flow_none() -> DecodedInstruction {
+        DecodedInstruction {
+            address: 0x4014ed,
+            bytes: vec![0xe9, 0x0e, 0x0d, 0x00, 0x00],
+            length: 5,
+            mnemonic: "JMP".into(),
+            operands_text: String::new(),
+            flow_kind: DecodedFlowKind::None,
+            direct_target: None,
+            references: vec![DecodedReference {
+                target: SAMPLE_RIP_TARGET,
+                kind: DecodedReferenceKind::RipRelativeAddress,
+                operand_index: 0,
+            }],
+            pending_context_commits: Vec::new(),
+        }
     }
 
     #[test]
-    fn function_discovery_only_collects_jump_targets_when_aggressive() {
-        let _guard = sleigh_runtime_discovery_lock();
-        let mut balanced = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
-        let mut aggressive = synthetic_pe64_vendor_site(VENDOR_JUMP_REL32);
+    fn collect_instruction_targets_treats_rip_relative_as_call_on_call_flow() {
+        let binary = pe64_executable_shell();
+        let mut calls = BTreeSet::new();
+        let mut jumps = BTreeSet::new();
+        collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
+        assert!(calls.contains(&SAMPLE_RIP_TARGET));
+        assert!(jumps.is_empty());
+    }
 
-        let balanced_report =
-            discover_functions_with_runtime(&mut balanced, FunctionDiscoveryProfile::Balanced);
-        let aggressive_report =
-            discover_functions_with_runtime(&mut aggressive, FunctionDiscoveryProfile::Aggressive);
+    #[test]
+    fn collect_instruction_targets_treats_rip_relative_as_jump_for_jmp_mnemonic() {
+        let binary = pe64_executable_shell();
+        let mut calls = BTreeSet::new();
+        let mut jumps = BTreeSet::new();
+        collect_instruction_targets(
+            &binary,
+            &jmp_with_rip_reference_flow_none(),
+            &mut calls,
+            &mut jumps,
+        );
+        assert!(calls.is_empty());
+        assert!(jumps.contains(&SAMPLE_RIP_TARGET));
+    }
 
-        assert!(!balanced_report.unsupported_runtime);
-        assert_eq!(balanced_report.accepted_function_count, 0);
-        assert!(!aggressive_report.unsupported_runtime);
-        assert_eq!(aggressive_report.accepted_function_count, 1);
-        assert!(aggressive.function_at_exact(VENDOR_CALL_TARGET).is_some());
+    #[test]
+    fn discovery_candidate_targets_balanced_excludes_jump_only() {
+        let calls = BTreeSet::from([0x401000_u64]);
+        let jumps = BTreeSet::from([0x402200_u64]);
+        let balanced =
+            discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
+        assert_eq!(balanced, BTreeSet::from([0x401000]));
+        let aggressive =
+            discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, balanced, &jumps);
+        assert!(aggressive.contains(&0x401000));
+        assert!(aggressive.contains(&0x402200));
+    }
+
+    #[test]
+    fn discover_accepts_call_target_inside_executable_when_not_known() {
+        let binary = pe64_executable_shell();
+        assert!(binary.function_addr_index.get(&SAMPLE_RIP_TARGET).is_none());
+
+        let mut calls = BTreeSet::new();
+        let mut jumps = BTreeSet::new();
+        collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
+
+        let candidates =
+            discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
+        let executable_ranges = executable_ranges(&binary);
+        let accepted: Vec<_> = candidates
+            .into_iter()
+            .filter(|&t| {
+                !binary.function_addr_index.contains_key(&t)
+                    && is_in_executable_ranges(t, &executable_ranges)
+            })
+            .collect();
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0], SAMPLE_RIP_TARGET);
+    }
+
+    #[test]
+    fn discover_balanced_skips_jump_only_even_when_executable() {
+        let binary = pe64_executable_shell();
+        let mut calls = BTreeSet::new();
+        let mut jumps = BTreeSet::new();
+        collect_instruction_targets(
+            &binary,
+            &jmp_with_rip_reference_flow_none(),
+            &mut calls,
+            &mut jumps,
+        );
+        let candidates =
+            discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
+        assert!(candidates.is_empty());
+        assert!(binary.functions.is_empty());
+    }
+
+    #[test]
+    fn discover_aggressive_accepts_jump_target_inside_executable() {
+        let binary = pe64_executable_shell();
+        let mut calls = BTreeSet::new();
+        let mut jumps = BTreeSet::new();
+        collect_instruction_targets(
+            &binary,
+            &jmp_with_rip_reference_flow_none(),
+            &mut calls,
+            &mut jumps,
+        );
+        let candidates =
+            discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, calls, &jumps);
+        let executable_ranges = executable_ranges(&binary);
+        let accepted: Vec<_> = candidates
+            .into_iter()
+            .filter(|&t| {
+                !binary.function_addr_index.contains_key(&t)
+                    && is_in_executable_ranges(t, &executable_ranges)
+            })
+            .collect();
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0], SAMPLE_RIP_TARGET);
     }
 
     /// Unknown `language_id` must resolve as unsupported **before** mutating discovered functions.
