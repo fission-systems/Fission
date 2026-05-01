@@ -258,6 +258,15 @@
 - No binary-specific LoadSpec repair was added.
 - Exact file-format constants remain spec data, but architecture selection policy now comes from checked-in Ghidra data files.
 - Benchmark artifacts and downloaded sample binaries remain uncommitted.
+
+## SLEIGH Crate-local Spec Snapshot Removal
+
+- Removed the legacy `crates/fission-sleigh/specs` snapshot now that `utils/sleigh-specs` is the active checked-in SLEIGH data root.
+- Removed the crate-local spec fallback from `fission-sleigh` discovery. Resolution now uses:
+  - `FISSION_SLEIGH_SPEC_DIR`
+  - repo-relative `utils/sleigh-specs`
+- Updated the `fission-sleigh` README so it no longer documents `crates/fission-sleigh/specs` as a fallback.
+- This is a data ownership cleanup only; no SLEIGH semantic fallback, heuristic, or generated P-code path was added.
 - Added `benchmark/config/benchmark_corpus/github_release_sources.example.json` as a non-binary example source config.
 - Updated `.gitignore` so `benchmark/binary/realworld/**` stays out of git while `benchmark/binary/realworld/.gitkeep` can keep the local corpus root.
 - Updated `benchmark/BENCHMARK_GUIDE.md` with the GitHub release collection command and the no-binary-staging policy.
@@ -340,13 +349,12 @@
 ## SLEIGH Specs Snapshot Migration
 
 - Added `utils/sleigh-specs` as the checked-in SLEIGH spec snapshot location for compiler/runtime language discovery.
-- Preserved the existing crate-local `crates/fission-sleigh/specs` tree as a legacy fallback while moving active resolution to repo-level utility data.
+- Initially preserved the crate-local SLEIGH snapshot during migration, then removed it after `utils/sleigh-specs` became the active data root.
 - Added `utils/sleigh-specs/MANIFEST.sha256.json` with source path, size, and SHA-256 for every copied spec resource.
-- Added `utils/sleigh-specs/README.md` documenting snapshot ownership, refresh source, and resolution order.
+- Added `utils/sleigh-specs/README.md` documenting snapshot ownership and refresh source.
 - Updated `fission-sleigh` discovery to resolve specs in this order:
   - `FISSION_SLEIGH_SPEC_DIR`
   - repo-relative `utils/sleigh-specs`
-  - legacy crate-local `crates/fission-sleigh/specs`
 - Updated runtime registry manifest embedding to use `utils/sleigh-specs/ghidra_language_manifest.json`.
 - Updated `fission-sleigh` README/AGENTS notes so SLEIGH spec ownership points at `utils/sleigh-specs`.
 

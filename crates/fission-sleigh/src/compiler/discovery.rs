@@ -29,7 +29,7 @@ pub fn sleigh_specs_root() -> PathBuf {
         return utils_root;
     }
 
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("specs")
+    utils_root
 }
 
 pub fn sleigh_languages_root() -> PathBuf {

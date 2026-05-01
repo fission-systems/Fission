@@ -115,7 +115,6 @@ fn main() -> anyhow::Result<()> {
 - Spec root resolution order:
   - `FISSION_SLEIGH_SPEC_DIR`
   - repo-relative `utils/sleigh-specs`
-  - legacy crate-local `crates/fission-sleigh/specs`
 - The checked-in spec snapshot is mirrored from:
   - `vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages/`
 - `RuntimeSleighFrontend::new(path)` infers language name from the file stem.
