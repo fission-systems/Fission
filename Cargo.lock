@@ -1332,7 +1332,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "toml 0.8.2",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -1369,7 +1369,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "toml 0.8.2",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-appender",
  "tracing-error",
