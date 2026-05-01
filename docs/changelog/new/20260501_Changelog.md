@@ -268,6 +268,27 @@
 - No approximate loader metadata or raw executable fallback was added.
 - No downloaded binaries, benchmark output artifacts, or Ghidra project DB files are staged with this change.
 
+## Ghidra Data Snapshot Vendoring
+
+- Added `utils/ghidra-data` as a checked-in Ghidra data snapshot so future loader/signature/analyzer work can consume local data without runtime/build dependency on `vendor/ghidra`.
+- Copied only data resources, not Java implementation code:
+  - `Ghidra/Features/Base/data` no-return lists, no-return constraints, PE Rich product table, parser profiles, Win16/Win32/Win64 symbol hint/export data, and string n-gram model.
+  - `Ghidra/Features/FileFormats/data/languages/*.opinion`.
+  - `Ghidra/Processors/*/data/languages/*.opinion`.
+  - `Ghidra/Processors/*/data/patterns/*`.
+  - `Ghidra/Processors/*/data/extensions/*`.
+  - Processor thunk metadata such as `aarch64-pltThunks.xml`.
+- Preserved Ghidra `LICENSE`, `NOTICE`, and `DISCLAIMER.md` beside the snapshot.
+- Added `utils/ghidra-data/MANIFEST.sha256.json` with source path, size, and SHA-256 for every vendored file.
+- Snapshot size: `160` data/provenance files, approximately `29M`.
+
+## Ghidra Data Snapshot Validation
+
+- `python3 -m json.tool utils/ghidra-data/MANIFEST.sha256.json`
+- Verified copied file count: `160`.
+- Verified snapshot size: approximately `29M`.
+- No Ghidra Java source files were copied into `utils/ghidra-data`.
+
 ## GitHub Release Corpus Validation
 
 - `python3 -m py_compile scripts/corpus/collect_github_release_samples.py scripts/corpus/hash_and_manifest.py scripts/benchmark/run_loader_smoke.py scripts/benchmark/run_realworld_suite.py`
