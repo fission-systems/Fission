@@ -30,4 +30,4 @@ indexmap = "2"
 [dev-dependencies]
 criterion = "0.5"
 insta = "1.47"
-petgraph = "0.6"
+petgraph = "0.8"
