@@ -26,6 +26,11 @@ on:
         required: false
         default: "fission-tauri,fission-static"
         description: "Crates to exclude from full suite"
+      timeout_minutes:
+        type: number
+        required: false
+        default: 45
+        description: "Job timeout; raise on slow runners (e.g. Windows release tests)"
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,7 +38,7 @@ env:
 jobs:
   test:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +64,7 @@ jobs:
 
       - name: Run Tests (Specific Crates)
         if: ${{ inputs.crates != '' }}
+        shell: bash
         run: |
           crates="${{ inputs.crates }}"
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"

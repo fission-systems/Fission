@@ -61,6 +61,7 @@ jobs:
       os: windows-latest
       crates: "fission-pcode,fission-automation"
       profile: release
+      timeout_minutes: 120
 
   # Step 4: Build & Test (macOS, ~20 min)
   build-macos-heavy:
