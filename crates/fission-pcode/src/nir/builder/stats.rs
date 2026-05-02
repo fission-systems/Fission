@@ -236,6 +236,15 @@ impl<'a> PreviewBuilder<'a> {
                 .call_target_export_thunk_target_resolved_count,
             call_target_indirect_const_resolved_count: self
                 .call_target_indirect_const_resolved_count,
+            call_target_iat_slot_resolved_count: self.call_target_iat_slot_resolved_count,
+            call_target_indirect_load_resolved_count: self
+                .call_target_indirect_load_resolved_count,
+            call_target_indirect_rejected_non_iat_load_count: self
+                .call_target_indirect_rejected_non_iat_load_count,
+            call_target_indirect_rejected_non_const_ptr_count: self
+                .call_target_indirect_rejected_non_const_ptr_count,
+            call_target_indirect_rejected_width_mismatch_count: self
+                .call_target_indirect_rejected_width_mismatch_count,
             call_target_unresolved_no_exact_identity_count: self
                 .call_target_unresolved_no_exact_identity_count,
             security_cookie_fold_count: 0,

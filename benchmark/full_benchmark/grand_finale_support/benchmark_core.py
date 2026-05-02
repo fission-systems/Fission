@@ -279,6 +279,11 @@ OWNER_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("call_target_exact_index_ambiguous_count", "call_target_exact_index_ambiguous"),
     ("call_target_export_thunk_target_resolved_count", "call_target_export_thunk_target_resolved"),
     ("call_target_indirect_const_resolved_count", "call_target_indirect_const_resolved"),
+    ("call_target_iat_slot_resolved_count", "call_target_iat_slot_resolved"),
+    ("call_target_indirect_load_resolved_count", "call_target_indirect_load_resolved"),
+    ("call_target_indirect_rejected_non_iat_load_count", "call_target_indirect_rejected_non_iat_load"),
+    ("call_target_indirect_rejected_non_const_ptr_count", "call_target_indirect_rejected_non_const_ptr"),
+    ("call_target_indirect_rejected_width_mismatch_count", "call_target_indirect_rejected_width_mismatch"),
     ("call_target_unresolved_no_exact_identity_count", "call_target_unresolved_no_exact_identity"),
     ("replacement_plan_rejected_alias_unsafe_count", "alias_unsafe"),
     ("replacement_plan_rejected_missing_merge_count", "missing_merge"),
@@ -442,6 +447,21 @@ def _extract_named_metrics(
 
 def _extract_owner_metrics_from_engine_summary(engine_summary: dict[str, Any]) -> dict[str, float]:
     return _extract_named_metrics(engine_summary, OWNER_METRIC_SPECS)
+
+
+def _aggregate_owner_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in OWNER_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in OWNER_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
 
 
 def _extract_shape_drift_metrics_from_engine_summary(engine_summary: dict[str, Any]) -> dict[str, float]:
@@ -4277,6 +4297,11 @@ def build_pairwise_engine_comparison(
                 "call_target_exact_index_ambiguous_count",
                 "call_target_export_thunk_target_resolved_count",
                 "call_target_indirect_const_resolved_count",
+                "call_target_iat_slot_resolved_count",
+                "call_target_indirect_load_resolved_count",
+                "call_target_indirect_rejected_non_iat_load_count",
+                "call_target_indirect_rejected_non_const_ptr_count",
+                "call_target_indirect_rejected_width_mismatch_count",
                 "call_target_unresolved_no_exact_identity_count",
                 "goto_total",
                 "top_level_label_total",
@@ -4416,6 +4441,16 @@ def build_comparison(
         direct_success_count=int(fission_quality.get("direct_success_count", 0)),
     )
     owner_metrics = _extract_owner_metrics_from_engine_summary(fission_quality)
+    entry_owner_metrics = _aggregate_owner_metrics_from_entries(fission["entries"])
+    owner_metrics = {
+        alias: (
+            entry_owner_metrics.get(alias, 0.0)
+            if _safe_float(owner_metrics.get(alias, 0.0), 0.0) == 0.0
+            and _safe_float(entry_owner_metrics.get(alias, 0.0), 0.0) != 0.0
+            else _safe_float(owner_metrics.get(alias, 0.0), 0.0)
+        )
+        for _key, alias in OWNER_METRIC_SPECS
+    }
     shape_drift_metrics = _extract_shape_drift_metrics_from_engine_summary(fission_quality)
     normalize_pass_metrics = _flatten_selected_normalize_pass_metrics(
         _extract_selected_normalize_pass_metrics(fission["meta"].get("preview_build_stats", {}))

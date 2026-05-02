@@ -1052,6 +1052,21 @@ pub struct NirBuildStats {
     /// Indirect calls resolved only after a COPY-only constant chain proof.
     #[serde(default)]
     pub call_target_indirect_const_resolved_count: usize,
+    /// IAT/import slots resolved to exact loader-proven import identities.
+    #[serde(default)]
+    pub call_target_iat_slot_resolved_count: usize,
+    /// Indirect calls resolved through a pointer-sized load from an exact IAT slot.
+    #[serde(default)]
+    pub call_target_indirect_load_resolved_count: usize,
+    /// Indirect load targets rejected because the load address is not an exact IAT slot.
+    #[serde(default)]
+    pub call_target_indirect_rejected_non_iat_load_count: usize,
+    /// Indirect load targets rejected because the pointer expression is not constant.
+    #[serde(default)]
+    pub call_target_indirect_rejected_non_const_ptr_count: usize,
+    /// Indirect load targets rejected because the loaded width is not pointer-sized.
+    #[serde(default)]
+    pub call_target_indirect_rejected_width_mismatch_count: usize,
     /// Call targets left unresolved because no exact identity was available.
     #[serde(default)]
     pub call_target_unresolved_no_exact_identity_count: usize,
@@ -1491,6 +1506,15 @@ impl NirBuildStats {
             other.call_target_export_thunk_target_resolved_count;
         self.call_target_indirect_const_resolved_count +=
             other.call_target_indirect_const_resolved_count;
+        self.call_target_iat_slot_resolved_count += other.call_target_iat_slot_resolved_count;
+        self.call_target_indirect_load_resolved_count +=
+            other.call_target_indirect_load_resolved_count;
+        self.call_target_indirect_rejected_non_iat_load_count +=
+            other.call_target_indirect_rejected_non_iat_load_count;
+        self.call_target_indirect_rejected_non_const_ptr_count +=
+            other.call_target_indirect_rejected_non_const_ptr_count;
+        self.call_target_indirect_rejected_width_mismatch_count +=
+            other.call_target_indirect_rejected_width_mismatch_count;
         self.call_target_unresolved_no_exact_identity_count +=
             other.call_target_unresolved_no_exact_identity_count;
         self.security_cookie_fold_count += other.security_cookie_fold_count;
@@ -1920,6 +1944,8 @@ impl TargetProfile {
 pub struct NirTypeContext {
     pub call_targets: HashMap<u64, String>,
     pub call_target_refs: HashMap<u64, CallTargetRef>,
+    #[serde(default)]
+    pub iat_target_refs: HashMap<u64, CallTargetRef>,
     #[serde(default)]
     pub ambiguous_call_targets: HashSet<u64>,
     pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,

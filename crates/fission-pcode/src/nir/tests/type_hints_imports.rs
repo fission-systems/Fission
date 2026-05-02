@@ -526,3 +526,113 @@ fn preview_callind_copy_only_constant_chain_resolves_exact_target() {
     assert_eq!(stats.call_target_indirect_const_resolved_count, 1);
     assert_eq!(stats.call_target_unresolved_sub_fallback_count, 0);
 }
+
+#[test]
+fn preview_callind_load_from_iat_slot_resolves_exact_import_target() {
+    let iat_slot = 0x14012c378_u64;
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006260,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140006260,
+                    output: Some(uniq(0x100, 8)),
+                    inputs: vec![cst(0, 8), cst(iat_slot as i64, 8)],
+                    asm_mnemonic: Some("LOAD IAT".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x140006268,
+                    output: None,
+                    inputs: vec![uniq(0x100, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [0x14012c378]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140006270,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.iat_target_refs.insert(
+        iat_slot,
+        CallTargetRef {
+            address: Some(iat_slot),
+            symbol: "CloseHandle".to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 255,
+        },
+    );
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "FUN_0x140006260",
+        0x140006260,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+    let stats = take_last_nir_build_stats().expect("build stats");
+
+    assert!(rendered.contains("CloseHandle()"), "{rendered}");
+    assert_eq!(stats.call_target_iat_slot_resolved_count, 1);
+    assert_eq!(stats.call_target_indirect_load_resolved_count, 1);
+    assert_eq!(stats.call_target_import_resolved_count, 1);
+    assert_eq!(stats.call_target_unresolved_sub_fallback_count, 0);
+}
+
+#[test]
+fn preview_callind_load_from_non_iat_slot_keeps_existing_surface() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006260,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140006260,
+                    output: Some(uniq(0x100, 8)),
+                    inputs: vec![cst(0, 8), cst(0x14012c378, 8)],
+                    asm_mnemonic: Some("LOAD NON-IAT".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x140006268,
+                    output: None,
+                    inputs: vec![uniq(0x100, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [0x14012c378]".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "FUN_0x140006260",
+        0x140006260,
+        &preview_options(),
+        Some(&PreviewTypeContext::default()),
+    )
+    .expect("preview render should succeed");
+    let stats = take_last_nir_build_stats().expect("build stats");
+
+    assert!(!rendered.contains("CloseHandle"), "{rendered}");
+    assert_eq!(stats.call_target_iat_slot_resolved_count, 0);
+    assert_eq!(stats.call_target_indirect_load_resolved_count, 0);
+    assert_eq!(stats.call_target_indirect_rejected_non_iat_load_count, 1);
+}

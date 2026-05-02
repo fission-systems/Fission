@@ -18,19 +18,20 @@ pub(crate) fn build_nir_type_context(
     address: u64,
 ) -> NirTypeContext {
     let mut index = CallTargetIndex::default();
+    let mut iat_index = CallTargetIndex::default();
 
     for func in binary.imports() {
         if func.address == 0 || func.name.is_empty() {
             continue;
         }
-        index.add(func.address, &func.name, CandidateClass::Import);
+        iat_index.add(func.address, &func.name, CandidateClass::Import);
     }
 
     for (resolved_address, name) in &binary.inner().iat_symbols {
         if *resolved_address == 0 || name.is_empty() {
             continue;
         }
-        index.add(*resolved_address, name, CandidateClass::Import);
+        iat_index.add(*resolved_address, name, CandidateClass::Import);
     }
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
@@ -71,18 +72,27 @@ pub(crate) fn build_nir_type_context(
         index.add(*resolved_address, name, CandidateClass::Global);
     }
     let resolved_index = index.finish();
+    let resolved_iat_index = iat_index.finish();
     let call_target_refs = resolved_index.call_target_refs;
+    let iat_target_refs = resolved_iat_index.call_target_refs;
     let call_targets = call_target_refs
         .iter()
+        .chain(iat_target_refs.iter())
         .map(|(address, target_ref)| (*address, target_ref.symbol.clone()))
+        .collect::<HashMap<_, _>>();
+    let all_target_refs = call_target_refs
+        .iter()
+        .chain(iat_target_refs.iter())
+        .map(|(address, target_ref)| (*address, target_ref.clone()))
         .collect::<HashMap<_, _>>();
 
     NirTypeContext {
         call_targets,
         call_target_refs: call_target_refs.clone(),
+        iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
-        call_effect_summaries: build_nir_call_effect_summaries(&call_target_refs),
-        call_param_rules: build_nir_call_param_rules(&call_target_refs),
+        call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs),
+        call_param_rules: build_nir_call_param_rules(&all_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
     }
 }

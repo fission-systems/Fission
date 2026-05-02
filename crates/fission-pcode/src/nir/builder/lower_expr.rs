@@ -42,6 +42,21 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    fn resolve_call_target_by_iat_slot(&mut self, addr: u64) -> Option<String> {
+        let Some(ctx) = self.type_context else {
+            self.call_target_context_missing_count += 1;
+            return None;
+        };
+        let Some(target_ref) = ctx.iat_target_refs.get(&addr) else {
+            self.call_target_indirect_rejected_non_iat_load_count += 1;
+            return None;
+        };
+        self.call_target_iat_slot_resolved_count += 1;
+        self.call_target_indirect_load_resolved_count += 1;
+        self.call_target_import_resolved_count += 1;
+        Some(target_ref.symbol.clone())
+    }
+
     pub(in crate::nir) fn lookup_def_site(
         &self,
         vn: &Varnode,
@@ -170,6 +185,8 @@ impl<'a> PreviewBuilder<'a> {
                             self.call_target_unresolved_sub_fallback_count += 1;
                             format!("sub_{addr:x}")
                         }
+                    } else if let Some(name) = self.resolve_iat_load_call_target(target) {
+                        name
                     } else {
                         name
                     }
@@ -183,6 +200,12 @@ impl<'a> PreviewBuilder<'a> {
                         } else {
                             self.call_target_unresolved_sub_fallback_count += 1;
                             format!("sub_{addr:x}")
+                        }
+                    } else if matches!(other, HirExpr::Load { .. }) {
+                        if let Some(name) = self.resolve_iat_load_call_target(target) {
+                            name
+                        } else {
+                            print_expr(&other)
                         }
                     } else {
                         print_expr(&other)
@@ -331,6 +354,34 @@ impl<'a> PreviewBuilder<'a> {
             current = producer.inputs.first()?.clone();
         }
         None
+    }
+
+    fn resolve_iat_load_call_target(&mut self, target: &Varnode) -> Option<String> {
+        let Some((_, producer)) = self.lookup_def_site(target) else {
+            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            return None;
+        };
+        if producer.opcode != PcodeOpcode::Load {
+            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            return None;
+        }
+        let Some(output) = producer.output.as_ref() else {
+            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            return None;
+        };
+        if output.size != self.options.pointer_size {
+            self.call_target_indirect_rejected_width_mismatch_count += 1;
+            return None;
+        }
+        let Some(ptr) = producer.inputs.get(1) else {
+            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            return None;
+        };
+        if !ptr.is_constant {
+            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            return None;
+        }
+        self.resolve_call_target_by_iat_slot(ptr.constant_val as u64)
     }
 
     fn debug_callind_target_recovery(&self, label: &str) {
