@@ -70,8 +70,9 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    # Temporary baseline for no-fix ecosystem advisories in Tauri Linux GTK3/WebKit stack.
-    # See docs/build/SECURITY_ADVISORIES.md for rationale and migration plan.
+# Temporary baseline for no-fix ecosystem advisories in Tauri Linux GTK3/WebKit stack,
+# Servo/CSS/HTML transitive crates, glib Iterator advisory, and rand/logger transitive chain.
+# See docs/build/SECURITY_ADVISORIES.md for rationale and migration plan (when added).
     "RUSTSEC-2024-0370",
     "RUSTSEC-2024-0411",
     "RUSTSEC-2024-0412",
@@ -83,12 +84,16 @@ ignore = [
     "RUSTSEC-2024-0418",
     "RUSTSEC-2024-0419",
     "RUSTSEC-2024-0420",
+    # glib-rs Iterator unsoundness (GTK/WebKit transitive via Tauri on Linux).
+    "RUSTSEC-2024-0429",
     "RUSTSEC-2025-0057",
     "RUSTSEC-2025-0075",
     "RUSTSEC-2025-0080",
     "RUSTSEC-2025-0081",
     "RUSTSEC-2025-0098",
     "RUSTSEC-2025-0100",
+    # rand custom logger unsoundness — transitive via Tauri HTML stack + proptest dev-deps.
+    "RUSTSEC-2026-0097",
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

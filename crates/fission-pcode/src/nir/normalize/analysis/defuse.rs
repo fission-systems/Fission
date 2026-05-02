@@ -742,6 +742,30 @@ fn count_any_mention_in_stmt(stmt: &HirStmt, name: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Process-wide env is shared across parallel tests; serialize mutations that toggle admission.
+    static WIDE_DEAD_RERUN_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct WideDeadRerunAdmissionEnvGuard(MutexGuard<'static, ()>);
+
+    impl WideDeadRerunAdmissionEnvGuard {
+        fn set_enabled() -> Self {
+            let guard = WIDE_DEAD_RERUN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1");
+            }
+            Self(guard)
+        }
+    }
+
+    impl Drop for WideDeadRerunAdmissionEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION");
+            }
+        }
+    }
 
     fn temp_binding(name: &str) -> NirBinding {
         NirBinding {
@@ -792,35 +816,31 @@ mod tests {
 
     #[test]
     fn wide_dead_assignment_rerun_admission_allows_small_function() {
-        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let _env = WideDeadRerunAdmissionEnvGuard::set_enabled();
         let func = test_func(10, 10);
         assert!(wide_dead_assignment_rerun_admitted(&func));
-        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
     }
 
     #[test]
     fn wide_dead_assignment_rerun_admission_skips_large_stmt_budget() {
-        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let _env = WideDeadRerunAdmissionEnvGuard::set_enabled();
         let func = test_func(221, 10);
         assert!(!wide_dead_assignment_rerun_admitted(&func));
-        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
     }
 
     #[test]
     fn wide_dead_assignment_rerun_admission_skips_large_local_budget() {
-        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let _env = WideDeadRerunAdmissionEnvGuard::set_enabled();
         let func = test_func(10, 161);
         assert!(!wide_dead_assignment_rerun_admitted(&func));
-        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
     }
 
     #[test]
     fn wide_dead_assignment_first_pass_still_runs_when_admission_skips() {
-        unsafe { std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1") };
+        let _env = WideDeadRerunAdmissionEnvGuard::set_enabled();
         let mut func = test_func(221, 221);
         assert!(apply_wide_dead_assignment_pass(&mut func));
         assert!(func.body.is_empty());
-        unsafe { std::env::remove_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION") };
     }
 }
 
