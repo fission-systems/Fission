@@ -751,7 +751,9 @@ mod tests {
 
     impl WideDeadRerunAdmissionEnvGuard {
         fn set_enabled() -> Self {
-            let guard = WIDE_DEAD_RERUN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = WIDE_DEAD_RERUN_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             unsafe {
                 std::env::set_var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION", "1");
             }
