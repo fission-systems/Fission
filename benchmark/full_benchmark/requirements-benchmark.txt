@@ -1,5 +1,5 @@
 pydantic>=2,<3
 jinja2>=3,<4
 rich>=15.0.0,<16
-pandas>=2,<3
+pandas>=3.0.2,<4
 numpy>=2.4.4,<3
