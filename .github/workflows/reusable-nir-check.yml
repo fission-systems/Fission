@@ -26,6 +26,8 @@ jobs:
   nir-check:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,6 +38,23 @@ jobs:
 
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
+
+      # Lane `nir` points at this path; exe is gitignored like cli-smoke — build from checked-in C source.
+      - name: Cache & install MinGW (PE fixture for nir lane)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: gcc-mingw-w64-x86-64
+          version: mingw-pe-nir-lane-v1
+
+      - name: Build PE nir-lane fixture (MinGW-w64)
+        run: |
+          set -euo pipefail
+          OUT="benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+          mkdir -p "$(dirname "${OUT}")"
+          x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            -o "${OUT}"
+          test -s "${OUT}"
 
       - name: Build fission-cli (Release)
         run: cargo build -p fission-cli --locked --release

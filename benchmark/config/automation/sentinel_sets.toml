@@ -25,17 +25,12 @@ default_timeout_ms = 1500
 [lane.nir]
 include_source_inventory_aligned_high = false
 
+# CI builds this PE on the runner (see reusable-cli-smoke / reusable-nir-check):
+# benchmark/binary/**/*.exe is gitignored but sources under benchmark/binary are checked in.
 [[lane.nir.binaries]]
-binary = "GetProcAddress.exe"
-path = "samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe"
-role = "preview_stage_block_control"
-default_functions_limit = 20
-default_timeout_ms = 1500
-
-[[lane.nir.binaries]]
-binary = "putty.exe"
-path = "samples/windows/x64/putty.exe"
-role = "preview_regression_control"
+binary = "test_functions.exe"
+path = "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+role = "fast_ci_pe_fixture_control"
 default_functions_limit = 10
 default_timeout_ms = 1500
 
