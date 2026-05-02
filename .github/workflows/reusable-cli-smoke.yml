@@ -71,6 +71,7 @@ jobs:
           set -euo pipefail
           BIN="${{ inputs.binary_relative_path }}"
           CLI="./target/${{ inputs.profile }}/fission_cli"
-          ADDR="$("${CLI}" list "${BIN}" --json | python3 -c 'import json,sys; fb="0x140001470"; d=json.load(sys.stdin); assert isinstance(d,list) and len(d)>0; print(next((f["address"] for f in d if not f.get("is_import") and isinstance(f.get("address"),str)), fb))')"
+          # Prefer symbols from test_functions.c; MinGW CRT helpers (e.g. __mingw_*) sort first but often lack SLA tpl coverage.
+          ADDR="$("${CLI}" list "${BIN}" --json | python3 "${{ github.workspace }}/.github/scripts/pick_pe_smoke_decomp_addr.py")"
           echo "decomp addr: ${ADDR}"
           "${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json | python3 -c 'import json,sys; r=json.load(sys.stdin); e=r[0] if isinstance(r,list) else r; assert isinstance(e,dict); (sys.stderr.write("decomp error:\n%s\n"%e["error"]), sys.exit(1)) if e.get("error") else None; assert "code" in e and isinstance(e["code"],str) and e["code"].strip(), e; print("decomp_ok", e.get("name","?"))'
