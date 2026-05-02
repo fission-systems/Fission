@@ -15,7 +15,7 @@ fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-signatures = { path = "../fission-signatures" }
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
