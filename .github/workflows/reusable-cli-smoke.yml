@@ -32,12 +32,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # APT packages are cached across runs (cache key bumps via `version` if Ubuntu image breaks restore).
-      - name: Cache & install MinGW (PE cross-compile)
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: gcc-mingw-w64-x86-64
-          version: mingw-pe-smoke-v1
+      # Use apt-get directly: cache-apt-pkgs-action can restore without exposing mingw on PATH (exit 127).
+      - name: Install MinGW-w64 (PE smoke fixture)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          command -v x86_64-w64-mingw32-gcc
 
       # benchmark/binary/**/*.exe is gitignored — same path as wiki/docs; build locally on CI (~150KiB PE)
       - name: Build PE smoke fixture (MinGW-w64)
