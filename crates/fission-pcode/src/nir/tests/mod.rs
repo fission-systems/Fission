@@ -82,6 +82,37 @@ fn preview_options_x86() -> MlilPreviewOptions {
     }
 }
 
+/// Shared preview context for tests that lower `CALL`/import sites at `0x14012c378` as `GetClientRect`
+/// with `LPRECT`/`RECT` param rules — matches [`PreviewTypeContext::call_target_refs`] resolution in
+/// [`crate::nir::builder::lower_expr`].
+fn get_client_rect_preview_type_context() -> PreviewTypeContext {
+    let mut context = PreviewTypeContext::default();
+    let addr = 0x14012c378_u64;
+    context
+        .call_targets
+        .insert(addr, "GetClientRect".to_string());
+    context.call_target_refs.insert(
+        addr,
+        CallTargetRef {
+            address: Some(addr),
+            symbol: "GetClientRect".to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 100,
+        },
+    );
+    context.call_param_rules.push(PreviewCallParamRule {
+        callee_address: Some(addr),
+        callee_name: "GetClientRect".to_string(),
+        arg_index: 1,
+        pointer_alias: "LPRECT".to_string(),
+        pointee_alias: "RECT".to_string(),
+        pointer_size: 8,
+        pointee_sizes: vec![16],
+    });
+    context
+}
+
 #[test]
 fn target_profile_unifies_pe_x64_auto_gate() {
     let options = preview_options();

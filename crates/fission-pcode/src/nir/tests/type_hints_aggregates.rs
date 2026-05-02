@@ -372,19 +372,7 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
         }],
     };
 
-    let mut context = PreviewTypeContext::default();
-    context
-        .call_targets
-        .insert(0x14012c378, "GetClientRect".to_string());
-    context.call_param_rules.push(PreviewCallParamRule {
-        callee_address: None,
-        callee_name: "GetClientRect".to_string(),
-        arg_index: 1,
-        pointer_alias: "LPRECT".to_string(),
-        pointee_alias: "RECT".to_string(),
-        pointer_size: 8,
-        pointee_sizes: vec![16],
-    });
+    let context = get_client_rect_preview_type_context();
 
     let rendered = render_mlil_preview_with_context(
         &func,
@@ -504,19 +492,7 @@ fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
         }],
     };
 
-    let mut context = PreviewTypeContext::default();
-    context
-        .call_targets
-        .insert(0x14012c378, "GetClientRect".to_string());
-    context.call_param_rules.push(PreviewCallParamRule {
-        callee_address: None,
-        callee_name: "GetClientRect".to_string(),
-        arg_index: 1,
-        pointer_alias: "LPRECT".to_string(),
-        pointee_alias: "RECT".to_string(),
-        pointer_size: 8,
-        pointee_sizes: vec![16],
-    });
+    let context = get_client_rect_preview_type_context();
 
     let rendered = render_mlil_preview_with_context(
         &func,
@@ -652,19 +628,7 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
         }],
     };
 
-    let mut context = PreviewTypeContext::default();
-    context
-        .call_targets
-        .insert(0x14012c378, "GetClientRect".to_string());
-    context.call_param_rules.push(PreviewCallParamRule {
-        callee_address: None,
-        callee_name: "GetClientRect".to_string(),
-        arg_index: 1,
-        pointer_alias: "LPRECT".to_string(),
-        pointee_alias: "RECT".to_string(),
-        pointer_size: 8,
-        pointee_sizes: vec![16],
-    });
+    let context = get_client_rect_preview_type_context();
 
     let rendered = render_mlil_preview_with_context(
         &func,
