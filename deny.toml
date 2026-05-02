@@ -113,6 +113,10 @@ allow = [
     "Zlib",
     "Unlicense",
     "Unicode-3.0",
+    # Workspace crates publish under AGPL (see CONTRIBUTING / crate manifests).
+    "AGPL-3.0-or-later",
+    # Transitive via Tauri / dirs (Servo cssparser, selectors, option-ext, …).
+    "MPL-2.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
