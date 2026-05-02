@@ -75,28 +75,22 @@ jobs:
       - name: Build fission-cli (release)
         run: cargo build -p fission-cli --locked --release
 
-      - name: Cache & install MinGW (benchmark PE builds)
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: mingw-w64
-          version: mingw-benchmark-v1
-
-      - name: Add Rust Windows GNU target
-        run: rustup target add x86_64-pc-windows-gnu
-
-      - name: Build benchmark binaries (small, medium, large)
+      # Smoke corpus entries point at benchmark/binary/**/.exe (gitignored); cross-compile from tracked C sources.
+      - name: Install MinGW-w64 (smoke corpus PE)
         run: |
-          for size in small medium large; do
-            echo "🔨 Building $size benchmark binaries..."
-            cd benchmark/binary/x86-64/window/$size
-            bash build.sh all 2>&1 | head -50
-            if [ -f "*.exe" ]; then
-              echo "✓ $size binaries built successfully"
-              ls -lh *.exe 2>/dev/null || true
-            fi
-            cd ../../../../../
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          command -v x86_64-w64-mingw32-gcc
+
+      - name: Build smoke corpus PE binaries (window/small C)
+        run: |
+          set -euo pipefail
+          bash benchmark/binary/x86-64/window/small/source/c/build.sh
+          for name in test_functions bitops_and_control_flow structs_and_pointers function_pointers_and_strings array_operations; do
+            f="benchmark/binary/x86-64/window/small/binary/c/${name}.exe"
+            test -s "$f"
+            echo "ok $f"
           done
-        continue-on-error: true
 
       - name: Run advisory smoke corpus benchmark
         id: benchmark
