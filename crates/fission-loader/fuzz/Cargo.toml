@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "fission-loader-fuzz"
 version = "0.0.0"
