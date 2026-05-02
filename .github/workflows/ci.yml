@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: ci-fast-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR: supersede stale runs. Push/main (and dispatch): queue instead of killing mid-checkout on slow runners.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
