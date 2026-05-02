@@ -386,11 +386,7 @@ impl ElfLoader {
         } else {
             std::mem::size_of::<Elf64Sym>()
         };
-        let count = if entry_size > 0 {
-            size as usize / entry_size
-        } else {
-            0
-        };
+        let count = (size as usize).checked_div(entry_size).unwrap_or(0);
 
         let sym_start = offset as usize;
         let sym_end = sym_start + size as usize;
@@ -517,11 +513,7 @@ impl ElfLoader {
         } else {
             std::mem::size_of::<Elf32Sym>()
         };
-        let count = if entry_size > 0 {
-            size as usize / entry_size
-        } else {
-            0
-        };
+        let count = (size as usize).checked_div(entry_size).unwrap_or(0);
 
         let sym_start = offset as usize;
         let sym_end = sym_start + size as usize;
