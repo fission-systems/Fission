@@ -14,7 +14,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  GHIDRA_INSTALL_DIR: vendor/ghidra/ghidra_11.4.2_PUBLIC
+  # Matches benchmark/full_benchmark DEFAULT_GHIDRA_DIRS and fission-sleigh resolver hints.
+  GHIDRA_INSTALL_DIR: vendor/ghidra/ghidra_12.0.4_PUBLIC
+  GHIDRA_RELEASE_ZIP_URL: https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.4_build/ghidra_12.0.4_PUBLIC_20260303.zip
 
 jobs:
   benchmark:
@@ -35,6 +37,24 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      # vendor/ghidra is not vendored in git — fetch the official PUBLIC bundle (same family as local dev paths).
+      - name: Restore Ghidra installation (cached)
+        id: ghidra-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GHIDRA_INSTALL_DIR }}
+          key: ghidra-12.0.4-public-20260303-${{ runner.os }}-v1
+
+      - name: Download and extract Ghidra
+        if: steps.ghidra-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${GHIDRA_INSTALL_DIR}")"
+          curl -fsSL "${GHIDRA_RELEASE_ZIP_URL}" -o /tmp/ghidra-public.zip
+          unzip -q /tmp/ghidra-public.zip -d "$(dirname "${GHIDRA_INSTALL_DIR}")"
+          rm -f /tmp/ghidra-public.zip
+          test -f "${GHIDRA_INSTALL_DIR}/support/analyzeHeadless"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
