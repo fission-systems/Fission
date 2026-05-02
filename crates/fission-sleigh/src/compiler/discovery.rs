@@ -79,6 +79,12 @@ pub struct GhidraInstallPaths {
     pub processors_root: PathBuf,
 }
 
+/// Returns true when a Ghidra install layout is present so packaged `.sla` ConstructTpl overlays can load.
+#[must_use]
+pub fn ghidra_packaged_sla_available() -> bool {
+    resolve_ghidra_install_paths().is_some()
+}
+
 pub fn resolve_ghidra_install_paths() -> Option<GhidraInstallPaths> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

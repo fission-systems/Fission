@@ -1,9 +1,20 @@
 use super::*;
 use crate::compiler::{
-    compile_frontend_for_entry_spec, compile_x86_64_frontend, spec_root_for_arch,
+    compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery, spec_root_for_arch,
     CompiledTemplateSource,
 };
 use std::path::PathBuf;
+
+macro_rules! require_packaged_ghidra_sla {
+    () => {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!(
+                "skip: packaged Ghidra .sla not found (vendor/ghidra layout or FISSION_GHIDRA_DIR)"
+            );
+            return;
+        }
+    };
+}
 
 fn assert_spec_derived_lift_or_typed_unsupported(
     compiled: &CompiledFrontend,
@@ -40,6 +51,7 @@ fn assert_spec_derived_lift_or_typed_unsupported(
 
 #[test]
 fn sla_template_feature_audit_smoke() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let audit = audit_sla_template_features(&compiled);
     let ctor_count: usize = compiled
@@ -59,6 +71,7 @@ fn sla_template_feature_audit_smoke() {
 
 #[test]
 fn generated_runtime_decodes_ret_with_spec_derived_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded = decode_instruction(&compiled, None, &[0xC3], 0x1000).expect("generated ret");
     assert_eq!(decoded.length, 1);
@@ -68,6 +81,7 @@ fn generated_runtime_decodes_ret_with_spec_derived_lift() {
 
 #[test]
 fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     let decoded = decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov");
@@ -78,6 +92,7 @@ fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
 
 #[test]
 fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded =
         decode_instruction(&compiled, None, &[0x75, 0x05], 0x1000).expect("generated jne");
@@ -92,6 +107,7 @@ fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
 
 #[test]
 fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded =
         decode_instruction(&compiled, None, &[0x7e, 0x05], 0x1000).expect("generated jle");
@@ -106,6 +122,7 @@ fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
 
 #[test]
 fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xC7, 0x00, 0x01, 0x00, 0x00, 0x00];
     let decoded =
@@ -130,6 +147,7 @@ fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility
 
 #[test]
 fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x83, 0xEC, 0x28];
     let decoded =
@@ -141,6 +159,7 @@ fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
 
 #[test]
 fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x8B, 0x05, 0x15, 0x30, 0x00, 0x00];
     let address = 0x1400_013e4;
@@ -169,6 +188,7 @@ fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lif
 
 #[test]
 fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xE8, 0x1A, 0xFC, 0xFF, 0xFF];
     let decoded =
@@ -180,6 +200,7 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
 
 #[test]
 fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
+    require_packaged_ghidra_sla!();
     let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
     let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
     let bytes = [0xc7, 0x05, 0x34, 0x50, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00];
@@ -209,6 +230,7 @@ fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
 
 #[test]
 fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
+    require_packaged_ghidra_sla!();
     let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
     let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
     let bytes = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
@@ -235,6 +257,7 @@ fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
 
 #[test]
 fn generated_runtime_records_decision_trace_for_startup_store() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
         .expect("decode context");
@@ -253,6 +276,7 @@ fn generated_runtime_records_decision_trace_for_startup_store() {
 
 #[test]
 fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x04, 0x11];
     let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_1450).expect("generated lea");
@@ -291,6 +315,7 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
 
 #[test]
 fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_error() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x41, 0xff];
     let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_148e)
@@ -315,6 +340,7 @@ fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_erro
 
 #[test]
 fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
     let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_19c0)
@@ -329,6 +355,7 @@ fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
 
 #[test]
 fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x63, 0x41, 0x3c];
     let decoded =
@@ -340,6 +367,7 @@ fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lif
 
 #[test]
 fn generated_runtime_zero_extends_reg32_decode_without_compatibility_lift() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x31, 0xc0];
     let decoded =
@@ -351,6 +379,7 @@ fn generated_runtime_zero_extends_reg32_decode_without_compatibility_lift() {
 
 #[test]
 fn generated_runtime_decodes_fninit_without_decode_no_match() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xdb, 0xe3];
     let decoded =
@@ -362,6 +391,7 @@ fn generated_runtime_decodes_fninit_without_decode_no_match() {
 
 #[test]
 fn generated_runtime_lifts_fninit_without_compatibility_emitter() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xdb, 0xe3];
     assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_25c0);
@@ -369,6 +399,7 @@ fn generated_runtime_lifts_fninit_without_compatibility_emitter() {
 
 #[test]
 fn generated_runtime_rejects_or_lifts_cmp_templates_without_compatibility() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x83, 0xf9, 0x01];
     assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1485);
@@ -376,6 +407,7 @@ fn generated_runtime_rejects_or_lifts_cmp_templates_without_compatibility() {
 
 #[test]
 fn generated_runtime_rejects_or_lifts_push_templates_without_compatibility() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x41, 0x57];
     assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1470);
@@ -383,6 +415,7 @@ fn generated_runtime_rejects_or_lifts_push_templates_without_compatibility() {
 
 #[test]
 fn generated_runtime_rejects_or_lifts_lea_templates_without_compatibility() {
+    require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x04, 0x11];
     assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
@@ -423,6 +456,7 @@ fn packed_context_bit_reads_cross_word_boundaries_like_ghidra() {
 
 #[test]
 fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
+    require_packaged_ghidra_sla!();
     let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x0c, 0x10, 0x8e, 0xd2];
@@ -440,6 +474,7 @@ fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
 
 #[test]
 fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle() {
+    require_packaged_ghidra_sla!();
     let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x0c, 0x0c, 0xaa, 0xf2];
@@ -468,6 +503,7 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
 
 #[test]
 fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
+    require_packaged_ghidra_sla!();
     let arm_spec = spec_root_for_arch("ARM").join("ARM7_le.slaspec");
     let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM7_le");
     let bytes = [0x08, 0x40, 0x2d, 0xe9];

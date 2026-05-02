@@ -1,31 +1,59 @@
 use super::*;
 
-pub(super) fn manifest_entry_for_entry_id(
-    entry_id: &str,
-) -> Result<Option<GhidraLanguageManifestEntry>> {
-    let manifest_path = ghidra_language_manifest_path();
-    if !manifest_path.exists() {
-        return Ok(None);
-    }
-    let manifest: GhidraLanguageManifest = serde_json::from_str(
-        &fs::read_to_string(&manifest_path)
-            .with_context(|| format!("read manifest {}", manifest_path.display()))?,
-    )
-    .with_context(|| format!("parse manifest {}", manifest_path.display()))?;
-    Ok(manifest
-        .entries
-        .into_iter()
-        .find(|entry| entry.entry_id == entry_id))
-}
+/// Explicit stems (`*.slaspec` basename without extension) supported as packaged-`.sla` runtime lifts.
+///
+/// This must **not** be derived by re-reading `ghidra_language_manifest.json`'s `runtime_status`:
+/// manifest regeneration (`build_ghidra_language_manifest`) used that path historically and could
+/// permanently promote every variant if the checked-in manifest was corrupted once.
+const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
+    // x86
+    "x86-64",
+    "x86",
+    // AARCH64
+    "AARCH64",
+    "AARCH64BE",
+    "AARCH64_AppleSilicon",
+    // ARM (16)
+    "ARM4_be",
+    "ARM4_le",
+    "ARM4t_be",
+    "ARM4t_le",
+    "ARM5_be",
+    "ARM5_le",
+    "ARM5t_be",
+    "ARM5t_le",
+    "ARM6_be",
+    "ARM6_le",
+    "ARM7_be",
+    "ARM7_le",
+    "ARM8_be",
+    "ARM8_le",
+    "ARM8m_be",
+    "ARM8m_le",
+    // MIPS (6)
+    "mips32be",
+    "mips32le",
+    "mips32R6be",
+    "mips32R6le",
+    "mips64be",
+    "mips64le",
+    // RISCV (`andestar_v5` stays compile-only)
+    "riscv.ilp32d",
+    "riscv.lp64d",
+];
 
 pub(super) fn runtime_status_for_entry(entry_id: &str) -> Result<String> {
-    Ok(manifest_entry_for_entry_id(entry_id)?
-        .map(|entry| entry.runtime_status)
-        .unwrap_or_else(|| "registered_compile_only".to_string()))
+    Ok(if is_executable_candidate_entry(entry_id)? {
+        "executable_candidate".to_string()
+    } else {
+        "registered_compile_only".to_string()
+    })
 }
 
 pub(super) fn is_executable_candidate_entry(entry_id: &str) -> Result<bool> {
-    Ok(runtime_status_for_entry(entry_id)? == "executable_candidate")
+    Ok(EXECUTABLE_CANDIDATE_ENTRY_IDS
+        .iter()
+        .any(|&id| id == entry_id))
 }
 
 pub(super) fn compatibility_aliases_for(processor: &str) -> Vec<String> {

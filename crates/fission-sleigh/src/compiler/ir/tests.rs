@@ -2,10 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::lowering::Collector;
 use super::*;
-use crate::compiler::{compile_frontend_for_entry_spec, x86_64_entry_spec_path};
+use crate::compiler::{compile_frontend_for_entry_spec, discovery, x86_64_entry_spec_path};
 
 #[test]
 fn compile_frontend_collects_pcode_ops_and_patterns() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for ConstructTpl decode check");
+        return;
+    }
     let entry_spec = x86_64_entry_spec_path();
     let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile frontend");
     assert!(
@@ -81,6 +85,10 @@ fn sla_construct_template_cutover_has_no_source_line_or_opprint_remap_overlay() 
 
 #[test]
 fn sla_native_runtime_ready_constructors_are_canonical() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for runtime-ready constructor check");
+        return;
+    }
     let entry_spec = x86_64_entry_spec_path();
     let compiled = crate::compiler::compile_frontend_for_entry_spec(&entry_spec)
         .expect("compile x86-64 frontend with packaged .sla");

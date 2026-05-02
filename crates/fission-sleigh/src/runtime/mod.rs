@@ -241,6 +241,7 @@ pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::discovery;
     use fission_core::architecture::BinaryLoadSpec;
     use fission_loader::loader::LoadedBinary;
     use std::collections::BTreeSet;
@@ -333,6 +334,10 @@ mod tests {
 
     #[test]
     fn runtime_frontend_lifts_x86_64_ret_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ret ConstructTpl lift");
+            return;
+        }
         let frontend =
             RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
         let decoded = frontend
@@ -376,6 +381,10 @@ mod tests {
 
     #[test]
     fn runtime_frontend_load_spec_matches_entry_id_frontend_for_ret() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ret lift parity check");
+            return;
+        }
         let load_spec = BinaryLoadSpec::new(
             "PE",
             0x140000000,
@@ -404,6 +413,17 @@ mod tests {
     fn runtime_frontend_load_spec_matches_entry_id_on_failing_test_functions_row() {
         let binary_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+        if !binary_path.is_file() {
+            eprintln!(
+                "skip: benchmark PE fixture missing (build via MinGW / CLI smoke workflow): {}",
+                binary_path.display()
+            );
+            return;
+        }
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for decode/lift parity check");
+            return;
+        }
         let binary = LoadedBinary::from_file(&binary_path).expect("load test_functions.exe");
         let entry_address = 0x140001450_u64;
         let bytes = binary
