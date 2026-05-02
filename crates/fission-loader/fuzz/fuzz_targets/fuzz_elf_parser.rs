@@ -5,6 +5,7 @@
 
 #![no_main]
 
+use fission_loader::LoadedBinary;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -14,10 +15,10 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Check for ELF magic before attempting parse
-    if data.get(0..4) != Some(&[0x7F, 0x45, 0x4C, 0x46]) {
+    if data.get(0..4) != Some(&b"\x7fELF"[..]) {
         return;
     }
 
     // Attempt to load the binary - should not panic
-    let _ = fission_loader::loader::load_binary_from_bytes(data, "fuzz_input.elf");
+    let _ = LoadedBinary::from_bytes(data.to_vec(), "fuzz_input.elf".to_string());
 });
