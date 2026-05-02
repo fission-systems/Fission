@@ -40,11 +40,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       # Lane `nir` points at this path; exe is gitignored like cli-smoke — build from checked-in C source.
-      - name: Cache & install MinGW (PE fixture for nir lane)
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: gcc-mingw-w64-x86-64
-          version: mingw-pe-nir-lane-v1
+      # Use apt-get directly: cache-apt-pkgs-action can restore without exposing mingw on PATH (exit 127).
+      - name: Install MinGW-w64 (PE nir-lane fixture)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          command -v x86_64-w64-mingw32-gcc
 
       - name: Build PE nir-lane fixture (MinGW-w64)
         run: |
