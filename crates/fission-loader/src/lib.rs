@@ -48,6 +48,16 @@
 #![allow(clippy::map_unwrap_or)]
 #![allow(clippy::get_first)]
 #![allow(clippy::assigning_clones)]
+#![allow(clippy::needless_raw_string_hashes)]
+#![allow(clippy::trivially_copy_pass_by_ref)]
+#![allow(clippy::unnecessary_sort_by)]
+#![allow(clippy::manual_checked_ops)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::range_plus_one)]
+#![allow(clippy::format_collect)]
+#![allow(clippy::len_without_is_empty)]
+#![allow(clippy::manual_contains)]
+#![allow(clippy::unnecessary_map_or)]
 
 pub mod detector;
 pub mod loader;
