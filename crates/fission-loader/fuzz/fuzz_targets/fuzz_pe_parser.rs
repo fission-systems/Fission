@@ -5,6 +5,7 @@
 
 #![no_main]
 
+use fission_loader::LoadedBinary;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -14,10 +15,10 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Check for MZ signature before attempting parse
-    if data.get(0..2) != Some(&[0x4D, 0x5A]) {
+    if data.get(0..2) != Some(&b"MZ"[..]) {
         return;
     }
 
     // Attempt to load the binary - should not panic
-    let _ = fission_loader::loader::load_binary_from_bytes(data, "fuzz_input.exe");
+    let _ = LoadedBinary::from_bytes(data.to_vec(), "fuzz_input.exe".to_string());
 });
