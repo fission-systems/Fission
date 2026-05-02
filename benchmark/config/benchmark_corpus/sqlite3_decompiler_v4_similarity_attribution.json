@@ -23,19 +23,19 @@
       ],
       "canonical_quality_rows": [
         {
-          "address": "0x180001140",
-          "name": "sqlite3_step",
-          "role": "call_target_canary"
+          "address": "0x1800085d0",
+          "name": "FUN_0x1800085d0",
+          "role": "implementation_call_surface_canary"
         },
         {
-          "address": "0x1800012b7",
-          "name": "sqlite3_prepare_v3",
-          "role": "call_target_canary"
+          "address": "0x180008fd0",
+          "name": "FUN_0x180008fd0",
+          "role": "implementation_call_surface_canary"
         },
         {
-          "address": "0x18000140b",
-          "name": "sqlite3_busy_handler",
-          "role": "call_target_canary"
+          "address": "0x180009d00",
+          "name": "FUN_0x180009d00",
+          "role": "implementation_call_surface_canary"
         }
       ],
       "seed_limit": 20,

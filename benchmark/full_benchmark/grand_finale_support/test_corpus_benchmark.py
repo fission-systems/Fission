@@ -28,6 +28,7 @@ from grand_finale_support.benchmark_core import (
     _refresh_single_summary_target_rows_from_row_gate,
     _resolve_binary_watchlist,
     build_pairwise_engine_comparison,
+    build_seeded_function_set,
     build_corpus_assessment,
     compare_with_previous_summary,
     load_corpus_manifest,
@@ -539,6 +540,37 @@ class CorpusBenchmarkTests(unittest.TestCase):
                     }
                 ],
             )
+
+    def test_build_seeded_function_set_keeps_required_rows_beyond_limit(self) -> None:
+        import grand_finale_support.benchmark_core as benchmark_core
+
+        original = benchmark_core.list_functions_with_fission
+        try:
+            benchmark_core.list_functions_with_fission = lambda *_args, **_kwargs: [
+                ("0x1000", "first"),
+                ("0x1010", "second"),
+                ("0x1020", "third"),
+                ("0x2000", "canary"),
+            ]
+
+            seeded = build_seeded_function_set(
+                binary_path=Path("sample.dll"),
+                fission_bin=Path("fission_cli"),
+                limit=2,
+                timeout_sec=1,
+                required_functions=[("0x2000", "call_target_canary")],
+            )
+        finally:
+            benchmark_core.list_functions_with_fission = original
+
+        self.assertEqual(
+            seeded,
+            [
+                ("0x1000", "first"),
+                ("0x1010", "second"),
+                ("0x2000", "canary"),
+            ],
+        )
 
     def test_load_corpus_manifest_defaults_legacy_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

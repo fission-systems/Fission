@@ -2746,6 +2746,7 @@ def build_seeded_function_set(
     fission_bin: Path,
     limit: int | None,
     timeout_sec: int,
+    required_functions: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str]]:
     discovered = list_functions_with_fission(
         ROOT_DIR,
@@ -2754,14 +2755,26 @@ def build_seeded_function_set(
         timeout_sec=timeout_sec,
     )
     if not discovered:
-        return []
+        return _normalize_row_target_pairs(required_functions)
     sampled = sample_functions(
         binary_path.name,
         discovered,
         limit or len(discovered),
         {},
     )
-    return [(canonical_address(address), name) for address, name in sampled]
+    selected: list[tuple[str, str]] = [
+        (canonical_address(address), name) for address, name in sampled
+    ]
+    seen = {address for address, _ in selected}
+    discovered_names = {
+        canonical_address(address): name for address, name in discovered
+    }
+    for address, role_or_name in _normalize_row_target_pairs(required_functions):
+        if address in seen:
+            continue
+        selected.append((address, discovered_names.get(address, role_or_name)))
+        seen.add(address)
+    return selected
 
 
 def build_address_alignment_summary(
@@ -6037,11 +6050,9 @@ def run_single_benchmark(
             DEFAULT_DYNAMIC_WATCHLIST_LIMIT,
         ),
     )
-    row_fidelity_targets_filter = [
-        (str(row.get("address", "")), str(row.get("role", "canary")))
-        for row in list(watchlist_metadata["rows"])
-        if isinstance(row, dict) and row.get("address")
-    ]
+    row_fidelity_targets_filter = _normalize_row_target_pairs(
+        list(watchlist_metadata["rows"])
+    )
     baseline_row_targets = row_fidelity_targets_filter or None
 
     print(f"[*] Binary: {binary_path}")
@@ -6115,6 +6126,7 @@ def run_single_benchmark(
         fission_bin=fission_bin,
         limit=effective_limit,
         timeout_sec=args.timeout,
+        required_functions=row_fidelity_targets_filter,
     )
     print(f"[*] Seeded function set: {len(seeded_functions)} canonical functions")
 
