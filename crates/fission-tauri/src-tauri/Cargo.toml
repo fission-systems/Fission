@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Fission - Tauri GUI"
 authors = ["Fission Dev Team"]
 edition = "2021"
+repository = "https://github.com/sjkim1127/Fission"
 license = "AGPL-3.0-or-later"
+readme = "../../../README.md"
+keywords = ["fission", "tauri", "decompiler", "gui"]
+categories = ["development-tools", "gui"]
 
 [lib]
 name = "fission_tauri_lib"

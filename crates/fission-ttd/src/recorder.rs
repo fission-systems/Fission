@@ -82,10 +82,10 @@ impl TTDRecorder {
     }
 
     fn enforce_max_snapshots(&mut self) {
-        if self.snapshots.len() >= self.max_snapshots {
-            if let Some(oldest) = self.snapshots.pop_front() {
-                self.snapshot_steps.remove(&oldest.step_index);
-            }
+        if self.snapshots.len() >= self.max_snapshots
+            && let Some(oldest) = self.snapshots.pop_front()
+        {
+            self.snapshot_steps.remove(&oldest.step_index);
         }
     }
 

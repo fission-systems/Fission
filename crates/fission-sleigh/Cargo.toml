@@ -3,7 +3,12 @@ name = "fission-sleigh"
 version = "0.1.0"
 edition = "2021"
 authors = ["Fission Dev Team"]
+description = "Ghidra Sleigh compiler/runtime integration for Fission"
+repository = "https://github.com/sjkim1127/Fission"
 license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["sleigh", "ghidra", "disassembly", "fission"]
+categories = ["development-tools"]
 
 [dependencies]
 anyhow = "1.0.102"

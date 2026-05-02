@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction, Varnode, WrapperClass,

@@ -6,6 +6,7 @@ authors = ["Fission Dev Team"]
 description = "P-code IR and optimizer for Fission decompiler"
 repository = "https://github.com/sjkim1127/Fission"
 license = "AGPL-3.0-or-later"
+readme = "../../README.md"
 keywords = ["ir", "pcode", "optimizer", "decompiler"]
 categories = ["development-tools"]
 

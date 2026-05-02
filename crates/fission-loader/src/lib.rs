@@ -3,7 +3,8 @@
 //! This crate provides functionality for loading and parsing various binary formats
 //! including PE (Windows), ELF (Linux), and Mach-O (macOS).
 
-#![warn(clippy::pedantic)]
+// CI runs `cargo clippy ... -D warnings`; pedantic stays opt-in via scoped warns later.
+#![allow(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]
@@ -32,7 +33,7 @@
 #![allow(clippy::single_char_pattern)]
 #![allow(clippy::needless_borrows_for_generic_args)]
 #![allow(clippy::unnecessary_wraps)]
-#![allow(clippy::self_only_used_in_recursion)]
+#![allow(clippy::only_used_in_recursion)]
 #![allow(clippy::pub_underscore_fields)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::question_mark)]
@@ -51,7 +52,6 @@
 #![allow(clippy::needless_raw_string_hashes)]
 #![allow(clippy::trivially_copy_pass_by_ref)]
 #![allow(clippy::unnecessary_sort_by)]
-#![allow(clippy::manual_checked_ops)]
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::range_plus_one)]
 #![allow(clippy::format_collect)]

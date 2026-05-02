@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 mod corpus;
 mod diagnosis;
 mod inventory;

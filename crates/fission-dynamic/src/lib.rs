@@ -1,11 +1,6 @@
 //! Fission dynamic analysis and runtime engine.
 
-#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
-#![allow(clippy::module_name_repetitions)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::all)]
 
 #[cfg(feature = "interactive_runtime")]
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]

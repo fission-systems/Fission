@@ -6,6 +6,7 @@ authors = ["Fission Dev Team"]
 description = "Binary format loader and parser for Fission"
 repository = "https://github.com/sjkim1127/Fission"
 license = "AGPL-3.0-or-later"
+readme = "../../README.md"
 keywords = ["binary", "loader", "pe", "elf", "mach-o"]
 categories = ["development-tools", "parser-implementations"]
 
