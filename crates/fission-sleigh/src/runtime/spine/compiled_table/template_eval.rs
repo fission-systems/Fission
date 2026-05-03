@@ -458,13 +458,14 @@ impl<'c> CompiledTableEmitter<'c> {
                 let value = self.read_template_varnode(input_tpl, state, 0)?;
 
                 if let Some(target) = self.dynamic_memory_target(out_tpl, state)? {
-                    let store_value = if value.is_constant {
-                        self.emitter
-                            .emit_copy(target.temp.clone(), value, mnemonic)?;
-                        target.temp
-                    } else {
-                        value
-                    };
+                    // Ghidra `PcodeEmit` materializes a dynamic output
+                    // location as a temporary varnode first, then emits the
+                    // backing STORE from that temporary. Do not fold the
+                    // parent COPY away for register inputs: raw p-code parity
+                    // depends on this two-step location generation.
+                    self.emitter
+                        .emit_copy(target.temp.clone(), value, mnemonic)?;
+                    let store_value = target.temp;
                     if store_value.size != target.size {
                         bail!(
                             "dynamic memory STORE value size {} did not match target size {}",

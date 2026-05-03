@@ -339,6 +339,40 @@ fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_erro
 }
 
 #[test]
+fn generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent() {
+    require_packaged_ghidra_sla!();
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let bytes = [0x48, 0x89, 0x5c, 0x24, 0x08];
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x1800_85d0)
+            .expect("lift mov [rsp + disp8], rbx");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!details.compat_emitter_used);
+
+    let int_add = ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::IntAdd)
+        .expect("address INT_ADD");
+    assert_eq!(
+        int_add.inputs[0].constant_val, 8,
+        "disp8 must be read after the ModRM+SIB terminal extent, not from the SIB byte"
+    );
+    assert_eq!(
+        ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
+        vec![
+            PcodeOpcode::IntAdd,
+            PcodeOpcode::Copy,
+            PcodeOpcode::Store,
+        ],
+        "dynamic memory COPY must materialize through the Ghidra temp before STORE"
+    );
+}
+
+#[test]
 fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");

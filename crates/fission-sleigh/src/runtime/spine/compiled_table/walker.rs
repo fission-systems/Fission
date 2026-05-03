@@ -1297,7 +1297,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.selection.trace.root_bucket.as_str(),
             )
         {
-            self.cursor.saturating_add(1)
+            let matched_pattern_len = self
+                .selection
+                .trace
+                .matched_leaf_pattern
+                .as_ref()
+                .map(disjoint_pattern_instruction_byte_len)
+                .unwrap_or(0);
+            if matched_pattern_len > 0 {
+                self.ctx.cursor.saturating_add(matched_pattern_len)
+            } else {
+                self.cursor.saturating_add(1)
+            }
         } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && reloffset.is_some_and(|rel| rel >= 0)
             && offsetbase.unwrap_or(-1) < 0

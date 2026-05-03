@@ -22,6 +22,52 @@
 - `cargo test -p fission-pcode call_target -- --test-threads=1` passed.
 - `cargo test -p fission-decompiler-core call_target -- --test-threads=1` passed.
 
+## sqlite3 raw p-code canary parity: SIB extent and dynamic COPY
+
+- Root cause:
+  sqlite3 canary rows `0x1800085d0` and `0x180008fd0` decoded `mov qword ptr
+  [rsp+disp8], rbx` through the correct `.sla ConstructTpl`, but Fission read
+  the displacement from the SIB byte (`0x24`) instead of the following `disp8`
+  byte. After fixing the displacement, the remaining difference was that
+  Fission folded Ghidra's dynamic-output `COPY temp <- RBX` before the backing
+  `STORE`.
+- Fix:
+  shared-token trailing subtable cursor placement now uses the selected
+  terminal `.sla` disjoint-pattern instruction byte length when available.
+  This keeps the cursor tied to the verified terminal pattern instead of a
+  one-byte ModRM/SIB assumption.
+- Fix:
+  dynamic memory COPY output emission now follows Ghidra `PcodeEmit` location
+  generation: materialize the dynamic output into its temp varnode first, then
+  emit the backing STORE from that temp. The parent COPY is no longer folded
+  away for register inputs.
+- Regression test:
+  added `generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent`
+  for `48 89 5c 24 08`, asserting the `disp8` value `8` comes from after the
+  ModRM+SIB terminal extent and that the op shape is `INT_ADD`, `COPY`, `STORE`.
+- sqlite3 raw p-code canary:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_dynamic_copy_fixed`
+  improved from `full_match=1/3`, average similarity
+  `0.6795555555555556`, average parity ratio `0.3333333333333333` to
+  `full_match=3/3`, average similarity `1.0`, average parity ratio `1.0`,
+  `compat_emitter_used=0`, fake placeholder op `0`, and invalid p-code shape
+  `0`.
+- x86-64 canonical guard:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sib_extent_canonical_guard`
+  remained green with `full_match=44`, average similarity `1.0`, average
+  parity ratio `1.0`, `compat_emitter_used=0`, fake placeholder op `0`, and
+  invalid p-code shape `0`.
+- sqlite3 full benchmark:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_sib_extent_dynamic_copy_fixed`
+  completed with coverage `100%`, failed rows `0`, and weighted average
+  normalized similarity `27.640%` (`+0.030` absolute versus the previous
+  `27.610%` baseline).
+- Validation:
+  `cargo test -p fission-sleigh generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent -- --test-threads=1 --nocapture`,
+  `cargo check -p fission-sleigh`, `cargo build --release -p fission-cli`, and
+  `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py`
+  passed.
+
 ## SLEIGH audit fatal gate rollback and decompiler benchmark revalidation
 
 - Root cause:
