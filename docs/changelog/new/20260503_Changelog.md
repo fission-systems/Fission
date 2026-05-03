@@ -152,3 +152,48 @@
   V7 is validated by unit and integration gates, but the sqlite3 full benchmark
   is blocked by SLEIGH artifact/runtime state before call-target lowering. No
   benchmark-side repair or call-name guessing was added.
+
+## Raw P-code SLEIGH preflight gate for decompiler V7
+
+- Added `benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json`
+  with sqlite3 decompiler canary rows `0x1800085d0`, `0x180008fd0`, and
+  `0x180009d00`. This manifest is an admission guard: decompiler quality
+  benchmarks should not be interpreted until SLEIGH raw p-code reaches these
+  rows first.
+- Ran canonical raw p-code preflight:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_canonical_current`
+- Result:
+  canonical gate failed before parity comparison with `fission_decode_error=17`,
+  `missing_fission_instruction=29`, `full_match=0`, average similarity `0.0`,
+  and average parity ratio `0.0`. All sampled Fission instruction failures were
+  `UnsupportedGeneratedSemantic: x86-64 runtime status is executable_candidate`.
+- Ran vendor raw p-code smoke:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/vendor_binary_smoke.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_vendor_current`
+- Result:
+  vendor smoke failed before parity comparison with `fission_decode_error=4`,
+  `missing_fission_instruction=12`, and Fission instruction count `0`. x86 and
+  x86-64 rows failed with `UnsupportedGeneratedSemantic: <language> runtime
+  status is executable_candidate`.
+- Ran sqlite3 raw p-code canary:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_current`
+- Result:
+  sqlite3 canary failed before NIR/decompiler entry with `fission_decode_error=3`
+  and all three rows reporting `UnsupportedGeneratedSemantic: x86-64 runtime
+  status is executable_candidate`.
+- Interpretation:
+  the current local SLEIGH runtime state blocks raw p-code below NIR/HIR, so the
+  sqlite3 full benchmark was intentionally not re-run as a V7 quality gate. The
+  next owner is SLEIGH runtime/generated artifact gating, not call-target
+  decompiler logic.
+
+## Raw P-code preflight validation
+
+- `cargo check -p fission-sleigh` passed.
+- `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
+  passed.
+- `cargo build --release -p fission-cli` passed.
+- `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py`
+  passed.
+- `cargo test -p fission-pcode type_hints_imports -- --test-threads=1` passed.
+- `cargo test -p fission-pcode call_target -- --test-threads=1` passed.
+- `cargo test -p fission-decompiler-core call_target -- --test-threads=1` passed.
