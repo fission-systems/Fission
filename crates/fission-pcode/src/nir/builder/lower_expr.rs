@@ -1,5 +1,15 @@
 use super::*;
 
+const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallTargetConstReject {
+    UnsupportedOpcode,
+    AmbiguousDef,
+    NonDominatingDef,
+    NoDef,
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn debug_preview_log(&self, message: &str) {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
@@ -218,7 +228,7 @@ impl<'a> PreviewBuilder<'a> {
                     if let Some(target) = self.recover_opaque_callind_target(target) {
                         target
                     } else {
-                        let target_expr = self.lower_varnode(target, &mut HashSet::new()).ok();
+                        let target_expr = self.lower_varnode(target, visiting).ok();
                         self.record_unsupported_inventory_event(
                             "call_target_unsupported",
                             Some(target),
@@ -358,15 +368,15 @@ impl<'a> PreviewBuilder<'a> {
 
     fn resolve_iat_load_call_target(&mut self, target: &Varnode) -> Option<String> {
         let Some((_, producer)) = self.lookup_def_site(target) else {
-            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
             return None;
         };
         if producer.opcode != PcodeOpcode::Load {
-            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
             return None;
         }
         let Some(output) = producer.output.as_ref() else {
-            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
             return None;
         };
         if output.size != self.options.pointer_size {
@@ -374,14 +384,143 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let Some(ptr) = producer.inputs.get(1) else {
-            self.call_target_indirect_rejected_non_const_ptr_count += 1;
+            self.record_call_target_const_reject(CallTargetConstReject::NoDef);
             return None;
         };
-        if !ptr.is_constant {
-            self.call_target_indirect_rejected_non_const_ptr_count += 1;
-            return None;
+        let ptr_addr = if ptr.is_constant {
+            ptr.constant_val as u64
+        } else {
+            let producer_site = self
+                .lookup_def_site(target)
+                .map(|(site, _)| site)
+                .unwrap_or_else(|| self.current_lowering_site.unwrap_or(LoweringSite {
+                    block_idx: 0,
+                    op_idx: usize::MAX,
+                }));
+            match self.resolve_exact_scalar_const_for_call_target(
+                ptr,
+                producer_site,
+                CALL_TARGET_CONST_FOLD_BUDGET,
+            ) {
+                Ok(addr) => {
+                    self.call_target_indirect_ptr_const_folded_count += 1;
+                    addr
+                }
+                Err(reason) => {
+                    self.record_call_target_const_reject(reason);
+                    return None;
+                }
+            }
+        };
+        self.resolve_call_target_by_iat_slot(ptr_addr)
+    }
+
+    fn record_call_target_const_reject(&mut self, reason: CallTargetConstReject) {
+        self.call_target_indirect_rejected_non_const_ptr_count += 1;
+        match reason {
+            CallTargetConstReject::UnsupportedOpcode => {
+                self.call_target_indirect_rejected_unsupported_ptr_opcode_count += 1;
+            }
+            CallTargetConstReject::AmbiguousDef => {
+                self.call_target_indirect_rejected_ambiguous_def_count += 1;
+            }
+            CallTargetConstReject::NonDominatingDef => {
+                self.call_target_indirect_rejected_non_dominating_def_count += 1;
+            }
+            CallTargetConstReject::NoDef => {
+                self.call_target_indirect_rejected_no_def_count += 1;
+            }
         }
-        self.resolve_call_target_by_iat_slot(ptr.constant_val as u64)
+    }
+
+    fn exact_def_site_for_call_target(
+        &self,
+        vn: &Varnode,
+        scope: LoweringSite,
+    ) -> Result<LoweringSite, CallTargetConstReject> {
+        let key = VarnodeKey::from(vn);
+        let Some(sites) = self.def_sites.get(&key) else {
+            return Err(CallTargetConstReject::NoDef);
+        };
+        if sites.is_empty() {
+            return Err(CallTargetConstReject::NoDef);
+        }
+        if let Some(defs_in_block) = self.block_defs.get(scope.block_idx)
+            && let Some(def_indices) = defs_in_block.get(&key)
+        {
+            let prior_count = def_indices.partition_point(|idx| *idx < scope.op_idx);
+            if prior_count > 0 {
+                return Ok(LoweringSite {
+                    block_idx: scope.block_idx,
+                    op_idx: def_indices[prior_count - 1],
+                });
+            }
+        }
+
+        let mut candidates = sites
+            .iter()
+            .filter_map(|site| {
+                if site.block_idx == scope.block_idx {
+                    return (site.op_idx < scope.op_idx).then_some(LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: site.op_idx,
+                    });
+                }
+                self.dom_tree
+                    .dominates(site.block_idx, scope.block_idx)
+                    .then_some(LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: site.op_idx,
+                    })
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|site| (site.block_idx, site.op_idx));
+        candidates.dedup();
+        match candidates.as_slice() {
+            [site] => Ok(*site),
+            [] => Err(CallTargetConstReject::NonDominatingDef),
+            _ => Err(CallTargetConstReject::AmbiguousDef),
+        }
+    }
+
+    fn resolve_exact_scalar_const_for_call_target(
+        &self,
+        vn: &Varnode,
+        scope: LoweringSite,
+        budget: usize,
+    ) -> Result<u64, CallTargetConstReject> {
+        if vn.is_constant {
+            return Ok(vn.constant_val as u64);
+        }
+        if budget == 0 {
+            return Err(CallTargetConstReject::UnsupportedOpcode);
+        }
+        let site = self.exact_def_site_for_call_target(vn, scope)?;
+        let producer = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+        let input_const = |idx: usize| {
+            producer
+                .inputs
+                .get(idx)
+                .ok_or(CallTargetConstReject::NoDef)
+                .and_then(|input| {
+                    self.resolve_exact_scalar_const_for_call_target(input, site, budget - 1)
+                })
+        };
+        match producer.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                input_const(0)
+            }
+            PcodeOpcode::IntAdd => Ok(input_const(0)?.wrapping_add(input_const(1)?)),
+            PcodeOpcode::IntSub => Ok(input_const(0)?.wrapping_sub(input_const(1)?)),
+            PcodeOpcode::PtrAdd => {
+                let base = input_const(0)?;
+                let index = input_const(1)?;
+                let scale = input_const(2)?;
+                Ok(base.wrapping_add(index.wrapping_mul(scale)))
+            }
+            PcodeOpcode::PtrSub => Ok(input_const(0)?.wrapping_add(input_const(1)?)),
+            _ => Err(CallTargetConstReject::UnsupportedOpcode),
+        }
     }
 
     fn debug_callind_target_recovery(&self, label: &str) {

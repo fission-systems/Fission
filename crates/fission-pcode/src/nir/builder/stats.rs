@@ -239,10 +239,20 @@ impl<'a> PreviewBuilder<'a> {
             call_target_iat_slot_resolved_count: self.call_target_iat_slot_resolved_count,
             call_target_indirect_load_resolved_count: self
                 .call_target_indirect_load_resolved_count,
+            call_target_indirect_ptr_const_folded_count: self
+                .call_target_indirect_ptr_const_folded_count,
             call_target_indirect_rejected_non_iat_load_count: self
                 .call_target_indirect_rejected_non_iat_load_count,
             call_target_indirect_rejected_non_const_ptr_count: self
                 .call_target_indirect_rejected_non_const_ptr_count,
+            call_target_indirect_rejected_unsupported_ptr_opcode_count: self
+                .call_target_indirect_rejected_unsupported_ptr_opcode_count,
+            call_target_indirect_rejected_ambiguous_def_count: self
+                .call_target_indirect_rejected_ambiguous_def_count,
+            call_target_indirect_rejected_non_dominating_def_count: self
+                .call_target_indirect_rejected_non_dominating_def_count,
+            call_target_indirect_rejected_no_def_count: self
+                .call_target_indirect_rejected_no_def_count,
             call_target_indirect_rejected_width_mismatch_count: self
                 .call_target_indirect_rejected_width_mismatch_count,
             call_target_unresolved_no_exact_identity_count: self

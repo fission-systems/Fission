@@ -1058,12 +1058,27 @@ pub struct NirBuildStats {
     /// Indirect calls resolved through a pointer-sized load from an exact IAT slot.
     #[serde(default)]
     pub call_target_indirect_load_resolved_count: usize,
+    /// Indirect call load pointers folded to an exact constant through def-use proof.
+    #[serde(default)]
+    pub call_target_indirect_ptr_const_folded_count: usize,
     /// Indirect load targets rejected because the load address is not an exact IAT slot.
     #[serde(default)]
     pub call_target_indirect_rejected_non_iat_load_count: usize,
     /// Indirect load targets rejected because the pointer expression is not constant.
     #[serde(default)]
     pub call_target_indirect_rejected_non_const_ptr_count: usize,
+    /// Indirect load pointers rejected because a producer opcode is not allowed in exact proof.
+    #[serde(default)]
+    pub call_target_indirect_rejected_unsupported_ptr_opcode_count: usize,
+    /// Indirect load pointers rejected because multiple reaching definitions were available.
+    #[serde(default)]
+    pub call_target_indirect_rejected_ambiguous_def_count: usize,
+    /// Indirect load pointers rejected because no definition dominated the call site.
+    #[serde(default)]
+    pub call_target_indirect_rejected_non_dominating_def_count: usize,
+    /// Indirect load pointers rejected because no definition was available.
+    #[serde(default)]
+    pub call_target_indirect_rejected_no_def_count: usize,
     /// Indirect load targets rejected because the loaded width is not pointer-sized.
     #[serde(default)]
     pub call_target_indirect_rejected_width_mismatch_count: usize,
@@ -1509,10 +1524,20 @@ impl NirBuildStats {
         self.call_target_iat_slot_resolved_count += other.call_target_iat_slot_resolved_count;
         self.call_target_indirect_load_resolved_count +=
             other.call_target_indirect_load_resolved_count;
+        self.call_target_indirect_ptr_const_folded_count +=
+            other.call_target_indirect_ptr_const_folded_count;
         self.call_target_indirect_rejected_non_iat_load_count +=
             other.call_target_indirect_rejected_non_iat_load_count;
         self.call_target_indirect_rejected_non_const_ptr_count +=
             other.call_target_indirect_rejected_non_const_ptr_count;
+        self.call_target_indirect_rejected_unsupported_ptr_opcode_count +=
+            other.call_target_indirect_rejected_unsupported_ptr_opcode_count;
+        self.call_target_indirect_rejected_ambiguous_def_count +=
+            other.call_target_indirect_rejected_ambiguous_def_count;
+        self.call_target_indirect_rejected_non_dominating_def_count +=
+            other.call_target_indirect_rejected_non_dominating_def_count;
+        self.call_target_indirect_rejected_no_def_count +=
+            other.call_target_indirect_rejected_no_def_count;
         self.call_target_indirect_rejected_width_mismatch_count +=
             other.call_target_indirect_rejected_width_mismatch_count;
         self.call_target_unresolved_no_exact_identity_count +=

@@ -94,3 +94,61 @@
   the sqlite3 canary rows do not currently expose a proofable
   `CALLIND LOAD(const_iat_slot)` path. The new gate now records the exact blocker
   instead of guessing call names from temporary variables or rendered text.
+
+## Decompiler Quality V7: folded indirect import call target proof
+
+- Extended the Ghidra `ActionDeindirect`-style owner in HIR call lowering with a
+  strict scalar proof for `CALLIND LOAD(pointer_expr)`.
+- Allowed only exact def-use constants: direct constants, `COPY`/cast-preserving
+  chains, `INT_ADD`, `INT_SUB`, `PTRADD`, and `PTRSUB` with exact constant inputs.
+- Kept register-derived, memory-derived, unknown, unsupported opcode,
+  non-dominating, no-def, and ambiguous multi-def cases as fallback output with
+  typed telemetry.
+- Added additive `NirBuildStats` and full benchmark owner metrics for folded
+  pointer proof and rejection breakdown:
+  `call_target_indirect_ptr_const_folded`,
+  `call_target_indirect_rejected_unsupported_ptr_opcode`,
+  `call_target_indirect_rejected_ambiguous_def`,
+  `call_target_indirect_rejected_non_dominating_def`, and
+  `call_target_indirect_rejected_no_def`.
+- Added targeted tests proving `CALLIND LOAD(COPY(IAT_CONST))` and
+  `CALLIND LOAD(INT_ADD(base_const, delta_const))` resolve only through exact
+  `NirTypeContext.iat_target_refs`; unsupported pointer opcodes do not promote
+  API names.
+
+## V7 Validation
+
+- `cargo test -p fission-pcode call_target -- --test-threads=1` passed.
+- `cargo test -p fission-pcode type_hints_imports -- --test-threads=1` passed.
+- `cargo test -p fission-decompiler-core call_target -- --test-threads=1` passed.
+- `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark`
+  passed.
+- `python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py`
+  passed.
+- `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
+  passed.
+- `cargo build --release -p fission-cli` passed.
+
+## V7 Benchmark
+
+- Command:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_deindirect_v7_after`
+- Artifact:
+  `benchmark/artifacts/full_benchmark/sqlite3_cycle_deindirect_v7_after`
+- Result:
+  benchmark command completed, but Fission rows failed before the V7 NIR call
+  target path with `UnsupportedGeneratedSemantic: x86-64 runtime status is
+  executable_candidate`. The active local worktree contains an unrelated
+  unstaged SLEIGH runtime gate change, so this run is not a valid decompiler
+  quality regression measurement.
+- Cross-check:
+  a temporary clean worktree with only the V7 patch applied built successfully,
+  but the sqlite3 benchmark still failed before NIR with
+  `UnsupportedPcodeTemplate: x86-64: missing_sla_construct_tpl`. This indicates
+  the current clean checkout/generated SLEIGH artifact state cannot reproduce
+  the previous sqlite3 V6 benchmark lane without restoring the exact generated
+  SLEIGH runtime artifact state.
+- Interpretation:
+  V7 is validated by unit and integration gates, but the sqlite3 full benchmark
+  is blocked by SLEIGH artifact/runtime state before call-target lowering. No
+  benchmark-side repair or call-name guessing was added.
