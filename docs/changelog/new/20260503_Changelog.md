@@ -21,6 +21,44 @@
 - `cargo build --release -p fission-cli` passed.
 - `cargo test -p fission-pcode call_target -- --test-threads=1` passed.
 - `cargo test -p fission-decompiler-core call_target -- --test-threads=1` passed.
+
+## SLEIGH audit fatal gate rollback and decompiler benchmark revalidation
+
+- Root cause:
+  local `crates/fission-sleigh/src/runtime/engine.rs` had promoted reporting-only
+  `RuntimeLegacyPathAudit` counters to fatal `UnsupportedGeneratedSemantic`
+  errors. This converted otherwise successful `.sla ConstructTpl` executions
+  into raw p-code decode failures before NIR/HIR could run.
+- Fix:
+  restored the default compiled-table contract so legacy audit data remains
+  telemetry in `RuntimeExecutionDetails` instead of a semantic failure gate.
+  No compatibility emitter, approximation, manual mapping, or architecture
+  hardcoding was added.
+- Single-row verification:
+  `test_functions.exe @ 0x140001450` now decodes as `lea`, length `3`,
+  `template_source=SpecDerived`, with audit counters
+  `legacy_shared_token_policy=1` and `no_export_subtable_fallback=1` preserved
+  as report-only telemetry.
+- Canonical raw p-code gate:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_canonical_fixed`
+  passed with `full_match=44`, average similarity `1.0`, average parity ratio
+  `1.0`, `compat_emitter_used=0`, fake placeholder op `0`, and invalid p-code
+  shape `0`.
+- sqlite3 raw p-code canary:
+  `python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_fixed`
+  reached all three rows with real `sla_construct_tpl` source. It produced
+  `full_match=1/3`, average similarity `0.6795555555555556`, and average
+  parity ratio `0.3333333333333333`, so the execution blocker is fixed while
+  remaining sqlite3 canary differences are now a separate SLEIGH p-code parity
+  owner issue.
+- sqlite3 full decompiler benchmark:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_engine_audit_fixed`
+  completed with coverage `100%`, failed rows `0`, and weighted average
+  normalized similarity `27.610%`.
+- Validation:
+  `cargo check -p fission-sleigh`, `cargo build --release -p fission-cli`, and
+  `python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py`
+  passed.
 - `cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli`
   passed.
 
