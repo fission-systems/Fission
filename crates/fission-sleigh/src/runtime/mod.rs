@@ -243,9 +243,7 @@ mod tests {
     use super::*;
     use crate::compiler::discovery;
     use fission_core::architecture::BinaryLoadSpec;
-    use fission_loader::loader::LoadedBinary;
     use std::collections::BTreeSet;
-    use std::path::PathBuf;
 
     fn var(offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -407,53 +405,6 @@ mod tests {
         assert_eq!(from_load_spec.language(), "x86-64");
         assert_eq!(load_spec_len, entry_len);
         assert_eq!(load_spec_ops, entry_ops);
-    }
-
-    #[test]
-    fn runtime_frontend_load_spec_matches_entry_id_on_failing_test_functions_row() {
-        let binary_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
-        if !binary_path.is_file() {
-            eprintln!(
-                "skip: benchmark PE fixture missing (build via MinGW / CLI smoke workflow): {}",
-                binary_path.display()
-            );
-            return;
-        }
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for decode/lift parity check");
-            return;
-        }
-        let binary = LoadedBinary::from_file(&binary_path).expect("load test_functions.exe");
-        let entry_address = 0x140001450_u64;
-        let bytes = binary
-            .view_bytes(entry_address, 16)
-            .expect("view bytes for failing row");
-        let load_spec = binary.load_spec().expect("binary load spec").clone();
-
-        let from_load_spec =
-            RuntimeSleighFrontend::new_for_load_spec(&load_spec).expect("load-spec runtime");
-        let from_entry_id =
-            RuntimeSleighFrontend::new_for_language("x86-64").expect("entry-id runtime");
-
-        let load_spec_result = from_load_spec.decode_and_lift_with_len(bytes, entry_address);
-        let entry_id_result = from_entry_id.decode_and_lift_with_len(bytes, entry_address);
-
-        assert_eq!(
-            load_spec_result.is_ok(),
-            entry_id_result.is_ok(),
-            "load-spec and entry-id frontends diverged on test_functions:add @ 0x140001450"
-        );
-        match (load_spec_result, entry_id_result) {
-            (Ok((lhs_ops, lhs_len)), Ok((rhs_ops, rhs_len))) => {
-                assert_eq!(lhs_len, rhs_len);
-                assert_eq!(lhs_ops, rhs_ops);
-            }
-            (Err(lhs_err), Err(rhs_err)) => {
-                assert_eq!(format!("{lhs_err:#}"), format!("{rhs_err:#}"));
-            }
-            _ => unreachable!("success mismatch handled above"),
-        }
     }
 
     #[test]

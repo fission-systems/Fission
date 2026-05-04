@@ -508,25 +508,67 @@ mod tests {
     }
 
     #[test]
-    fn test_elf_relocatable_function_addresses_read_executable_bytes() {
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../benchmark/binary/x86-64/compiler_options/small/binary/c/clang-elf-o0/sleigh_option_matrix.o",
-        );
-        if !fixture.exists() {
-            eprintln!("skipping missing benchmark fixture: {}", fixture.display());
-            return;
-        }
+    fn test_elf_relocatable_executable_views_use_explicit_section_layout() {
+        // Synthetic ELF64 relocatable-style layout (no benchmark/binary fixtures).
+        let mut data = vec![0u8; 320];
+        data[0] = 0x90;
+        data[64] = 0x91;
+        data[224] = 0x92;
 
-        let binary = LoadedBinary::from_file(&fixture).expect("parse ELF relocatable fixture");
-        for address in [0x100000, 0x100140, 0x1001a0] {
-            assert!(
-                binary.view_executable_bytes(address, 1).is_some(),
-                "expected executable bytes at 0x{address:x}"
-            );
-            assert!(
-                binary.view_bytes(address, 1).is_some(),
-                "expected generic byte lookup at 0x{address:x}"
-            );
+        let binary = LoadedBinaryBuilder::new(
+            "synthetic_reloc.o".to_string(),
+            DataBuffer::Heap(data),
+        )
+        .format("ELF64")
+        .entry_point(0)
+        .image_base(0)
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text.a".to_string(),
+            virtual_address: 0x100000,
+            virtual_size: 1,
+            file_offset: 0,
+            file_size: 1,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".text.b".to_string(),
+            virtual_address: 0x100140,
+            virtual_size: 1,
+            file_offset: 64,
+            file_size: 1,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".text.c".to_string(),
+            virtual_address: 0x1001a0,
+            virtual_size: 1,
+            file_offset: 224,
+            file_size: 1,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("build synthetic ELF64 relocatable-like binary");
+
+        for (address, expected) in [
+            (0x100000_u64, 0x90_u8),
+            (0x100140_u64, 0x91_u8),
+            (0x1001a0_u64, 0x92_u8),
+        ] {
+            let exe = binary
+                .view_executable_bytes(address, 1)
+                .unwrap_or_else(|| panic!("executable bytes at 0x{address:x}"));
+            assert_eq!(exe[0], expected);
+            let raw = binary
+                .view_bytes(address, 1)
+                .unwrap_or_else(|| panic!("raw bytes at 0x{address:x}"));
+            assert_eq!(raw[0], expected);
         }
     }
 

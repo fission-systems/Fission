@@ -14,6 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
   # Matches benchmark/full_benchmark DEFAULT_GHIDRA_DIRS and fission-sleigh resolver hints.
   GHIDRA_INSTALL_DIR: vendor/ghidra/ghidra_12.0.4_PUBLIC
   GHIDRA_RELEASE_ZIP_URL: https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.4_build/ghidra_12.0.4_PUBLIC_20260303.zip
@@ -91,6 +92,9 @@ jobs:
             test -s "$f"
             echo "ok $f"
           done
+
+      - name: Sleigh load_spec vs entry-id parity (canonical raw-P-code row)
+        run: python3 benchmark/raw_p_code_benchmark/run_frontend_load_spec_parity.py --cargo-profile release
 
       - name: Run advisory smoke corpus benchmark
         id: benchmark
