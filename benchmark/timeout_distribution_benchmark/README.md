@@ -1,26 +1,26 @@
 # Timeout distribution benchmark
 
-오프라인으로 **Ghidra oracle JSON**과 **Fission 결과 JSON**을 주소 기준으로 조인해, 성공/실패 교차표와 선택적 임계 초(threshold)별 “느리거나 실패한” 카운트, 성공 표본의 지연 분포(p50/p95/p99)를 요약합니다.
+Offline join of **Ghidra oracle JSON** and **Fission result JSON** by address, producing cross-tabs of success/failure, per-threshold counts of rows that are **slow or failed**, and latency percentiles (p50 / p95 / p99) for successful samples.
 
-## 입력
+## Inputs
 
 ### `--oracle`
 
-[`benchmark/ghidra_oracle_benchmark/export_oracle.py`](../ghidra_oracle_benchmark/export_oracle.py) 출력 (`rows[].address`, `rows[].ghidra.decompile_success`, `rows[].ghidra.decompile_sec`).
+Output from [`benchmark/ghidra_oracle_benchmark/export_oracle.py`](../ghidra_oracle_benchmark/export_oracle.py) (`rows[].address`, `rows[].ghidra.decompile_success`, `rows[].ghidra.decompile_sec`).
 
-주소가 `null`인 스냅샷 행은 조인에서 제외됩니다.
+Rows with a null address (snapshot-only rows) are excluded from the join.
 
 ### `--fission`
 
-다음 중 하나의 형태를 자동 탐지합니다.
+Auto-detects one of:
 
-- 최상위 `entries`: `{ "<addr>": { "success", "wall_sec" | "decomp_sec", ... } }`
-- `functions[]`: 각 원소에 `address`, `success`, `wall_sec` 또는 `decomp_sec`
-- `pairwise.pyghidra_vs_fission.comparisons[]`: `address`(또는 `seed_address`)와 성공 플래그·시간 필드
+- Top-level `entries`: `{ "<addr>": { "success", "wall_sec" | "decomp_sec", ... } }`
+- `functions[]`: each item has `address`, `success`, and `wall_sec` or `decomp_sec`
+- `pairwise.pyghidra_vs_fission.comparisons[]`: `address` (or `seed_address`) plus success flags and timing fields
 
-주소 정규화는 Grand Finale와 동일하게 [`normalize_address`](../full_benchmark/grand_finale_support/metrics.py)를 사용합니다.
+Address normalization uses the same [`normalize_address`](../full_benchmark/grand_finale_support/metrics.py) helper as Grand Finale.
 
-## 실행 예시
+## Example
 
 ```bash
 python3 benchmark/timeout_distribution_benchmark/summarize_timeouts.py \
@@ -30,7 +30,7 @@ python3 benchmark/timeout_distribution_benchmark/summarize_timeouts.py \
   --out benchmark/artifacts/timeout_distribution/summary.json
 ```
 
-## 해석 메모
+## Interpretation
 
-- “소프트 타임아웃” 버킷은 **실패한 행 + 주어진 초를 초과한 성공 행**을 포함합니다 (실제 디컴 엔진의 하드 타임아웃과는 다를 수 있음).
-- Fission 쪽 단계별 시간은 행에 `preview_build_stats` 등이 있으면 별도 확장 스크립트로 분해할 수 있습니다 (본 스크립트는 요약치 중심).
+- **Soft timeout** buckets include **failed rows plus successful rows whose latency exceeds the threshold** (this may differ from a decompiler engine hard timeout).
+- Per-stage Fission timings (`preview_build_stats`, etc.) can be split out in a follow-on script; this tool focuses on summary fields.

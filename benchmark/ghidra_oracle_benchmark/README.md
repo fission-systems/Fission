@@ -1,45 +1,45 @@
 # Ghidra oracle export benchmark
 
-PyGhidra + Ghidra headless에서 **디컴 C 문자열 외의 oracle**(xref, 호출 타깃, 문자열 참조, 서명·파라미터 요약, 디컴 성공/실패 이유 등)을 매니페스트 기준으로 JSON으로 덤프합니다.  
-Rust 크레이트 유닛 테스트와 분리되어 있으며, 픽스처 경로는 **매니페스트에만** 둡니다.
+PyGhidra + Ghidra headless dumps **oracle facts beyond decompiled C text** (xrefs, call targets, string references, signature / parameter summaries, decompile success or failure reasons, etc.) to JSON driven by a manifest.  
+This lane is separate from Rust crate unit tests; fixture paths belong **only in manifests**.
 
-## 요구 사항
+## Requirements
 
-- Ghidra 설치 디렉터리 (`GHIDRA_INSTALL_DIR` 또는 `--ghidra-dir`)
-- Python 패키지 `pyghidra` (`pip install pyghidra`)
-- 파일 기반 매니페스트의 경우 바이너리 파일이 로컬에 존재해야 함 (예: CI에서 MinGW로 빌드한 `.exe`)
+- Ghidra install directory (`GHIDRA_INSTALL_DIR` or `--ghidra-dir`)
+- Python package `pyghidra` (`pip install pyghidra`)
+- For file-backed manifests, the binary must exist locally (e.g. an `.exe` built with MinGW in CI)
 
-## 매니페스트 스키마
+## Manifest schema
 
-최상위:
+Top level:
 
-- `binaries` (배열): 각 원소는 하나의 로드 단위입니다.
+- `binaries` (array): each element is one load unit.
 
-바이너리 원소:
+Binary entry fields:
 
-| 필드 | 의미 |
-|------|------|
-| `id` | 안정적인 문자열 ID |
-| `path` | 저장소 루트 기준 상대 경로 (파일 로드 시 필수) |
-| `hex_bytes` | 공백 없는 hex 문자열 (합성 로드 시 `path` 대신 사용) |
-| `program_name` | 합성 로드 시 프로그램 이름 (기본 `synthetic`) |
-| `language` | Ghidra Language ID (합성 시 기본 `DATA:LE:64:default`) |
-| `loader` | 로더 이름 (기본 `BinaryLoader`) |
-| `rows` | 함수별 타깃 행 배열 (`addr`, 선택 `name`, 선택 `feature_group`/`feature`). 비어 있으면 바이너리 스냅샷만 한 줄 출력합니다. |
+| Field | Meaning |
+|------|---------|
+| `id` | Stable string ID |
+| `path` | Repo-relative path (required for file loads) |
+| `hex_bytes` | Hex string (optional whitespace); used instead of `path` for synthetic loads |
+| `program_name` | Program name for synthetic loads (default `synthetic`) |
+| `language` | Ghidra language ID for synthetic loads (default `DATA:LE:64:default`) |
+| `loader` | Loader name (default `BinaryLoader`) |
+| `rows` | Array of per-function targets (`addr`, optional `name`, optional `feature_group` / `feature`). If empty, emits a single binary snapshot row. |
 
-행 원소:
+Row entry fields:
 
-- `addr`: 시드 주소 (`0x...`)
-- `name`: 선택적 이름 힌트 (시드 해석에 사용, [`grand_finale_support/runners.py`](../../full_benchmark/grand_finale_support/runners.py) 와 동일 규칙)
+- `addr`: Seed address (`0x...`)
+- `name`: Optional name hint for seed resolution (same rules as [`grand_finale_support/runners.py`](../../full_benchmark/grand_finale_support/runners.py))
 
-## 출력 스키마
+## Output schema
 
-- `_meta`: 도구 이름, 매니페스트 경로/sha256, Ghidra 경로, 벽시계 시간, 행 수
-- `rows[]`: 각 행에 `binary_snapshot`(바이너리 단위 요약), `ghidra`(함수 oracle 페이로드), 시드 매칭 메타데이터
+- `_meta`: tool name, manifest path / sha256, Ghidra path, wall-clock time, row count
+- `rows[]`: each row includes `binary_snapshot` (binary-level summary), `ghidra` (function oracle payload), and seed matching metadata
 
-필드 일부는 Ghidra 버전/API에 따라 채워지지 않을 수 있으며 `collector_warnings`에 이유가 남습니다.
+Some fields may be absent depending on Ghidra version / API; reasons are recorded under `collector_warnings`.
 
-## 실행 예시
+## Examples
 
 ```bash
 export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0.4_PUBLIC
@@ -50,7 +50,7 @@ python3 benchmark/ghidra_oracle_benchmark/export_oracle.py \
   --per-function-timeout-sec 180
 ```
 
-합성 바이트만 (프로젝트 임시 파일은 `benchmark/artifacts/ghidra_oracle_micro/`, gitignore 됨):
+Synthetic bytes only (temporary projects live under `benchmark/artifacts/ghidra_oracle_micro/`, gitignored):
 
 ```bash
 python3 benchmark/ghidra_oracle_benchmark/export_oracle.py \
@@ -59,8 +59,8 @@ python3 benchmark/ghidra_oracle_benchmark/export_oracle.py \
   --out benchmark/artifacts/ghidra_oracle/export_micro.json
 ```
 
-## 메모
+## Notes
 
-- 초기 버전은 Grand Finale와 동일하게 레거시 `pyghidra.open_program()` 경로를 사용합니다 (파일 입력).
-- 신형 `program_loader()` 경로는 합성 `hex_bytes` 입력에 사용합니다.
-- 대규모 `call_targets` / 문자열 목록은 상한으로 잘립니다 ([`collectors.py`](collectors.py)).
+- File inputs use the legacy `pyghidra.open_program()` path, matching Grand Finale.
+- Synthetic `hex_bytes` inputs use the newer `program_loader()` flow.
+- Large `call_targets` / string lists are capped ([`collectors.py`](collectors.py)).
