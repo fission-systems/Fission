@@ -1,3 +1,7 @@
+//! Lane manifests, target resolution, and per-lane runners.
+
+pub mod nir_check;
+
 use crate::model::{LaneTarget, SourceMeta};
 use anyhow::{Context, Result};
 use serde::Deserialize;

@@ -56,6 +56,10 @@ and latest is mirrored to:
 - `--no-build` + `--fission-bin <path>`
   - skip building `fission_cli` and use an existing binary
 
+- `--emit-legacy-preview-artifacts`
+  - optional: duplicates candidate JSON under deprecated `preview_*` filenames (same content as `nir_*`).
+  - default: only canonical `nir_*` files are written
+
 ---
 
 ## Key outputs
@@ -74,7 +78,9 @@ Main artifacts inside each run directory:
 - `diagnosis.json`, `diagnosis.md`
   - diagnosis buckets and recommended next patch
 - `nir_quality_candidates.json`
-  - per-row candidate data used for deep triage
+  - per-row candidate data used for deep triage (baseline focus mode reads this path)
+- **Legacy (opt-in):** `preview_quality_candidates.json`, `preview_explicit_blocked_candidates.json`,
+  `preview_explicit_aligned_candidate_report.json` — only when `--emit-legacy-preview-artifacts` is set
 
 ---
 
@@ -131,8 +137,11 @@ Treat this as an operational guardrail, not an absolute truth. Always inspect to
 ## Development notes
 
 - Core modules:
-  - `main.rs`: orchestration, CLI, output writing
-  - `report.rs`: summary/delta/decision-insight construction and markdown rendering
+  - `main.rs` + `cli.rs`: thin entry and Clap surface
+  - `lanes/nir_check.rs`: NIR lane pipeline; `lanes/mod.rs`: manifest/target resolution
+  - `artifacts.rs`: JSON/Markdown emission for a run directory
+  - `gates.rs`: go/stop exit code and performance regression checks
+  - `report/`: summary/delta/decision-insight construction and markdown rendering
   - `diagnosis.rs`: diagnosis buckets and recommended patch classification
   - `corpus.rs`: candidate aggregation and quality artifact assembly
   - `inventory.rs`: `fission_cli` inventory execution and loading

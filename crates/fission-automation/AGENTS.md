@@ -13,8 +13,13 @@ Benchmark runner ownership now lives under `benchmark/full_benchmark/`; this cra
 
 ```text
 src/
-├── main.rs           # `nir-check` CLI
-├── lanes.rs          # sentinel manifest + lane target resolution
+├── main.rs           # allocator + thin CLI dispatch
+├── cli.rs            # Clap commands / args (`nir-check`)
+├── lanes/
+│   ├── mod.rs        # sentinel manifest + lane target resolution
+│   └── nir_check.rs  # NIR lane orchestration (inventory → diagnosis → artifacts → gates)
+├── artifacts.rs      # run directory writes (`ArtifactWriter`, diagnosis Markdown helpers)
+├── gates.rs          # `--fail-on-stop` + perf regression vs baseline
 ├── inventory.rs      # subprocess inventory emit
 ├── diagnosis.rs      # diagnosis buckets / next-patch hints
 ├── corpus.rs         # corpus artifacts + totals
@@ -36,6 +41,7 @@ src/
 | `--functions-limit`, `--timeout-ms` | Per-target overrides |
 | `--dry-run` | Print targets and paths; no subprocess |
 | `--fail-on-stop` | Exit non-zero unless `go_stop_gate.decision` starts with `go_` |
+| `--emit-legacy-preview-artifacts` | Also write deprecated `preview_*` JSON aliases alongside canonical `nir_*` outputs |
 | `--jobs` | Parallel inventory runs (default `1`) |
 
 ## CI
