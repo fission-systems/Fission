@@ -65,7 +65,7 @@ License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./
 | **fission-loader** | Binary format parsing, symbols, sections, strings | Binary layer |
 | **fission-signatures** | Function signatures, type signatures, identifier data | Data layer |
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
-| **fission-cli** | Command-line interface, REPL, batch processing | Product layer |
+| **fission-cli** | Headless CLI (one-shot subcommands), Rhai `script`, operator `inventory` | Product layer |
 | **fission-tauri** | Desktop GUI, interactive analysis, visualization | Product layer |
 
 ---
@@ -116,7 +116,7 @@ Fission maintains comprehensive, role-based documentation:
 ### Project Maturity Status
 
 **Solid & Production-Ready:**
-- ✅ CLI interface with REPL and batch modes
+- ✅ Headless CLI (`fission_cli`: subcommands, JSON/automation paths, `inventory`, Rhai `script`)
 - ✅ Rust-native decompilation pipeline
 - ✅ Quality assurance and regression testing
 - ✅ Automated benchmarking against Ghidra
@@ -158,7 +158,7 @@ PE x64 has the strongest direct NIR coverage. Other architectures and formats ex
 
 | Crate | Purpose |
 |-------|---------|
-| [`crates/fission-cli`](./crates/fission-cli) | Command-line interface with REPL |
+| [`crates/fission-cli`](./crates/fission-cli) | Headless one-shot CLI and operator workflows |
 | [`crates/fission-tauri`](./crates/fission-tauri) | Cross-platform desktop GUI |
 | [`crates/fission-automation`](./crates/fission-automation) | Quality lanes, test automation, CI/CD integration |
 
@@ -270,7 +270,7 @@ cargo test --all
 ### Production-Ready Components ✅
 
 - **Decompilation Pipeline**: Full Rust-native NIR/HIR path with deterministic output
-- **Command-Line Interface**: Feature-rich REPL with batch processing modes
+- **Command-Line Interface**: One-shot subcommands with JSON/inventory surfaces and optional Rhai `script` (no interactive REPL or TUI in `fission-cli`)
 - **Quality Assurance**: Integrated regression testing and automated benchmarking
 - **Binary Support**: PE x64 (primary), ELF x64/ARM64, Mach-O (experimental)
 - **Telemetry**: Built-in metrics, statistics, and CI/CD reporting
