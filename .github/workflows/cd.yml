@@ -1,9 +1,12 @@
 name: CD Release
 
+# Canonical tags: vX.Y.Z (matches softprops/action-gh-release defaults).
+# Bare semver X.Y.Z is also accepted so local/git tags stay consistent with Cargo versions.
 on:
   push:
     tags:
       - "v*.*.*"
+      - "[0-9]*.[0-9]*.[0-9]*"
 
 permissions:
   contents: write
