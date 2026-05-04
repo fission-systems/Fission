@@ -1,3 +1,9 @@
+//! NIR/HIR pipeline after P-code lifting: preview builder, normalization,
+//! structuring, rendering, and telemetry wired through [`types::NirBuildStats`].
+//!
+//! Typical stage order: [`builder`] → [`normalize`] → [`structuring`] → [`printer`].
+//! Directory guide: `crates/fission-pcode/src/nir/AGENTS.md`.
+
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_loader::loader::LoadedBinary;
 use std::collections::{BTreeMap, HashMap, HashSet};

@@ -1,3 +1,9 @@
+//! HIR normalization passes (arith, idioms, memory, global opts, recovery, typing).
+//!
+//! Entry points delegate to [`pipeline`]; wave statistics integrate with build telemetry.
+//!
+//! Guide: `crates/fission-pcode/src/nir/normalize/AGENTS.md`.
+
 use super::*;
 
 mod analysis;

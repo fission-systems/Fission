@@ -1,3 +1,8 @@
+//! Shared HIR/NIR surface types and canonical build telemetry ([`NirBuildStats`]).
+//!
+//! New counters or schema changes must stay aligned with automation/reporting lanes.
+//! Overview: `crates/fission-pcode/src/nir/AGENTS.md` (`types.rs` row).
+
 use fission_loader::loader::LoadedBinary;
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};

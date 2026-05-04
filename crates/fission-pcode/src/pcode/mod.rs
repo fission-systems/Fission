@@ -1,3 +1,9 @@
+//! Lifted P-code representation (`PcodeOp`, CFG helpers) and the [`optimizer`] pass bundle.
+//!
+//! Safe Rust boundary here; FFI to Ghidra-era surfaces lives in the separate `fission-ffi` crate.
+//!
+//! Optimizer hooks and IR shapes are consumed by [`crate::nir`] when building previews.
+
 // Core types
 mod types;
 pub use types::*;

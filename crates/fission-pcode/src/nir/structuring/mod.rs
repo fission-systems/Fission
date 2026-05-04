@@ -1,3 +1,8 @@
+//! CFG-driven structuring from flattened HIR/NIR into loops, conditionals, guarded tails,
+//! and related shapes. Prefer dom/postdom/SCC facts over lexical hacks.
+//!
+//! Guide: `crates/fission-pcode/src/nir/structuring/AGENTS.md`.
+
 pub(super) use super::support::*;
 use super::*;
 

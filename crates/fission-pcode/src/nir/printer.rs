@@ -1,3 +1,8 @@
+//! Pseudocode rendering from structured HIR/NIR (`render_nir`, layout helpers).
+//!
+//! Downstream of semantics; avoid fixing structuring failures by tweaking format-only paths.
+//! Policy: `crates/fission-pcode/src/nir/AGENTS.md`.
+
 use super::*;
 use std::collections::HashMap;
 

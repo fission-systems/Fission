@@ -1,3 +1,9 @@
+//! Lowers lifted P-code into preview HIR under [`PreviewBuilder`]: control flow, calls,
+//! memory surfaces, and unsupported stubs. Counters feed [`super::types::NirBuildStats`];
+//! do not invent parallel telemetry payloads.
+//!
+//! Guide: `crates/fission-pcode/src/nir/builder/AGENTS.md`.
+
 pub(super) use super::support::*;
 use super::*;
 use indexmap::IndexMap;

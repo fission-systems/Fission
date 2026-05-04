@@ -2,6 +2,9 @@
 //!
 //! This crate provides the P-code IR (intermediate representation) used for
 //! binary analysis and decompilation, along with optimization passes.
+//!
+//! Pipeline stages and conventions live under [`crate::nir`] with directory guides in
+//! `crates/fission-pcode/src/nir/AGENTS.md` and child `*/AGENTS.md` files.
 
 // CI runs `cargo clippy ... -D warnings`; `-D warnings` cannot be selectively reversed via `-A clippy::*`
 // on the command line for all lint kinds, so suppress Clippy for this crate until policy is tightened again.
