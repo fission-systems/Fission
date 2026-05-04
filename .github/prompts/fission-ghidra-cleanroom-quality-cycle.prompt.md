@@ -14,7 +14,7 @@ model: GPT-5 (copilot)
 
 고정 컨텍스트:
 - 프로젝트: Fission
-- 레퍼런스 코드: [Ghidra 로컬 코드베이스](../../vendor/ghidra/ghidra-Ghidra_11.4.2_build)
+- 레퍼런스 코드: [Ghidra 로컬 코드베이스](vendor/ghidra/ghidra-Ghidra_12.0.4_build)
 - 벤치마크 스크립트: [full_benchmark](../../benchmark/full_benchmark)
 - 샘플 바이너리: [sample binaries](../../benchmark/binary/x86-64/window/small/binary/c)
 - 저장 아티팩트: [benchmark artifacts](../../benchmark/artifacts)
@@ -29,6 +29,7 @@ model: GPT-5 (copilot)
 6. 미해결 병목이 장기 지속되고 내부 구현만으로 해소 불가한 경우에 한해 Rust 라이브러리 사용을 허용한다. 단, C++ 바인딩은 금지한다.
 7. 단기 처방(임시 우회, 바이너리/컴파일러 특화 땜질)보다 장기 유지보수성과 일반화 가능한 구조 개선을 우선한다.
 8. 제안과 구현은 최소 2~3 사이클 이후에도 유효한 아키텍처 관점(확장성, 검증 가능성, 관측 가능성)을 포함해야 한다.
+9.근사치,추정값 사용을 금지합니다. 반드시 실측치와 검증 가능한 분석에 기반한 개선을 수행해야 합니다.
 
 반드시 수행할 작업:
 1. 먼저 현재 미해결 병목을 식별하고 재현한다.

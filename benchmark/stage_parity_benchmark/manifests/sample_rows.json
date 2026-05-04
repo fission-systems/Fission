@@ -1,0 +1,22 @@
+{
+  "defaults": {
+    "language": "x86:LE:64:default",
+    "compiler": "windows"
+  },
+  "binaries": [
+    {
+      "id": "test-functions-x64",
+      "path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "rows": [
+        {
+          "name": "call-target-case",
+          "addr": "0x140001160",
+          "feature_group": "call_recovery",
+          "feature": "direct_import_and_thunk",
+          "owner": "nir_builder_call_recovery",
+          "notes": "Ghidra resolves imported callee and arity"
+        }
+      ]
+    }
+  ]
+}
