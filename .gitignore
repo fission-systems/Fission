@@ -125,3 +125,6 @@ benchmark_results/
 /.agent/
 /.sisyphus/
 /.venv-bench/
+
+# Cursor / local IDE prompts (not part of canonical repo surface)
+.github/prompts/
