@@ -5,7 +5,8 @@
 //! - `ReadProcessMemory` / `WriteProcessMemory` for memory I/O
 //! - `VirtualQueryEx` for memory region enumeration
 
-use super::{MemoryError, MemoryProtection, MemoryRegion, PlatformMemory};
+use super::super::PlatformMemory;
+use crate::debug::memory::{MemoryError, MemoryProtection, MemoryRegion};
 
 /// Windows-specific memory manager
 ///

@@ -2,8 +2,8 @@
 //!
 //! This module provides debugging capabilities on Linux using the ptrace system call.
 
-use super::traits::Debugger;
-use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState};
+use crate::debug::traits::Debugger;
+use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
 /// Linux debugger implementation using ptrace
@@ -184,7 +184,7 @@ impl Debugger for LinuxDebugger {
             })?;
         }
 
-        let bp = super::types::Breakpoint {
+        let bp = Breakpoint {
             address,
             original_byte,
             enabled: true,
@@ -286,12 +286,12 @@ impl Debugger for LinuxDebugger {
         })?;
 
         file.write_all(data).map_err(|e| {
-            format!(
+            FissionError::debug(format!(
                 "Failed to write {} bytes at 0x{:x}: {}",
                 data.len(),
                 address,
                 e
-            )
+            ))
         })?;
 
         Ok(())

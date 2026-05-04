@@ -4,9 +4,9 @@ mod process;
 
 pub use process::enumerate_processes;
 
-use super::traits::Debugger;
-use super::ttd::Timeline;
-use super::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
+use crate::debug::timeline::Timeline;
+use crate::debug::traits::Debugger;
+use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -53,7 +53,7 @@ pub struct WindowsDebugger {
     state: DebugState,
     /// Handle to the attached process
     process_handle: Option<HANDLE>,
-    /// TTD Timeline for auto-recording (shared with UI)
+    /// Execution timeline for auto-recording during debugging (shared with UI)
     pub ttd_timeline: Option<Arc<Mutex<Timeline>>>,
 }
 
@@ -67,7 +67,7 @@ impl WindowsDebugger {
         }
     }
 
-    /// Set the TTD timeline for auto-recording during debugging
+    /// Attach the UI-backed [`Timeline`] for step recording during debugging
     pub fn set_ttd_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.ttd_timeline = Some(timeline);
     }
@@ -95,7 +95,7 @@ impl WindowsDebugger {
     }
 
     /// Record a TTD snapshot if recording is active
-    fn record_ttd_snapshot(&self, thread_id: u32, registers: &super::types::RegisterState) {
+    fn record_ttd_snapshot(&self, thread_id: u32, registers: &crate::debug::types::RegisterState) {
         if let Some(timeline_arc) = &self.ttd_timeline {
             if let Ok(mut timeline) = timeline_arc.lock() {
                 if timeline.is_recording() {
@@ -107,7 +107,11 @@ impl WindowsDebugger {
 }
 
 /// Start debug event loop for the attached process
-pub fn start_event_loop(pid: u32, tx: Sender<super::types::DebugEvent>, stop_rx: Receiver<()>) {
+pub fn start_event_loop(
+    pid: u32,
+    tx: Sender<crate::debug::types::DebugEvent>,
+    stop_rx: Receiver<()>,
+) {
     thread::spawn(move || {
         let mut debug_event = DEBUG_EVENT::default();
         loop {
@@ -129,33 +133,38 @@ pub fn start_event_loop(pid: u32, tx: Sender<super::types::DebugEvent>, stop_rx:
                         let address = record.ExceptionAddress as u64;
                         let code_raw: u32 = record.ExceptionCode.0 as u32;
                         if code_raw == EXCEPTION_BREAKPOINT_CODE {
-                            Some(super::types::DebugEvent::BreakpointHit { address, thread_id })
+                            Some(crate::debug::types::DebugEvent::BreakpointHit {
+                                address,
+                                thread_id,
+                            })
                         } else if code_raw == EXCEPTION_SINGLE_STEP_CODE {
-                            Some(super::types::DebugEvent::SingleStep { thread_id })
+                            Some(crate::debug::types::DebugEvent::SingleStep { thread_id })
                         } else {
-                            Some(super::types::DebugEvent::Exception {
+                            Some(crate::debug::types::DebugEvent::Exception {
                                 code: code_raw,
                                 address,
                                 first_chance: is_first,
                             })
                         }
                     },
-                    CREATE_PROCESS_DEBUG_EVENT => Some(super::types::DebugEvent::ProcessCreated {
-                        pid: proc_id,
-                        main_thread_id: thread_id,
-                    }),
+                    CREATE_PROCESS_DEBUG_EVENT => {
+                        Some(crate::debug::types::DebugEvent::ProcessCreated {
+                            pid: proc_id,
+                            main_thread_id: thread_id,
+                        })
+                    }
                     EXIT_PROCESS_DEBUG_EVENT => {
                         let exit_code = unsafe { debug_event.u.ExitProcess.dwExitCode };
-                        Some(super::types::DebugEvent::ProcessExited { exit_code })
+                        Some(crate::debug::types::DebugEvent::ProcessExited { exit_code })
                     }
                     CREATE_THREAD_DEBUG_EVENT => {
-                        Some(super::types::DebugEvent::ThreadCreated { thread_id })
+                        Some(crate::debug::types::DebugEvent::ThreadCreated { thread_id })
                     }
                     EXIT_THREAD_DEBUG_EVENT => {
                         let _exit_code = unsafe { debug_event.u.ExitThread.dwExitCode };
-                        Some(super::types::DebugEvent::ThreadExited { thread_id })
+                        Some(crate::debug::types::DebugEvent::ThreadExited { thread_id })
                     }
-                    LOAD_DLL_DEBUG_EVENT => Some(super::types::DebugEvent::DllLoaded {
+                    LOAD_DLL_DEBUG_EVENT => Some(crate::debug::types::DebugEvent::DllLoaded {
                         base_address: unsafe { debug_event.u.LoadDll.lpBaseOfDll } as u64,
                         name: "<dll>".into(),
                     }),
@@ -281,7 +290,7 @@ impl Debugger for WindowsDebugger {
                 .map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             // Record TTD snapshot before step (if recording is active)
-            let registers = super::types::RegisterState {
+            let registers = crate::debug::types::RegisterState {
                 rax: ctx.Rax,
                 rbx: ctx.Rbx,
                 rcx: ctx.Rcx,
@@ -342,7 +351,7 @@ impl Debugger for WindowsDebugger {
         // Patch with INT3 (0xCC)
         self.write_memory(address, &[0xCC])?;
 
-        let bp = super::types::Breakpoint {
+        let bp = crate::debug::types::Breakpoint {
             address,
             original_byte,
             enabled: true,
@@ -448,7 +457,10 @@ impl Debugger for WindowsDebugger {
         }
     }
 
-    fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<super::types::RegisterState> {
+    fn fetch_registers(
+        &mut self,
+        thread_id: u32,
+    ) -> FissionResult<crate::debug::types::RegisterState> {
         unsafe {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, thread_id)
                 .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
@@ -462,7 +474,7 @@ impl Debugger for WindowsDebugger {
             res.map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             // Map Windows CONTEXT to our RegisterState (x64)
-            Ok(super::types::RegisterState {
+            Ok(crate::debug::types::RegisterState {
                 rax: ctx.Rax,
                 rbx: ctx.Rbx,
                 rcx: ctx.Rcx,

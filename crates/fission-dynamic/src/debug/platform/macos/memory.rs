@@ -11,7 +11,8 @@
 //! - Or running with `sudo`
 //! - Implementation using mach_vm_* APIs
 
-use super::{MemoryError, MemoryRegion, PlatformMemory};
+use super::super::PlatformMemory;
+use crate::debug::memory::{MemoryError, MemoryRegion};
 
 /// macOS-specific memory manager (stub)
 ///

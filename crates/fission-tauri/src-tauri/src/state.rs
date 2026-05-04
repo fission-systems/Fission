@@ -115,7 +115,7 @@ impl Default for AppState {
             #[cfg(target_os = "windows")]
             debug_stop_tx: std::sync::Mutex::new(None),
             plugin_manager: Mutex::new(PluginManager::new()),
-            timeline: Mutex::new(Box::new(fission_dynamic::debug::ttd::Timeline::new())),
+            timeline: Mutex::new(Box::new(fission_dynamic::debug::timeline::Timeline::new())),
             menu_handles: std::sync::OnceLock::new(),
         }
     }

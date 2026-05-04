@@ -1,7 +1,7 @@
-//! Time-travel debugging facade.
+//! Execution timeline façade ([`Timeline`], [`TimelineDriver`] impl).
 //!
-//! Snapshot and recorder primitives live in `fission-ttd`.
-//! `fission-dynamic` keeps the RR-aware timeline integration layer here.
+//! Core recorder types and traits come from [`fission_ttd`](::fission_ttd).
+//! Linux replay integrates Mozilla RR via [`crate::debug::rr`].
 
 #[cfg(target_os = "linux")]
 use crate::debug::rr::RRDebugger;

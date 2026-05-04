@@ -6,7 +6,8 @@
 //!
 //! Note: Requires ptrace attachment or same-user ownership for access.
 
-use super::{MemoryError, MemoryProtection, MemoryRegion, PlatformMemory};
+use super::super::PlatformMemory;
+use crate::debug::memory::{MemoryError, MemoryProtection, MemoryRegion};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 

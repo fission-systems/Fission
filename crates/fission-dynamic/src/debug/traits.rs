@@ -77,15 +77,13 @@ pub trait Debugger: Send {
 // Time Travel Debugging Trait
 // ============================================================================
 
-use super::ttd::ExecutionSnapshot;
+use super::timeline::ExecutionSnapshot;
 
-/// Time-travel debugging backend trait
+/// Time-travel / reversible execution backend trait
 ///
-/// This trait provides a unified interface for all time-travel debugging
-/// backends including:
-/// - **RR (Record and Replay)**: Linux-only, uses GDB/MI protocol
-/// - **TTD (Internal)**: Cross-platform, snapshot-based
-/// - **Windows TTD**: Windows-only (future integration with WinDbg)
+/// Backends include:
+/// - **Internal recorder** (`fission-ttd`): snapshot-based timeline (used heavily on Windows flows)
+/// - **RR (Record and Replay)**: Linux-only GDB/MI integration (`crate::debug::rr`)
 ///
 /// # Example
 ///

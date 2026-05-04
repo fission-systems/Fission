@@ -1,36 +1,42 @@
-//! Platform Abstraction Layer for Memory Operations
+//! Platform-specific backends for dynamic debugging.
 //!
-//! This module provides platform-agnostic interfaces for process memory operations.
-//! Each supported platform (Windows, Linux, macOS) has its own implementation
-//! that conforms to the `PlatformMemory` trait.
+//! Each OS subtree owns:
+//! - **`memory`**: [`PlatformMemory`] implementation (process memory PAL).
+//! - **`debugger`**: attach/breakpoints/registers (`Debugger` trait impl).
 //!
 //! # Architecture
 //!
 //! ```text
 //! platform/
-//! ├── mod.rs      - Trait definitions and re-exports
-//! ├── windows.rs  - Windows implementation (ReadProcessMemory, etc.)
-//! ├── linux.rs    - Linux implementation (/proc/{pid}/mem)
-//! └── macos.rs    - macOS implementation (Mach API stub)
+//! ├── mod.rs              - PlatformMemory trait + exports
+//! ├── windows/
+//! │   ├── memory.rs
+//! │   └── debugger/       - Win32 Debug API (+ process enumeration)
+//! ├── linux/
+//! │   ├── memory.rs
+//! │   └── debugger.rs     - ptrace
+//! └── macos/
+//!     ├── memory.rs
+//!     └── debugger.rs     - stub
 //! ```
 
-use super::memory::{MemoryError, MemoryProtection, MemoryRegion};
+use super::memory::{MemoryError, MemoryRegion};
 
 // Platform-specific modules
 #[cfg(target_os = "windows")]
-mod windows;
+pub mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::WindowsMemory;
+pub use windows::{WindowsDebugger as PlatformDebugger, WindowsMemory, enumerate_processes};
 
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::LinuxMemory;
+pub use linux::{LinuxDebugger as PlatformDebugger, LinuxMemory, enumerate_processes};
 
 #[cfg(target_os = "macos")]
-mod macos;
+pub mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::MacOSMemory;
+pub use macos::{MacOSDebugger as PlatformDebugger, MacOSMemory, enumerate_processes};
 
 /// Platform-agnostic trait for process memory operations
 ///

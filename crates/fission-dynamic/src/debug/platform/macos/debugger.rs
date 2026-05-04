@@ -3,8 +3,8 @@
 //! This module provides debugging capabilities on macOS using the Mach API.
 //! Currently a stub implementation - Mach debugging requires special entitlements.
 
-use super::traits::Debugger;
-use super::types::{DebugState, ProcessInfo, RegisterState};
+use crate::debug::traits::Debugger;
+use crate::debug::types::{DebugState, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
 /// macOS debugger implementation (stub)

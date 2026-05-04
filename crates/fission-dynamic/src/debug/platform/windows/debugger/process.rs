@@ -1,6 +1,6 @@
 //! Process enumeration using Windows API.
 
-use super::super::types::ProcessInfo;
+use crate::debug::types::ProcessInfo;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, MAX_PATH};
 use windows::Win32::System::ProcessStatus::{EnumProcesses, GetModuleBaseNameW};

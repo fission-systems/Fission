@@ -9,8 +9,8 @@ use std::process::Child;
 use std::process::{Command, Stdio};
 
 use super::gdb_mi::{GdbMiParser, MiResponse, MiValue};
+use crate::debug::timeline::ExecutionSnapshot;
 use crate::debug::traits::TimeTravelDebugger;
-use crate::debug::ttd::ExecutionSnapshot;
 use crate::debug::types::RegisterState;
 use fission_core::{FissionError, Result as FissionResult};
 
