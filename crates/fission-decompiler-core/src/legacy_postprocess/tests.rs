@@ -1017,7 +1017,7 @@ fn test_process_keeps_single_use_temp_when_canonical_semantics_owned_upstream() 
   return uVar3;
 }"#;
 
-    let output = PostProcessor::new().process(input);
+    let output = PostProcessor::legacy_semantic_pipeline().process(input);
     assert!(
         !output.contains("return (ulonglong)(iVar1 != 0);"),
         "default process path must not inline away the upstream-owned representative: {}",
@@ -1043,7 +1043,7 @@ fn test_process_with_registry_keeps_single_use_temp_when_canonical_semantics_own
   return uVar3;
 }"#;
 
-    let output = PostProcessor::new()
+    let output = PostProcessor::legacy_semantic_pipeline()
         .process_with_registry(input)
         .expect("postprocess with registry");
     assert!(
@@ -1160,7 +1160,7 @@ fn test_process_normalizes_pointer_offset_aliases_without_field_info() {
     };
     let input = r#"unique0x00004880 = register0x00000008 + 0xbc8;
 value = *unique0x00004880;"#;
-    let output = PostProcessor::new()
+    let output = PostProcessor::legacy_semantic_pipeline()
         .with_inferred_types(vec![inferred])
         .process(input);
     assert!(
@@ -1187,7 +1187,7 @@ fn test_process_normalizes_pointer_offset_aliases_in_non_deref_uses() {
     };
     let input = r#"unique0x00004880 = register0x00000008 + 0xbc8;
 value = foo(unique0x00004880);"#;
-    let output = PostProcessor::new()
+    let output = PostProcessor::legacy_semantic_pipeline()
         .with_inferred_types(vec![inferred])
         .process(input);
     assert!(

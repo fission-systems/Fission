@@ -1,0 +1,172 @@
+use fission_loader::loader::LoadedBinary;
+use fission_pcode::{PcodeFunction, Varnode};
+use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
+
+#[derive(Debug, Clone)]
+pub(crate) struct DecodeDiag {
+    pub attempts: usize,
+    pub stop_reason: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct DecodeFailure {
+    pub message: String,
+    pub diag: DecodeDiag,
+}
+
+fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
+    let marker = "decode failed at 0x";
+    let idx = err.find(marker)?;
+    let hex_start = idx + marker.len();
+    let hex_end = err[hex_start..]
+        .find(|c: char| !c.is_ascii_hexdigit())
+        .map(|i| hex_start + i)
+        .unwrap_or(err.len());
+    let fail_addr = u64::from_str_radix(&err[hex_start..hex_end], 16).ok()?;
+    let safe = fail_addr.checked_sub(func_addr)? as usize;
+    if safe == 0 { None } else { Some(safe) }
+}
+
+pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
+    pcode.blocks.iter().map(|b| b.ops.len()).sum()
+}
+
+pub(crate) fn decode_rust_sleigh_pcode(
+    binary: &LoadedBinary,
+    name: &str,
+    entry_address: u64,
+    max_bytes: usize,
+    instruction_limit: usize,
+    continue_past_indirect_branch: bool,
+    retry_on_decode_error: bool,
+) -> Result<(PcodeFunction, DecodeDiag), DecodeFailure> {
+    let bytes = binary.view_bytes(entry_address, max_bytes).ok_or_else(|| {
+        DecodeFailure {
+            message: format!(
+                "rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}"
+            ),
+            diag: DecodeDiag {
+                attempts: 0,
+                stop_reason: "view_bytes_unavailable".into(),
+            },
+        }
+    })?;
+
+    let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
+        message: format!(
+            "rust_sleigh: missing Ghidra load spec for '{}'",
+            binary.path
+        ),
+        diag: DecodeDiag {
+            attempts: 0,
+            stop_reason: "missing_load_spec".into(),
+        },
+    })?;
+
+    let lifter = RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(|e| {
+        DecodeFailure {
+            message: format!("rust_sleigh: {e:#}"),
+            diag: DecodeDiag {
+                attempts: 0,
+                stop_reason: "lifter_init_failed".into(),
+            },
+        }
+    })?;
+
+    let lift_contract = if continue_past_indirect_branch {
+        DecodeContract::decomp_function(instruction_limit)
+    } else {
+        DecodeContract::strict_function(instruction_limit)
+    };
+    let result =
+        lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);
+    match result {
+        Ok(lifted) => Ok((
+            lifted.function,
+            DecodeDiag {
+                attempts: 1,
+                stop_reason: "success_first_lift".into(),
+            },
+        )),
+        Err(first_err) => {
+            if retry_on_decode_error {
+                let err_str = format!("{first_err:#}");
+                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
+                    if safe > 0 && safe < bytes.len() {
+                        if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
+                            &bytes[..safe],
+                            entry_address,
+                            lift_contract,
+                        ) {
+                            return Ok((
+                                retry.function,
+                                DecodeDiag {
+                                    attempts: 2,
+                                    stop_reason: "success_after_truncated_retry".into(),
+                                },
+                            ));
+                        }
+                        return Err(DecodeFailure {
+                            message: format!(
+                                "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err:#}"
+                            ),
+                            diag: DecodeDiag {
+                                attempts: 2,
+                                stop_reason: "lift_failed_after_truncated_retry".into(),
+                            },
+                        });
+                    }
+                }
+            }
+            Err(DecodeFailure {
+                message: format!(
+                    "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err:#}"
+                ),
+                diag: DecodeDiag {
+                    attempts: 1,
+                    stop_reason: "lift_failed".into(),
+                },
+            })
+        }
+    }
+}
+
+fn format_varnode_for_pcode(vn: &Varnode) -> String {
+    if vn.is_constant {
+        format!("const(0x{:x}:{})", vn.constant_val as u64, vn.size)
+    } else {
+        format!(
+            "v(space={},off=0x{:x},size={})",
+            vn.space_id, vn.offset, vn.size
+        )
+    }
+}
+
+pub(crate) fn render_pcode_text(name: &str, pcode: &PcodeFunction) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("// rust_sleigh direct pcode output: {name}\n"));
+    for block in &pcode.blocks {
+        out.push_str(&format!(
+            "block_{} @ 0x{:x}\n",
+            block.index, block.start_address
+        ));
+        for op in &block.ops {
+            let out_vn = op
+                .output
+                .as_ref()
+                .map(format_varnode_for_pcode)
+                .unwrap_or_else(|| "-".to_string());
+            let in_vn = op
+                .inputs
+                .iter()
+                .map(format_varnode_for_pcode)
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "  [{:04}] 0x{:x} {:?}  {} <- {}\n",
+                op.seq_num, op.address, op.opcode, out_vn, in_vn
+            ));
+        }
+    }
+    out
+}

@@ -124,7 +124,7 @@ fn render_legacy_code(
         fact_store.loader_type_facts(),
         &merged_types,
     );
-    let postprocessor = PostProcessor::new()
+    let postprocessor = PostProcessor::legacy_semantic_pipeline()
         .with_inferred_types(merged_types)
         .with_dwarf_info(fact_store.dwarf_function(address).cloned())
         .with_string_map(Some(binary.inner().string_map.clone()));

@@ -15,7 +15,6 @@ default-run = "fission_cli"
 [lib]
 name = "fission_cli"
 path = "src/lib.rs"
-test = false
 
 [features]
 default = []

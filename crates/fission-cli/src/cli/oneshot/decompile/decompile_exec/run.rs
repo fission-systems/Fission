@@ -1,3 +1,4 @@
+use crate::cli::oneshot::debug_decomp::{debug_decomp_bundle_json, write_debug_decomp_bundle_file};
 use super::super::decompile_render::{
     DecompEntry, RenderedCode, decompile_code_with_profile, make_assembly_fallback,
     strip_inferred_structs, strip_warnings,
@@ -17,6 +18,66 @@ fn build_cfg_blocks(
     ops: Vec<fission_pcode::PcodeOp>,
 ) -> Vec<fission_pcode::PcodeBasicBlock> {
     fission_sleigh::runtime::build_cfg_blocks(entry_address, ops)
+}
+
+fn maybe_record_debug_decomp(
+    cli: &OneShotArgs,
+    effective_json: bool,
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+    preview_build_stats: Option<&fission_pcode::NirBuildStats>,
+    preview_hint_stats: Option<&fission_pcode::NirHintStats>,
+    native_timing: Option<serde_json::Value>,
+    failed_hard: bool,
+    assembly_fallback_no_stats: bool,
+    entry: Option<&mut serde_json::Value>,
+    sink: Option<&mut Vec<serde_json::Value>>,
+) {
+    if !cli.debug_decomp && cli.debug_decomp_bundle.is_none() {
+        return;
+    }
+    let nt = native_timing.as_ref();
+    let bundle = debug_decomp_bundle_json(
+        binary,
+        cli.address,
+        func,
+        preview_build_stats,
+        preview_hint_stats,
+        nt,
+        failed_hard,
+        assembly_fallback_no_stats,
+    );
+    let embed = cli.debug_decomp && effective_json;
+
+    if embed {
+        if let Some(entry) = entry {
+            match sink {
+                Some(sink) => {
+                    entry["debug_decomp"] = bundle.clone();
+                    sink.push(bundle);
+                }
+                None => {
+                    entry["debug_decomp"] = bundle;
+                }
+            }
+            return;
+        }
+    }
+
+    if let Some(sink) = sink {
+        sink.push(bundle);
+    }
+}
+
+fn timing_json_from_storage(raw: Option<&String>) -> Option<serde_json::Value> {
+    raw.and_then(|timing| {
+        let t = timing.trim();
+        if t.is_empty() || t == "{}" {
+            None
+        } else {
+            serde_json::from_str(timing).ok()
+        }
+    })
 }
 
 fn render_with_rust_sleigh(
@@ -61,6 +122,7 @@ fn run_rust_sleigh_decompilation(
     effective_no_warnings: bool,
     effective_json: bool,
     init_start: std::time::Instant,
+    debug_bundle_sink: Option<&mut Vec<serde_json::Value>>,
 ) -> io::Result<()> {
     let mut all_output = String::new();
     let mut json_results = Vec::new();
@@ -106,6 +168,19 @@ fn run_rust_sleigh_decompilation(
                             (rendered.postprocess_sec * 1_000_000.0).round() / 1_000_000.0
                         );
                     }
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        None,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        Some(&mut entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(entry);
                 } else {
                     if !effective_no_header {
@@ -118,6 +193,19 @@ fn run_rust_sleigh_decompilation(
                     }
                     all_output.push_str(&filtered);
                     all_output.push_str("\n\n");
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        None,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
             Err(e) => {
@@ -142,6 +230,19 @@ fn run_rust_sleigh_decompilation(
                             entry["decomp_sec"] =
                                 serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                         }
+                        maybe_record_debug_decomp(
+                            cli,
+                            effective_json,
+                            binary,
+                            func,
+                            None,
+                            None,
+                            None,
+                            false,
+                            true,
+                            Some(&mut entry),
+                            debug_bundle_sink.as_mut(),
+                        );
                         json_results.push(entry);
                     } else {
                         if !effective_no_header {
@@ -156,6 +257,19 @@ fn run_rust_sleigh_decompilation(
                         }
                         all_output.push_str(&fallback);
                         all_output.push_str("\n\n");
+                        maybe_record_debug_decomp(
+                            cli,
+                            effective_json,
+                            binary,
+                            func,
+                            None,
+                            None,
+                            None,
+                            false,
+                            true,
+                            None,
+                            debug_bundle_sink.as_mut(),
+                        );
                     }
                 } else if effective_json {
                     let mut entry = serde_json::json!({
@@ -171,14 +285,46 @@ fn run_rust_sleigh_decompilation(
                         entry["decomp_sec"] =
                             serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                     }
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        None,
+                        None,
+                        None,
+                        true,
+                        false,
+                        Some(&mut entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(entry);
                 } else {
                     all_output.push_str(&format!(
                         "// Error decompiling {} (0x{:x}): {}\n\n",
                         func.name, func.address, error_text
                     ));
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        None,
+                        None,
+                        None,
+                        true,
+                        false,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
+        }
+    }
+
+    if let Some(rows) = debug_bundle_sink {
+        if let Some(ref path) = cli.debug_decomp_bundle {
+            write_debug_decomp_bundle_file(path, rows)?;
         }
     }
 
@@ -241,6 +387,7 @@ fn run_sequential_decompilation<'a>(
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
+    debug_bundle_sink: Option<&mut Vec<serde_json::Value>>,
 ) -> (String, Vec<serde_json::Value>, f64, f64) {
     let mut all_output = String::new();
     let mut json_results = Vec::new();
@@ -300,6 +447,27 @@ fn run_sequential_decompilation<'a>(
                         );
                         attach_native_timing_if_present(&mut entry, decomp);
                     }
+                    let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                        let t = s.trim();
+                        if t.is_empty() || t == "{}" {
+                            None
+                        } else {
+                            serde_json::from_str(&s).ok()
+                        }
+                    });
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        native_timing,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        Some(&mut entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(entry);
                 } else {
                     if !effective_no_header {
@@ -312,6 +480,27 @@ fn run_sequential_decompilation<'a>(
                     }
                     all_output.push_str(&filtered);
                     all_output.push_str("\n\n");
+                    let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                        let t = s.trim();
+                        if t.is_empty() || t == "{}" {
+                            None
+                        } else {
+                            serde_json::from_str(&s).ok()
+                        }
+                    });
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        native_timing,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
             Err(e) => {
@@ -339,6 +528,27 @@ fn run_sequential_decompilation<'a>(
                                 serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                             attach_native_timing_if_present(&mut entry, decomp);
                         }
+                        let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                            let t = s.trim();
+                            if t.is_empty() || t == "{}" {
+                                None
+                            } else {
+                                serde_json::from_str(&s).ok()
+                            }
+                        });
+                        maybe_record_debug_decomp(
+                            cli,
+                            effective_json,
+                            binary,
+                            func,
+                            None,
+                            None,
+                            native_timing,
+                            false,
+                            true,
+                            Some(&mut entry),
+                            debug_bundle_sink.as_mut(),
+                        );
                         json_results.push(entry);
                     } else {
                         if !effective_no_header {
@@ -353,6 +563,27 @@ fn run_sequential_decompilation<'a>(
                         }
                         all_output.push_str(&fallback);
                         all_output.push_str("\n\n");
+                        let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                            let t = s.trim();
+                            if t.is_empty() || t == "{}" {
+                                None
+                            } else {
+                                serde_json::from_str(&s).ok()
+                            }
+                        });
+                        maybe_record_debug_decomp(
+                            cli,
+                            effective_json,
+                            binary,
+                            func,
+                            None,
+                            None,
+                            native_timing,
+                            false,
+                            true,
+                            None,
+                            debug_bundle_sink.as_mut(),
+                        );
                     }
                     continue;
                 }
@@ -377,12 +608,54 @@ fn run_sequential_decompilation<'a>(
                             serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                         attach_native_timing_if_present(&mut entry, decomp);
                     }
+                    let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                        let t = s.trim();
+                        if t.is_empty() || t == "{}" {
+                            None
+                        } else {
+                            serde_json::from_str(&s).ok()
+                        }
+                    });
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        None,
+                        None,
+                        native_timing,
+                        true,
+                        false,
+                        Some(&mut entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(entry);
                 } else {
                     all_output.push_str(&format!(
                         "// Error decompiling {} (0x{:x}): {}\n\n",
                         func.name, func.address, error_text
                     ));
+                    let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                        let t = s.trim();
+                        if t.is_empty() || t == "{}" {
+                            None
+                        } else {
+                            serde_json::from_str(&s).ok()
+                        }
+                    });
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        func,
+                        None,
+                        None,
+                        native_timing,
+                        true,
+                        false,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
         }
@@ -411,6 +684,7 @@ fn run_parallel_decompilation<'a>(
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
+    debug_bundle_sink: Option<&mut Vec<serde_json::Value>>,
 ) -> (String, Vec<serde_json::Value>, f64, f64) {
     let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
     let config = fission_core::config::Config::default();
@@ -597,6 +871,14 @@ fn run_parallel_decompilation<'a>(
 
         match &entry.code {
             Ok(rendered) => {
+                let func_meta = binary.function_at_exact(entry.address).cloned().unwrap_or_else(|| {
+                    FunctionInfo {
+                        name: entry.name.clone(),
+                        address: entry.address,
+                        size: entry.size,
+                        ..Default::default()
+                    }
+                });
                 let mut filtered = rendered.code.clone();
                 if effective_no_warnings {
                     filtered = strip_warnings(&filtered);
@@ -636,6 +918,20 @@ fn run_parallel_decompilation<'a>(
                             }
                         }
                     }
+                    let native_timing = timing_json_from_storage(entry.last_timing_json.as_ref());
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        &func_meta,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        native_timing,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        Some(&mut json_entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(json_entry);
                 } else {
                     if !effective_no_header {
@@ -648,9 +944,31 @@ fn run_parallel_decompilation<'a>(
                     }
                     all_output.push_str(&filtered);
                     all_output.push_str("\n\n");
+                    let native_timing = timing_json_from_storage(entry.last_timing_json.as_ref());
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        &func_meta,
+                        rendered.preview_build_stats.as_ref(),
+                        rendered.preview_hint_stats.as_ref(),
+                        native_timing,
+                        false,
+                        rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
             Err(e) => {
+                let func_meta = binary.function_at_exact(entry.address).cloned().unwrap_or_else(|| {
+                    FunctionInfo {
+                        name: entry.name.clone(),
+                        address: entry.address,
+                        size: entry.size,
+                        ..Default::default()
+                    }
+                });
                 if effective_json {
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
@@ -673,12 +991,40 @@ fn run_parallel_decompilation<'a>(
                             }
                         }
                     }
+                    let native_timing = timing_json_from_storage(entry.last_timing_json.as_ref());
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        &func_meta,
+                        None,
+                        None,
+                        native_timing,
+                        true,
+                        false,
+                        Some(&mut json_entry),
+                        debug_bundle_sink.as_mut(),
+                    );
                     json_results.push(json_entry);
                 } else {
                     all_output.push_str(&format!(
                         "// Error decompiling {} (0x{:x}): {}\n\n",
                         entry.name, entry.address, e
                     ));
+                    let native_timing = timing_json_from_storage(entry.last_timing_json.as_ref());
+                    maybe_record_debug_decomp(
+                        cli,
+                        effective_json,
+                        binary,
+                        &func_meta,
+                        None,
+                        None,
+                        native_timing,
+                        true,
+                        false,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
                 }
             }
         }
@@ -740,6 +1086,8 @@ pub(crate) fn run_decompilation(
     let selection_accounting = selected_functions.accounting;
     let functions = selected_functions.functions;
 
+    let mut debug_bundle_file_rows = cli.debug_decomp_bundle.as_ref().map(|_| Vec::new());
+
     if matches!(engine_mode, EngineMode::RustSleigh) {
         let effective_no_header = cli.no_header || cli.ghidra_compat;
         let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
@@ -766,6 +1114,7 @@ pub(crate) fn run_decompilation(
                     effective_no_warnings,
                     effective_json,
                     init_start,
+                    debug_bundle_file_rows.as_mut(),
                 );
             }
         }
@@ -780,6 +1129,7 @@ pub(crate) fn run_decompilation(
             effective_no_warnings,
             effective_json,
             init_start,
+            debug_bundle_file_rows.as_mut(),
         );
     }
 
@@ -877,6 +1227,7 @@ pub(crate) fn run_decompilation(
             effective_no_header,
             effective_no_warnings,
             effective_json,
+            debug_bundle_file_rows.as_mut(),
         )
     } else {
         run_sequential_decompilation(
@@ -890,8 +1241,15 @@ pub(crate) fn run_decompilation(
             effective_no_header,
             effective_no_warnings,
             effective_json,
+            debug_bundle_file_rows.as_mut(),
         )
     };
+
+    if let Some(ref path) = cli.debug_decomp_bundle {
+        if let Some(rows) = debug_bundle_file_rows.as_ref() {
+            write_debug_decomp_bundle_file(path, rows)?;
+        }
+    }
 
     let final_output = if cli.benchmark {
         let envelope = serde_json::json!({

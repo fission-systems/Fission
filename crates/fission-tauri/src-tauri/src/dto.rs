@@ -313,7 +313,10 @@ impl Default for CppPostProcessOptions {
     }
 }
 
-/// Rust side post-processing options (individual pass toggles).
+/// Rust side **legacy text** post-processing toggles (mirrors core defaults).
+///
+/// Defaults are **all disabled**. Enable explicitly only for legacy compatibility experiments —
+/// semantic shaping belongs in NIR/HIR, not string rewriting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RustPostProcessOptions {
     pub clean_rust: bool,
@@ -343,28 +346,28 @@ pub struct RustPostProcessOptions {
 impl Default for RustPostProcessOptions {
     fn default() -> Self {
         Self {
-            clean_rust: true,
-            clean_go: true,
-            swift_demangle: true,
-            field_offsets: true,
-            insert_casts: true,
-            arithmetic_idioms: true,
-            temp_var_inlining: true,
-            stack_var_normalization: true,
-            piece_access_normalization: true,
-            deref_to_array: true,
-            bitop_to_logicop: true,
-            remove_dead_branches: true,
-            simplify_if: true,
-            while_to_for: true,
-            dead_assign_removal: true,
-            rename_induction_vars: true,
-            rename_semantic_vars: true,
-            loop_idioms: true,
-            switch_reconstruction: true,
-            mul_to_shift: true,
-            dwarf_names: true,
-            string_pointers: true,
+            clean_rust: false,
+            clean_go: false,
+            swift_demangle: false,
+            field_offsets: false,
+            insert_casts: false,
+            arithmetic_idioms: false,
+            temp_var_inlining: false,
+            stack_var_normalization: false,
+            piece_access_normalization: false,
+            deref_to_array: false,
+            bitop_to_logicop: false,
+            remove_dead_branches: false,
+            simplify_if: false,
+            while_to_for: false,
+            dead_assign_removal: false,
+            rename_induction_vars: false,
+            rename_semantic_vars: false,
+            loop_idioms: false,
+            switch_reconstruction: false,
+            mul_to_shift: false,
+            dwarf_names: false,
+            string_pointers: false,
         }
     }
 }

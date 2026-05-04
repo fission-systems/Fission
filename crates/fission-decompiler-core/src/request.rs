@@ -5,6 +5,16 @@ use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction};
 use fission_static::analysis::decomp::facts::FactStore;
 
+/// Records whether legacy **text** post-processing ran and why canonical NIR paths skip it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostprocessPolicy {
+    /// Canonical NIR / Rust-Sleigh paths must not apply string semantic rewrites here.
+    DisabledForNirSemanticOwner,
+    /// Legacy compatibility surface explicitly ran [`crate::legacy_postprocess::PostProcessor`].
+    LegacyTextPipelineApplied,
+}
+
 #[derive(Debug, Clone)]
 pub struct DecompileRequest<'a> {
     pub binary: &'a LoadedBinary,
@@ -44,10 +54,15 @@ pub struct DecompileResult {
     pub build_stats: Option<NirBuildStats>,
     pub hint_stats: Option<NirHintStats>,
     pub postprocess_applied: bool,
+    pub postprocess_policy: PostprocessPolicy,
 }
 
 impl DecompileResult {
-    pub fn from_selection(selection: DecompileSelection, postprocess_applied: bool) -> Self {
+    pub fn from_selection(
+        selection: DecompileSelection,
+        postprocess_applied: bool,
+        postprocess_policy: PostprocessPolicy,
+    ) -> Self {
         let routing = selection.routing_decision();
         let build_stats = selection.build_stats.clone();
         let hint_stats = selection.hint_stats.clone();
@@ -59,6 +74,7 @@ impl DecompileResult {
             build_stats,
             hint_stats,
             postprocess_applied,
+            postprocess_policy,
         }
     }
 }
@@ -90,5 +106,9 @@ pub fn decompile_prebuilt_pcode(
         )?
     };
 
-    Ok(DecompileResult::from_selection(selection, false))
+    Ok(DecompileResult::from_selection(
+        selection,
+        false,
+        PostprocessPolicy::DisabledForNirSemanticOwner,
+    ))
 }

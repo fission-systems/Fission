@@ -58,6 +58,10 @@ pub struct OneShotArgs {
     pub resume_from: Option<PathBuf>,
     pub quiet_batch_errors: bool,
     pub emit_function_facts_inventory: bool,
+    /// Embed stage metric/evidence bundle in JSON (`decomp`); requires `--json` or `--benchmark`.
+    pub debug_decomp: bool,
+    /// Write the same debug bundle to a JSON file (works without embedding).
+    pub debug_decomp_bundle: Option<PathBuf>,
 }
 
 impl Default for OneShotArgs {
@@ -101,6 +105,8 @@ impl Default for OneShotArgs {
             resume_from: None,
             quiet_batch_errors: false,
             emit_function_facts_inventory: false,
+            debug_decomp: false,
+            debug_decomp_bundle: None,
         }
     }
 }
@@ -309,6 +315,14 @@ struct DecompArgs {
     /// Benchmark mode: record per-function timing in JSON output
     #[arg(long)]
     benchmark: bool,
+
+    /// Embed developer/benchmark debug bundle (`debug_decomp`) in JSON output (requires `--json` or `--benchmark`)
+    #[arg(long)]
+    debug_decomp: bool,
+
+    /// Write debug bundle JSON to FILE (same payload as `debug_decomp`; does not require `--json`)
+    #[arg(long, value_name = "FILE")]
+    debug_decomp_bundle: Option<PathBuf>,
 
     /// Override binary format detection (auto|pe|elf|macho)
     #[arg(long, value_name = "FORMAT", hide = true)]
@@ -587,6 +601,14 @@ struct LegacyCliArgs {
     #[arg(long)]
     benchmark: bool,
 
+    /// Embed developer/benchmark debug bundle in JSON output (requires `--json` or `--benchmark`)
+    #[arg(long)]
+    debug_decomp: bool,
+
+    /// Write debug bundle JSON to FILE
+    #[arg(long, value_name = "FILE")]
+    debug_decomp_bundle: Option<PathBuf>,
+
     /// Decompile all discovered functions (batch mode)
     #[arg(long, alias = "all")]
     decomp_all: bool,
@@ -734,6 +756,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
             args.no_warnings = decomp.no_warnings;
             args.ghidra_compat = decomp.ghidra_compat;
             args.benchmark = decomp.benchmark;
+            args.debug_decomp = decomp.debug_decomp;
+            args.debug_decomp_bundle = decomp.debug_decomp_bundle;
             args.format = decomp.format;
             args
         }
@@ -818,6 +842,8 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         ghidra_compat: cli.ghidra_compat,
         no_warnings: cli.no_warnings,
         benchmark: cli.benchmark,
+        debug_decomp: cli.debug_decomp,
+        debug_decomp_bundle: cli.debug_decomp_bundle.clone(),
         decomp_all: cli.decomp_all,
         decomp_limit: cli.decomp_limit,
         include_nonuser_functions: cli.include_nonuser_functions,
@@ -919,6 +945,27 @@ mod tests {
         assert!(parsed.args.ghidra_compat);
         assert!(parsed.args.benchmark);
         assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_decomp_debug_flags_parse() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x100",
+            "--json",
+            "--debug-decomp",
+            "--debug-decomp-bundle",
+            "/tmp/dbg.json",
+        ]);
+        assert!(parsed.args.debug_decomp);
+        assert!(parsed.args.json);
+        assert_eq!(
+            parsed.args.debug_decomp_bundle,
+            Some(PathBuf::from("/tmp/dbg.json"))
+        );
     }
 
     #[test]

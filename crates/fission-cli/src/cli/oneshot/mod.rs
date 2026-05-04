@@ -8,8 +8,9 @@ mod binary_info;
 mod common;
 #[cfg(feature = "native_decomp")]
 mod decompile;
+mod debug_decomp;
 #[cfg(not(feature = "native_decomp"))]
-mod decompile_rust_sleigh;
+mod rust_decomp;
 mod disasm;
 mod function_select;
 mod functions;
@@ -22,7 +23,7 @@ use decompile::{
     emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
 };
 #[cfg(not(feature = "native_decomp"))]
-use decompile_rust_sleigh::run_decompilation_rust_sleigh;
+use rust_decomp::run_decompilation_rust_sleigh;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
@@ -196,6 +197,12 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if cli.address.is_some() || cli.decomp_all {
+        if cli.debug_decomp && !cli.json && !cli.benchmark {
+            anyhow::bail!(
+                "`--debug-decomp` requires `--json` or `--benchmark` when embedding `debug_decomp` in stdout output"
+            );
+        }
+
         #[cfg(feature = "native_decomp")]
         {
             run_decompilation(cli, &binary, &binary_data)?;

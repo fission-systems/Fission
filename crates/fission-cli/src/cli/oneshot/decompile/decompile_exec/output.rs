@@ -1,3 +1,4 @@
+use crate::cli::oneshot::debug_decomp::{debug_decomp_bundle_json, write_debug_decomp_bundle_file};
 use super::super::decompile_render::{
     attach_native_timing, decompile_code_with_profile, make_assembly_fallback,
     strip_inferred_structs, strip_warnings,
@@ -29,6 +30,45 @@ pub(crate) fn decompile_and_output(
         cli.verbose,
     ) {
         Ok(rendered) => {
+            let func_meta = binary.function_at_exact(addr).cloned().unwrap_or_else(|| {
+                FunctionInfo {
+                    name: name.to_string(),
+                    address: addr,
+                    size: 0,
+                    is_export: false,
+                    is_import: false,
+                    ..Default::default()
+                }
+            });
+
+            let native_timing = decomp.get_last_timing_json().ok().and_then(|s| {
+                let t = s.trim();
+                if t.is_empty() || t == "{}" {
+                    None
+                } else {
+                    serde_json::from_str(&s).ok()
+                }
+            });
+
+            let debug_bundle = (cli.debug_decomp || cli.debug_decomp_bundle.is_some()).then(|| {
+                debug_decomp_bundle_json(
+                    binary,
+                    cli.address,
+                    &func_meta,
+                    rendered.preview_build_stats.as_ref(),
+                    rendered.preview_hint_stats.as_ref(),
+                    native_timing.as_ref(),
+                    false,
+                    rendered.preview_build_stats.is_none() && rendered.fell_back,
+                )
+            });
+
+            if let Some(ref path) = cli.debug_decomp_bundle {
+                if let Some(ref bundle) = debug_bundle {
+                    write_debug_decomp_bundle_file(path, std::slice::from_ref(bundle))?;
+                }
+            }
+
             let mut filtered = rendered.code.clone();
             if effective_no_warnings {
                 filtered = strip_warnings(&filtered);
@@ -37,7 +77,7 @@ pub(crate) fn decompile_and_output(
                 filtered = strip_inferred_structs(&filtered);
             }
             if cli.json {
-                let json_output = serde_json::to_string_pretty(&serde_json::json!({
+                let mut obj = serde_json::json!({
                     "address": format!("0x{:x}", addr),
                     "name": name,
                     "code": filtered,
@@ -46,8 +86,14 @@ pub(crate) fn decompile_and_output(
                     "fallback_reason": rendered.fallback_reason,
                     "preview_build_stats": rendered.preview_build_stats,
                     "preview_hint_stats": rendered.preview_hint_stats,
-                }))
-                .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?;
+                });
+                if cli.debug_decomp {
+                    if let Some(bundle) = debug_bundle {
+                        obj["debug_decomp"] = bundle;
+                    }
+                }
+                let json_output = serde_json::to_string_pretty(&obj)
+                    .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?;
                 if let Some(ref output_path) = cli.output {
                     fs::write(output_path, json_output.as_bytes())?;
                     if cli.verbose {
@@ -84,8 +130,49 @@ pub(crate) fn decompile_and_output(
             {
                 let mut stdout = io::stdout().lock();
                 writeln!(stdout, "{}", fallback)?;
+
+                if let Some(ref path) = cli.debug_decomp_bundle {
+                    let bundle = debug_decomp_bundle_json(
+                        binary,
+                        cli.address,
+                        func,
+                        None,
+                        None,
+                        None,
+                        false,
+                        true,
+                    );
+                    write_debug_decomp_bundle_file(path, &[bundle])?;
+                }
                 return Ok(());
             }
+
+            if cli.debug_decomp_bundle.is_some() {
+                let func_meta = binary.function_at_exact(addr).cloned().unwrap_or_else(|| {
+                    FunctionInfo {
+                        name: name.to_string(),
+                        address: addr,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                        ..Default::default()
+                    }
+                });
+                let bundle = debug_decomp_bundle_json(
+                    binary,
+                    cli.address,
+                    &func_meta,
+                    None,
+                    None,
+                    None,
+                    true,
+                    false,
+                );
+                if let Some(ref path) = cli.debug_decomp_bundle {
+                    write_debug_decomp_bundle_file(path, &[bundle])?;
+                }
+            }
+
             eprintln!("Error: {}", error_text);
             std::process::exit(1);
         }

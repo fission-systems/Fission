@@ -33,7 +33,6 @@ use tracing::warn;
 #[cfg(feature = "native_decomp")]
 use rayon::prelude::*;
 
-mod decompile_exec;
 mod decompile_render;
 mod decompile_targets;
 mod nir_candidates;

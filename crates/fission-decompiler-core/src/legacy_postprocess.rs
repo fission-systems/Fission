@@ -1,9 +1,15 @@
-//! Decompiler Post-Processor
+//! **Legacy text rewrite pipeline** (quarantined).
 //!
-//! Provides IDA-style code cleaning and boilerplate removal.
+//! Historically described as “IDA-style code cleaning”: it mutates **rendered source text**
+//! after decompilation. Several passes touch control flow, casts, stack/piece shaping, or naming,
+//! which makes them unsuitable as a semantic repair layer on canonical NIR/HIR paths.
 //!
-//! This module processes raw C code from the decompiler to make it more
-//! readable by hiding language-specific overhead like safety checks and panics.
+//! **Policy:** structuring, semantic normalization, and type recovery belong in
+//! [`fission_pcode`](https://docs.rs/fission-pcode) / NIR — not here. Canonical NIR / Rust-Sleigh
+//! pipelines must not apply this processor unless explicitly opting into the legacy preset.
+//!
+//! Use [`PostProcessor::legacy_semantic_pipeline`] (or [`RustPostProcessOptions::legacy_semantic_all_enabled`])
+//! only for narrow compatibility surfaces (for example native FFI legacy output).
 
 use fission_loader::loader::types::{DwarfFunctionInfo, InferredTypeInfo};
 use std::borrow::Cow;
@@ -29,10 +35,12 @@ mod tests;
 mod type_promotion;
 mod var_sweep;
 
-/// Configurable options for the Rust-side post-processing passes.
+/// Configurable options for the Rust-side **legacy** text post-processing passes.
 ///
-/// Each flag corresponds to one pass in [`PostProcessor::process`].
-/// All default to `true` (enabled).
+/// Each flag corresponds to one pass in [`PostProcessor::process`] / [`PostProcessor::process_with_registry`].
+///
+/// **Default is all-disabled** so accidental wiring cannot silently rewrite semantics on canonical paths.
+/// Use [`Self::legacy_semantic_all_enabled`] for the historical “everything on” preset.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RustPostProcessOptions {
     pub clean_rust: bool,
@@ -59,8 +67,39 @@ pub struct RustPostProcessOptions {
     pub string_pointers: bool,
 }
 
-impl Default for RustPostProcessOptions {
-    fn default() -> Self {
+impl RustPostProcessOptions {
+    /// All passes disabled — safe default for canonical NIR / Rust-Sleigh surfaces.
+    pub fn disabled() -> Self {
+        Self {
+            clean_rust: false,
+            clean_go: false,
+            swift_demangle: false,
+            field_offsets: false,
+            insert_casts: false,
+            arithmetic_idioms: false,
+            temp_var_inlining: false,
+            stack_var_normalization: false,
+            piece_access_normalization: false,
+            deref_to_array: false,
+            bitop_to_logicop: false,
+            remove_dead_branches: false,
+            simplify_if: false,
+            while_to_for: false,
+            dead_assign_removal: false,
+            rename_induction_vars: false,
+            rename_semantic_vars: false,
+            loop_idioms: false,
+            switch_reconstruction: false,
+            mul_to_shift: false,
+            dwarf_names: false,
+            string_pointers: false,
+        }
+    }
+
+    /// Historical preset matching pre-quarantine defaults (all semantic-ish passes enabled).
+    ///
+    /// Use only on explicit legacy compatibility paths (for example native FFI text fallback).
+    pub fn legacy_semantic_all_enabled() -> Self {
         Self {
             clean_rust: true,
             clean_go: true,
@@ -88,7 +127,13 @@ impl Default for RustPostProcessOptions {
     }
 }
 
-/// Decompiler output post-processor
+impl Default for RustPostProcessOptions {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+/// Legacy text post-processor (`PostProcessor`).
 pub struct PostProcessor {
     options: RustPostProcessOptions,
     inferred_types: Vec<InferredTypeInfo>,
@@ -108,6 +153,12 @@ impl PostProcessor {
             dwarf_info: None,
             string_map: None,
         }
+    }
+
+    /// Explicit legacy preset (all historical passes enabled). Prefer over [`Self::new`] when the
+    /// caller intends semantic text rewriting (native FFI legacy output, regression tests, etc.).
+    pub fn legacy_semantic_pipeline() -> Self {
+        Self::new().with_options(RustPostProcessOptions::legacy_semantic_all_enabled())
     }
 
     /// Configure post-processing passes via options struct
