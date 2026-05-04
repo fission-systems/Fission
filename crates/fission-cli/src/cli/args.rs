@@ -134,6 +134,29 @@ pub struct ParsedOneShotArgs {
     pub legacy_warning: Option<LegacyInvocationKind>,
 }
 
+/// Parsed top-level CLI invocation (legacy one-shot pipeline vs Rhai script runner).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParsedInvocation {
+    OneShot(ParsedOneShotArgs),
+    Script(ScriptInvocation),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScriptInvocation {
+    pub verbose: bool,
+    pub cmd: ScriptCmd,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScriptCmd {
+    Check { script: PathBuf },
+    Run {
+        binary: PathBuf,
+        script: PathBuf,
+        json: bool,
+    },
+}
+
 #[derive(Args, Clone, Debug, Default)]
 struct CommonBinaryOutputArgs {
     /// Output in JSON format
@@ -173,6 +196,8 @@ enum CliCommand {
     Strings(StringsArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
+    /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
+    Script(ScriptArgs),
 }
 
 #[derive(Args, Debug)]
@@ -344,6 +369,50 @@ struct StringsArgs {
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Compile-check or run embedded Rhai scripts with read-only access to loaded binary inventory.\n\nScripts receive `binary` (path, format, functions, imports, …) and may call `emit` to record structured findings.",
+    after_help = "Examples:\n  fission_cli script check --script scan.rhai\n  fission_cli script run app.exe --script scan.rhai --json"
+)]
+struct ScriptArgs {
+    #[command(subcommand)]
+    command: ScriptCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ScriptCommand {
+    /// Syntax-check a Rhai script (no binary load)
+    Check(ScriptCheckArgs),
+    /// Load a binary, run Balanced discovery, then evaluate the script
+    Run(ScriptRunArgs),
+}
+
+#[derive(Args, Debug)]
+struct ScriptCheckArgs {
+    /// Path to the `.rhai` script
+    #[arg(long, value_name = "FILE")]
+    script: PathBuf,
+
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[derive(Args, Debug)]
+struct ScriptRunArgs {
+    /// Binary to analyze
+    binary: PathBuf,
+
+    /// Path to the `.rhai` script
+    #[arg(long, value_name = "FILE")]
+    script: PathBuf,
+
+    #[arg(short, long)]
+    json: bool,
+
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[derive(Args, Debug)]
@@ -684,17 +753,19 @@ fn should_use_canonical_parser(argv: &[OsString]) -> bool {
     }
 
     match argv[1].to_str() {
-        Some("info" | "list" | "disasm" | "decomp" | "strings" | "inventory") => true,
+        Some(
+            "info" | "list" | "disasm" | "decomp" | "strings" | "inventory" | "script",
+        ) => true,
         Some("help" | "--help" | "-h" | "--version" | "-V") => true,
         _ => false,
     }
 }
 
-pub fn parse_oneshot_args() -> ParsedOneShotArgs {
+pub fn parse_oneshot_args() -> ParsedInvocation {
     parse_oneshot_args_from(std::env::args_os())
 }
 
-fn parse_oneshot_args_from<I, T>(iter: I) -> ParsedOneShotArgs
+pub fn parse_oneshot_args_from<I, T>(iter: I) -> ParsedInvocation
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString>,
@@ -703,118 +774,139 @@ where
     if should_use_canonical_parser(&argv) {
         normalize_canonical(CliArgs::parse_from(argv))
     } else {
-        normalize_legacy(LegacyCliArgs::parse_from(argv))
+        ParsedInvocation::OneShot(normalize_legacy(LegacyCliArgs::parse_from(argv)))
     }
 }
 
-fn normalize_canonical(cli: CliArgs) -> ParsedOneShotArgs {
-    let args = match cli.command {
-        CliCommand::Info(info) => {
-            let mut args = OneShotArgs::with_binary(info.binary);
-            args.json = info.common.json;
-            args.verbose = info.common.verbose;
-            args.sections = info.sections;
-            args.imports = info.imports;
-            args.exports = info.exports;
-            args.info = !args.sections && !args.imports && !args.exports;
-            args
+fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
+    match cli.command {
+        CliCommand::Script(script) => {
+            let invocation = match script.command {
+                ScriptCommand::Check(c) => ScriptInvocation {
+                    verbose: c.verbose,
+                    cmd: ScriptCmd::Check { script: c.script },
+                },
+                ScriptCommand::Run(r) => ScriptInvocation {
+                    verbose: r.verbose,
+                    cmd: ScriptCmd::Run {
+                        binary: r.binary,
+                        script: r.script,
+                        json: r.json,
+                    },
+                },
+            };
+            ParsedInvocation::Script(invocation)
         }
-        CliCommand::List(list) => {
-            let mut args = OneShotArgs::with_binary(list.binary);
-            args.list = true;
-            args.json = list.common.json;
-            args.verbose = list.common.verbose;
-            args
+        cmd => {
+            let args = match cmd {
+                CliCommand::Info(info) => {
+                    let mut args = OneShotArgs::with_binary(info.binary);
+                    args.json = info.common.json;
+                    args.verbose = info.common.verbose;
+                    args.sections = info.sections;
+                    args.imports = info.imports;
+                    args.exports = info.exports;
+                    args.info = !args.sections && !args.imports && !args.exports;
+                    args
+                }
+                CliCommand::List(list) => {
+                    let mut args = OneShotArgs::with_binary(list.binary);
+                    args.list = true;
+                    args.json = list.common.json;
+                    args.verbose = list.common.verbose;
+                    args
+                }
+                CliCommand::Disasm(disasm) => {
+                    let mut args = OneShotArgs::with_binary(disasm.binary);
+                    args.count = disasm.count;
+                    args.json = disasm.common.json;
+                    args.verbose = disasm.common.verbose;
+                    if disasm.function {
+                        args.disasm_function = Some(disasm.addr);
+                    } else {
+                        args.disasm = Some(disasm.addr);
+                    }
+                    args
+                }
+                CliCommand::Decomp(decomp) => {
+                    let mut args = OneShotArgs::with_binary(decomp.binary);
+                    args.address = decomp.addr;
+                    args.decomp_all = decomp.all;
+                    args.decomp_limit = decomp.limit;
+                    args.include_nonuser_functions = decomp.include_nonuser_functions;
+                    args.profile = decomp.profile;
+                    args.engine = decomp.engine;
+                    args.compiler_id = decomp.compiler_id;
+                    args.timeout_ms = decomp.timeout_ms;
+                    args.function_discovery_profile = decomp.function_discovery_profile;
+                    args.json = decomp.json;
+                    args.output = decomp.output;
+                    args.verbose = decomp.verbose;
+                    args.no_header = decomp.no_header;
+                    args.no_warnings = decomp.no_warnings;
+                    args.ghidra_compat = decomp.ghidra_compat;
+                    args.benchmark = decomp.benchmark;
+                    args.debug_decomp = decomp.debug_decomp;
+                    args.debug_decomp_bundle = decomp.debug_decomp_bundle;
+                    args.format = decomp.format;
+                    args
+                }
+                CliCommand::Strings(strings) => {
+                    let mut args = OneShotArgs::with_binary(strings.binary);
+                    args.strings = Some(strings.min_len);
+                    args.json = strings.common.json;
+                    args.verbose = strings.common.verbose;
+                    args
+                }
+                CliCommand::Inventory(inventory) => match inventory.command {
+                    InventoryCommand::FunctionFacts(facts) => {
+                        let mut args = OneShotArgs::with_binary(facts.binary);
+                        args.emit_function_facts_inventory = true;
+                        args.address = facts.addr;
+                        args.addresses_file = facts.addresses_file;
+                        args.functions_limit = facts.functions_limit;
+                        args.include_nonuser_functions = facts.include_nonuser_functions;
+                        args.chunk_size = facts.chunk_size;
+                        args.output_jsonl = facts.output_jsonl;
+                        args.summary_json = facts.summary_json;
+                        args.resume_from = facts.resume_from;
+                        args.quiet_batch_errors = facts.quiet_batch_errors;
+                        args.compiler_id = facts.compiler_id;
+                        args.profile = facts.profile;
+                        args.timeout_ms = facts.timeout_ms;
+                        args.function_discovery_profile = facts.function_discovery_profile;
+                        args.verbose = facts.verbose;
+                        args
+                    }
+                    InventoryCommand::PreviewCandidates(preview) => {
+                        let mut args = OneShotArgs::with_binary(preview.binary);
+                        args.preview_candidate_inventory = preview.inventory || !preview.batch;
+                        args.preview_candidate_scan_batch = preview.batch;
+                        args.address = preview.addr;
+                        args.preview_candidate_limit = preview.preview_candidate_limit;
+                        args.include_nonuser_functions = preview.include_nonuser_functions;
+                        args.addresses_file = preview.addresses_file;
+                        args.functions_limit = preview.functions_limit;
+                        args.chunk_size = preview.chunk_size;
+                        args.output_jsonl = preview.output_jsonl;
+                        args.summary_json = preview.summary_json;
+                        args.resume_from = preview.resume_from;
+                        args.quiet_batch_errors = preview.quiet_batch_errors;
+                        args.compiler_id = preview.compiler_id;
+                        args.profile = preview.profile;
+                        args.timeout_ms = preview.timeout_ms;
+                        args.function_discovery_profile = preview.function_discovery_profile;
+                        args.verbose = preview.verbose;
+                        args
+                    }
+                },
+                CliCommand::Script(_) => unreachable!("script branch handled above"),
+            };
+            ParsedInvocation::OneShot(ParsedOneShotArgs {
+                args,
+                legacy_warning: None,
+            })
         }
-        CliCommand::Disasm(disasm) => {
-            let mut args = OneShotArgs::with_binary(disasm.binary);
-            args.count = disasm.count;
-            args.json = disasm.common.json;
-            args.verbose = disasm.common.verbose;
-            if disasm.function {
-                args.disasm_function = Some(disasm.addr);
-            } else {
-                args.disasm = Some(disasm.addr);
-            }
-            args
-        }
-        CliCommand::Decomp(decomp) => {
-            let mut args = OneShotArgs::with_binary(decomp.binary);
-            args.address = decomp.addr;
-            args.decomp_all = decomp.all;
-            args.decomp_limit = decomp.limit;
-            args.include_nonuser_functions = decomp.include_nonuser_functions;
-            args.profile = decomp.profile;
-            args.engine = decomp.engine;
-            args.compiler_id = decomp.compiler_id;
-            args.timeout_ms = decomp.timeout_ms;
-            args.function_discovery_profile = decomp.function_discovery_profile;
-            args.json = decomp.json;
-            args.output = decomp.output;
-            args.verbose = decomp.verbose;
-            args.no_header = decomp.no_header;
-            args.no_warnings = decomp.no_warnings;
-            args.ghidra_compat = decomp.ghidra_compat;
-            args.benchmark = decomp.benchmark;
-            args.debug_decomp = decomp.debug_decomp;
-            args.debug_decomp_bundle = decomp.debug_decomp_bundle;
-            args.format = decomp.format;
-            args
-        }
-        CliCommand::Strings(strings) => {
-            let mut args = OneShotArgs::with_binary(strings.binary);
-            args.strings = Some(strings.min_len);
-            args.json = strings.common.json;
-            args.verbose = strings.common.verbose;
-            args
-        }
-        CliCommand::Inventory(inventory) => match inventory.command {
-            InventoryCommand::FunctionFacts(facts) => {
-                let mut args = OneShotArgs::with_binary(facts.binary);
-                args.emit_function_facts_inventory = true;
-                args.address = facts.addr;
-                args.addresses_file = facts.addresses_file;
-                args.functions_limit = facts.functions_limit;
-                args.include_nonuser_functions = facts.include_nonuser_functions;
-                args.chunk_size = facts.chunk_size;
-                args.output_jsonl = facts.output_jsonl;
-                args.summary_json = facts.summary_json;
-                args.resume_from = facts.resume_from;
-                args.quiet_batch_errors = facts.quiet_batch_errors;
-                args.compiler_id = facts.compiler_id;
-                args.profile = facts.profile;
-                args.timeout_ms = facts.timeout_ms;
-                args.function_discovery_profile = facts.function_discovery_profile;
-                args.verbose = facts.verbose;
-                args
-            }
-            InventoryCommand::PreviewCandidates(preview) => {
-                let mut args = OneShotArgs::with_binary(preview.binary);
-                args.preview_candidate_inventory = preview.inventory || !preview.batch;
-                args.preview_candidate_scan_batch = preview.batch;
-                args.address = preview.addr;
-                args.preview_candidate_limit = preview.preview_candidate_limit;
-                args.include_nonuser_functions = preview.include_nonuser_functions;
-                args.addresses_file = preview.addresses_file;
-                args.functions_limit = preview.functions_limit;
-                args.chunk_size = preview.chunk_size;
-                args.output_jsonl = preview.output_jsonl;
-                args.summary_json = preview.summary_json;
-                args.resume_from = preview.resume_from;
-                args.quiet_batch_errors = preview.quiet_batch_errors;
-                args.compiler_id = preview.compiler_id;
-                args.profile = preview.profile;
-                args.timeout_ms = preview.timeout_ms;
-                args.function_discovery_profile = preview.function_discovery_profile;
-                args.verbose = preview.verbose;
-                args
-            }
-        },
-    };
-
-    ParsedOneShotArgs {
-        args,
-        legacy_warning: None,
     }
 }
 
@@ -891,11 +983,72 @@ mod tests {
     use clap::error::ErrorKind;
 
     fn parse_canonical(args: &[&str]) -> ParsedOneShotArgs {
-        parse_oneshot_args_from(args.iter().copied())
+        match parse_oneshot_args_from(args.iter().copied()) {
+            ParsedInvocation::OneShot(p) => p,
+            ParsedInvocation::Script(_) => panic!("expected one-shot canonical parse"),
+        }
     }
 
     fn parse_legacy(args: &[&str]) -> ParsedOneShotArgs {
-        parse_oneshot_args_from(args.iter().copied())
+        match parse_oneshot_args_from(args.iter().copied()) {
+            ParsedInvocation::OneShot(p) => p,
+            ParsedInvocation::Script(_) => panic!("legacy parser cannot emit script"),
+        }
+    }
+
+    #[test]
+    fn canonical_script_check_parsing() {
+        let inv = parse_oneshot_args_from([
+            "fission_cli",
+            "script",
+            "check",
+            "--script",
+            "rules.rhai",
+        ]);
+        match inv {
+            ParsedInvocation::Script(s) => {
+                assert!(!s.verbose);
+                match s.cmd {
+                    ScriptCmd::Check { script } => {
+                        assert_eq!(script, PathBuf::from("rules.rhai"));
+                    }
+                    _ => panic!("expected check"),
+                }
+            }
+            _ => panic!("expected script invocation"),
+        }
+    }
+
+    #[test]
+    fn canonical_script_run_parsing() {
+        let inv = parse_oneshot_args_from([
+            "fission_cli",
+            "script",
+            "run",
+            "app.exe",
+            "--script",
+            "scan.rhai",
+            "--json",
+            "--verbose",
+        ]);
+        match inv {
+            ParsedInvocation::Script(s) => {
+                assert!(s.verbose);
+                match s.cmd {
+                    ScriptCmd::Run {
+                        binary,
+                        script,
+                        json,
+                    } => {
+                        assert_eq!(binary, PathBuf::from("app.exe"));
+                        assert_eq!(script, PathBuf::from("scan.rhai"));
+                        assert!(json);
+                    }
+                    _ => panic!("expected run"),
+                }
+            }
+            _ => panic!("expected script invocation"),
+        }
     }
 
     #[test]

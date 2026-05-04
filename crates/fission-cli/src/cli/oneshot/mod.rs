@@ -15,6 +15,7 @@ mod disasm;
 mod function_select;
 mod functions;
 mod inventory;
+mod script;
 mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
@@ -30,8 +31,10 @@ use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
 use crate::cli::args::{
-    FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, parse_oneshot_args,
+    FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, ParsedInvocation,
+    ParsedOneShotArgs, parse_oneshot_args,
 };
+use script::execute_script;
 use anyhow::{Context, Result};
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
@@ -58,6 +61,31 @@ pub fn main() -> Result<()> {
 
 fn run() -> Result<()> {
     let parsed = parse_oneshot_args();
+    match parsed {
+        ParsedInvocation::Script(invocation) => {
+            let mut logging_options =
+                fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
+            logging_options.level = if invocation.verbose { "info" } else { "warn" }.to_string();
+            logging_options.include_span_events = invocation.verbose;
+            fission_core::logging::init_with_options(logging_options);
+
+            if let Err(error) = execute_script(invocation) {
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|err| err.kind() == io::ErrorKind::BrokenPipe)
+                {
+                    return Ok(());
+                }
+                let span_trace = fission_core::logging::capture_span_trace();
+                return Err(error.context(format!("span trace:\n{span_trace}")));
+            }
+            return Ok(());
+        }
+        ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
+    }
+}
+
+fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
     let cli = parsed.args;
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
@@ -274,6 +302,8 @@ fn print_help() {
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
+    println!("  fission_cli script check --script <FILE>");
+    println!("  fission_cli script run <binary> --script <FILE> [--json]");
     println!();
     println!("Commands:");
     println!("  info       Show binary metadata and inventory views");
@@ -282,6 +312,7 @@ fn print_help() {
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
     println!("  inventory  Operator-oriented inventory and batch emitters");
+    println!("  script     Rhai automation against read-only binary inventory");
     println!();
     println!("Decomp options:");
     println!("      --profile <P>          balanced|quality|speed|nir");

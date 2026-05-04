@@ -1,0 +1,25 @@
+[package]
+name = "fission-script"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Rust-native embedded scripting (Rhai) for read-only binary automation"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+keywords = ["fission", "scripting", "rhai", "reverse-engineering"]
+categories = ["development-tools"]
+
+[features]
+default = []
+decomp_debug = ["dep:fission-decompiler-core"]
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static", default-features = false }
+fission-decompiler-core = { path = "../fission-decompiler-core", optional = true }
+rhai = { version = "1.24", features = ["sync"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

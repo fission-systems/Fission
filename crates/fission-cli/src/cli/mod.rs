@@ -8,5 +8,8 @@ pub mod output;
 
 mod args;
 
-pub use args::{LegacyInvocationKind, OneShotArgs, parse_hex_address, parse_oneshot_args};
+pub use args::{
+    LegacyInvocationKind, OneShotArgs, ParsedInvocation, ParsedOneShotArgs, ScriptCmd,
+    ScriptInvocation, parse_hex_address, parse_oneshot_args,
+};
 pub use oneshot::run_oneshot;
