@@ -26,7 +26,7 @@ cargo test -p fission-loader
 
 ## Integration expectations
 
-If your change affects CLI-visible `info`/`list`, add a note in [`docs/changelog/new/`](../changelog/new/) when user output changes.
+If your change affects CLI-visible `info`/`list`, mention it in the PR description and upcoming **version-scoped** release notes (GitHub Release / `CHANGELOG.md` when present); archived dated logs live under [`docs/changelog/Legacy/`](../changelog/Legacy/).
 
 ## Security reminder
 

@@ -95,7 +95,7 @@ Fission maintains comprehensive, role-based documentation:
 - [`THIRD_PARTY.md`](./THIRD_PARTY.md) — Vendored upstream provenance (CLA § third-party)
 - [`SECURITY.md`](./SECURITY.md) — Coordinated disclosure and sample-handling expectations
 - [`docs/changelog/Legacy/CHANGELOG.md`](./docs/changelog/Legacy/CHANGELOG.md) — Historical release log
-- [`docs/changelog/new/`](./docs/changelog/new/) — Dated development entries (consolidated per release policy)
+- [`docs/changelog/Legacy/`](./docs/changelog/Legacy/) — Archived dated development logs (`YYYYMMDD_Changelog.md`) and legacy rollup
 
 ---
 

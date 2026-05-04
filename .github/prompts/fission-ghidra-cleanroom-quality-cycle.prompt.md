@@ -18,7 +18,7 @@ model: GPT-5 (copilot)
 - 벤치마크 스크립트: [full_benchmark](../../benchmark/full_benchmark)
 - 샘플 바이너리: [sample binaries](../../benchmark/binary/x86-64/window/small/binary/c)
 - 저장 아티팩트: [benchmark artifacts](../../benchmark/artifacts)
-- changelog 경로: [new changelog](../../docs/changelog/new)
+- changelog 경로(아카이브): [Legacy changelog 폴더](../../docs/changelog/Legacy); 신규 릴리즈는 GitHub Release / 버전별 노트 우선
 
 필수 원칙:
 1. 실전 바이너리 이전에 샘플 바이너리 품질을 먼저 끌어올린다.

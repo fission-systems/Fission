@@ -24,8 +24,8 @@ The numbered sections below expand this gate into operational detail.
 ## 1. Version and changelog
 
 - [ ] Version matches [`docs/VERSIONING.md`](VERSIONING.md) rules and the git tag (`v*.*.*`).
-- [ ] User-visible changes recorded under [`docs/changelog/new/`](changelog/new/) (see **Changelog policy** below).
-- [ ] Breaking or experimental CLI flags called out explicitly in changelog notes.
+- [ ] User-visible changes summarized for the tag (GitHub Release notes and/or repo `CHANGELOG.md` when adopted); deep-dated logs prior to version-scoped notes live under [`docs/changelog/Legacy/`](changelog/Legacy/).
+- [ ] Breaking or experimental CLI flags called out explicitly in release notes.
 
 ## 2. Build matrix (must match CD)
 
@@ -51,7 +51,7 @@ Run the **30-minute** (or shorter) path in [`docs/EVALUATION.md`](EVALUATION.md)
 
 [`benchmark/binary/x86-64/window/small/`](../benchmark/binary/x86-64/window/small/)
 
-Capture note-level anomalies (JSON shape shifts, crashers) in changelog **Known issues**.
+Capture note-level anomalies (JSON shape shifts, crashers) in release notes **Known issues**.
 
 ## 4. Quality evidence (recommended)
 
@@ -82,6 +82,8 @@ Full SBOM generation is **not** yet automated in CI. Acceptable interim steps:
 
 ## Changelog policy
 
-Development entries live in **`docs/changelog/new/`** as dated Markdown files (`YYYYMMDD_Changelog.md`). At release time, maintainers consolidate into user-facing notes as the project prefers — but **every tag must reference** what moved in `docs/changelog/new/` for that cycle.
+**Current:** Prefer **version-scoped** notes tied to SemVer tags / GitHub Releases (and a root `CHANGELOG.md` when the project adopts one).
+
+**Archive:** Earlier date-stamped engineering logs (`YYYYMMDD_Changelog.md`) were consolidated under [`docs/changelog/Legacy/`](changelog/Legacy/). [`docs/changelog/new/README.md`](changelog/new/README.md) explains the retired scratch folder.
 
 Contributors: see [`CONTRIBUTING.md`](../CONTRIBUTING.md) § Documentation for where to mention user-facing edits.

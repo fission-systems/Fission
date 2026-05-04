@@ -596,7 +596,7 @@ cargo tarpaulin --out Html
 **When adding features, update:**
 - README.md (if user-facing)
 - docs/ folder (detailed guides)
-- [`docs/changelog/new/`](docs/changelog/new/) — dated entry when behavior users rely on changes (see [`docs/RELEASE.md`](docs/RELEASE.md) changelog policy)
+- [`docs/changelog/Legacy/`](docs/changelog/Legacy/) — archived dated logs; for new releases use GitHub Release notes / forthcoming `CHANGELOG.md` (see [`docs/RELEASE.md`](docs/RELEASE.md))
 - Code examples
 - CLI help text
 
