@@ -1,0 +1,13 @@
+{
+  "description": "Synthetic bytes smoke — rows optional; empty rows emit binary_snapshot-only oracle row.",
+  "binaries": [
+    {
+      "id": "raw-micro-bytes",
+      "hex_bytes": "90c3",
+      "program_name": "micro",
+      "language": "DATA:LE:64:default",
+      "loader": "BinaryLoader",
+      "rows": []
+    }
+  ]
+}
