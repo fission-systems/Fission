@@ -65,14 +65,10 @@ vendor/
 !examples/binaries/comparison_test_x86.exe
 
 # Benchmark binaries (compiled output, built in CI)
-# Source code and build scripts are tracked; only binaries excluded
-/benchmark/binary/**/*.exe
-/benchmark/binary/**/*.exe_ghidra/
-/benchmark/binary/**/*.o
-/benchmark/binary/**/*.a
-/benchmark/binary/**/build/
+# Track source/build inputs only; ignore everything else under benchmark/binary.
+/benchmark/binary/**
 !benchmark/binary/.gitkeep
-!benchmark/binary/**/source/
+!benchmark/binary/**/source/**
 !benchmark/binary/**/build.sh
 
 # Local sample corpora and scratch projects
