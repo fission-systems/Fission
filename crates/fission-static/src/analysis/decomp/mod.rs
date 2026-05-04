@@ -8,7 +8,7 @@
 //! to communicate with the native Ghidra decompiler library.
 //!
 //! ```text
-//! fission-analysis/decomp (safe wrapper)
+//! fission-static/analysis/decomp (safe wrapper)
 //!         ↓
 //! fission-ffi (unsafe FFI boundary)
 //!         ↓

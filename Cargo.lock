@@ -1292,19 +1292,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
-name = "fission-analysis"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "fission-core",
- "fission-dynamic",
- "fission-loader",
- "fission-pcode",
- "fission-static",
- "fission-ttd",
-]
-
-[[package]]
 name = "fission-automation"
 version = "0.1.0"
 dependencies = [
@@ -1506,6 +1493,7 @@ dependencies = [
  "anyhow",
  "bytecheck",
  "cc",
+ "criterion",
  "crossbeam-channel",
  "dirs 5.0.1",
  "fission-core",

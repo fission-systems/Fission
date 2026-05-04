@@ -519,7 +519,7 @@ pub struct ListingInfo {
 // Debug
 // ============================================================================
 
-/// Debugger session status (mirrors fission_analysis::debug::types::DebugStatus).
+/// Debugger session status (mirrors `fission_dynamic::debug::types::DebugStatus`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DebugStatusDto {

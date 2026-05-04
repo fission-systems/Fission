@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use fission_analysis::analysis::cfg::CfgAnalysis;
-use fission_analysis::analysis::optimizer::OptimizerConfig;
-use fission_analysis::analysis::optimizer::integration::optimize_c_code;
+use fission_static::analysis::cfg::CfgAnalysis;
+use fission_static::analysis::optimizer::OptimizerConfig;
+use fission_static::analysis::optimizer::integration::optimize_c_code;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::fs;
 use std::path::Path;
@@ -32,6 +32,11 @@ fn build_diamond_cfg(n: usize) -> PcodeFunction {
         blocks.push(PcodeBasicBlock {
             index: i as u32,
             start_address: addr,
+            successors: if i + 1 < n {
+                vec![(i + 1) as u32]
+            } else {
+                vec![]
+            },
             ops,
         });
     }
@@ -65,9 +70,15 @@ fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
                 }],
                 asm_mnemonic: None,
             }];
+            let is_last = d == depth - 1 && b == branches - 1;
             blocks.push(PcodeBasicBlock {
                 index: block_id,
                 start_address: addr,
+                successors: if is_last {
+                    vec![]
+                } else {
+                    vec![block_id + 1]
+                },
                 ops,
             });
             block_id += 1;

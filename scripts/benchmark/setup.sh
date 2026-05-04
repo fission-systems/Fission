@@ -36,7 +36,7 @@ echo "This may take 1-2 minutes on first run..."
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-cargo bench -p fission-analysis --bench benchmark -- \
+cargo bench -p fission-static --bench benchmark -- \
     cfg_analysis_64 \
     --output-format bencher \
     --warm-up-time 1 \
@@ -47,5 +47,5 @@ echo "✅ Benchmark setup complete!"
 echo ""
 echo "📖 Next steps:"
 echo "   1. Review benchmark/BENCHMARK_GUIDE.md"
-echo "   2. Run full benchmarks: cargo bench -p fission-analysis --bench benchmark"
-echo "   3. Compare with baseline: cargo bench -p fission-analysis --bench benchmark -- --baseline main"
+echo "   2. Run full benchmarks: cargo bench -p fission-static --bench benchmark"
+echo "   3. Compare with baseline: cargo bench -p fission-static --bench benchmark -- --baseline main"

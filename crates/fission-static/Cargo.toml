@@ -43,3 +43,8 @@ proptest = "1.4"
 insta = { version = "1.47", features = ["yaml"] }
 fission-pcode = { path = "../fission-pcode" }
 fission-loader = { path = "../fission-loader" }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmark"
+harness = false

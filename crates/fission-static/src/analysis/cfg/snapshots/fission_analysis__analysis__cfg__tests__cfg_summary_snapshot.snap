@@ -1,5 +1,5 @@
 ---
-source: crates/fission-analysis/src/analysis/cfg/mod.rs
+source: crates/fission-static/src/analysis/cfg/mod.rs
 expression: summary
 ---
 function_address: "0x1000"
