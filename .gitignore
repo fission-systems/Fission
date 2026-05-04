@@ -128,3 +128,4 @@ benchmark_results/
 
 # Cursor / local IDE prompts (not part of canonical repo surface)
 .github/prompts/
+/SKILL.md
