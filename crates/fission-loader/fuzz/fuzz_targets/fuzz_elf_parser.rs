@@ -2,6 +2,9 @@
 //!
 //! This tests the ELF parser against arbitrary input to find crashes
 //! or panics that could be triggered by malformed files.
+//!
+//! Run from `crates/fission-loader`: `cargo fuzz run fuzz_elf_parser`.
+//! Nightly fuzz job: `.github/workflows/fuzz.yml`.
 
 #![no_main]
 

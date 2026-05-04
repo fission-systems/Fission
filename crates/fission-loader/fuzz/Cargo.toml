@@ -1,3 +1,8 @@
+# cargo-fuzz workspace for the parent crate (`fission-loader`).
+#
+# Keep this directory next to the crate under test (standard `cargo-fuzz` layout).
+# Run from `crates/fission-loader`: `cargo fuzz run fuzz_pe_parser` / `fuzz_elf_parser`.
+# Scheduled CI: `.github/workflows/fuzz.yml` (`working-directory: crates/fission-loader`).
 [workspace]
 
 [package]

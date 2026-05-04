@@ -2,6 +2,9 @@
 //!
 //! This tests the PE parser against arbitrary input to find crashes
 //! or panics that could be triggered by malformed files.
+//!
+//! Run from `crates/fission-loader`: `cargo fuzz run fuzz_pe_parser`.
+//! Nightly fuzz job: `.github/workflows/fuzz.yml`.
 
 #![no_main]
 
