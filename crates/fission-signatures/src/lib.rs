@@ -1,6 +1,10 @@
-//! Fission Signatures - Function signature database
+//! Fission Signatures — loaders, parsers, providers, and matchers for
+//! Ghidra-style Function ID and type/signature facts.
 //!
-//! This crate provides Ghidra-style Function ID and type signature resources.
+//! **Data ownership:** canonical imported/generated WinAPI/type/FID/signature
+//! files live under `utils/signatures/` (see [`utils/MANIFEST.md`](../../../utils/MANIFEST.md)). This crate reads them at
+//! runtime via [`fission_core::PATHS`]; do not add duplicate corpora under
+//! `crates/fission-signatures/data/` (CI-enforced).
 
 // This crate carries imported/generated signature and FIDBF data where exact
 // constants, casts, relation names, and table-shaped code are often intentional.

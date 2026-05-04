@@ -97,7 +97,14 @@ DEFAULT_GHIDRA_DIRS = (
     ROOT_DIR / "ghidra_12.0.4_PUBLIC",
     ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
 )
-BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
+BASE_TYPES_JSON = (
+    ROOT_DIR
+    / "utils"
+    / "signatures"
+    / "typeinfo"
+    / "win32"
+    / "base_types.json"
+)
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)

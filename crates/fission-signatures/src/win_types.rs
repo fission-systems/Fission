@@ -2,11 +2,44 @@
 //!
 //! Common Windows API structures for type annotation in decompiled code.
 //! Based on Windows SDK headers and ghidra-data community definitions.
-//! Data is loaded from JSON files at compile time via `include_str!`.
+//! Canonical JSON lives under `utils/signatures/typeinfo/win32/`
+//! (`base_types.json`, `structures.json`), loaded at runtime via [`fission_core::PATHS`].
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
+use fission_core::PATHS;
 use serde::Deserialize;
+
+fn win32_typeinfo_json_path(filename: &str) -> PathBuf {
+    let root = PATHS.workspace_root.as_ref().unwrap_or_else(|| {
+        panic!(
+            "fission-signatures win_types: workspace root unknown; cannot load utils/signatures/typeinfo/win32/{filename}"
+        )
+    });
+    root.join("utils")
+        .join("signatures")
+        .join("typeinfo")
+        .join("win32")
+        .join(filename)
+}
+
+fn read_typeinfo_json(filename: &str) -> String {
+    let path = win32_typeinfo_json_path(filename);
+    if !path.exists() {
+        panic!(
+            "fission-signatures win_types: missing canonical data file {} (expected under utils/signatures/typeinfo/win32/)",
+            path.display()
+        );
+    }
+    fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "fission-signatures win_types: failed to read {}: {e}",
+            path.display()
+        )
+    })
+}
 
 // ============================================================================
 // Windows Base Types (for annotation purposes)
@@ -15,6 +48,8 @@ use serde::Deserialize;
 /// Windows base type sizes
 pub mod base_types {
     use serde::Deserialize;
+
+    use super::read_typeinfo_json;
 
     /// Type size information for annotation
     #[derive(Debug, Clone)]
@@ -35,14 +70,16 @@ pub mod base_types {
         is_signed: bool,
     }
 
-    /// Load all base types from compiled-in JSON data.
+    /// Load all base types from `utils/signatures/typeinfo/win32/base_types.json`.
     pub fn all() -> Vec<TypeInfo> {
-        let json_str = include_str!("../data/win_types/base_types.json");
-        let items: Vec<JsonTypeInfo> = serde_json::from_str(json_str)
-            .unwrap_or_else(|e| panic!(
-                "Failed to parse base_types.json - this is compile-time embedded data, check syntax in data/win_types/base_types.json: {}",
-                e
-            ));
+        let json_str = read_typeinfo_json("base_types.json");
+        let items: Vec<JsonTypeInfo> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
+            let path = super::win32_typeinfo_json_path("base_types.json");
+            panic!(
+                "Failed to parse base_types.json at {}: {e}",
+                path.display()
+            )
+        });
         items
             .into_iter()
             .map(|j| TypeInfo {
@@ -106,12 +143,14 @@ pub struct WindowsStructures {
 
 impl WindowsStructures {
     pub fn new() -> Self {
-        let json_str = include_str!("../data/win_types/structures.json");
-        let items: Vec<JsonStructDef> = serde_json::from_str(json_str)
-            .unwrap_or_else(|e| panic!(
-                "Failed to parse structures.json - this is compile-time embedded data, check syntax in data/win_types/structures.json: {}",
-                e
-            ));
+        let json_str = read_typeinfo_json("structures.json");
+        let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
+            let path = win32_typeinfo_json_path("structures.json");
+            panic!(
+                "Failed to parse structures.json at {}: {e}",
+                path.display()
+            )
+        });
 
         let mut structures = HashMap::with_capacity(items.len());
         for item in items {
@@ -154,5 +193,22 @@ impl WindowsStructures {
 impl Default for WindowsStructures {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn loads_utils_win_types_json() {
+        let ws = super::WindowsStructures::new();
+        assert!(
+            ws.get("UNICODE_STRING").is_some(),
+            "expected UNICODE_STRING from utils/signatures/typeinfo/win32/structures.json"
+        );
+        let base = super::base_types::all();
+        assert!(
+            !base.is_empty(),
+            "expected base_types from utils/signatures/typeinfo/win32/base_types.json"
+        );
     }
 }

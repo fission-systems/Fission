@@ -49,7 +49,14 @@ DEFAULT_GHIDRA_DIRS = (
     ROOT_DIR / "ghidra-Ghidra_12.0.4_build",
 )
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
-BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
+BASE_TYPES_JSON = (
+    ROOT_DIR
+    / "utils"
+    / "signatures"
+    / "typeinfo"
+    / "win32"
+    / "base_types.json"
+)
 DEFAULT_CORPUS_FILE = SCRIPT_DIR / "corpora" / "preview_quality_corpus.json"
 
 

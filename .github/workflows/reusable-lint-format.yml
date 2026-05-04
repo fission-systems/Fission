@@ -28,6 +28,9 @@ jobs:
       - name: Guard — no fission-analysis dependency (facade removed)
         run: bash scripts/check_no_fission_analysis_dependency.sh
 
+      - name: Guard — signature data canonical only under utils/signatures
+        run: bash scripts/check_signatures_canonical_data.sh
+
       - name: Guard — crate sources must not reference benchmark fixtures
         run: python3 scripts/test/no_benchmark_fixture_refs_in_crates.py
 
