@@ -1,0 +1,119 @@
+# Create a Git tag only after CI Fast Gate (ci.yml) has completed successfully for
+# the target commit (push event). Pushing the tag triggers CD Release (.github/workflows/cd.yml).
+#
+# Use: Actions → "Release Tag (CI green)" → Run workflow → set `tag` (e.g. v0.1.1) → optional `ref` (default main).
+name: Release Tag (CI green)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create (e.g. v0.1.1 or 0.1.1). Triggers CD builds when pushed."
+        required: true
+        type: string
+      ref:
+        description: "Branch or full SHA to tag. Default: main (latest on that branch)."
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-tag-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  verify-ci-green:
+    name: Verify CI Fast Gate (push) is green
+    runs-on: ubuntu-latest
+    outputs:
+      target_sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Resolve ref and check ci.yml runs
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ref = `${{ inputs.ref }}`.trim() || "main";
+            const { data: commitData } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref,
+            });
+            const sha = commitData.sha;
+            core.setOutput("sha", sha);
+            core.info(`Resolved ${ref} → ${sha}`);
+
+            const { data: runsData } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "ci.yml",
+              head_sha: sha,
+              event: "push",
+              per_page: 100,
+            });
+
+            const ok = runsData.workflow_runs.some(
+              (r) => r.status === "completed" && r.conclusion === "success",
+            );
+
+            if (!ok) {
+              core.setFailed(
+                `No successful completed push run of workflow ci.yml for commit ${sha}. ` +
+                  "Wait until \"CI Fast Gate\" finishes green for this commit on the default branch workflow, then retry.",
+              );
+              return;
+            }
+            core.info("CI Fast Gate (ci.yml, push) succeeded for this commit.");
+
+  push-tag:
+    name: Create and push tag
+    needs: verify-ci-green
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-ci-green.outputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Validate tag name
+        env:
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          t="$(echo -n "$TAG" | xargs)"
+          if [[ -z "$t" ]]; then echo "error: empty tag"; exit 1; fi
+          if [[ "$t" == *"/"* ]] || [[ "$t" == *" "* ]]; then
+            echo "error: tag must not contain '/' or spaces"
+            exit 1
+          fi
+          if [[ ! "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] && \
+             [[ ! "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "error: use SemVer such as v0.1.1, 0.1.1, or optional -rc.1 suffix"
+            exit 1
+          fi
+
+      - name: Create annotated tag and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          t="$(echo -n "${{ inputs.tag }}" | xargs)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin --tags --quiet || true
+          if git rev-parse "refs/tags/${t}" >/dev/null 2>&1; then
+            echo "error: tag ${t} already exists locally"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${t}" >/dev/null 2>&1; then
+            echo "error: tag ${t} already exists on origin"
+            exit 1
+          fi
+          git tag -a "${t}" -m "Release ${t}"
+          git push origin "refs/tags/${t}"

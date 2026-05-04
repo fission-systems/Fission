@@ -99,6 +99,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/full_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
+- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): it only tags a commit after `ci.yml` has a successful **push** run for that SHA, then `cd.yml` builds assets.
 
 ## References
 
@@ -108,3 +109,4 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 - `README.md`
 - `.github/workflows/ci.yml`
 - `.github/workflows/ci-heavy.yml`
+- `.github/workflows/release-tag.yml`
