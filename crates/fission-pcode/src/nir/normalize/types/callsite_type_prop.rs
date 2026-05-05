@@ -47,7 +47,7 @@ use super::super::wave_stats::{
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
 use crate::nir::var_rename::rename_vars_in_stmts;
-use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES};
+use fission_signatures::{symbol_for_win_api_database_lookup, ApiSignature, SIGNATURE_RESOURCES};
 use std::collections::{HashMap, HashSet};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -188,7 +188,7 @@ pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
 }
 
 pub(crate) fn is_known_api_signature(name: &str) -> bool {
-    api_signature(name).is_some()
+    api_signature_via_import_aliases(name).is_some()
 }
 
 pub(crate) fn api_signature(name: &str) -> Option<&'static ApiSignature> {
@@ -196,6 +196,13 @@ pub(crate) fn api_signature(name: &str) -> Option<&'static ApiSignature> {
         .api_signatures()
         .ok()?
         .find(|signature| signature.name == name)
+}
+
+#[inline]
+fn api_signature_via_import_aliases(name: &str) -> Option<&'static ApiSignature> {
+    api_signature(name).or_else(|| {
+        symbol_for_win_api_database_lookup(name).and_then(|flat| api_signature(flat))
+    })
 }
 
 /// Return the NirType implied by the API signature's return type string.
@@ -478,7 +485,9 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
             .callee_summaries
             .get(callee)
             .or_else(|| func.callee_summaries.get(resolved_callee));
-        let Some(sig) = api_signature(resolved_callee).or_else(|| api_signature(callee)) else {
+        let Some(sig) = api_signature_via_import_aliases(resolved_callee)
+            .or_else(|| api_signature_via_import_aliases(callee))
+        else {
             if summary.is_some() {
                 signature_missing_count += 1;
             } else {
@@ -603,8 +612,8 @@ fn exact_api_arity_for_target(
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> Option<usize> {
     let resolved_target = resolve_call_target_symbol(target, summaries);
-    api_signature(resolved_target)
-        .or_else(|| api_signature(target))
+    api_signature_via_import_aliases(resolved_target)
+        .or_else(|| api_signature_via_import_aliases(target))
         .map(|sig| sig.params.len())
 }
 

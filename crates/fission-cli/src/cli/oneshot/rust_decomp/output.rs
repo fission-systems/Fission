@@ -101,6 +101,7 @@ pub(crate) fn benchmark_envelope_json(
             "functions_selected_total": selection_accounting.functions_selected_total,
             "functions_excluded_import_count": selection_accounting.functions_excluded_import_count,
             "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
+            "functions_excluded_provenance_count": selection_accounting.functions_excluded_provenance_count,
             "include_nonuser_functions": selection_accounting.include_nonuser_functions,
             "init_sec": 0.0,
             "total_decomp_sec": round_six(total_decomp_secs),

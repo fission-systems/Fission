@@ -58,6 +58,28 @@ def _xref_metrics(entry: dict[str, Any]) -> dict[str, int]:
     return _extract_metrics(raw, xref_keys)
 
 
+def _provenance_metrics(entry: dict[str, Any]) -> dict[str, int]:
+    """Function / import provenance counters (defaults to zero).
+
+    Populate ``entry[\"provenance_metrics\"]`` when bench rows export static analysis facts.
+    """
+    raw = entry.get("provenance_metrics")
+    if not isinstance(raw, dict):
+        raw = {}
+    keys = (
+        "function_provenance_startup_or_entry_count",
+        "function_provenance_import_thunk_count",
+        "function_provenance_forwarder_thunk_count",
+        "function_provenance_compiler_runtime_count",
+        "function_provenance_user_heuristic_count",
+        "function_provenance_unknown_count",
+        "external_symbol_identity_total",
+        "external_symbol_va_mapping_total",
+        "batch_excluded_provenance_count",
+    )
+    return _extract_metrics(raw, keys)
+
+
 def build_stage_report(entry: dict[str, Any]) -> dict[str, Any]:
     preview = entry.get("preview_build_stats")
     if not isinstance(preview, dict):
@@ -171,5 +193,6 @@ def build_stage_report(entry: dict[str, Any]) -> dict[str, Any]:
         "normalize": normalize,
         "structuring": structuring,
         "xrefs": _xref_metrics(entry),
+        "provenance": _provenance_metrics(entry),
         "owner_bucket": owner_bucket,
     }

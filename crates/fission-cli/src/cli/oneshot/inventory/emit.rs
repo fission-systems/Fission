@@ -141,6 +141,8 @@ pub(crate) fn emit_function_facts_inventory(
         functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
         functions_excluded_runtime_wrapper_count: selection_accounting
             .functions_excluded_runtime_wrapper_count,
+        functions_excluded_provenance_count: selection_accounting
+            .functions_excluded_provenance_count,
         include_nonuser_functions: selection_accounting.include_nonuser_functions,
         chunk_size,
         ..Default::default()
@@ -1011,6 +1013,8 @@ pub(crate) fn emit_function_facts_inventory(
         functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
         functions_excluded_runtime_wrapper_count: selection_accounting
             .functions_excluded_runtime_wrapper_count,
+        functions_excluded_provenance_count: selection_accounting
+            .functions_excluded_provenance_count,
         include_nonuser_functions: selection_accounting.include_nonuser_functions,
         chunk_size,
         ..Default::default()

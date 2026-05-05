@@ -3,6 +3,7 @@ use fission_loader::loader::function_view::{
     canonical_functions_sorted, is_runtime_wrapper_zero_size, prefer_function_name,
 };
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_static::analysis::{build_external_symbol_index, build_function_provenance_index};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -14,6 +15,7 @@ pub(crate) struct BatchSelectionAccounting {
     pub(crate) functions_selected_total: usize,
     pub(crate) functions_excluded_import_count: usize,
     pub(crate) functions_excluded_runtime_wrapper_count: usize,
+    pub(crate) functions_excluded_provenance_count: usize,
     pub(crate) include_nonuser_functions: bool,
 }
 
@@ -24,6 +26,7 @@ impl BatchSelectionAccounting {
             functions_selected_total: selected_total,
             functions_excluded_import_count: 0,
             functions_excluded_runtime_wrapper_count: 0,
+            functions_excluded_provenance_count: 0,
             include_nonuser_functions,
         }
     }
@@ -41,6 +44,8 @@ pub(crate) fn select_batch_functions<'a>(
     limit: Option<usize>,
 ) -> BatchFunctionSelection<'a> {
     let canonical = canonical_functions_sorted(binary);
+    let ext = build_external_symbol_index(binary);
+    let prov = build_function_provenance_index(binary, Some(&ext));
     let mut accounting = BatchSelectionAccounting {
         functions_discovered_total: canonical.len(),
         include_nonuser_functions,
@@ -56,6 +61,12 @@ pub(crate) fn select_batch_functions<'a>(
             }
             if is_runtime_wrapper_zero_size(func) {
                 accounting.functions_excluded_runtime_wrapper_count += 1;
+                continue;
+            }
+            if let Some(rec) = prov.records.get(&func.address)
+                && rec.exclude_from_default_batch_decompile()
+            {
+                accounting.functions_excluded_provenance_count += 1;
                 continue;
             }
         }
@@ -195,6 +206,14 @@ mod tests {
             ..Default::default()
         })
         .add_function(FunctionInfo {
+            name: "__security_check_cookie".to_string(),
+            address: 0x140001200,
+            size: 0x10,
+            is_export: false,
+            is_import: false,
+            ..Default::default()
+        })
+        .add_function(FunctionInfo {
             name: "puts".to_string(),
             address: 0x140001100,
             size: 0,
@@ -211,7 +230,7 @@ mod tests {
         let binary = test_binary();
         let selected = canonical_functions_sorted(&binary);
         let addrs: Vec<u64> = selected.iter().map(|func| func.address).collect();
-        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0]);
+        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0, 0x140001200]);
     }
 
     #[test]
@@ -227,13 +246,14 @@ mod tests {
         let selected = select_batch_functions(&binary, false, None);
         let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
         assert_eq!(addrs, vec![0x140001000, 0x140001080]);
-        assert_eq!(selected.accounting.functions_discovered_total, 3);
+        assert_eq!(selected.accounting.functions_discovered_total, 4);
         assert_eq!(selected.accounting.functions_selected_total, 2);
         assert_eq!(selected.accounting.functions_excluded_import_count, 0);
         assert_eq!(
             selected.accounting.functions_excluded_runtime_wrapper_count,
             1
         );
+        assert_eq!(selected.accounting.functions_excluded_provenance_count, 1);
         assert!(!selected.accounting.include_nonuser_functions);
     }
 
@@ -242,14 +262,15 @@ mod tests {
         let binary = test_binary();
         let selected = select_batch_functions(&binary, true, None);
         let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
-        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0]);
-        assert_eq!(selected.accounting.functions_discovered_total, 3);
-        assert_eq!(selected.accounting.functions_selected_total, 3);
+        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x1400010c0, 0x140001200]);
+        assert_eq!(selected.accounting.functions_discovered_total, 4);
+        assert_eq!(selected.accounting.functions_selected_total, 4);
         assert_eq!(selected.accounting.functions_excluded_import_count, 0);
         assert_eq!(
             selected.accounting.functions_excluded_runtime_wrapper_count,
             0
         );
+        assert_eq!(selected.accounting.functions_excluded_provenance_count, 0);
         assert!(selected.accounting.include_nonuser_functions);
     }
 
@@ -268,5 +289,6 @@ mod tests {
             selected.accounting.functions_excluded_runtime_wrapper_count,
             0
         );
+        assert_eq!(selected.accounting.functions_excluded_provenance_count, 0);
     }
 }

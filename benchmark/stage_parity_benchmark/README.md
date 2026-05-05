@@ -29,6 +29,11 @@ When raw p-code agrees but final C diverges, oracle **string refs, external call
 `stage_metrics.build_stage_report` now emits `stages.xrefs` with integer counters defaulted to **zero**.
 Benchmark runners may populate top-level `xref_metrics` on each row payload once Rust exports land; compare against Ghidra reference facts via [`benchmark/ghidra_oracle_benchmark/`](../ghidra_oracle_benchmark/README.md) using the same binary/function join keys as above.
 
+## Provenance metrics lane (additive)
+
+`stage_metrics.build_stage_report` emits `stages.provenance` with integer counters defaulted to **zero**.
+Rust exporters may populate top-level `provenance_metrics` on benchmark rows (function buckets, external-symbol index sizing, batch exclusions).
+
 ## Related tooling
 
 - Latency / timeout cross-summary: [`benchmark/timeout_distribution_benchmark/`](../timeout_distribution_benchmark/README.md)

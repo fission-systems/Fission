@@ -12,6 +12,7 @@ pub(crate) struct NirCandidateInventory {
     pub(crate) functions_selected_total: usize,
     pub(crate) functions_excluded_import_count: usize,
     pub(crate) functions_excluded_runtime_wrapper_count: usize,
+    pub(crate) functions_excluded_provenance_count: usize,
     pub(crate) include_nonuser_functions: bool,
     pub(crate) candidates: Vec<NirCandidateEntry>,
 }
@@ -81,6 +82,7 @@ pub(crate) struct NirCandidateScanSummary {
     pub(crate) functions_selected_total: usize,
     pub(crate) functions_excluded_import_count: usize,
     pub(crate) functions_excluded_runtime_wrapper_count: usize,
+    pub(crate) functions_excluded_provenance_count: usize,
     pub(crate) include_nonuser_functions: bool,
     pub(crate) addresses_scanned: usize,
     pub(crate) chunks_completed: usize,

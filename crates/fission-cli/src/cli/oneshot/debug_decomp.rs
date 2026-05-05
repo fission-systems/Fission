@@ -12,6 +12,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use super::debug_bundle_extra;
 /// Serialize bundle JSON with `{ "schema_version": 1, "functions": [...] }`.
 pub(crate) fn write_debug_decomp_bundle_file(
     path: &Path,
@@ -106,6 +107,8 @@ pub(crate) fn debug_decomp_bundle_json(
     if let Some(t) = native_timing {
         root["native_timing"] = t.clone();
     }
+
+    debug_bundle_extra::attach_static_analysis_facts(&mut root, binary, func);
 
     root
 }

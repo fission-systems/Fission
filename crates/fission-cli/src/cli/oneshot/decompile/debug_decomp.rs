@@ -4,6 +4,7 @@
 //! coarse stage status strings, timing/size counters from [`NirBuildStats`], and
 //! heuristic [`owner_buckets`] for benchmarks.
 
+use crate::cli::oneshot::debug_bundle_extra;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_decompiler::{NirBuildStats, NirHintStats};
 use serde::Serialize;
@@ -103,6 +104,8 @@ pub(crate) fn debug_decomp_bundle_json(
     if let Some(t) = native_timing {
         root["native_timing"] = t.clone();
     }
+
+    debug_bundle_extra::attach_static_analysis_facts(&mut root, binary, func);
 
     root
 }

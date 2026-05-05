@@ -6,6 +6,7 @@ mod assessment;
 mod binary_info;
 #[cfg(feature = "native_decomp")]
 mod common;
+mod debug_bundle_extra;
 mod debug_decomp;
 #[cfg(feature = "native_decomp")]
 mod decompile;

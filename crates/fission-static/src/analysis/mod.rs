@@ -5,9 +5,12 @@
 
 pub mod callgraph;
 pub mod decomp;
+pub mod external_symbol;
 pub mod function_discovery;
+pub mod function_provenance;
 pub mod optimizer;
 pub mod patch;
+pub mod prototype_hint;
 pub mod string_xrefs;
 pub mod strings;
 pub mod xrefs;
@@ -31,3 +34,12 @@ pub use xref_index::{
     XrefIndex, XrefIndexBuilder, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
     XrefSourceCategory, XrefSourceLayer, XrefTarget,
 };
+pub use external_symbol::{
+    build_external_symbol_index, normalize_library_key,
+    parse_external_identity_from_loader_string, ExternalSymbolIdentity, ExternalSymbolIndex,
+};
+pub use function_provenance::{
+    build_function_provenance_index, FunctionProvenanceIndex, FunctionProvenanceKind,
+    FunctionProvenanceRecord,
+};
+pub use prototype_hint::win_api_prototype_hint_json;

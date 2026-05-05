@@ -125,6 +125,7 @@ pub(super) struct FunctionFactsInventorySummary {
     pub(super) functions_selected_total: usize,
     pub(super) functions_excluded_import_count: usize,
     pub(super) functions_excluded_runtime_wrapper_count: usize,
+    pub(super) functions_excluded_provenance_count: usize,
     pub(super) include_nonuser_functions: bool,
     pub(super) rows_emitted: usize,
     pub(super) chunks_completed: usize,

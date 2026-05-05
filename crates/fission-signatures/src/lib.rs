@@ -21,6 +21,7 @@
 #![allow(clippy::missing_panics_doc)]
 
 pub mod api_types;
+pub mod import_flat;
 pub mod fid;
 pub mod fidbf;
 pub mod provider;
@@ -43,6 +44,7 @@ pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =
     std::sync::LazyLock::new(SignatureDatabase::new);
 
 pub use api_types::{ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo};
+pub use import_flat::symbol_for_win_api_database_lookup;
 pub use fid::{
     FidDatabaseSet, FidFunctionView, FidHashError, FidHashQuad, FidHashUnit, FidHasher,
     FidInstructionOperand, FidMatchError, FidMatcher, FidOperandValue, FidRelocationView,
