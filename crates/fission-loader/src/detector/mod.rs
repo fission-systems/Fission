@@ -29,7 +29,8 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// Detection confidence level
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum Confidence {
     /// Low confidence - single weak indicator
     Low,

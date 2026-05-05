@@ -306,6 +306,8 @@ pub struct LoadedBinary {
     /// Keyed by function address for O(1) lookup during post-processing.
     /// Not serialized — rebuilt on each load from the PDB sidecar when available.
     pub pdb_functions: std::collections::HashMap<u64, PdbFunctionInfo>,
+    /// Structured compiler/packer/language hints with evidence (not an rkyv snapshot field).
+    pub identity_report: Option<super::identity::BinaryIdentityReport>,
 }
 
 impl LoadedBinary {
@@ -315,6 +317,7 @@ impl LoadedBinary {
             inner: Arc::new(inner),
             dwarf_functions: std::collections::HashMap::new(),
             pdb_functions: std::collections::HashMap::new(),
+            identity_report: None,
         }
     }
 

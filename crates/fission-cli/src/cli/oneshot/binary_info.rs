@@ -10,6 +10,7 @@ pub(super) fn print_binary_info(
     binary: &LoadedBinary,
     json: bool,
     include_detections: bool,
+    include_identity: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     let (arch_json, bits) = binary
@@ -59,10 +60,20 @@ pub(super) fn print_binary_info(
                 })
                 .collect();
             if let Value::Object(ref mut map) = payload {
-                map.insert(
-                    "detections".to_string(),
-                    Value::Array(detections),
-                );
+                map.insert("detections".to_string(), Value::Array(detections));
+            }
+        }
+        if include_identity {
+            if let Some(ref rep) = binary.identity_report {
+                let id_json = serde_json::to_value(rep).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("identity JSON serialization failed: {e}"),
+                    )
+                })?;
+                if let Value::Object(ref mut map) = payload {
+                    map.insert("identity".to_string(), id_json);
+                }
             }
         }
         writeln!(
@@ -145,6 +156,40 @@ pub(super) fn print_binary_info(
                         writeln!(stdout, "    {}", truncate(details, 72))?;
                     }
                 }
+            }
+        }
+
+        if include_identity {
+            if let Some(ref rep) = binary.identity_report {
+                writeln!(stdout)?;
+                writeln!(
+                    stdout,
+                    "\x1b[1;36m──────────────────────────────────────────────────────────\x1b[0m"
+                )?;
+                writeln!(
+                    stdout,
+                    "\x1b[1;35mIdentity\x1b[0m (loader provenance / hints)"
+                )?;
+                let s = &rep.summary;
+                writeln!(
+                    stdout,
+                    "  packed_score={:.2} overlay={} high_entropy_exec_sections={} aggregate_confidence={}",
+                    s.packed_score, s.has_overlay, s.high_entropy_executable_sections, s.confidence
+                )?;
+                if let Some(ref c) = s.likely_compiler {
+                    writeln!(stdout, "  likely_compiler: {c}")?;
+                }
+                if let Some(ref l) = s.likely_language {
+                    writeln!(stdout, "  likely_language: {l}")?;
+                }
+                if let Some(ref p) = s.likely_packer {
+                    writeln!(stdout, "  likely_packer: {p}")?;
+                }
+                writeln!(
+                    stdout,
+                    "  detections={} (see --identity --json for evidence)",
+                    rep.detections.len()
+                )?;
             }
         }
     }

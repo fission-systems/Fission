@@ -6,15 +6,15 @@ mod assessment;
 mod binary_info;
 #[cfg(feature = "native_decomp")]
 mod common;
+mod debug_decomp;
 #[cfg(feature = "native_decomp")]
 mod decompile;
-mod debug_decomp;
-#[cfg(not(feature = "native_decomp"))]
-mod rust_decomp;
 mod disasm;
 mod function_select;
 mod functions;
 mod inventory;
+#[cfg(not(feature = "native_decomp"))]
+mod rust_decomp;
 mod script;
 mod strings;
 
@@ -23,21 +23,21 @@ use binary_info::{print_binary_info, print_exports, print_imports, print_section
 use decompile::{
     emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
 };
-#[cfg(not(feature = "native_decomp"))]
-use rust_decomp::run_decompilation_rust_sleigh;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
+#[cfg(not(feature = "native_decomp"))]
+use rust_decomp::run_decompilation_rust_sleigh;
 use strings::print_strings;
 
 use crate::cli::args::{
     FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, ParsedInvocation,
     ParsedOneShotArgs, parse_oneshot_args,
 };
-use script::execute_script;
 use anyhow::{Context, Result};
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
+use script::execute_script;
 use std::fs;
 use std::io;
 
@@ -163,6 +163,7 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             &binary,
             cli.json,
             cli.info_detections,
+            cli.info_identity,
         )?);
     }
 

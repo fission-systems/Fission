@@ -112,9 +112,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
 pub(crate) fn record_plain_output(entry: &CliRustDecompileRecord) -> String {
     match &entry.outcome {
         CliRustOutcome::Success { code, .. } => code.clone(),
-        CliRustOutcome::AssemblyFallback {
-            fallback_code, ..
-        } => fallback_code.clone(),
+        CliRustOutcome::AssemblyFallback { fallback_code, .. } => fallback_code.clone(),
         CliRustOutcome::HardError { error_text, .. } => format!(
             "// Error decompiling {} (0x{:x}): {}",
             entry.func.name, entry.func.address, error_text

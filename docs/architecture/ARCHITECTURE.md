@@ -67,6 +67,8 @@ canonical pipeline follows the Ghidra Loader owner chain:
 4. `symbols`: classify code/data, imports, exports, thunks, undefined externals, and debug-only symbols.
 5. `finalize`: build `LoadedBinary`, `FunctionInfo`, imports, exports, and canonical function views.
 
+**Binary identity (`loader::identity`).** After `LoaderPipeline::load`, Fission attaches an optional structured `BinaryIdentityReport` on the `LoadedBinary` wrapper (entropy, overlay tail hints, PE-oriented section/import signals, evidence lists). This augments loader provenance for CLI JSON (`fission_cli info --identity`) and future benchmark attribution; it is **not** a decompiler repair layer and Phase 1 does not alter parsing or IR. Flat heuristic/DiE-style hits remain available via `detector::detect` (`info --detections`).
+
 PE/COFF/ELF/Mach-O parsing is Fission-owned through bounds-checked byte readers.
 `object` is not a loader decision owner; it may be used only as fixture/debug
 inspection support. `gimli` and `pdb` remain specialized DWARF/PDB metadata

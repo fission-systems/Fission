@@ -1,7 +1,7 @@
-use crate::cli::oneshot::rust_decomp::{
-    make_internal_error_result, render_one_function_inner, FunctionRenderResult,
-};
 use crate::cli::oneshot::rust_decomp::record::RenderConfig;
+use crate::cli::oneshot::rust_decomp::{
+    FunctionRenderResult, make_internal_error_result, render_one_function_inner,
+};
 use fission_loader::loader::FunctionInfo;
 use std::cmp::min;
 use std::sync::{Arc, Mutex, mpsc};

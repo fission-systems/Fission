@@ -1,6 +1,4 @@
-use fission_decompiler::{
-    PreviewWorkerRequest, PreviewWorkerResponse, execute_preview_worker,
-};
+use fission_decompiler::{PreviewWorkerRequest, PreviewWorkerResponse, execute_preview_worker};
 use std::io::{self, Read, Write};
 
 #[cfg(feature = "allocator-mimalloc")]

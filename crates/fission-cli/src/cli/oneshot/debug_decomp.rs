@@ -4,8 +4,8 @@
 //! coarse stage status strings, timing/size counters from [`NirBuildStats`], and
 //! heuristic [`owner_buckets`] for benchmarks.
 
-use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_decompiler::{NirBuildStats, NirHintStats};
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;
@@ -13,7 +13,10 @@ use std::io;
 use std::path::Path;
 
 /// Serialize bundle JSON with `{ "schema_version": 1, "functions": [...] }`.
-pub(crate) fn write_debug_decomp_bundle_file(path: &Path, bundles: &[serde_json::Value]) -> io::Result<()> {
+pub(crate) fn write_debug_decomp_bundle_file(
+    path: &Path,
+    bundles: &[serde_json::Value],
+) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -275,7 +278,8 @@ fn quality_evidence_subset(s: &NirBuildStats) -> serde_json::Value {
         call_target_indirect_const_resolved_count: s.call_target_indirect_const_resolved_count,
         call_target_iat_slot_resolved_count: s.call_target_iat_slot_resolved_count,
         call_target_indirect_load_resolved_count: s.call_target_indirect_load_resolved_count,
-        call_target_unresolved_no_exact_identity_count: s.call_target_unresolved_no_exact_identity_count,
+        call_target_unresolved_no_exact_identity_count: s
+            .call_target_unresolved_no_exact_identity_count,
         call_signature_refined_count: s.call_signature_refined_count,
         prototype_summary_refined_count: s.prototype_summary_refined_count,
         prototype_summary_round_count: s.prototype_summary_round_count,
@@ -289,8 +293,10 @@ fn quality_evidence_subset(s: &NirBuildStats) -> serde_json::Value {
         typed_object_shape_refined_count: s.typed_object_shape_refined_count,
         object_root_fact_promotion_count: s.object_root_fact_promotion_count,
         materialization_stabilized_count: s.materialization_stabilized_count,
-        replacement_plan_rejected_alias_unsafe_count: s.replacement_plan_rejected_alias_unsafe_count,
-        replacement_plan_rejected_missing_merge_count: s.replacement_plan_rejected_missing_merge_count,
+        replacement_plan_rejected_alias_unsafe_count: s
+            .replacement_plan_rejected_alias_unsafe_count,
+        replacement_plan_rejected_missing_merge_count: s
+            .replacement_plan_rejected_missing_merge_count,
         representative_downgrade_count: s.representative_downgrade_count,
         forced_linear_structuring_count: s.forced_linear_structuring_count,
         structuring_scc_component_count: s.structuring_scc_component_count,
@@ -300,20 +306,32 @@ fn quality_evidence_subset(s: &NirBuildStats) -> serde_json::Value {
         region_emit_ready_failed_count: s.region_emit_ready_failed_count,
         blockgraph_region_candidate_count: s.blockgraph_region_candidate_count,
         blockgraph_region_complete_count: s.blockgraph_region_complete_count,
-        blockgraph_region_rejected_missing_follow_count: s.blockgraph_region_rejected_missing_follow_count,
-        blockgraph_region_rejected_must_emit_label_count: s.blockgraph_region_rejected_must_emit_label_count,
+        blockgraph_region_rejected_missing_follow_count: s
+            .blockgraph_region_rejected_missing_follow_count,
+        blockgraph_region_rejected_must_emit_label_count: s
+            .blockgraph_region_rejected_must_emit_label_count,
         blockgraph_region_rejected_middle_ref_count: s.blockgraph_region_rejected_middle_ref_count,
-        blockgraph_region_rejected_external_ref_count: s.blockgraph_region_rejected_external_ref_count,
-        blockgraph_region_rejected_join_owner_conflict_count: s.blockgraph_region_rejected_join_owner_conflict_count,
-        blockgraph_region_rejected_nonterminal_join_count: s.blockgraph_region_rejected_nonterminal_join_count,
-        blockgraph_region_rejected_follow_owner_conflict_count: s.blockgraph_region_rejected_follow_owner_conflict_count,
+        blockgraph_region_rejected_external_ref_count: s
+            .blockgraph_region_rejected_external_ref_count,
+        blockgraph_region_rejected_join_owner_conflict_count: s
+            .blockgraph_region_rejected_join_owner_conflict_count,
+        blockgraph_region_rejected_nonterminal_join_count: s
+            .blockgraph_region_rejected_nonterminal_join_count,
+        blockgraph_region_rejected_follow_owner_conflict_count: s
+            .blockgraph_region_rejected_follow_owner_conflict_count,
         blockgraph_region_rejected_emit_ready_count: s.blockgraph_region_rejected_emit_ready_count,
-        blockgraph_region_rejected_irreducible_count: s.blockgraph_region_rejected_irreducible_count,
-        guarded_tail_rejected_missing_terminal_join_count: s.guarded_tail_rejected_missing_terminal_join_count,
-        guarded_tail_rejected_side_entry_conflict_count: s.guarded_tail_rejected_side_entry_conflict_count,
-        guarded_tail_rejected_alias_interleave_conflict_count: s.guarded_tail_rejected_alias_interleave_conflict_count,
-        guarded_tail_rejected_ambiguous_follow_count: s.guarded_tail_rejected_ambiguous_follow_count,
-        guarded_tail_rejected_side_effectful_callee_count: s.guarded_tail_rejected_side_effectful_callee_count,
+        blockgraph_region_rejected_irreducible_count: s
+            .blockgraph_region_rejected_irreducible_count,
+        guarded_tail_rejected_missing_terminal_join_count: s
+            .guarded_tail_rejected_missing_terminal_join_count,
+        guarded_tail_rejected_side_entry_conflict_count: s
+            .guarded_tail_rejected_side_entry_conflict_count,
+        guarded_tail_rejected_alias_interleave_conflict_count: s
+            .guarded_tail_rejected_alias_interleave_conflict_count,
+        guarded_tail_rejected_ambiguous_follow_count: s
+            .guarded_tail_rejected_ambiguous_follow_count,
+        guarded_tail_rejected_side_effectful_callee_count: s
+            .guarded_tail_rejected_side_effectful_callee_count,
     })
     .unwrap_or_else(|_| serde_json::Value::Null)
 }

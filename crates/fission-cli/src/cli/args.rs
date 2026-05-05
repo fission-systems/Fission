@@ -29,6 +29,8 @@ pub struct OneShotArgs {
     pub exports: bool,
     /// Run packer/compiler/language detection (heuristics + DiE signatures) for `info`.
     pub info_detections: bool,
+    /// Emit structured loader identity report (entropy, overlay, import/section hints with evidence).
+    pub info_identity: bool,
     pub strings: Option<usize>,
     pub disasm: Option<u64>,
     pub disasm_function: Option<u64>,
@@ -77,6 +79,7 @@ impl Default for OneShotArgs {
             imports: false,
             exports: false,
             info_detections: false,
+            info_identity: false,
             strings: None,
             disasm: None,
             disasm_function: None,
@@ -152,7 +155,9 @@ pub struct ScriptInvocation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScriptCmd {
-    Check { script: PathBuf },
+    Check {
+        script: PathBuf,
+    },
     Run {
         binary: PathBuf,
         script: PathBuf,
@@ -206,7 +211,7 @@ enum CliCommand {
 #[derive(Args, Debug)]
 #[command(
     long_about = "Show binary metadata plus optional section/import/export inventories.\n\nUse this command for quick facts about the loaded binary without entering the decompilation path.",
-    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json\n  fission_cli info app.exe --detections --json"
+    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json\n  fission_cli info app.exe --detections --json\n  fission_cli info app.exe --identity --json"
 )]
 struct InfoArgs {
     /// Path to the binary file to analyze
@@ -215,6 +220,10 @@ struct InfoArgs {
     /// Run integrated detection (section/import/string heuristics plus Detect It Easy signatures)
     #[arg(long)]
     detections: bool,
+
+    /// Attach structured loader identity report (entropy, overlay, PE hints with evidence)
+    #[arg(long)]
+    identity: bool,
 
     /// Show section information
     #[arg(short = 'S', long)]
@@ -760,9 +769,7 @@ fn should_use_canonical_parser(argv: &[OsString]) -> bool {
     }
 
     match argv[1].to_str() {
-        Some(
-            "info" | "list" | "disasm" | "decomp" | "strings" | "inventory" | "script",
-        ) => true,
+        Some("info" | "list" | "disasm" | "decomp" | "strings" | "inventory" | "script") => true,
         Some("help" | "--help" | "-h" | "--version" | "-V") => true,
         _ => false,
     }
@@ -814,6 +821,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.imports = info.imports;
                     args.exports = info.exports;
                     args.info_detections = info.detections;
+                    args.info_identity = info.identity;
                     args.info = !args.sections && !args.imports && !args.exports;
                     args
                 }
@@ -929,6 +937,7 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         imports: cli.imports,
         exports: cli.exports,
         info_detections: false,
+        info_identity: false,
         strings: cli.strings,
         disasm: cli.disasm,
         disasm_function: cli.disasm_function,
@@ -1007,13 +1016,8 @@ mod tests {
 
     #[test]
     fn canonical_script_check_parsing() {
-        let inv = parse_oneshot_args_from([
-            "fission_cli",
-            "script",
-            "check",
-            "--script",
-            "rules.rhai",
-        ]);
+        let inv =
+            parse_oneshot_args_from(["fission_cli", "script", "check", "--script", "rules.rhai"]);
         match inv {
             ParsedInvocation::Script(s) => {
                 assert!(!s.verbose);
@@ -1067,17 +1071,20 @@ mod tests {
         assert!(parsed.args.info);
         assert_eq!(parsed.args.binary, PathBuf::from("bin.exe"));
         assert!(!parsed.args.info_detections);
+        assert!(!parsed.args.info_identity);
+    }
+
+    #[test]
+    fn canonical_info_identity_flag_sets_info_identity() {
+        let parsed = parse_canonical(&["fission_cli", "info", "bin.exe", "--identity", "--json"]);
+        assert!(parsed.args.info);
+        assert!(parsed.args.json);
+        assert!(parsed.args.info_identity);
     }
 
     #[test]
     fn canonical_info_detections_flag_sets_info_detections() {
-        let parsed = parse_canonical(&[
-            "fission_cli",
-            "info",
-            "bin.exe",
-            "--detections",
-            "--json",
-        ]);
+        let parsed = parse_canonical(&["fission_cli", "info", "bin.exe", "--detections", "--json"]);
         assert!(parsed.args.info);
         assert!(parsed.args.json);
         assert!(parsed.args.info_detections);

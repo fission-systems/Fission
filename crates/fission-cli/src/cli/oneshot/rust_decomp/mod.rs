@@ -164,9 +164,12 @@ pub(crate) fn render_one_function_inner(
             let decomp_sec = start.elapsed().as_secs_f64();
             let error_text = err.to_string();
 
-            if let Some(fallback_code) =
-                fallback::make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &error_text)
-            {
+            if let Some(fallback_code) = fallback::make_assembly_fallback(
+                binary,
+                binary.inner().data.as_slice(),
+                func,
+                &error_text,
+            ) {
                 let record = CliRustDecompileRecord {
                     func: func.clone(),
                     outcome: CliRustOutcome::AssemblyFallback {
@@ -176,15 +179,8 @@ pub(crate) fn render_one_function_inner(
                     },
                 };
 
-                let debug_bundle = debug_bundle_for_record(
-                    binary,
-                    func,
-                    config,
-                    None,
-                    None,
-                    false,
-                    true,
-                );
+                let debug_bundle =
+                    debug_bundle_for_record(binary, func, config, None, None, false, true);
 
                 record_into_function_render_result(record, debug_bundle, config.benchmark)
             } else {
@@ -196,15 +192,8 @@ pub(crate) fn render_one_function_inner(
                     },
                 };
 
-                let debug_bundle = debug_bundle_for_record(
-                    binary,
-                    func,
-                    config,
-                    None,
-                    None,
-                    true,
-                    false,
-                );
+                let debug_bundle =
+                    debug_bundle_for_record(binary, func, config, None, None, true, false);
 
                 record_into_function_render_result(record, debug_bundle, config.benchmark)
             }

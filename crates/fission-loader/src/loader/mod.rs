@@ -13,6 +13,7 @@ pub mod dwarf;
 pub mod elf;
 pub mod formats;
 pub mod function_view;
+pub mod identity;
 pub mod macho;
 pub mod pdb_sidecar;
 pub mod pe;
@@ -50,6 +51,10 @@ impl LoadedBinary {
     /// Auto-detect binary format and parse
     fn auto_detect_and_parse(data: DataBuffer, path: String) -> Result<Self> {
         let mut binary = pipeline::LoaderPipeline::load(data, path)?;
+        binary.identity_report = Some(identity::analyze(
+            &binary,
+            identity::IdentityScanLimits::default(),
+        ));
         let format = binary.format.clone();
 
         if format.starts_with("PE") && binary.inner().pdb_debug_info.is_some() {
@@ -515,46 +520,44 @@ mod tests {
         data[64] = 0x91;
         data[224] = 0x92;
 
-        let binary = LoadedBinaryBuilder::new(
-            "synthetic_reloc.o".to_string(),
-            DataBuffer::Heap(data),
-        )
-        .format("ELF64")
-        .entry_point(0)
-        .image_base(0)
-        .is_64bit(true)
-        .add_section(SectionInfo {
-            name: ".text.a".to_string(),
-            virtual_address: 0x100000,
-            virtual_size: 1,
-            file_offset: 0,
-            file_size: 1,
-            is_executable: true,
-            is_readable: true,
-            is_writable: false,
-        })
-        .add_section(SectionInfo {
-            name: ".text.b".to_string(),
-            virtual_address: 0x100140,
-            virtual_size: 1,
-            file_offset: 64,
-            file_size: 1,
-            is_executable: true,
-            is_readable: true,
-            is_writable: false,
-        })
-        .add_section(SectionInfo {
-            name: ".text.c".to_string(),
-            virtual_address: 0x1001a0,
-            virtual_size: 1,
-            file_offset: 224,
-            file_size: 1,
-            is_executable: true,
-            is_readable: true,
-            is_writable: false,
-        })
-        .build()
-        .expect("build synthetic ELF64 relocatable-like binary");
+        let binary =
+            LoadedBinaryBuilder::new("synthetic_reloc.o".to_string(), DataBuffer::Heap(data))
+                .format("ELF64")
+                .entry_point(0)
+                .image_base(0)
+                .is_64bit(true)
+                .add_section(SectionInfo {
+                    name: ".text.a".to_string(),
+                    virtual_address: 0x100000,
+                    virtual_size: 1,
+                    file_offset: 0,
+                    file_size: 1,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_section(SectionInfo {
+                    name: ".text.b".to_string(),
+                    virtual_address: 0x100140,
+                    virtual_size: 1,
+                    file_offset: 64,
+                    file_size: 1,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_section(SectionInfo {
+                    name: ".text.c".to_string(),
+                    virtual_address: 0x1001a0,
+                    virtual_size: 1,
+                    file_offset: 224,
+                    file_size: 1,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("build synthetic ELF64 relocatable-like binary");
 
         for (address, expected) in [
             (0x100000_u64, 0x90_u8),

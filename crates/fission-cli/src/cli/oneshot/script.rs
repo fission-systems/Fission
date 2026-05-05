@@ -52,11 +52,9 @@ pub fn execute_script(invocation: ScriptInvocation) -> Result<()> {
             let binary_data = fs::read(&binary)
                 .with_context(|| format!("failed to read binary `{}`", binary.display()))?;
 
-            let loaded_raw = LoadedBinary::from_bytes(
-                binary_data,
-                binary.to_string_lossy().to_string(),
-            )
-            .with_context(|| format!("failed to parse binary `{}`", binary.display()))?;
+            let loaded_raw =
+                LoadedBinary::from_bytes(binary_data, binary.to_string_lossy().to_string())
+                    .with_context(|| format!("failed to parse binary `{}`", binary.display()))?;
 
             let loaded = fission_script::prepare_binary_for_script(loaded_raw);
 

@@ -35,11 +35,11 @@ use fission_static::analysis::decomp::{
 };
 
 #[cfg(not(feature = "native_decomp"))]
-use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
-#[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
 };
+#[cfg(not(feature = "native_decomp"))]
+use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
 #[cfg(not(feature = "native_decomp"))]
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 

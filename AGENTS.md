@@ -56,6 +56,7 @@ Read the nearest child file before editing those areas.
 | Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
+| Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
 | Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
