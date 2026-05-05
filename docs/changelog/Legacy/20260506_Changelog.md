@@ -55,3 +55,44 @@
 - The next quality owner remains NIR/structuring: `fibonacci @ 0x140001470`
   still reports `blockgraph_region_rejected_must_emit_label=6`, high alias
   residue, and only `3.11%` normalized similarity against Ghidra.
+
+## Windows small C guarded-tail flag helper purity
+
+- Extended the guarded-tail pure helper contract to cover Fission's synthetic
+  flag intrinsics `__carry`, `__scarry`, and `__sborrow`, in addition to the
+  existing `__popcount` helper.
+- Centralized that helper allowlist in `guarded_tail/mod.rs` and reused it from
+  suffix call-effect classification and alias-forward purity checks. This keeps
+  the change in NIR structuring proof logic instead of adding a printer patch or
+  a binary-specific heuristic.
+- Sample diagnostics on
+  `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` showed the
+  flag helpers are now internalized as pure known helper calls in the
+  `fibonacci @ 0x140001470` guarded-tail suffix trace. The rendered row did not
+  change yet; the remaining blockers are still alias fallthrough and join/label
+  ownership.
+
+## Validation
+
+- `CARGO_TARGET_DIR=/tmp/fission-cycle2-target cargo test -p fission-pcode flag_intrinsic -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle2-target cargo build -p fission-cli --release`
+  passed.
+
+## Benchmark
+
+- Before:
+  `benchmark/artifacts/full_benchmark/windows-small-c-test-functions-pdata-after`
+- After:
+  `benchmark/artifacts/full_benchmark/windows-small-c-flag-helper-purity-after`
+- Command:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle2-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-flag-helper-purity-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-test-functions-pdata-after`
+- Result:
+  the regression gate passed. The limit-20 sample run stayed at
+  `avg_normalized_similarity=36.910%` and `100.0%` shared success. Aggregate
+  normalized similarity moved from `7.170%` to `7.180%`.
+- Structural counters:
+  top-level labels improved from `25` to `24`; BlockGraph completed regions
+  improved from `0` to `2`; `blockgraph_region_rejected_must_emit_label`
+  improved from `20` to `16`. `alias_unsafe`, `missing_merge`,
+  `materialization_stabilized`, generic local names, and gotos were unchanged.

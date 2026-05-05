@@ -301,7 +301,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn call_target_is_known_pure_helper(target: &str) -> bool {
-        matches!(target, "__popcount")
+        guarded_tail_call_target_is_known_pure_helper(target)
     }
 
     fn call_target_is_memory_mutating(target: &str) -> bool {
@@ -3172,6 +3172,52 @@ mod tests {
             },
             SuffixCallEffectShapeKind::PureKnownHelperCall,
         );
+    }
+
+    #[test]
+    fn suffix_call_effect_shape_classifies_flag_intrinsics_as_pure_helpers() {
+        for target in ["__carry", "__scarry", "__sborrow"] {
+            assert_suffix_call_effect_shape_kind(
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("tmp".to_string()),
+                    rhs: HirExpr::Call {
+                        target: target.to_string(),
+                        args: vec![
+                            HirExpr::Var("lhs".to_string()),
+                            HirExpr::Const(
+                                1,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: false,
+                                },
+                            ),
+                        ],
+                        ty: NirType::Bool,
+                    },
+                },
+                SuffixCallEffectShapeKind::PureKnownHelperCall,
+            );
+        }
+    }
+
+    #[test]
+    fn guarded_tail_pure_value_accepts_flag_intrinsic_exprs() {
+        for target in ["__carry", "__scarry", "__sborrow"] {
+            assert!(PreviewBuilder::test_expr_is_pure_value(&HirExpr::Call {
+                target: target.to_string(),
+                args: vec![
+                    HirExpr::Var("lhs".to_string()),
+                    HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
+                ],
+                ty: NirType::Bool,
+            }));
+        }
     }
 
     #[test]

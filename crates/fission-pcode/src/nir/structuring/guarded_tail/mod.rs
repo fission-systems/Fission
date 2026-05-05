@@ -13,6 +13,10 @@ mod promotion_graph;
 mod replacement;
 mod suffix_window;
 
+pub(super) fn guarded_tail_call_target_is_known_pure_helper(target: &str) -> bool {
+    matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GuardedTailCanonicalizationFailure {
     MultiplePayloadEntries,

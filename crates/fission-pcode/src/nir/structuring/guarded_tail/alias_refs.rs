@@ -41,7 +41,11 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_is_pure_value(base) && Self::expr_is_pure_value(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::expr_is_pure_value(src),
-            HirExpr::Call { .. } | HirExpr::Load { .. } => false,
+            HirExpr::Call { target, args, .. } => {
+                guarded_tail_call_target_is_known_pure_helper(target)
+                    && args.iter().all(Self::expr_is_pure_value)
+            }
+            HirExpr::Load { .. } => false,
         }
     }
 
@@ -57,6 +61,11 @@ impl<'a> PreviewBuilder<'a> {
                 rhs,
             } if Self::expr_is_pure_value(rhs)
         )
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_expr_is_pure_value(expr: &HirExpr) -> bool {
+        Self::expr_is_pure_value(expr)
     }
 
     fn stmt_is_alias_forward_safe(stmt: &HirStmt, label: &str, next_label: &str) -> bool {
