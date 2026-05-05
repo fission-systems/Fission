@@ -68,10 +68,35 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let op = &block.ops[term_idx];
+        if self.options.is_64bit
+            && let Some(input) = op.inputs.last()
+            && self.is_return_control_target_stack_load(input)
+        {
+            return Ok(None);
+        }
+
         op.inputs
             .last()
             .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
             .transpose()
+    }
+
+    fn is_return_control_target_stack_load(&self, input: &Varnode) -> bool {
+        if input.is_constant || input.size != self.options.pointer_size {
+            return false;
+        }
+        let Some((_site, op)) = self.lookup_def_site(input) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::Load
+            || op.output.as_ref() != Some(input)
+            || op.inputs.len() < 2
+        {
+            return false;
+        }
+        self.resolve_stack_address_from_memory_op(op)
+            .or_else(|| self.resolve_stack_address(&op.inputs[1]))
+            .is_some()
     }
 
     pub(in crate::nir) fn try_lower_intra_instruction_conditional_return(

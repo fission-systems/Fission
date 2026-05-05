@@ -118,6 +118,86 @@ fn preview_names_x86_general_purpose_registers() {
 }
 
 #[test]
+fn preview_x64_ret_stack_target_is_not_return_value() {
+    let ret_target = uniq(0x500, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140002000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140002000,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![cst(0, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV RAX,qword ptr [RSP]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140002001,
+                    output: None,
+                    inputs: vec![cst(0, 8), ret_target],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "x64_void_ret", 0x140002000, &preview_options())
+        .expect("preview render");
+    assert!(code.contains("void x64_void_ret()"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return *"), "{code}");
+    assert!(!code.contains("var_"), "{code}");
+}
+
+#[test]
+fn preview_x64_ret_prefers_abi_return_register_over_stack_target() {
+    let ret_target = uniq(0x508, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140002100,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002100,
+                    output: Some(reg(0x00, 8)),
+                    inputs: vec![cst(42, 8)],
+                    asm_mnemonic: Some("MOV RAX,0x2a".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140002101,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![cst(0, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV RCX,qword ptr [RSP]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140002102,
+                    output: None,
+                    inputs: vec![cst(0, 8), ret_target],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "x64_value_ret", 0x140002100, &preview_options())
+        .expect("preview render");
+    assert!(code.contains("return 42;"), "{code}");
+    assert!(!code.contains("return *"), "{code}");
+}
+
+#[test]
 fn preview_uses_entry_register_alias_for_non_abi_register() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;

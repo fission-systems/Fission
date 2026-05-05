@@ -279,6 +279,208 @@ fn infer_return_type_stmts(
     None
 }
 
+fn zero_extended_return_candidate_type(
+    expr: &HirExpr,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> Option<NirType> {
+    match expr {
+        HirExpr::Cast { ty, expr: inner } => {
+            let NirType::Int {
+                bits: outer_bits,
+                signed: false,
+            } = ty
+            else {
+                return None;
+            };
+            let inner_ty = match inner.as_ref() {
+                HirExpr::Var(name) => {
+                    let mut visited = HashSet::new();
+                    infer_type_for_binding(name, defs, known_binding_types, &mut visited)
+                }
+                other => expr_type(other),
+            };
+            match inner_ty {
+                NirType::Int {
+                    bits: inner_bits, ..
+                } if inner_bits < *outer_bits => Some(inner_ty),
+                _ => None,
+            }
+        }
+        HirExpr::Var(name) => {
+            let mut visited = HashSet::new();
+            let ty = infer_type_for_binding(name, defs, known_binding_types, &mut visited);
+            match ty {
+                NirType::Int { bits, .. } if bits < 64 => Some(ty),
+                _ => None,
+            }
+        }
+        other => match expr_type(other) {
+            ty @ NirType::Int { bits, .. } if bits < 64 => Some(ty),
+            _ => None,
+        },
+    }
+}
+
+fn collect_zero_extended_return_candidates(
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut Vec<NirType>,
+) -> usize {
+    let mut value_return_count = 0;
+    for stmt in stmts {
+        value_return_count +=
+            collect_zero_extended_return_candidates_stmt(stmt, defs, known_binding_types, out);
+    }
+    value_return_count
+}
+
+fn collect_zero_extended_return_candidates_stmt(
+    stmt: &HirStmt,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut Vec<NirType>,
+) -> usize {
+    match stmt {
+        HirStmt::Return(Some(expr)) => {
+            if let Some(ty) = zero_extended_return_candidate_type(expr, defs, known_binding_types) {
+                out.push(ty);
+            }
+            1
+        }
+        HirStmt::Return(None) => 0,
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => {
+            collect_zero_extended_return_candidates(stmts, defs, known_binding_types, out)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let then_count =
+                collect_zero_extended_return_candidates(then_body, defs, known_binding_types, out);
+            let else_count =
+                collect_zero_extended_return_candidates(else_body, defs, known_binding_types, out);
+            then_count + else_count
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut value_return_count = 0;
+            for case in cases {
+                value_return_count += collect_zero_extended_return_candidates(
+                    &case.body,
+                    defs,
+                    known_binding_types,
+                    out,
+                );
+            }
+            value_return_count
+                + collect_zero_extended_return_candidates(default, defs, known_binding_types, out)
+        }
+        _ => 0,
+    }
+}
+
+fn strip_zero_extended_return_casts(stmts: &mut [HirStmt], narrowed_ty: &NirType) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        changed |= strip_zero_extended_return_casts_stmt(stmt, narrowed_ty);
+    }
+    changed
+}
+
+fn strip_zero_extended_return_casts_stmt(stmt: &mut HirStmt, narrowed_ty: &NirType) -> bool {
+    match stmt {
+        HirStmt::Return(Some(HirExpr::Cast { ty, expr })) => {
+            let should_strip = matches!(
+                (ty, narrowed_ty),
+                (
+                    NirType::Int {
+                        bits: outer_bits,
+                        signed: false,
+                    },
+                    NirType::Int {
+                        bits: inner_bits,
+                        ..
+                    },
+                ) if inner_bits < outer_bits
+            );
+            if should_strip {
+                let inner = (**expr).clone();
+                *stmt = HirStmt::Return(Some(inner));
+                true
+            } else {
+                false
+            }
+        }
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => strip_zero_extended_return_casts(stmts, narrowed_ty),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            strip_zero_extended_return_casts(then_body, narrowed_ty)
+                | strip_zero_extended_return_casts(else_body, narrowed_ty)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases {
+                changed |= strip_zero_extended_return_casts(&mut case.body, narrowed_ty);
+            }
+            changed | strip_zero_extended_return_casts(default, narrowed_ty)
+        }
+        _ => false,
+    }
+}
+
+fn narrow_zero_extended_return_width(
+    func: &mut HirFunction,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    if func.surface_return_type_name.is_some() {
+        return false;
+    }
+    let NirType::Int {
+        bits: return_bits,
+        signed: false,
+    } = &func.return_type
+    else {
+        return false;
+    };
+    let mut candidates = Vec::new();
+    let value_return_count = collect_zero_extended_return_candidates(
+        &func.body,
+        defs,
+        known_binding_types,
+        &mut candidates,
+    );
+    if value_return_count == 0 || candidates.len() != value_return_count {
+        return false;
+    }
+    let candidate = candidates[0].clone();
+    let NirType::Int {
+        bits: candidate_bits,
+        ..
+    } = candidate
+    else {
+        return false;
+    };
+    if candidate_bits >= *return_bits || candidates.iter().any(|ty| ty != &candidate) {
+        return false;
+    }
+
+    func.return_type = candidate.clone();
+    strip_zero_extended_return_casts(&mut func.body, &candidate);
+    true
+}
+
 /// Apply the type inference pass to a function.
 ///
 /// - Updates `NirBinding.ty` for all `locals` and `params` that have
@@ -335,6 +537,8 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     );
     changed |= func.return_type != prev_return_type;
 
+    changed |= narrow_zero_extended_return_width(func, &defs, &known_binding_types);
+
     changed
 }
 
@@ -355,6 +559,16 @@ mod tests {
             ty: NirType::Unknown,
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn make_param(name: &str, ty: NirType) -> NirBinding {
+        NirBinding {
+            name: name.to_owned(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         }
     }
@@ -536,5 +750,81 @@ mod tests {
         super::apply_type_inference_pass(&mut func);
         // ty must remain Unknown — only surface_type_name is authoritative
         assert_eq!(func.locals[0].ty, NirType::Unknown);
+    }
+
+    #[test]
+    fn narrows_zero_extended_return_width_from_all_arms() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![
+                make_param("param_1", u32_ty.clone()),
+                make_param("param_2", u32_ty.clone()),
+            ],
+            locals: vec![],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                        ty: u64_ty.clone(),
+                        expr: Box::new(HirExpr::Var("param_2".to_owned())),
+                    }))],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+        assert!(changed);
+        assert_eq!(func.return_type, u32_ty);
+        let HirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("expected if");
+        };
+        assert!(matches!(
+            &then_body[0],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "param_2"
+        ));
+    }
+
+    #[test]
+    fn keeps_wide_return_when_any_arm_lacks_narrow_evidence() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![make_param("param_1", u32_ty)],
+            locals: vec![],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Return(Some(HirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(HirExpr::Var("param_1".to_owned())),
+                })),
+                HirStmt::Return(Some(HirExpr::Var("unknown_wide".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+        assert!(!changed);
+        assert_eq!(func.return_type, u64_ty);
     }
 }

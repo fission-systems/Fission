@@ -326,3 +326,92 @@
   `process_code @ 0x140001850` changed from returning an undefined `uVar29`
   carrier to:
   `if ((uint)(param_1 + -1) < 3) { return 0; } return (uint)(param_1 + -1);`.
+
+# ABI return control target and zero-extension width narrowing
+
+## Summary
+
+- Split x86-64 `RETURN` control-target stack loads from semantic return values
+  in the NIR preview builder. A stack load feeding the p-code `RETURN`
+  terminator is now treated as the return address target unless a proven ABI
+  return register value is available.
+- Added `void` surface return propagation for functions whose HIR body contains
+  only bare returns. This keeps the rendered signature aligned with the
+  corrected return surface instead of inferring a value from the control-flow
+  target.
+- Added a guarded prototype/type inference cleanup for zero-extended return
+  values: when every value-return arm proves the same narrower integer type
+  behind an unsigned widening cast, the function return type is narrowed and
+  redundant outer return casts are stripped.
+
+## Design notes
+
+- The owner is the NIR builder/type inference pipeline, not the printer. The
+  change follows Ghidra's separation between the p-code `RETURN` control input
+  and the function prototype return storage, and keeps the type-width cleanup in
+  the prototype/types stage.
+- The width narrowing is all-arms and evidence-based: explicit surface return
+  types are not rewritten, unknown return arms reject the narrowing, mixed
+  candidate widths reject the narrowing, and only integer narrowing from a wider
+  unsigned return is accepted.
+- The implementation does not use binary-specific addresses, names, or corpus
+  rows. The Windows small-C corpus is used only as an external quality gate.
+
+## Validation
+
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo test -p fission-pcode preview_x64_ret_ -- --test-threads=1`
+  passed: `2 passed`.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo test -p fission-pcode narrows_zero_extended_return_width_from_all_arms -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo test -p fission-pcode keeps_wide_return_when_any_arm_lacks_narrow_evidence -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo test -p fission-pcode -- --test-threads=1`
+  passed: `728 passed`.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo check -p fission-pcode`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo check -p fission-decompiler`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo check -p fission-automation`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-goal-target cargo build -p fission-cli --release`
+  passed.
+- `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark`
+  passed: `34 passed`.
+- `git diff --check`
+  passed.
+
+## Benchmark
+
+- Before:
+  `benchmark/artifacts/full_benchmark/windows-small-c-intra-cbranch-return-after`
+- After:
+  `benchmark/artifacts/full_benchmark/windows-small-c-ret-type-width-after`
+- Repeat artifacts:
+  `benchmark/artifacts/full_benchmark/windows-small-c-ret-type-width-after-run2`
+  and
+  `benchmark/artifacts/full_benchmark/windows-small-c-ret-type-width-after-run3`
+- Command:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-goal-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-ret-type-width-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-intra-cbranch-return-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
+- Result:
+  the regression gate passed and row fidelity passed. Average normalized
+  similarity improved from `38.38%` to `39.09%`; shared success stayed
+  `20/20`.
+- Quality counters:
+  `generic_local_name_sum=276`, `generic_param_name_sum=14`, `goto_total=34`,
+  `top_level_label_total=24`, `synthetic_helper_call_total=3`,
+  `alias_unsafe=13101`, `missing_merge=4254`, and
+  `materialization_stabilized=1408` stayed stable. MIR shadow `value`
+  decreased from `648` to `645` after redundant return casts were removed.
+- Repeatability:
+  all three runs passed the gate and row fidelity with
+  `avg_normalized_similarity=39.09%`. Fission wall times were `11.921s`,
+  `12.260s`, and `11.918s`.
+- Row notes:
+  `add @ 0x140001450` changed from `ulonglong add(...)` returning
+  `(ulonglong)(uint)(...)` to `uint add(...)` returning `(uint)(...)`, improving
+  row similarity from `47.54` to `54.72`.
+  `max @ 0x140001460` changed from `ulonglong max(...)` with
+  `(ulonglong)param_2` to `uint max(...)` returning `param_2`, improving row
+  similarity from `56.76` to `63.64`.
+  `fibonacci @ 0x140001470` narrowed the signature and removed one outer return
+  cast without changing row fidelity.

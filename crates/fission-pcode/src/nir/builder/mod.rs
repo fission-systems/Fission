@@ -232,6 +232,7 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
+        let (has_bare_return, has_value_return) = Self::return_surface_shape(&body);
         let return_type = body
             .iter()
             .rev()
@@ -267,13 +268,61 @@ impl<'a> PreviewBuilder<'a> {
                 .chain(self.temps.values().cloned())
                 .collect(),
             return_type,
-            surface_return_type_name: None,
+            surface_return_type_name: (has_bare_return && !has_value_return)
+                .then(|| "void".to_string()),
             body,
             calling_convention: self.options.calling_convention,
             is_64bit: self.options.is_64bit,
             callee_observed_max_arity: IndexMap::new(),
             callee_summaries: IndexMap::new(),
         })
+    }
+
+    fn return_surface_shape(stmts: &[HirStmt]) -> (bool, bool) {
+        let mut has_bare_return = false;
+        let mut has_value_return = false;
+        for stmt in stmts {
+            match stmt {
+                HirStmt::Return(None) => has_bare_return = true,
+                HirStmt::Return(Some(_)) => has_value_return = true,
+                HirStmt::Block(body)
+                | HirStmt::While { body, .. }
+                | HirStmt::DoWhile { body, .. }
+                | HirStmt::For { body, .. } => {
+                    let (bare, value) = Self::return_surface_shape(body);
+                    has_bare_return |= bare;
+                    has_value_return |= value;
+                }
+                HirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    let (then_bare, then_value) = Self::return_surface_shape(then_body);
+                    let (else_bare, else_value) = Self::return_surface_shape(else_body);
+                    has_bare_return |= then_bare || else_bare;
+                    has_value_return |= then_value || else_value;
+                }
+                HirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        let (bare, value) = Self::return_surface_shape(&case.body);
+                        has_bare_return |= bare;
+                        has_value_return |= value;
+                    }
+                    let (bare, value) = Self::return_surface_shape(default);
+                    has_bare_return |= bare;
+                    has_value_return |= value;
+                }
+                HirStmt::Assign { .. }
+                | HirStmt::Expr(_)
+                | HirStmt::VaStart { .. }
+                | HirStmt::Label(_)
+                | HirStmt::Goto(_)
+                | HirStmt::Break
+                | HirStmt::Continue => {}
+            }
+        }
+        (has_bare_return, has_value_return)
     }
 
     pub(crate) fn build_unsupported_control_evidence(
