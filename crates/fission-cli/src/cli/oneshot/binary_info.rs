@@ -185,6 +185,34 @@ pub(super) fn print_binary_info(
                 if let Some(ref p) = s.likely_packer {
                     writeln!(stdout, "  likely_packer: {p}")?;
                 }
+                if let Some(ref r) = rep.resources {
+                    writeln!(
+                        stdout,
+                        "  identity.resources: die_pe_json={} patterns={} win_api_txt={} fid_bf_count={:?}",
+                        r.die_pe_json_present,
+                        r.pattern_json_count.unwrap_or(0),
+                        r.win_typeinfo_present,
+                        r.fid_bf_count
+                    )?;
+                }
+                if let Some(ref dc) = rep.die_compat {
+                    writeln!(
+                        stdout,
+                        "  identity.die_compat: rules {}/{} supported, sigs matched {}",
+                        dc.rules_supported,
+                        dc.rules_seen,
+                        dc.signatures_matched
+                    )?;
+                }
+                if let Some(ref wc) = rep.winapi_catalog {
+                    writeln!(
+                        stdout,
+                        "  identity.winapi_catalog: IAT symbols {} catalog hits {} misses {}",
+                        wc.symbols_considered,
+                        wc.symbols_in_catalog,
+                        wc.symbols_not_in_catalog
+                    )?;
+                }
                 writeln!(
                     stdout,
                     "  detections={} (see --identity --json for evidence)",

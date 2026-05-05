@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Locate the checked-in DIE mirror without depending on the vendor source tree.
-pub(super) fn detect_it_easy_mirror_root() -> Option<PathBuf> {
+pub(crate) fn detect_it_easy_mirror_root() -> Option<PathBuf> {
     let suffix = Path::new("utils")
         .join("signatures")
         .join("die")

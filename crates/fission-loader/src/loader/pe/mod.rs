@@ -763,6 +763,134 @@ impl<'a> PeLoaderImpl<'a> {
     }
 }
 
+/// TLS / debug-directory facts for [`crate::loader::identity`] (never affects loader parse outcome).
+#[derive(Debug, Clone)]
+pub(crate) struct IdentityPeFacts {
+    pub tls_directory_present: bool,
+    pub tls_callback_count: usize,
+    pub debug_directory_kinds: Vec<String>,
+}
+
+pub(crate) fn identity_pe_facts(binary: &LoadedBinary) -> Option<IdentityPeFacts> {
+    let fmt = binary.format.to_ascii_uppercase();
+    if !fmt.starts_with("PE") {
+        return None;
+    }
+    let bytes = binary.data.as_slice();
+    let raw = parse_pe_file(bytes).ok()?;
+    let (image_base, data_directories, is_pe32_plus) = match &raw.optional_header {
+        PeOptionalHeader::Pe32(d) => (d.image_base, &d.data_directories, false),
+        PeOptionalHeader::Pe32Plus(d) => (d.image_base, &d.data_directories, true),
+    };
+
+    let tls_directory_present = data_directories
+        .get(9)
+        .is_some_and(|d| d.virtual_address != 0 && d.size != 0);
+    let mut tls_callback_count = 0usize;
+
+    if let Some(tls_dd) = data_directories.get(9)
+        && tls_dd.virtual_address != 0
+        && tls_dd.size != 0
+    {
+        let tls_rva = tls_dd.virtual_address;
+        let tls_va = image_base.checked_add(u64::from(tls_rva))?;
+        let tls_fo = identity_va_to_file_offset(binary, tls_va)?;
+        let cb_va = if is_pe32_plus {
+            let end = tls_fo.checked_add(32)?;
+            let slice = bytes.get(tls_fo..end)?;
+            u64::from_le_bytes(slice[24..32].try_into().ok()?)
+        } else {
+            let end = tls_fo.checked_add(16)?;
+            let slice = bytes.get(tls_fo..end)?;
+            u64::from(u32::from_le_bytes(slice[12..16].try_into().ok()?))
+        };
+
+        if cb_va != 0 {
+            if let Some(cb_fo) = identity_va_to_file_offset(binary, cb_va) {
+                let ptr_sz = if is_pe32_plus { 8usize } else { 4usize };
+                let mut off = cb_fo;
+                for _ in 0..128usize {
+                    let end = off.checked_add(ptr_sz)?;
+                    if end > bytes.len() {
+                        break;
+                    }
+                    let ptr = if is_pe32_plus {
+                        u64::from_le_bytes(bytes[off..end].try_into().unwrap())
+                    } else {
+                        u64::from(u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()))
+                    };
+                    if ptr == 0 {
+                        break;
+                    }
+                    tls_callback_count += 1;
+                    off = end;
+                }
+            }
+        }
+    }
+
+    let mut debug_directory_kinds = Vec::new();
+    if let Some(dd) = data_directories.get(6)
+        && dd.virtual_address != 0
+        && dd.size >= IMAGE_DEBUG_DIRECTORY_SIZE as u32
+    {
+            let dbg_va = image_base.checked_add(u64::from(dd.virtual_address))?;
+            let dbg_fo = identity_va_to_file_offset(binary, dbg_va)?;
+            let entry_count = (dd.size as usize) / IMAGE_DEBUG_DIRECTORY_SIZE;
+            for idx in 0..entry_count {
+                let ent_fo = dbg_fo.saturating_add(idx * IMAGE_DEBUG_DIRECTORY_SIZE);
+                let end = ent_fo.checked_add(IMAGE_DEBUG_DIRECTORY_SIZE)?;
+                let slice = bytes.get(ent_fo..end)?;
+                let ty = u32::from_le_bytes(slice[12..16].try_into().ok()?);
+                debug_directory_kinds.push(debug_directory_kind_name(ty));
+            }
+    }
+
+    Some(IdentityPeFacts {
+        tls_directory_present,
+        tls_callback_count,
+        debug_directory_kinds,
+    })
+}
+
+fn identity_va_to_file_offset(binary: &LoadedBinary, va: u64) -> Option<usize> {
+    let data_len = binary.data.as_slice().len();
+    for sec in &binary.sections {
+        let end = sec.virtual_address.saturating_add(sec.virtual_size);
+        if va >= sec.virtual_address && va < end {
+            let delta = va.checked_sub(sec.virtual_address)?;
+            let fo = sec.file_offset.checked_add(delta)?;
+            let fo_usize = usize::try_from(fo).ok()?;
+            return (fo_usize < data_len).then_some(fo_usize);
+        }
+    }
+    None
+}
+
+fn debug_directory_kind_name(ty: u32) -> String {
+    match ty {
+        0 => "UNKNOWN".into(),
+        1 => "COFF".into(),
+        2 => "CODEVIEW".into(),
+        3 => "FPO".into(),
+        4 => "MISC".into(),
+        5 => "EXCEPTION".into(),
+        6 => "FIXUP".into(),
+        7 => "OMAP_TO_SRC".into(),
+        8 => "OMAP_FROM_SRC".into(),
+        9 => "BORLAND".into(),
+        10 => "RESERVED10".into(),
+        11 => "CLSID".into(),
+        12 => "VC_FEATURE".into(),
+        13 => "POGO".into(),
+        14 => "ILTCG".into(),
+        15 => "MPX".into(),
+        16 => "REPRO".into(),
+        17 => "EX_DLLCHARACTERISTICS".into(),
+        other => format!("TYPE_{other:#x}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

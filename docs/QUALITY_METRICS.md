@@ -56,6 +56,10 @@ Each `BinarySnapshot` / `AggregateSnapshot` embeds `nir_build_stats_totals`, whi
 
 Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), MIR projection counts (`mir_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `types.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
 
+## Loader identity (`BinaryIdentityReport`)
+
+CLI `--identity` JSON includes optional Phase 2 fields: `resources`, `die_compat`, `pe`, `winapi_catalog`. Skipped DIE primitives are aggregated under `die_compat.unsupported_primitives` using stable snake_case keys aligned with [`SignatureRule`](../../crates/fission-loader/src/detector/die_engine/rules.rs) variants executed outside the Phase 2 subset (notably `ep_pattern`, `file_pattern`, `overlay_pattern`; supported kinds include `section_name`, `string_match`, `import`, `overlay_present`, `section_entropy`, `overlay_entropy`, `rich_header`, `section_count`, `section_numeric`).
+
 ## Deferred automation
 
 Publishing weekly JSON deltas to GitHub Actions summaries remains future work; until then, attach artifact paths in PRs/releases when citing improvements ([`CONTRIBUTING.md`](../CONTRIBUTING.md)).

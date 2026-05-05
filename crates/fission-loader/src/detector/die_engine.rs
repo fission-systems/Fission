@@ -36,6 +36,14 @@ impl SignatureDatabase {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse signature JSON: {}", e))
     }
 
+    /// Load only `pe_signatures.json` from [`fission_core::PATHS`] (no `.sg` mirror merge).
+    ///
+    /// Used by loader identity Phase 2 DIE subset evaluation to avoid scanning the full mirror at analyze time.
+    pub fn load_pe_json_only() -> Option<Self> {
+        let path = fission_core::PATHS.get_die_signatures_path()?;
+        Self::load(&path).ok()
+    }
+
     /// Load from default path using PathConfig
     pub fn load_default() -> Option<Self> {
         // Try PathConfig first (centralized path resolution)
@@ -599,6 +607,10 @@ pub struct DieMatcher {
     section_cache: HashMap<String, bool>,
     string_cache: HashMap<String, bool>,
     ep_pattern_cache: HashMap<String, Vec<Option<u8>>>,
+    /// When set, string rules scan only this prefix of the mapped image (identity budgets).
+    max_string_scan_bytes: Option<usize>,
+    /// When set, entropy primitives hash only this many bytes per section / overlay slice.
+    max_entropy_scan_bytes: Option<usize>,
 }
 
 impl DieMatcher {
@@ -608,6 +620,27 @@ impl DieMatcher {
             section_cache: HashMap::new(),
             string_cache: HashMap::new(),
             ep_pattern_cache: HashMap::new(),
+            max_string_scan_bytes: None,
+            max_entropy_scan_bytes: None,
+        }
+    }
+
+    /// Apply conservative scan caps (identity lane); `None` preserves legacy full-binary behavior.
+    #[must_use]
+    pub fn with_scan_budgets(
+        mut self,
+        max_string_scan_bytes: Option<usize>,
+        max_entropy_scan_bytes: Option<usize>,
+    ) -> Self {
+        self.max_string_scan_bytes = max_string_scan_bytes;
+        self.max_entropy_scan_bytes = max_entropy_scan_bytes;
+        self
+    }
+
+    fn capped_entropy_slice<'a>(&self, bytes: &'a [u8]) -> &'a [u8] {
+        match self.max_entropy_scan_bytes {
+            Some(cap) if cap < bytes.len() => &bytes[..cap],
+            _ => bytes,
         }
     }
 
@@ -658,7 +691,12 @@ impl DieMatcher {
         }
 
         // Evaluate all DIE string rules against the binary in one pass.
-        let data = _binary.data.as_slice();
+        let mut data = _binary.data.as_slice();
+        if let Some(cap) = self.max_string_scan_bytes {
+            if cap < data.len() {
+                data = &data[..cap];
+            }
+        }
         let escaped = unique_needles
             .iter()
             .map(|needle| regex::escape(needle))
@@ -699,7 +737,7 @@ impl DieMatcher {
         }
     }
 
-    fn match_signature(&self, binary: &LoadedBinary, sig: &Signature) -> Option<Detection> {
+    pub(crate) fn match_signature(&self, binary: &LoadedBinary, sig: &Signature) -> Option<Detection> {
         if let Some(format) = &sig.source_format
             && !binary_matches_die_format(binary, format)
         {
@@ -764,6 +802,10 @@ impl DieMatcher {
                 matched_rules, total_rules, ignored, source
             )),
         )
+    }
+
+    pub(crate) fn eval_signature_rule(&self, binary: &LoadedBinary, rule: &SignatureRule) -> bool {
+        self.match_rule(binary, rule)
     }
 
     fn match_rule(&self, binary: &LoadedBinary, rule: &SignatureRule) -> bool {
@@ -843,12 +885,18 @@ impl DieMatcher {
             } => self
                 .section_by_selector(binary, selector)
                 .and_then(|section| self.section_bytes(binary, section))
-                .map(|bytes| compare_f64(shannon_entropy(bytes), *op, *value))
+                .map(|bytes| {
+                    let bytes = self.capped_entropy_slice(bytes);
+                    compare_f64(shannon_entropy(bytes), *op, *value)
+                })
                 .unwrap_or(false),
 
             SignatureRule::OverlayEntropy { op, value } => self
                 .overlay_bytes(binary)
-                .map(|bytes| compare_f64(shannon_entropy(bytes), *op, *value))
+                .map(|bytes| {
+                    let bytes = self.capped_entropy_slice(bytes);
+                    compare_f64(shannon_entropy(bytes), *op, *value)
+                })
                 .unwrap_or(false),
 
             SignatureRule::Import { function } => {
