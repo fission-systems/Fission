@@ -430,7 +430,8 @@ pub(crate) fn unique_register_name(offset: u64, size: u32) -> Option<&'static st
 }
 
 pub(crate) fn is_primary_return_register(vn: &Varnode) -> bool {
-    (vn.space_id == REGISTER_SPACE_ID && vn.offset == 0x00)
+    ((vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
+        && vn.offset == 0x00)
         || (vn.space_id == UNIQUE_SPACE_ID
             && unique_register_name(vn.offset, vn.size) == Some("rax"))
 }

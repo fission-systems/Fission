@@ -165,6 +165,11 @@
 - Tightened guarded-tail pure-helper suffix handling so known pure helper calls
   still go through the dedicated ownership/escape proof instead of being
   accepted by the generic pure-statement fast path.
+- Fixed 64-bit Rust-Sleigh `RET` lowering so the p-code return target loaded
+  from the stack is not treated as the function return value when a valid ABI
+  return-register definition exists after the last side effect. This recovers
+  leaf register-return expressions such as `add @ 0x140001450` while avoiding
+  stale `RAX` promotion across calls and stores in startup/void helper shapes.
 
 ## Validation
 
@@ -186,6 +191,17 @@
   passed.
 - `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo build -p fission-cli --release`
   passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle6-target cargo test -p fission-pcode -- --test-threads=1`
+  passed: `723 passed`.
+- `python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark`
+  passed: `32 passed`.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle6-target cargo check -p fission-pcode`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle6-target cargo check -p fission-decompiler`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle6-target cargo build -p fission-cli --release`
+  passed.
+- `git diff --check` passed.
 
 ## Benchmark
 
@@ -194,11 +210,11 @@
 - After:
   `benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-callarg-narrow-after`
 - Command:
-  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle5-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-callarg-narrow-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle6-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-callarg-narrow-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
 - Result:
-  average normalized similarity improved from `36.91%` to `37.51%`; median
-  normalized similarity improved from `38.32%` to `40.59%`; aggregate weighted
-  normalized similarity improved from `7.18%` to `7.38%`; shared success stayed
+  average normalized similarity improved from `36.91%` to `38.24%`; median
+  normalized similarity improved from `38.32%` to `42.78%`; aggregate weighted
+  normalized similarity improved from `7.18%` to `7.49%`; shared success stayed
   `20/20`. `goto_total=34`, `top_level_label_total=24`,
   `blockgraph_region_complete_count=2`, `alias_unsafe=13511`, and
   `missing_merge=4270` stayed unchanged.
@@ -206,13 +222,18 @@
   `fibonacci @ 0x140001470` changed from `ulonglong fibonacci()` with `var_8`
   uses to `ulonglong fibonacci(uint param_1)` with `var_8` count `0`, and row
   similarity improved from `3.11%` to `3.16%` in the final cached Ghidra
-  comparison run.
+  comparison run. `add @ 0x140001450` no longer returns the `ret` stack-load
+  artifact (`return *var_20`) and now renders the recovered LEA dataflow as
+  `return (ulonglong)(uint)(param_1 + param_2);`.
 - Gate note:
   row fidelity passed after narrowing callsite recovery and suppressing runtime
   helper entry params: `__tmainCRTStartup @ 0x140001010` stayed `2.57%`,
   `fibonacci @ 0x140001470` improved `3.11% -> 3.16%`,
   `fill_matrix @ 0x140001870` improved `5.80% -> 5.87%`, and
   `__do_global_ctors @ 0x140001940` stayed `10.69%`. The baseline gate still
-  failed because `generic_param_name_sum` increased from `0` to `14`, which is
+  failed because `generic_param_name_sum` increased from `0` to `14` and
+  `generic_local_name_sum` increased from `276` to `278`. The param increase is
   the expected surface cost of recovering ABI formals for user functions such as
-  `add`, `max`, `fibonacci`, `sum_array`, `fill_matrix`, and `swap`.
+  `add`, `max`, `fibonacci`, `sum_array`, `fill_matrix`, and `swap`; the local
+  increase remains a follow-up shape-cleanup item, so this run is reported as
+  quality-improved but not mechanically gate-clean.

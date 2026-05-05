@@ -180,6 +180,97 @@ fn preview_uses_entry_register_alias_for_non_abi_register() {
 }
 
 #[test]
+fn preview_inlines_lea_register_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = |offset, size| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001450,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntMult,
+                    address: 0x140001450,
+                    output: Some(tmp(0x1000, 8)),
+                    inputs: vec![runtime_reg(0x10, 8), cst(1, 8)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140001450,
+                    output: Some(tmp(0x1008, 8)),
+                    inputs: vec![runtime_reg(0x08, 8), tmp(0x1000, 8)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::SubPiece,
+                    address: 0x140001450,
+                    output: Some(runtime_reg(0x00, 4)),
+                    inputs: vec![tmp(0x1008, 8), cst(0, 4)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x140001450,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x00, 4)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140001453,
+                    output: Some(runtime_reg(0x288, 8)),
+                    inputs: vec![cst(3, 8), runtime_reg(0x20, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140001453,
+                    output: Some(runtime_reg(0x20, 8)),
+                    inputs: vec![runtime_reg(0x20, 8), cst(8, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001453,
+                    output: None,
+                    inputs: vec![cst(3, 8), runtime_reg(0x288, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "lea_add", 0x140001450, &options)
+        .expect("preview render");
+    assert!(code.contains("lea_add(ulonglong param_1, ulonglong param_2)"), "{code}");
+    assert!(code.contains("param_1 + param_2"), "{code}");
+    assert!(!code.contains("*var_"), "{code}");
+}
+
+#[test]
 fn preview_suppresses_entrypoint_register_alias_params() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;

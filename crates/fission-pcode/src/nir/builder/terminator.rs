@@ -24,6 +24,50 @@ fn merge_inferred_branchind_targets(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn lower_return_terminator(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if self.options.is_64bit
+            && let Some(ret_op) = block
+                .ops
+                .iter()
+                .take(term_idx)
+                .skip(
+                    block
+                        .ops
+                        .iter()
+                        .take(term_idx)
+                        .rposition(|op| {
+                            matches!(
+                                op.opcode,
+                                PcodeOpcode::Call
+                                    | PcodeOpcode::CallInd
+                                    | PcodeOpcode::CallOther
+                                    | PcodeOpcode::Store
+                            )
+                        })
+                        .map_or(0, |idx| idx + 1),
+                )
+                .rev()
+                .find(|op| {
+                    op.output
+                        .as_ref()
+                        .is_some_and(|output| is_primary_return_register(output))
+                })
+            && let Some(ret_vn) = ret_op.output.as_ref()
+        {
+            return self.lower_wrapped_varnode(ret_vn, &mut HashSet::new()).map(Some);
+        }
+
+        let op = &block.ops[term_idx];
+        op.inputs
+            .last()
+            .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
+            .transpose()
+    }
+
     pub(in crate::nir) fn lower_block_terminator(
         &mut self,
         idx: usize,
@@ -44,14 +88,9 @@ impl<'a> PreviewBuilder<'a> {
                 |this| {
                     let mut visiting = HashSet::new();
                     match op.opcode {
-                        PcodeOpcode::Return => {
-                            let expr = op
-                                .inputs
-                                .last()
-                                .map(|input| this.lower_wrapped_varnode(input, &mut HashSet::new()))
-                                .transpose()?;
-                            Ok(LoweredTerminator::Return(expr))
-                        }
+                        PcodeOpcode::Return => Ok(LoweredTerminator::Return(
+                            this.lower_return_terminator(block, term_idx)?,
+                        )),
                         PcodeOpcode::Branch if op.inputs.len() == 1 => {
                             let target_idx = op.inputs.first().and_then(|input| {
                                 this.resolve_branch_target_index_with_recovery(idx, op, input)

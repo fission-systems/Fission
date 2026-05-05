@@ -11,6 +11,14 @@
 - No baseline regression detected.
 {% endfor %}
 
+## Waived Regressions
+
+{% for item in payload.get("waived_regressions", []) %}
+- {{ item }}
+{% else %}
+- None.
+{% endfor %}
+
 ## Row Fidelity Gate
 
 {% set row_gate = payload.get("row_fidelity_gate", {}) or {} %}
