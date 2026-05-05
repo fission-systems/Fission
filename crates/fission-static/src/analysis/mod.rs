@@ -1,6 +1,7 @@
-//! Analysis Module - Binary analysis engines
+//! Binary-level static analysis services (xrefs, call graphs, function discovery, patches, strings).
 //!
-//! Contains decompilation, disassembly, binary loading, patching, detection, CFG analysis, and xrefs.
+//! Decompilation semantics and orchestration live in `fission-pcode` / `fission-decompiler`; this
+//! crate supplies facts under `decomp` and analyzer utilities loaded binaries can use without owning IR policy.
 
 pub mod callgraph;
 pub mod decomp;

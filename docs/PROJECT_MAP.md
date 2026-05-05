@@ -18,7 +18,7 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-static`](../crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](../crates/fission-dynamic) | Dynamic analysis support |
 | [`crates/fission-ttd`](../crates/fission-ttd) | Time-travel / trace-adjacent support |
-| [`crates/fission-plugin`](../crates/fission-plugin) | Plugin surface |
+| [`crates/fission-plugin`](../crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](../crates/fission-cli) | CLI product (`fission_cli`) |
 | [`crates/fission-decompiler`](../crates/fission-decompiler) | Decompilation orchestration, Rust-Sleigh bridge, routing/workers |
 | [`crates/fission-tauri/src-tauri`](../crates/fission-tauri/src-tauri) | Tauri backend crate (workspace member) |

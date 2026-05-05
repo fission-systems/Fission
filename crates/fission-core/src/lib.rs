@@ -6,8 +6,6 @@ pub mod architecture;
 pub mod common;
 pub mod constants;
 pub mod core;
-pub mod plugin;
-
 pub use crate::core::config;
 pub use crate::core::config_store;
 // Re-export core::constants as core_constants to avoid name collision

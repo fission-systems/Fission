@@ -1,8 +1,8 @@
 //! Plugin API - Interface exposed to plugins for interacting with Fission.
 
+pub use crate::contracts::traits::PluginAPI;
+pub use crate::contracts::types::{PluginInfo, PluginType};
 pub use fission_core::common::types::BinaryInfo;
-pub use fission_core::plugin::traits::PluginAPI;
-pub use fission_core::plugin::types::{PluginInfo, PluginType};
 
 use fission_loader::loader::LoadedBinary;
 

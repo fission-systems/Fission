@@ -1,6 +1,6 @@
-use crate::common::types::{BinaryInfo, FunctionInfo};
-use crate::core::constants::FISSION_VERSION;
 use anyhow::Result;
+use fission_core::common::types::{BinaryInfo, FunctionInfo};
+use fission_core::FISSION_VERSION;
 use std::any::Any;
 use std::sync::Arc;
 

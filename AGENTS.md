@@ -41,7 +41,6 @@ Fission/
 - `crates/fission-pcode/src/nir/structuring/AGENTS.md`
 - `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
-- `crates/fission-static/src/analysis/decomp/postprocess/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 
@@ -57,8 +56,8 @@ Read the nearest child file before editing those areas.
 | Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
-| Static orchestration / postprocess | `crates/fission-static/src/analysis/` | Routing and downstream passes |
-| Legacy compatibility boundary | `crates/fission-static/src/analysis/decomp/` | Keep compatibility-only logic separate from canonical Rust structuring |
+| Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
+| Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
 | Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
 
 ## Core Rules

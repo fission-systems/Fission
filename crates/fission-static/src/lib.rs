@@ -1,4 +1,4 @@
-//! Fission static analysis and decompilation engine.
+//! Fission static analysis services and decompilation-facing facts (see `analysis::decomp`).
 
 #![allow(clippy::all)]
 

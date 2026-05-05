@@ -1,6 +1,6 @@
 //! Plugin Types
 
-use crate::core::constants::FISSION_VERSION;
+use fission_core::FISSION_VERSION;
 
 /// Plugin metadata
 #[derive(Debug, Clone)]

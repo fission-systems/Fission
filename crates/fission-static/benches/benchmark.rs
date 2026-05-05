@@ -6,7 +6,9 @@
 //! assume the repo `benchmark/` tree.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use fission_pcode::{cfg::CfgAnalysis, PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode::{
+    PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode, cfg::CfgAnalysis,
+};
 use fission_static::analysis::optimizer::OptimizerConfig;
 use fission_static::analysis::optimizer::integration::optimize_c_code;
 use std::fs;
@@ -80,11 +82,7 @@ fn build_complex_cfg(depth: usize, branches: usize) -> PcodeFunction {
             blocks.push(PcodeBasicBlock {
                 index: block_id,
                 start_address: addr,
-                successors: if is_last {
-                    vec![]
-                } else {
-                    vec![block_id + 1]
-                },
+                successors: if is_last { vec![] } else { vec![block_id + 1] },
                 ops,
             });
             block_id += 1;

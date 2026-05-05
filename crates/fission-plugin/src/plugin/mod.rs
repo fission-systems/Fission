@@ -4,7 +4,7 @@ pub mod api;
 pub mod hooks;
 pub mod manager;
 
-pub use fission_core::plugin::traits::{
+pub use crate::contracts::traits::{
     self, FissionPlugin, PluginAPI as CorePluginAPI, PluginContext,
 };
 
