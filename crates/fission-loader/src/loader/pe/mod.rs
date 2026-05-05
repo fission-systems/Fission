@@ -263,14 +263,8 @@ impl PeLoader {
                 if let Ok(pdata_functions) =
                     loader.parse_pdata(exception_dir_rva.0, exception_dir_rva.1, image_base)
                 {
-                    // Merge with existing functions, avoiding duplicates
                     for pdata_func in pdata_functions {
-                        if !functions_info
-                            .iter()
-                            .any(|f| f.address == pdata_func.address)
-                        {
-                            functions_info.push(pdata_func);
-                        }
+                        merge_pdata_function(&mut functions_info, pdata_func);
                     }
                 }
             }
@@ -298,6 +292,29 @@ impl PeLoader {
             .add_global_symbols(global_symbols)
             .build()
     }
+}
+
+fn merge_pdata_function(
+    functions: &mut Vec<crate::loader::types::FunctionInfo>,
+    pdata_func: crate::loader::types::FunctionInfo,
+) {
+    if let Some(existing) = functions
+        .iter_mut()
+        .find(|func| func.address == pdata_func.address)
+    {
+        if existing.size == 0 {
+            existing.size = pdata_func.size;
+        }
+        if existing.kind.is_none() {
+            existing.kind = pdata_func.kind;
+        }
+        if existing.source_section.is_none() {
+            existing.source_section = pdata_func.source_section;
+        }
+        return;
+    }
+
+    functions.push(pdata_func);
 }
 
 pub fn detect_pe_is_64bit(bytes: &[u8]) -> bool {
@@ -1085,6 +1102,44 @@ mod tests {
             loader.exact_relative_jump_export_target(0x100, image_base),
             None
         );
+    }
+
+    #[test]
+    fn pe_pdata_merge_preserves_coff_name_and_adds_extent() {
+        let mut functions = vec![crate::loader::types::FunctionInfo {
+            name: "fibonacci".to_string(),
+            address: 0x140001470,
+            size: 0,
+            is_export: false,
+            is_import: false,
+            origin: Some("pe-coff-symbol-table".to_string()),
+            kind: Some("code".to_string()),
+            source_section: Some(".text".to_string()),
+            external_library: None,
+            is_thunk_like: false,
+            thunk_target: None,
+        }];
+        let pdata_func = crate::loader::types::FunctionInfo {
+            name: "FUN_0x140001470".to_string(),
+            address: 0x140001470,
+            size: 0x3b0,
+            is_export: false,
+            is_import: false,
+            origin: Some("pe-pdata".to_string()),
+            kind: Some("code".to_string()),
+            source_section: Some(".pdata".to_string()),
+            external_library: None,
+            is_thunk_like: false,
+            thunk_target: None,
+        };
+
+        merge_pdata_function(&mut functions, pdata_func);
+
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name, "fibonacci");
+        assert_eq!(functions[0].size, 0x3b0);
+        assert_eq!(functions[0].origin.as_deref(), Some("pe-coff-symbol-table"));
+        assert_eq!(functions[0].source_section.as_deref(), Some(".text"));
     }
 
     #[test]
