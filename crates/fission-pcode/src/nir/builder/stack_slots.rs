@@ -9,6 +9,14 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit {
             return None;
         }
+        if self.suppress_entry_register_params {
+            if vn.space_id != REGISTER_SPACE_ID {
+                return None;
+            }
+            let (name, _) =
+                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
+            return Some(name.to_string());
+        }
         let abi = self.abi_state();
         if is_register_varnode(vn)
             && let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied()

@@ -55,6 +55,8 @@ pub struct FunctionProvenanceIndex {
 fn is_compiler_runtime_helper_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n.contains("register_frame_ctor")
+        || n.contains("crtstartup")
+        || n.contains("__dyn_tls_")
         || n.contains("__security_check_cookie")
         || n.contains("__chkstk")
         || n.contains("__cpu_features_init")
@@ -224,6 +226,70 @@ mod tests {
             })
             .add_function(FunctionInfo {
                 name: "__security_check_cookie".into(),
+                address: 0x140001020,
+                size: 32,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            })
+            .build()
+            .expect("build");
+        let idx = build_function_provenance_index(&bin, None);
+        let r = idx.records.get(&0x140001020).unwrap();
+        assert_eq!(r.kind, FunctionProvenanceKind::CompilerRuntimeHelper);
+        assert!(r.exclude_from_default_batch_decompile());
+    }
+
+    #[test]
+    fn crt_startup_is_compiler_runtime() {
+        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
+            .format("PE64")
+            .entry_point(0x140001000)
+            .image_base(0x140000000)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x140001020,
+                virtual_size: 64,
+                file_offset: 0,
+                file_size: 64,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_function(FunctionInfo {
+                name: "__tmainCRTStartup".into(),
+                address: 0x140001020,
+                size: 32,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            })
+            .build()
+            .expect("build");
+        let idx = build_function_provenance_index(&bin, None);
+        let r = idx.records.get(&0x140001020).unwrap();
+        assert_eq!(r.kind, FunctionProvenanceKind::CompilerRuntimeHelper);
+        assert!(r.exclude_from_default_batch_decompile());
+    }
+
+    #[test]
+    fn dyn_tls_helper_is_compiler_runtime() {
+        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
+            .format("PE64")
+            .entry_point(0x140001000)
+            .image_base(0x140000000)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x140001020,
+                virtual_size: 64,
+                file_offset: 0,
+                file_size: 64,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_function(FunctionInfo {
+                name: "__dyn_tls_init".into(),
                 address: 0x140001020,
                 size: 32,
                 is_export: false,

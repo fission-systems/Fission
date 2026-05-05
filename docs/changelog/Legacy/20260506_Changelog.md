@@ -154,25 +154,37 @@
 - Fixed `register_param()` ordering so entry aliases such as `edi <- ecx` are
   checked before returning a non-ABI hardware register name. This allows saved
   entry argument copies to surface as `param_k`.
+- Kept callsite argument recovery on the legacy Ghidra register space only.
+  Entry formal recovery can consume Rust-Sleigh register space `4`, but
+  unknown indirect calls should not inherit weak runtime-space register
+  carriers as synthetic call arguments.
+- Suppressed entry-register formal parameter surfacing for compiler/runtime
+  bootstrap helpers (`CRTStartup` and dynamic TLS helpers) while preserving it
+  for normal user functions. The same helper family is also classified as
+  `CompilerRuntimeHelper` in the function-provenance index.
 - Tightened guarded-tail pure-helper suffix handling so known pure helper calls
   still go through the dedicated ownership/escape proof instead of being
   accepted by the generic pure-statement fast path.
 
 ## Validation
 
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode preview_uses_entry_register_alias_for_non_abi_register -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo test -p fission-pcode bootstrap_x86::preview_ -- --test-threads=1`
   passed.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode suffix_accepts_known_pure_helper -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo test -p fission-static function_provenance -- --test-threads=1`
   passed.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode suffix_rejects_known_pure_helper -- --test-threads=1`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo test -p fission-pcode suffix_accepts_known_pure_helper -- --test-threads=1`
   passed.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode -- --test-threads=1`
-  passed: `721 passed`.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo check -p fission-pcode`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo test -p fission-pcode suffix_rejects_known_pure_helper -- --test-threads=1`
   passed.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo check -p fission-decompiler`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo test -p fission-pcode -- --test-threads=1`
+  passed: `722 passed`.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo check -p fission-pcode`
   passed.
-- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo build -p fission-cli --release`
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo check -p fission-decompiler`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo check -p fission-static`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle5-target cargo build -p fission-cli --release`
   passed.
 
 ## Benchmark
@@ -180,23 +192,27 @@
 - Before:
   `benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after`
 - After:
-  `benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-after`
+  `benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-callarg-narrow-after`
 - Command:
-  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle4-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle5-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-callarg-narrow-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
 - Result:
-  average normalized similarity improved from `36.91%` to `37.54%`; shared
-  success stayed `100.0%`; `goto_total=34`, `top_level_label_total=24`,
+  average normalized similarity improved from `36.91%` to `37.51%`; median
+  normalized similarity improved from `38.32%` to `40.59%`; aggregate weighted
+  normalized similarity improved from `7.18%` to `7.38%`; shared success stayed
+  `20/20`. `goto_total=34`, `top_level_label_total=24`,
   `blockgraph_region_complete_count=2`, `alias_unsafe=13511`, and
   `missing_merge=4270` stayed unchanged.
 - Row note:
   `fibonacci @ 0x140001470` changed from `ulonglong fibonacci()` with `var_8`
   uses to `ulonglong fibonacci(uint param_1)` with `var_8` count `0`, and row
-  similarity improved from `3.11%` to `3.15%` in the final cached Ghidra
+  similarity improved from `3.11%` to `3.16%` in the final cached Ghidra
   comparison run.
 - Gate note:
-  the benchmark regression gate still failed because `generic_param_name_sum`
-  increased from `0` to `18` and row-fidelity marked small similarity drops on
-  `__tmainCRTStartup @ 0x140001010` (`2.57% -> 2.31%`) and
-  `__do_global_ctors @ 0x140001940` (`10.69% -> 10.45%`). This cycle therefore
-  improves the target parameter surface and average similarity, but it is not a
-  clean gate pass.
+  row fidelity passed after narrowing callsite recovery and suppressing runtime
+  helper entry params: `__tmainCRTStartup @ 0x140001010` stayed `2.57%`,
+  `fibonacci @ 0x140001470` improved `3.11% -> 3.16%`,
+  `fill_matrix @ 0x140001870` improved `5.80% -> 5.87%`, and
+  `__do_global_ctors @ 0x140001940` stayed `10.69%`. The baseline gate still
+  failed because `generic_param_name_sum` increased from `0` to `14`, which is
+  the expected surface cost of recovering ABI formals for user functions such as
+  `add`, `max`, `fibonacci`, `sum_array`, `fill_matrix`, and `swap`.

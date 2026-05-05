@@ -1,4 +1,5 @@
 use super::*;
+use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
 #[test]
 fn preview_supports_pe_x86_single_block() {
@@ -176,6 +177,73 @@ fn preview_uses_entry_register_alias_for_non_abi_register() {
         !code.contains("return rdi;") && !code.contains("return edi;"),
         "{code}"
     );
+}
+
+#[test]
+fn preview_suppresses_entrypoint_register_alias_params() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001000,
+                    output: Some(runtime_reg(0x38, 4)),
+                    inputs: vec![runtime_reg(0x08, 4)],
+                    asm_mnemonic: Some("MOV EDI,ECX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001002,
+                    output: None,
+                    inputs: vec![cst(0, 8), runtime_reg(0x38, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let binary = LoadedBinaryBuilder::new("entry.exe".to_string(), DataBuffer::Heap(vec![0; 64]))
+        .format("PE64")
+        .entry_point(0x140001000)
+        .image_base(0x140000000)
+        .is_64bit(true)
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x140001000,
+            virtual_size: 0x1000,
+            file_offset: 0,
+            file_size: 64,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("test binary builds");
+
+    let code = render_mlil_preview_with_binary_and_context(
+        &func,
+        "entrypoint",
+        0x140001000,
+        &options,
+        Some(&binary),
+        None,
+    )
+    .expect("preview render");
+    assert!(code.contains("entrypoint()"), "{code}");
+    assert!(!code.contains("param_1"), "{code}");
 }
 
 #[test]

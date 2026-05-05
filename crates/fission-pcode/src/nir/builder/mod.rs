@@ -84,18 +84,30 @@ impl<'a> PreviewBuilder<'a> {
         self.pcode.blocks.len() + self.virtual_block_map.len()
     }
 
+    fn should_suppress_entry_register_params(&self, name: &str, address: u64) -> bool {
+        if is_compiler_runtime_param_suppressed_name(name) {
+            return true;
+        }
+        self.binary
+            .is_some_and(|binary| binary.entry_point == address)
+    }
+
     pub(super) fn build_hir(
         &mut self,
         name: &str,
-        _address: u64,
+        address: u64,
     ) -> Result<HirFunction, MlilPreviewError> {
         let _build = trace_span!(
             "preview_build_hir",
             fn_name = name,
-            address = _address,
+            address = address,
             blocks = self.pcode.blocks.len()
         )
         .entered();
+        if self.should_suppress_entry_register_params(name, address) {
+            self.register_param_aliases.clear();
+            self.suppress_entry_register_params = true;
+        }
         if self.pcode.blocks.is_empty() {
             return Err(MlilPreviewError::UnsupportedPattern("empty pcode"));
         }
@@ -412,4 +424,9 @@ impl<'a> PreviewBuilder<'a> {
         self.temps.insert(name, binding.clone());
         binding
     }
+}
+
+fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("crtstartup") || lower.contains("__dyn_tls_")
 }

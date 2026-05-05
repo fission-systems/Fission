@@ -122,6 +122,7 @@ impl<'a> PreviewBuilder<'a> {
             selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
             register_param_aliases,
+            suppress_entry_register_params: false,
             stack_frame_size,
             linear_exit_cache: BuilderCacheMap::default(),
             linear_body_cache: BuilderCacheMap::default(),

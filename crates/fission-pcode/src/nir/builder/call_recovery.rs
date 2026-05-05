@@ -25,6 +25,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn param_index_for_varnode(&self, vn: &Varnode) -> Option<usize> {
+        if vn.space_id != REGISTER_SPACE_ID {
+            return None;
+        }
         self.abi_state().param_slot_for_varnode(vn)
     }
 
