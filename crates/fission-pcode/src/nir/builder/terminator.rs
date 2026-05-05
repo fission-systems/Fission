@@ -24,41 +24,47 @@ fn merge_inferred_branchind_targets(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn last_primary_return_def_after_barrier(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Option<(usize, Varnode)> {
+        let start = block
+            .ops
+            .iter()
+            .take(term_idx)
+            .rposition(|op| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther | PcodeOpcode::Store
+                )
+            })
+            .map_or(0, |idx| idx + 1);
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .skip(start)
+            .rev()
+            .find_map(|(op_idx, op)| {
+                op.output
+                    .as_ref()
+                    .filter(|output| is_primary_return_register(output))
+                    .map(|output| (op_idx, output.clone()))
+            })
+    }
+
     fn lower_return_terminator(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
         if self.options.is_64bit
-            && let Some(ret_op) = block
-                .ops
-                .iter()
-                .take(term_idx)
-                .skip(
-                    block
-                        .ops
-                        .iter()
-                        .take(term_idx)
-                        .rposition(|op| {
-                            matches!(
-                                op.opcode,
-                                PcodeOpcode::Call
-                                    | PcodeOpcode::CallInd
-                                    | PcodeOpcode::CallOther
-                                    | PcodeOpcode::Store
-                            )
-                        })
-                        .map_or(0, |idx| idx + 1),
-                )
-                .rev()
-                .find(|op| {
-                    op.output
-                        .as_ref()
-                        .is_some_and(|output| is_primary_return_register(output))
-                })
-            && let Some(ret_vn) = ret_op.output.as_ref()
+            && let Some((_ret_op_idx, ret_vn)) =
+                self.last_primary_return_def_after_barrier(block, term_idx)
         {
-            return self.lower_wrapped_varnode(ret_vn, &mut HashSet::new()).map(Some);
+            return self.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()).map(Some);
         }
 
         let op = &block.ops[term_idx];
@@ -66,6 +72,93 @@ impl<'a> PreviewBuilder<'a> {
             .last()
             .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
             .transpose()
+    }
+
+    pub(in crate::nir) fn try_lower_intra_instruction_conditional_return(
+        &mut self,
+    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+        if !self.options.is_64bit || self.pcode.blocks.len() != 3 {
+            return Ok(None);
+        }
+        let branch_block_idx = 0usize;
+        let branch_block = &self.pcode.blocks[branch_block_idx];
+        let Some(branch_term_idx) = self.block_terminator_index(branch_block) else {
+            return Ok(None);
+        };
+        let branch_op = &branch_block.ops[branch_term_idx];
+        if branch_op.opcode != PcodeOpcode::CBranch || branch_op.inputs.len() < 2 {
+            return Ok(None);
+        }
+        let successors = self.successors.get(branch_block_idx).cloned().unwrap_or_default();
+        if successors.len() != 2 {
+            return Ok(None);
+        }
+        let Some(target_addr) = branch_target_address(&branch_op.inputs[0]) else {
+            return Ok(None);
+        };
+        let Some(target_idx) = self.address_to_index.get(&target_addr).copied() else {
+            return Ok(None);
+        };
+        let Some(copy_idx) = successors.iter().copied().find(|idx| *idx != target_idx) else {
+            return Ok(None);
+        };
+        if target_idx >= self.pcode.blocks.len() || copy_idx >= self.pcode.blocks.len() {
+            return Ok(None);
+        }
+        let copy_block = &self.pcode.blocks[copy_idx];
+        let return_block = &self.pcode.blocks[target_idx];
+        if self.successors.get(copy_idx).map(Vec::as_slice) != Some(&[target_idx][..]) {
+            return Ok(None);
+        }
+        if copy_block.ops.len() != 1 || copy_block.ops[0].opcode != PcodeOpcode::Copy {
+            return Ok(None);
+        }
+        let copy_output = copy_block.ops[0].output.as_ref();
+        if !copy_output.is_some_and(is_primary_return_register) {
+            return Ok(None);
+        }
+        let Some(return_term_idx) = self.block_terminator_index(return_block) else {
+            return Ok(None);
+        };
+        if return_block.ops[return_term_idx].opcode != PcodeOpcode::Return {
+            return Ok(None);
+        }
+        let Some((default_op_idx, default_vn)) =
+            self.last_primary_return_def_after_barrier(branch_block, branch_term_idx)
+        else {
+            return Ok(None);
+        };
+
+        let cond = self.with_lowering_site(
+            LoweringSite {
+                block_idx: branch_block_idx,
+                op_idx: branch_term_idx,
+            },
+            |this| this.lower_wrapped_varnode(&branch_op.inputs[1], &mut HashSet::new()),
+        )?;
+        let default_expr = self.with_lowering_site(
+            LoweringSite {
+                block_idx: branch_block_idx,
+                op_idx: default_op_idx,
+            },
+            |this| this.lower_wrapped_varnode(&default_vn, &mut HashSet::new()),
+        )?;
+        let alt_expr = self.with_lowering_site(
+            LoweringSite {
+                block_idx: copy_idx,
+                op_idx: 0,
+            },
+            |this| this.lower_wrapped_varnode(&copy_block.ops[0].inputs[0], &mut HashSet::new()),
+        )?;
+
+        Ok(Some(vec![
+            HirStmt::If {
+                cond,
+                then_body: vec![HirStmt::Return(Some(default_expr))],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(alt_expr)),
+        ]))
     }
 
     pub(in crate::nir) fn lower_block_terminator(

@@ -208,6 +208,10 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        if let Some(body) = self.try_lower_intra_instruction_conditional_return()? {
+            return Ok(body);
+        }
+
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
         let (

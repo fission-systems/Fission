@@ -10,13 +10,32 @@ fn is_cfg_split_opcode(opcode: PcodeOpcode) -> bool {
 
 fn direct_control_target(op: &PcodeOp) -> Option<u64> {
     match op.opcode {
+        PcodeOpcode::Branch | PcodeOpcode::CBranch => op.inputs.first().and_then(|vn| {
+            if vn.is_constant {
+                if vn.offset != 0 {
+                    Some(vn.offset)
+                } else if vn.constant_val >= 0 {
+                    Some(vn.constant_val as u64)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    }
+}
+
+fn direct_control_target_with_symbolic_internal_label(op: &PcodeOp) -> Option<u64> {
+    direct_control_target(op).or_else(|| match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => op
             .inputs
             .first()
-            .filter(|vn| vn.is_constant)
-            .map(|vn| vn.constant_val as u64),
+            .filter(|vn| !vn.is_constant && vn.offset != 0)
+            .map(|vn| vn.offset),
         _ => None,
-    }
+    })
 }
 
 fn cfg_build_diag_enabled() -> bool {
@@ -74,12 +93,19 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
     let mut block_starts: BTreeSet<usize> = BTreeSet::new();
     block_starts.insert(0);
 
+    let allow_symbolic_internal_labels = ops.len() <= 40;
+
     for (idx, op) in ops.iter().enumerate() {
         if is_cfg_split_opcode(op.opcode) {
             if idx + 1 < ops.len() {
                 block_starts.insert(idx + 1);
             }
-            if let Some(target) = direct_control_target(op) {
+            let target = if allow_symbolic_internal_labels {
+                direct_control_target_with_symbolic_internal_label(op)
+            } else {
+                direct_control_target(op)
+            };
+            if let Some(target) = target {
                 if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                     block_starts.insert(target_idx);
                 }
@@ -111,7 +137,12 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
             match last.opcode {
                 PcodeOpcode::Branch => {
                     branch_input = last.inputs.first().map(format_varnode_diag);
-                    if let Some(target) = direct_control_target(last) {
+                    let target = if allow_symbolic_internal_labels {
+                        direct_control_target_with_symbolic_internal_label(last)
+                    } else {
+                        direct_control_target(last)
+                    };
+                    if let Some(target) = target {
                         branch_target = Some(target);
                         if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                             push_successor(&mut successors, op_to_block[target_idx]);
@@ -120,7 +151,12 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
                 }
                 PcodeOpcode::CBranch => {
                     branch_input = last.inputs.first().map(format_varnode_diag);
-                    if let Some(target) = direct_control_target(last) {
+                    let target = if allow_symbolic_internal_labels {
+                        direct_control_target_with_symbolic_internal_label(last)
+                    } else {
+                        direct_control_target(last)
+                    };
+                    if let Some(target) = target {
                         branch_target = Some(target);
                         if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                             push_successor(&mut successors, op_to_block[target_idx]);

@@ -271,6 +271,105 @@ fn preview_inlines_lea_register_return() {
 }
 
 #[test]
+fn preview_structures_intra_instruction_conditional_return_copy() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = |offset, size| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140001460,
+                successors: vec![2, 1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0x140001460,
+                        output: Some(tmp(0x2000, 1)),
+                        inputs: vec![runtime_reg(0x08, 4), runtime_reg(0x10, 4)],
+                        asm_mnemonic: Some("CMP".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140001462,
+                        output: Some(runtime_reg(0x00, 4)),
+                        inputs: vec![runtime_reg(0x10, 4)],
+                        asm_mnemonic: Some("CMOV".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x140001464,
+                        output: None,
+                        inputs: vec![tmp(0x140001467, 8), tmp(0x2000, 1)],
+                        asm_mnemonic: Some("CBRANCH".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140001464,
+                successors: vec![2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001464,
+                    output: Some(runtime_reg(0x00, 4)),
+                    inputs: vec![runtime_reg(0x08, 4)],
+                    asm_mnemonic: Some("CMOV".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x140001467,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x140001467,
+                        output: Some(runtime_reg(0x288, 8)),
+                        inputs: vec![cst(3, 8), runtime_reg(0x20, 8)],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140001467,
+                        output: None,
+                        inputs: vec![cst(3, 8), runtime_reg(0x288, 8)],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "conditional_max", 0x140001460, &options)
+        .expect("preview render");
+    assert!(code.contains("if (param_1 < param_2)"), "{code}");
+    assert!(code.contains("return param_2;"), "{code}");
+    assert!(code.contains("return param_1;"), "{code}");
+    assert!(!code.contains("uVar"), "{code}");
+    assert!(!code.contains("*var_"), "{code}");
+}
+
+#[test]
 fn preview_suppresses_entrypoint_register_alias_params() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;

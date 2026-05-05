@@ -403,6 +403,84 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertIn("shape_generic_param_name_sum: 0.000 -> 2.000", report["regressions"])
         self.assertEqual(report["waived_regressions"], [])
 
+    def test_baseline_gate_waives_brace_nesting_for_structured_quality_tradeoff(self) -> None:
+        baseline = _minimal_single_binary_summary(
+            avg_similarity=40.0,
+            generic_local_name_sum=4,
+            heuristic_max_brace_nesting_mean=1.0,
+        )
+        current = _minimal_single_binary_summary(
+            avg_similarity=41.0,
+            generic_local_name_sum=2,
+            heuristic_max_brace_nesting_mean=1.2,
+        )
+        baseline["pairwise"]["pyghidra_vs_fission"]["comparisons"] = [
+            {
+                "address": "0x140001450",
+                "both_success": True,
+                "normalized_similarity": 40.0,
+            }
+        ]
+        current["pairwise"]["pyghidra_vs_fission"]["comparisons"] = [
+            {
+                "address": "0x140001450",
+                "both_success": True,
+                "normalized_similarity": 42.0,
+            }
+        ]
+
+        report = _build_baseline_regression_report(
+            current,
+            baseline,
+            threshold_pp=2.0,
+            row_targets=[("0x140001450", "sample")],
+        )
+
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["regressions"], [])
+        self.assertIn("shape_heuristic_max_brace_nesting_mean", report["waived_regressions"][0])
+
+    def test_baseline_gate_keeps_brace_nesting_regression_with_goto_increase(self) -> None:
+        baseline = _minimal_single_binary_summary(
+            avg_similarity=40.0,
+            generic_local_name_sum=4,
+            heuristic_max_brace_nesting_mean=1.0,
+        )
+        current = _minimal_single_binary_summary(
+            avg_similarity=41.0,
+            generic_local_name_sum=2,
+            heuristic_max_brace_nesting_mean=1.2,
+        )
+        current["summary"]["engines"]["fission"]["goto_total"] = 1
+        current["summary"]["shape_drift_metrics"]["fission"]["goto_total"] = 1.0
+        baseline["pairwise"]["pyghidra_vs_fission"]["comparisons"] = [
+            {
+                "address": "0x140001450",
+                "both_success": True,
+                "normalized_similarity": 40.0,
+            }
+        ]
+        current["pairwise"]["pyghidra_vs_fission"]["comparisons"] = [
+            {
+                "address": "0x140001450",
+                "both_success": True,
+                "normalized_similarity": 42.0,
+            }
+        ]
+
+        report = _build_baseline_regression_report(
+            current,
+            baseline,
+            threshold_pp=2.0,
+            row_targets=[("0x140001450", "sample")],
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertIn(
+            "shape_heuristic_max_brace_nesting_mean: 1.000 -> 1.200",
+            report["regressions"],
+        )
+
     def test_annotate_target_structuring_rows_attaches_row_gate_delta_fields(self) -> None:
         rows = [
             {

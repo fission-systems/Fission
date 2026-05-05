@@ -448,4 +448,39 @@ mod tests {
         assert_eq!(blocks[2].start_address, 0x110);
         assert_eq!(blocks[0].successors, vec![2, 1]);
     }
+
+    #[test]
+    fn cfg_blocks_split_nonconstant_direct_branch_target() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::Copy,
+                Some(var(0x10, 4)),
+                vec![Varnode::constant(1, 4)],
+            ),
+            op(
+                1,
+                0x104,
+                PcodeOpcode::CBranch,
+                None,
+                vec![var(0x110, 8), Varnode::constant(1, 1)],
+            ),
+            op(
+                2,
+                0x108,
+                PcodeOpcode::Copy,
+                Some(var(0x20, 4)),
+                vec![Varnode::constant(2, 4)],
+            ),
+            op(3, 0x110, PcodeOpcode::Return, None, vec![]),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].start_address, 0x100);
+        assert_eq!(blocks[1].start_address, 0x108);
+        assert_eq!(blocks[2].start_address, 0x110);
+        assert_eq!(blocks[0].successors, vec![2, 1]);
+    }
 }

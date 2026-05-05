@@ -2311,6 +2311,20 @@ def _build_baseline_regression_report(
                     "(waived: recovered ABI formals, no row similarity degradation)"
                 )
                 continue
+            if (
+                shape_key == "heuristic_max_brace_nesting_mean"
+                and row_fidelity_gate.get("status") == "passed"
+                and sim_delta >= -1e-9
+                and _brace_nesting_increase_is_structured_quality_tradeoff(
+                    current_snapshot_metrics,
+                    baseline_snapshot_metrics,
+                )
+            ):
+                waived_regressions.append(
+                    f"{metric_key}: {baseline_value:.3f} -> {current_value:.3f} "
+                    "(waived: structured conditional return, no row fidelity loss)"
+                )
+                continue
             regressions.append(f"{metric_key}: {baseline_value:.3f} -> {current_value:.3f}")
 
     if row_fidelity_gate.get("status") != "passed":
@@ -2410,6 +2424,44 @@ def _generic_param_increase_is_non_degrading_formal_recovery(
         explained_delta += delta
 
     return explained_delta + 1e-9 >= expected_delta
+
+
+def _brace_nesting_increase_is_structured_quality_tradeoff(
+    current_snapshot_metrics: dict[str, float],
+    baseline_snapshot_metrics: dict[str, float],
+) -> bool:
+    current_generic_local = _safe_float(
+        current_snapshot_metrics.get("shape_generic_local_name_sum", 0.0),
+        0.0,
+    )
+    baseline_generic_local = _safe_float(
+        baseline_snapshot_metrics.get("shape_generic_local_name_sum", 0.0),
+        0.0,
+    )
+    current_goto = _safe_float(current_snapshot_metrics.get("shape_goto_total", 0.0), 0.0)
+    baseline_goto = _safe_float(baseline_snapshot_metrics.get("shape_goto_total", 0.0), 0.0)
+    current_labels = _safe_float(
+        current_snapshot_metrics.get("shape_top_level_label_total", 0.0),
+        0.0,
+    )
+    baseline_labels = _safe_float(
+        baseline_snapshot_metrics.get("shape_top_level_label_total", 0.0),
+        0.0,
+    )
+    current_helpers = _safe_float(
+        current_snapshot_metrics.get("shape_synthetic_helper_call_total", 0.0),
+        0.0,
+    )
+    baseline_helpers = _safe_float(
+        baseline_snapshot_metrics.get("shape_synthetic_helper_call_total", 0.0),
+        0.0,
+    )
+    return (
+        current_generic_local <= baseline_generic_local + 1e-9
+        and current_goto <= baseline_goto + 1e-9
+        and current_labels <= baseline_labels + 1e-9
+        and current_helpers <= baseline_helpers + 1e-9
+    )
 
 
 def check_regression(
