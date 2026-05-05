@@ -20,6 +20,32 @@ pub const X86_SEG_BASE: u64 = 0xA86A_0000;
 pub const X86_EFLAGS_BASE: u64 = 0xA86F_0000;
 pub const X86_MXCSR_OFFSET: u64 = X86_EFLAGS_BASE + 0x100;
 
+/// Returns the canonical x86-64 GPR family index for any width alias.
+pub fn x86_gpr_family_index(name: &str) -> Option<usize> {
+    const GPR_ALIASES: [&[&str]; 16] = [
+        &["rax", "eax", "ax", "al"],
+        &["rcx", "ecx", "cx", "cl"],
+        &["rdx", "edx", "dx", "dl"],
+        &["rbx", "ebx", "bx", "bl"],
+        &["rsp", "esp", "sp", "spl"],
+        &["rbp", "ebp", "bp", "bpl"],
+        &["rsi", "esi", "si", "sil"],
+        &["rdi", "edi", "di", "dil"],
+        &["r8", "r8d", "r8w", "r8b"],
+        &["r9", "r9d", "r9w", "r9b"],
+        &["r10", "r10d", "r10w", "r10b"],
+        &["r11", "r11d", "r11w", "r11b"],
+        &["r12", "r12d", "r12w", "r12b"],
+        &["r13", "r13d", "r13w", "r13b"],
+        &["r14", "r14d", "r14w", "r14b"],
+        &["r15", "r15d", "r15w", "r15b"],
+    ];
+
+    GPR_ALIASES
+        .iter()
+        .position(|aliases| aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name)))
+}
+
 /// Returns a human-readable name for a UNIQUE-space x86 architectural register varnode.
 ///
 /// Returns `None` for any offset that does not fall on a valid stride boundary

@@ -3,6 +3,15 @@ use super::support::{
 };
 use super::{CallingConvention, NirBindingOrigin, REGISTER_SPACE_ID, UNIQUE_SPACE_ID, Varnode};
 
+fn x64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
+    let name_family = crate::arch::x86::x86_gpr_family_index(name)?;
+    abi.param_offsets().iter().position(|&off| {
+        x64_ghidra_reg_name(off)
+            .and_then(crate::arch::x86::x86_gpr_family_index)
+            .is_some_and(|family| family == name_family)
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CarrierResource {
     pub(crate) class: super::CarrierClass,
@@ -249,12 +258,7 @@ impl AbiProvider for WindowsX64AbiProvider {
     }
 
     fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        CallingConvention::WindowsX64
-            .param_offsets()
-            .iter()
-            .position(|&off| {
-                x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name))
-            })
+        x64_param_slot_for_name_family(name, CallingConvention::WindowsX64)
     }
 
     fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
@@ -306,9 +310,7 @@ impl AbiProvider for GenericAbiProvider {
     }
 
     fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        self.abi.param_offsets().iter().position(|&off| {
-            x64_ghidra_reg_name(off).is_some_and(|hw| hw.eq_ignore_ascii_case(name))
-        })
+        x64_param_slot_for_name_family(name, self.abi)
     }
 
     fn param_hw_name(&self, slot: usize) -> Option<&'static str> {

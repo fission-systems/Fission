@@ -96,3 +96,47 @@
   improved from `0` to `2`; `blockgraph_region_rejected_must_emit_label`
   improved from `20` to `16`. `alias_unsafe`, `missing_merge`,
   `materialization_stabilized`, generic local names, and gotos were unchanged.
+
+## ABI subregister parameter aliasing
+
+- Fixed ABI parameter-slot classification for x86-64 subregister names such as
+  `ecx`, `cx`, `cl`, `edi`, `r8d`, and `r9b`. These now map to the same
+  parameter slot as their 64-bit register family (`rcx`, `rdi`, `r8`, `r9`,
+  and so on) under the active calling convention.
+- Reused that ABI-family classification when removing redundant
+  `param_k = <incoming register>` copies, so entry-spill promotion no longer
+  leaves alias-width copies like `param_1 = ecx`.
+- This is an ABI-provider fix, not an ISA-specific printer patch. It preserves
+  the existing Windows x64 and System V AMD64 slot order while handling
+  width-specific register aliases produced by the lifter.
+
+## Validation
+
+- `CARGO_TARGET_DIR=/tmp/fission-cycle3-target cargo test -p fission-pcode entry_param_promotion -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle3-target cargo test -p fission-pcode calling_convention -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle3-target cargo check -p fission-pcode`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle3-target cargo build -p fission-cli --release`
+  passed.
+
+## Benchmark
+
+- Before:
+  `benchmark/artifacts/full_benchmark/windows-small-c-flag-helper-purity-after`
+- After:
+  `benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after`
+- Command:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle3-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-flag-helper-purity-after`
+- Result:
+  the regression gate passed, but sample quality metrics were unchanged:
+  `avg_normalized_similarity=36.910%`, aggregate normalized similarity
+  `7.180%`, `100.0%` shared success, `top_level_label_total=24`,
+  `goto_total=34`, BlockGraph complete regions `2`, and
+  `blockgraph_region_rejected_must_emit_label=16`.
+- Row note:
+  `fibonacci @ 0x140001470` still renders as `ulonglong fibonacci()` with
+  `var_8`-based parameter surface. The ABI alias fix is a prerequisite for
+  direct subregister entry spills, but this row's remaining parameter gap is
+  downstream stack/local surface recovery rather than direct `ecx` naming.

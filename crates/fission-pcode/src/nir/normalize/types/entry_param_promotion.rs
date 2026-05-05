@@ -280,8 +280,7 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvent
                 .map(|n| n.saturating_sub(1))
             {
                 if let Some(hw) = peel_var_name(rhs)
-                    && let Some(expected) = hw_name_for_slot(abi, slot)
-                    && hw.eq_ignore_ascii_case(expected)
+                    && param_slot_for_hw_register(hw, abi) == Some(slot)
                 {
                     return false;
                 }

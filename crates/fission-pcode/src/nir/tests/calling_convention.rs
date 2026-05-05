@@ -37,6 +37,16 @@ fn win64_r9_is_param_4() {
 }
 
 #[test]
+fn win64_subregister_aliases_map_to_param_slots() {
+    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0);
+    assert_eq!(abi.param_slot_for_name("ecx"), Some(0));
+    assert_eq!(abi.param_slot_for_name("cx"), Some(0));
+    assert_eq!(abi.param_slot_for_name("cl"), Some(0));
+    assert_eq!(abi.param_slot_for_name("r8d"), Some(2));
+    assert_eq!(abi.param_slot_for_name("r9b"), Some(3));
+}
+
+#[test]
 fn win64_rdi_is_not_a_param() {
     let (name, idx) = register_name_with_param(0x38, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "rdi");
@@ -92,6 +102,17 @@ fn sysv_r9_is_param_6() {
     let (name, idx) = register_name_with_param(0x88, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_6");
     assert_eq!(idx, Some(5));
+}
+
+#[test]
+fn sysv_subregister_aliases_map_to_param_slots() {
+    let abi = AbiState::new(CallingConvention::SystemVAmd64, true, 8, 0);
+    assert_eq!(abi.param_slot_for_name("edi"), Some(0));
+    assert_eq!(abi.param_slot_for_name("si"), Some(1));
+    assert_eq!(abi.param_slot_for_name("edx"), Some(2));
+    assert_eq!(abi.param_slot_for_name("ecx"), Some(3));
+    assert_eq!(abi.param_slot_for_name("r8w"), Some(4));
+    assert_eq!(abi.param_slot_for_name("r9d"), Some(5));
 }
 
 // ── Non-param registers must always use hardware names ─────────────────────────

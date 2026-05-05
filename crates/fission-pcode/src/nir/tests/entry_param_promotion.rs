@@ -49,6 +49,38 @@ fn entry_spill_sysv_rsi_becomes_param_2() {
 }
 
 #[test]
+fn entry_spill_win64_ecx_alias_becomes_param_1() {
+    let mut func = HirFunction {
+        name: "spill".into(),
+        params: vec![],
+        locals: vec![binding_temp("saved_n")],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("saved_n".into()),
+                rhs: HirExpr::Var("ecx".into()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("saved_n".into()))),
+        ],
+        calling_convention: CallingConvention::WindowsX64,
+        is_64bit: true,
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("param_1"),
+        "expected Win64 ecx alias spill to promote to param_1, got:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("ecx"),
+        "expected ecx alias to be replaced by param_1, got:\n{rendered}"
+    );
+}
+
+#[test]
 fn win64_variadic_shape_trims_unused_tail_params() {
     let int64 = NirType::Int {
         bits: 64,
