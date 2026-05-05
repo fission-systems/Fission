@@ -62,6 +62,14 @@ pub struct OneShotArgs {
     pub resume_from: Option<PathBuf>,
     pub quiet_batch_errors: bool,
     pub emit_function_facts_inventory: bool,
+    /// Canonical `xrefs` subcommand (merged loader + optional disassembly layer).
+    pub xrefs_cmd: bool,
+    /// Loader seeds only (`xrefs --no-disassembly`).
+    pub xref_no_disassembly: bool,
+    /// Optional function VA for JSON slice (`xrefs --function`).
+    pub xref_function: Option<u64>,
+    /// Embed xref summary into `info --json` (`info --xrefs`).
+    pub info_xrefs: bool,
     /// Embed stage metric/evidence bundle in JSON (`decomp`); requires `--json` or `--benchmark`.
     pub debug_decomp: bool,
     /// Write the same debug bundle to a JSON file (works without embedding).
@@ -111,6 +119,10 @@ impl Default for OneShotArgs {
             resume_from: None,
             quiet_batch_errors: false,
             emit_function_facts_inventory: false,
+            xrefs_cmd: false,
+            xref_no_disassembly: false,
+            xref_function: None,
+            info_xrefs: false,
             debug_decomp: false,
             debug_decomp_bundle: None,
         }
@@ -182,7 +194,7 @@ struct CommonBinaryOutputArgs {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -202,6 +214,8 @@ enum CliCommand {
     Decomp(DecompArgs),
     /// Extract binary strings
     Strings(StringsArgs),
+    /// Canonical cross-reference index (loader seeds + optional disassembly layer)
+    Xrefs(XrefsArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
@@ -211,7 +225,7 @@ enum CliCommand {
 #[derive(Args, Debug)]
 #[command(
     long_about = "Show binary metadata plus optional section/import/export inventories.\n\nUse this command for quick facts about the loaded binary without entering the decompilation path.",
-    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json\n  fission_cli info app.exe --detections --json\n  fission_cli info app.exe --identity --json"
+    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json\n  fission_cli info app.exe --detections --json\n  fission_cli info app.exe --identity --json\n  fission_cli info app.exe --xrefs --json"
 )]
 struct InfoArgs {
     /// Path to the binary file to analyze
@@ -236,6 +250,10 @@ struct InfoArgs {
     /// List exported functions
     #[arg(short = 'E', long)]
     exports: bool,
+
+    /// Attach canonical xref index summary (JSON adds `xrefs`; text mode prints a short section)
+    #[arg(long)]
+    xrefs: bool,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -382,6 +400,27 @@ struct StringsArgs {
     /// Minimum string length
     #[arg(long = "min-len", default_value_t = 4)]
     min_len: usize,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit canonical cross-reference records (`fission-static::xref_index`): loader-derived seeds plus optional Sleigh disassembly layer.\n\nDisassembly requires a usable load spec on `LoadedBinary`. Use `--no-disassembly` for import/export/string/global anchors only.",
+    after_help = "Examples:\n  fission_cli xrefs app.exe --json\n  fission_cli xrefs app.exe --no-disassembly --json\n  fission_cli xrefs app.exe --function 0x140001000 --json"
+)]
+struct XrefsArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Skip Sleigh xref extraction (loader seeds only)
+    #[arg(long)]
+    no_disassembly: bool,
+
+    /// Include per-function xref slice for this function entry VA in JSON output
+    #[arg(long, value_parser = parse_hex_address)]
+    function: Option<u64>,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -769,7 +808,7 @@ fn should_use_canonical_parser(argv: &[OsString]) -> bool {
     }
 
     match argv[1].to_str() {
-        Some("info" | "list" | "disasm" | "decomp" | "strings" | "inventory" | "script") => true,
+        Some("info" | "list" | "disasm" | "decomp" | "strings" | "xrefs" | "inventory" | "script") => true,
         Some("help" | "--help" | "-h" | "--version" | "-V") => true,
         _ => false,
     }
@@ -822,6 +861,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.exports = info.exports;
                     args.info_detections = info.detections;
                     args.info_identity = info.identity;
+                    args.info_xrefs = info.xrefs;
                     args.info = !args.sections && !args.imports && !args.exports;
                     args
                 }
@@ -872,6 +912,15 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.strings = Some(strings.min_len);
                     args.json = strings.common.json;
                     args.verbose = strings.common.verbose;
+                    args
+                }
+                CliCommand::Xrefs(xrefs) => {
+                    let mut args = OneShotArgs::with_binary(xrefs.binary);
+                    args.xrefs_cmd = true;
+                    args.xref_no_disassembly = xrefs.no_disassembly;
+                    args.xref_function = xrefs.function;
+                    args.json = xrefs.common.json;
+                    args.verbose = xrefs.common.verbose;
                     args
                 }
                 CliCommand::Inventory(inventory) => match inventory.command {
@@ -971,6 +1020,10 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         resume_from: cli.resume_from,
         quiet_batch_errors: cli.quiet_batch_errors,
         emit_function_facts_inventory: cli.emit_function_facts_inventory,
+        xrefs_cmd: false,
+        xref_no_disassembly: false,
+        xref_function: None,
+        info_xrefs: false,
     };
 
     ParsedOneShotArgs {
@@ -1088,6 +1141,31 @@ mod tests {
         assert!(parsed.args.info);
         assert!(parsed.args.json);
         assert!(parsed.args.info_detections);
+    }
+
+    #[test]
+    fn canonical_info_xrefs_sets_flag() {
+        let parsed = parse_canonical(&["fission_cli", "info", "bin.exe", "--xrefs", "--json"]);
+        assert!(parsed.args.info);
+        assert!(parsed.args.info_xrefs);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_xrefs_subcommand_maps_fields() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "xrefs",
+            "bin.exe",
+            "--no-disassembly",
+            "--function",
+            "0x140001000",
+            "--json",
+        ]);
+        assert!(parsed.args.xrefs_cmd);
+        assert!(parsed.args.xref_no_disassembly);
+        assert_eq!(parsed.args.xref_function, Some(0x140001000));
+        assert!(parsed.args.json);
     }
 
     #[test]

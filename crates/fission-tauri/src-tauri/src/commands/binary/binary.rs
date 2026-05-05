@@ -66,6 +66,7 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     // Store the binary and reset user state
     let mut inner = state.inner.lock().await;
     inner.loaded_binary = Some(binary_arc);
+    inner.xref_database = None;
     inner.comments.clear();
     inner.renamed_functions.clear();
     inner.manual_renamed_functions.clear();

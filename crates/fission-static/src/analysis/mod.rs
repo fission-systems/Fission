@@ -11,6 +11,7 @@ pub mod patch;
 pub mod string_xrefs;
 pub mod strings;
 pub mod xrefs;
+pub mod xref_index;
 
 // Re-export types from separate crates
 pub use fission_loader::{
@@ -24,4 +25,9 @@ pub use function_discovery::{
 };
 pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
-pub use xrefs::{Xref, XrefDatabase, XrefType};
+pub use xrefs::{Xref, XrefDatabase, XrefType, OPERAND_INDEX_MNEMONIC};
+pub use xref_index::{
+    build_xref_index, resolve_enclosing_function, FunctionXrefsSummary, XrefEvidence, XrefId,
+    XrefIndex, XrefIndexBuilder, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
+    XrefSourceCategory, XrefSourceLayer, XrefTarget,
+};

@@ -7,6 +7,7 @@ use crate::services::cross_image::{AutoRenameKind, PropagationReason};
 use fission_loader::loader::LoadedBinary;
 use fission_plugin::plugin::PluginManager;
 use fission_static::analysis::decomp::{FactProvenance, FactStore};
+use fission_static::analysis::XrefDatabase;
 use fission_ttd::TimelineDriver;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -24,6 +25,8 @@ pub struct InnerState {
     /// Currently loaded binary
     pub loaded_binary: Option<Arc<LoadedBinary>>,
 
+    /// Lazily rebuilt when stale (`None` after binary replace); powers [`crate::commands::get_xrefs`].
+    pub xref_database: Option<XrefDatabase>,
     /// User comments keyed by address
     pub comments: HashMap<u64, String>,
 

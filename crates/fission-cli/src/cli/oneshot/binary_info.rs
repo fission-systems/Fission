@@ -3,6 +3,7 @@ use fission_loader::loader::function_view::{
     canonical_exports_sorted, canonical_imports_sorted, canonical_view_counts,
 };
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_static::analysis::build_xref_index;
 use serde_json::Value;
 use std::io::{self, Write};
 
@@ -11,6 +12,7 @@ pub(super) fn print_binary_info(
     json: bool,
     include_detections: bool,
     include_identity: bool,
+    include_xrefs: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     let (arch_json, bits) = binary
@@ -74,6 +76,16 @@ pub(super) fn print_binary_info(
                 if let Value::Object(ref mut map) = payload {
                     map.insert("identity".to_string(), id_json);
                 }
+            }
+        }
+        if include_xrefs {
+            let idx = build_xref_index(binary, true);
+            let summary = idx.summary();
+            if let Value::Object(ref mut map) = payload {
+                map.insert(
+                    "xrefs".to_string(),
+                    serde_json::json!({ "summary": summary }),
+                );
             }
         }
         writeln!(
@@ -218,6 +230,33 @@ pub(super) fn print_binary_info(
                     "  detections={} (see --identity --json for evidence)",
                     rep.detections.len()
                 )?;
+            }
+        }
+
+        if include_xrefs {
+            let idx = build_xref_index(binary, true);
+            let sum = idx.summary();
+            writeln!(stdout)?;
+            writeln!(
+                stdout,
+                "\x1b[1;36m──────────────────────────────────────────────────────────\x1b[0m"
+            )?;
+            writeln!(stdout, "\x1b[1;35mXrefs\x1b[0m (canonical index)")?;
+            writeln!(
+                stdout,
+                "  total={} calls={} jumps={} data={} imports={} exports={} strings={} globals={} relocations={}",
+                sum.total,
+                sum.calls,
+                sum.jumps,
+                sum.data,
+                sum.imports,
+                sum.exports,
+                sum.strings,
+                sum.globals,
+                sum.relocations
+            )?;
+            if let Some(ref note) = sum.relocation_note {
+                writeln!(stdout, "  note: {}", note)?;
             }
         }
     }

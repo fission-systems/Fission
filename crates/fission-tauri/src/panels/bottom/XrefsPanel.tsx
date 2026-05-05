@@ -8,16 +8,20 @@ interface XrefsPanelProps {
 }
 
 export default function XrefsPanel({ xrefs, address, onXrefClick }: XrefsPanelProps) {
-    // Count how many xrefs originate from the same function (incoming)
-    // or point to the same target (outgoing) to show a badge.
     const funcCounts = useMemo(() => {
         const map = new Map<string, number>();
+        if (!address) {
+            return map;
+        }
         for (const x of xrefs) {
-            const key = x.from_function ?? x.from_address;
+            const incoming = x.to_address === address;
+            const key = incoming
+                ? (x.from_function ?? x.from_address)
+                : (x.to_function ?? x.to_address);
             map.set(key, (map.get(key) ?? 0) + 1);
         }
         return map;
-    }, [xrefs]);
+    }, [xrefs, address]);
 
     if (!address) {
         return (
@@ -54,13 +58,25 @@ export default function XrefsPanel({ xrefs, address, onXrefClick }: XrefsPanelPr
                 <tbody>
                     {xrefs.map((xref, i) => {
                         const isIncoming = xref.to_address === address;
-                        const funcKey = xref.from_function ?? xref.from_address;
+                        const funcKey = isIncoming
+                            ? (xref.from_function ?? xref.from_address)
+                            : (xref.to_function ?? xref.to_address);
                         const count = funcCounts.get(funcKey) ?? 1;
+                        const funcLabel = isIncoming
+                            ? (xref.from_function ?? "—")
+                            : (xref.to_function ?? "—");
+                        const meta =
+                            xref.sleigh_kind != null || xref.operand_index != null
+                                ? `${xref.sleigh_kind ?? ""}${xref.sleigh_kind != null && xref.operand_index != null ? " " : ""}${xref.operand_index != null ? `op:${xref.operand_index}` : ""}`.trim()
+                                : null;
                         return (
                             <tr
                                 key={i}
                                 className="data-table__row"
-                                onClick={() => onXrefClick?.(isIncoming ? xref.from_address : xref.to_address)}
+                                onClick={() =>
+                                    onXrefClick?.(isIncoming ? xref.from_address : xref.to_address)
+                                }
+                                title={meta ?? undefined}
                             >
                                 <td className={isIncoming ? "xref-incoming" : "xref-outgoing"}>
                                     {isIncoming ? "← IN" : "→ OUT"}
@@ -69,10 +85,13 @@ export default function XrefsPanel({ xrefs, address, onXrefClick }: XrefsPanelPr
                                     {isIncoming ? xref.from_address : xref.to_address}
                                 </td>
                                 <td>{xref.xref_type}</td>
-                                <td>{xref.from_function ?? "—"}</td>
+                                <td>{funcLabel}</td>
                                 <td className="xrefs-panel__fn-count">
                                     {count > 1 ? (
-                                        <span className="xrefs-panel__badge" title={`${count} xrefs from this function`}>
+                                        <span
+                                            className="xrefs-panel__badge"
+                                            title={`${count} xrefs grouped`}
+                                        >
                                             ×{count}
                                         </span>
                                     ) : null}

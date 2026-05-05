@@ -87,6 +87,9 @@ export interface XrefDto {
     to_address: string;
     xref_type: string;
     from_function: string | null;
+    to_function: string | null;
+    operand_index?: number | null;
+    sleigh_kind?: string | null;
 }
 
 export interface BookmarkDto {

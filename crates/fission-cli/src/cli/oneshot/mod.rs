@@ -17,6 +17,7 @@ mod inventory;
 mod rust_decomp;
 mod script;
 mod strings;
+mod xrefs;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 #[cfg(feature = "native_decomp")]
@@ -29,6 +30,7 @@ use inventory::emit_function_facts_inventory;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
 use strings::print_strings;
+use xrefs::run_xrefs;
 
 use crate::cli::args::{
     FunctionDiscoveryProfileArg, LegacyInvocationKind, OneShotArgs, ParsedInvocation,
@@ -164,6 +166,7 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             cli.json,
             cli.info_detections,
             cli.info_identity,
+            cli.info_xrefs,
         )?);
     }
 
@@ -177,6 +180,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.exports {
         return Ok(print_exports(&binary, cli.json)?);
+    }
+
+    if cli.xrefs_cmd {
+        return Ok(run_xrefs(cli, &binary)?);
     }
 
     if cli.list {
@@ -306,6 +313,7 @@ fn print_help() {
     println!("  fission_cli disasm <binary> --addr <ADDR> [--count N] [--function] [--json]");
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
+    println!("  fission_cli xrefs <binary> [--json] [--no-disassembly] [--function ADDR]");
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!("  fission_cli script check --script <FILE>");
     println!("  fission_cli script run <binary> --script <FILE> [--json]");
@@ -316,6 +324,7 @@ fn print_help() {
     println!("  disasm     Disassemble instructions or full functions");
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
+    println!("  xrefs      Canonical xref index (loader + optional disassembly)");
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");
     println!();

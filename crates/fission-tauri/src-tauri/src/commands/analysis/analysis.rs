@@ -35,6 +35,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
     // Replace the Arc with the updated binary
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
+    inner.xref_database = None;
     inner.rebuild_fact_store();
     tracing::debug!(
         decoded = report.decoded_instruction_count,
@@ -70,6 +71,7 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
     let renames = inner.renamed_functions.clone();
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
+    inner.xref_database = None;
     inner.rebuild_fact_store();
     tracing::debug!(
         decoded = report.decoded_instruction_count,

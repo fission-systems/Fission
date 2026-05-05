@@ -85,6 +85,7 @@ pub async fn patch_bytes(
     })?;
 
     inner.loaded_binary = Some(std::sync::Arc::new(binary));
+    inner.xref_database = None;
     Ok(original)
 }
 

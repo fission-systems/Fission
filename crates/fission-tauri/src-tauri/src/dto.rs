@@ -124,7 +124,14 @@ pub struct XrefDto {
     pub from_address: String,
     pub to_address: String,
     pub xref_type: String,
+    /// Function containing `from_address` (caller site).
     pub from_function: Option<String>,
+    /// Resolved symbol at `to_address` when it matches a known function entry.
+    pub to_function: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operand_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sleigh_kind: Option<String>,
 }
 
 /// Bookmark entry.

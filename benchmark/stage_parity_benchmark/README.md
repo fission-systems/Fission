@@ -24,6 +24,11 @@ Debugging labels categorize suspected loss causes (field names may evolve per to
 
 When raw p-code agrees but final C diverges, oracle **string refs, external call counts, and parameter counts** help localize which stage dropped facts.
 
+## Xref metrics lane (additive)
+
+`stage_metrics.build_stage_report` now emits `stages.xrefs` with integer counters defaulted to **zero**.
+Benchmark runners may populate top-level `xref_metrics` on each row payload once Rust exports land; compare against Ghidra reference facts via [`benchmark/ghidra_oracle_benchmark/`](../ghidra_oracle_benchmark/README.md) using the same binary/function join keys as above.
+
 ## Related tooling
 
 - Latency / timeout cross-summary: [`benchmark/timeout_distribution_benchmark/`](../timeout_distribution_benchmark/README.md)

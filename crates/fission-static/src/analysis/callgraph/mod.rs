@@ -1,4 +1,8 @@
 //! Call graph analysis built from cross-references.
+//!
+//! Edges are aggregated from [`super::xrefs::XrefDatabase`] entries whose [`super::xrefs::XrefType`]
+//! is [`super::xrefs::XrefType::Call`]. This includes conditional calls (`call` on conditional
+//! flow) when Sleigh classifies them as call targets; jump-only tail edges are excluded.
 
 use rustc_hash::FxHashMap;
 
@@ -124,5 +128,61 @@ fn find_function_addr(functions: &[FunctionInfo], addr: u64, fallback_range: u64
         Some(func.address)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::FunctionInfo;
+    use crate::analysis::xrefs::{Xref, XrefDatabase, XrefType, OPERAND_INDEX_MNEMONIC};
+    use fission_sleigh::runtime::DecodedFlowKind;
+
+    fn sample_functions() -> Vec<FunctionInfo> {
+        vec![
+            FunctionInfo {
+                name: "caller".into(),
+                address: 0x1000,
+                size: 0x100,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "callee".into(),
+                address: 0x2000,
+                size: 0x50,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn callgraph_counts_only_call_xrefs() {
+        let mut db = XrefDatabase::new();
+        db.add_xref(Xref {
+            from_addr: 0x1004,
+            to_addr: 0x2000,
+            xref_type: XrefType::Call,
+            operand_index: OPERAND_INDEX_MNEMONIC,
+            sleigh_kind: None,
+            flow_kind: Some(DecodedFlowKind::Call),
+        });
+        db.add_xref(Xref {
+            from_addr: 0x1008,
+            to_addr: 0x2050,
+            xref_type: XrefType::Jump,
+            operand_index: OPERAND_INDEX_MNEMONIC,
+            sleigh_kind: None,
+            flow_kind: Some(DecodedFlowKind::Jump),
+        });
+
+        let g = CallGraph::build_from_xrefs(&sample_functions(), &db, 0x40);
+        assert_eq!(g.total_call_sites(), 1);
+        let callees = g.callees_of(0x1000);
+        assert_eq!(callees.len(), 1);
+        assert_eq!(callees[0].addr, 0x2000);
     }
 }

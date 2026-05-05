@@ -31,6 +31,33 @@ def _derive_stage_status(preview_build_stats: dict[str, Any] | None) -> dict[str
     }
 
 
+def _xref_metrics(entry: dict[str, Any]) -> dict[str, int]:
+    """Additive xref counters for stage parity (defaults to zero).
+
+    Populate ``entry[\"xref_metrics\"]`` from Rust tooling when emitting benchmark rows.
+    Ghidra oracle comparisons stay under ``benchmark/ghidra_oracle_benchmark/``.
+    """
+    raw = entry.get("xref_metrics")
+    if not isinstance(raw, dict):
+        raw = {}
+    xref_keys = (
+        "xref_record_total",
+        "xref_loader_layer_total",
+        "xref_disassembly_layer_total",
+        "xref_relocation_layer_total",
+        "xref_call_total",
+        "xref_jump_total",
+        "xref_conditional_jump_total",
+        "xref_data_total",
+        "xref_import_ref_total",
+        "xref_export_ref_total",
+        "xref_string_ref_total",
+        "xref_global_symbol_total",
+        "xref_relocation_fact_total",
+    )
+    return _extract_metrics(raw, xref_keys)
+
+
 def build_stage_report(entry: dict[str, Any]) -> dict[str, Any]:
     preview = entry.get("preview_build_stats")
     if not isinstance(preview, dict):
@@ -143,5 +170,6 @@ def build_stage_report(entry: dict[str, Any]) -> dict[str, Any]:
         "nir_build": nir_build,
         "normalize": normalize,
         "structuring": structuring,
+        "xrefs": _xref_metrics(entry),
         "owner_bucket": owner_bucket,
     }
