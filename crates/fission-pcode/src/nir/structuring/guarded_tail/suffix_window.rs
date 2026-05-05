@@ -231,7 +231,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
+    pub(super) fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Call { .. } => true,
             HirExpr::Cast { expr, .. }
@@ -259,6 +259,12 @@ impl<'a> PreviewBuilder<'a> {
             HirStmt::Assign {
                 lhs: HirLValue::Var(_),
                 rhs,
+            } if Self::suffix_expr_contains_call(rhs) => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
             } if Self::expr_is_pure_value(rhs) => match rhs {
                 HirExpr::Var(_) => SuffixSideEffectShapeKind::PureTempAssign,
                 _ => SuffixSideEffectShapeKind::PureRegisterAssign,
@@ -267,12 +273,6 @@ impl<'a> PreviewBuilder<'a> {
                 lhs: HirLValue::Var(_),
                 rhs: HirExpr::Load { ptr, .. },
             } if Self::expr_is_pure_value(ptr) => SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } if Self::suffix_expr_contains_call(rhs) => {
-                SuffixSideEffectShapeKind::CallExprSideEffect
-            }
             HirStmt::Assign {
                 lhs: HirLValue::Var(_),
                 rhs,

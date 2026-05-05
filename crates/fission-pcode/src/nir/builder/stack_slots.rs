@@ -10,6 +10,21 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let abi = self.abi_state();
+        if is_register_varnode(vn)
+            && let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied()
+        {
+            let alias_name = abi.param_name(param_index);
+            self.params
+                .entry(param_index)
+                .or_insert_with(|| NirBinding {
+                    name: alias_name.clone(),
+                    ty: type_from_size(vn.size, false),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(param_index)),
+                    initializer: None,
+                });
+            return Some(alias_name);
+        }
         let Some(index) = abi.param_slot_for_varnode(vn) else {
             if vn.space_id != REGISTER_SPACE_ID {
                 return None;
@@ -26,19 +41,6 @@ impl<'a> PreviewBuilder<'a> {
             origin: Some(NirBindingOrigin::ParamIndex(index)),
             initializer: None,
         });
-        if let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied() {
-            let alias_name = abi.param_name(param_index);
-            self.params
-                .entry(param_index)
-                .or_insert_with(|| NirBinding {
-                    name: alias_name.clone(),
-                    ty: type_from_size(vn.size, false),
-                    surface_type_name: None,
-                    origin: Some(NirBindingOrigin::ParamIndex(param_index)),
-                    initializer: None,
-                });
-            return Some(alias_name);
-        }
         Some(name)
     }
 

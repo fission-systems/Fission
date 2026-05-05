@@ -22,7 +22,7 @@ pub(super) fn collect_entry_register_param_aliases(
                 let Some(output) = &op.output else {
                     continue;
                 };
-                if output.space_id != REGISTER_SPACE_ID {
+                if !is_register_varnode(output) {
                     continue;
                 }
                 let Some((_, output_param_index)) =
@@ -36,7 +36,7 @@ pub(super) fn collect_entry_register_param_aliases(
                 let Some(input) = op.inputs.first() else {
                     continue;
                 };
-                if input.space_id != REGISTER_SPACE_ID {
+                if !is_register_varnode(input) {
                     continue;
                 }
                 let alias_param_index = register_name_with_param(input.offset, input.size, abi)

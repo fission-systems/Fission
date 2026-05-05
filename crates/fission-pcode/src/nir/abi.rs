@@ -1,7 +1,8 @@
 use super::support::{
-    StackBase, register_name_with_param, unique_register_name, x64_ghidra_reg_name,
+    StackBase, is_register_varnode, register_name_with_param, unique_register_name,
+    x64_ghidra_reg_name,
 };
-use super::{CallingConvention, NirBindingOrigin, REGISTER_SPACE_ID, UNIQUE_SPACE_ID, Varnode};
+use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
 fn x64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
     let name_family = crate::arch::x86::x86_gpr_family_index(name)?;
@@ -143,7 +144,7 @@ impl AbiState {
             let hole_penalty = slot.saturating_sub(expected_next);
             expected_next = expected_next.max(slot.saturating_add(1));
             let class =
-                if carrier.space_id == REGISTER_SPACE_ID || carrier.space_id == UNIQUE_SPACE_ID {
+                if is_register_varnode(carrier) || carrier.space_id == UNIQUE_SPACE_ID {
                     super::CarrierClass::Gpr
                 } else {
                     super::CarrierClass::LocalSlot
@@ -245,7 +246,7 @@ impl AbiProvider for WindowsX64AbiProvider {
     }
 
     fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if vn.space_id == REGISTER_SPACE_ID {
+        if is_register_varnode(vn) {
             return register_name_with_param(vn.offset, vn.size, CallingConvention::WindowsX64)
                 .and_then(|(_, index)| index);
         }
@@ -303,7 +304,7 @@ impl AbiProvider for GenericAbiProvider {
     }
 
     fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if vn.space_id != REGISTER_SPACE_ID {
+        if !is_register_varnode(vn) {
             return None;
         }
         register_name_with_param(vn.offset, vn.size, self.abi).and_then(|(_, index)| index)

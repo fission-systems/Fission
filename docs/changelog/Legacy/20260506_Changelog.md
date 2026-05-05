@@ -140,3 +140,63 @@
   `var_8`-based parameter surface. The ABI alias fix is a prerequisite for
   direct subregister entry spills, but this row's remaining parameter gap is
   downstream stack/local surface recovery rather than direct `ecx` naming.
+
+## Runtime register-space ABI parameter recovery
+
+- Taught the NIR ABI/entry-analysis layer to recognize Rust-Sleigh register
+  varnodes that arrive in runtime register space `4` in addition to the legacy
+  Ghidra JSON register space `1`.
+- Kept the expansion deliberately narrow: runtime register space `4` is used
+  for ABI parameter-slot and entry-alias recovery, but general register
+  rendering and stack-base surfacing still follow the existing legacy register
+  path. A wider register-space conversion was tested and rejected because it
+  inflated labels, gotos, undefined return types, and materialization counts.
+- Fixed `register_param()` ordering so entry aliases such as `edi <- ecx` are
+  checked before returning a non-ABI hardware register name. This allows saved
+  entry argument copies to surface as `param_k`.
+- Tightened guarded-tail pure-helper suffix handling so known pure helper calls
+  still go through the dedicated ownership/escape proof instead of being
+  accepted by the generic pure-statement fast path.
+
+## Validation
+
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode preview_uses_entry_register_alias_for_non_abi_register -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode suffix_accepts_known_pure_helper -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode suffix_rejects_known_pure_helper -- --test-threads=1`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo test -p fission-pcode -- --test-threads=1`
+  passed: `721 passed`.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo check -p fission-pcode`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo check -p fission-decompiler`
+  passed.
+- `CARGO_TARGET_DIR=/tmp/fission-cycle4-target cargo build -p fission-cli --release`
+  passed.
+
+## Benchmark
+
+- Before:
+  `benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after`
+- After:
+  `benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-after`
+- Command:
+  `python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --limit 20 --timeout 300 --ghidra-func-timeout 30 --fission-bin /tmp/fission-cycle4-target/release/fission_cli --ghidra-dir vendor/ghidra/ghidra-Ghidra_12.0.4_build --use-ghidra-cache --ghidra-cache-dir benchmark/artifacts/ghidra_cache --output-dir benchmark/artifacts/full_benchmark/windows-small-c-runtime-register-space-after --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-abi-subregister-param-after --regression-threshold 2.0 --pairwise-similarity-mode shared-full --aggregate-similarity-mode weighted`
+- Result:
+  average normalized similarity improved from `36.91%` to `37.54%`; shared
+  success stayed `100.0%`; `goto_total=34`, `top_level_label_total=24`,
+  `blockgraph_region_complete_count=2`, `alias_unsafe=13511`, and
+  `missing_merge=4270` stayed unchanged.
+- Row note:
+  `fibonacci @ 0x140001470` changed from `ulonglong fibonacci()` with `var_8`
+  uses to `ulonglong fibonacci(uint param_1)` with `var_8` count `0`, and row
+  similarity improved from `3.11%` to `3.15%` in the final cached Ghidra
+  comparison run.
+- Gate note:
+  the benchmark regression gate still failed because `generic_param_name_sum`
+  increased from `0` to `18` and row-fidelity marked small similarity drops on
+  `__tmainCRTStartup @ 0x140001010` (`2.57% -> 2.31%`) and
+  `__do_global_ctors @ 0x140001940` (`10.69% -> 10.45%`). This cycle therefore
+  improves the target parameter surface and average similarity, but it is not a
+  clean gate pass.

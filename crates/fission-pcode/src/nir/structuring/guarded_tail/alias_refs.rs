@@ -50,7 +50,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn stmt_is_pure_value_expr(stmt: &HirStmt) -> bool {
-        matches!(stmt, HirStmt::Expr(expr) if Self::expr_is_pure_value(expr))
+        matches!(
+            stmt,
+            HirStmt::Expr(expr)
+                if Self::expr_is_pure_value(expr) && !Self::suffix_expr_contains_call(expr)
+        )
     }
 
     pub(super) fn stmt_is_pure_value_assign(stmt: &HirStmt) -> bool {
@@ -59,7 +63,7 @@ impl<'a> PreviewBuilder<'a> {
             HirStmt::Assign {
                 lhs: HirLValue::Var(_),
                 rhs,
-            } if Self::expr_is_pure_value(rhs)
+            } if Self::expr_is_pure_value(rhs) && !Self::suffix_expr_contains_call(rhs)
         )
     }
 

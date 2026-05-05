@@ -117,6 +117,68 @@ fn preview_names_x86_general_purpose_registers() {
 }
 
 #[test]
+fn preview_uses_entry_register_alias_for_non_abi_register() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140001000,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140001000,
+                        output: Some(runtime_reg(0x38, 4)),
+                        inputs: vec![runtime_reg(0x08, 4)],
+                        asm_mnemonic: Some("MOV EDI,ECX".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x140001002,
+                        output: None,
+                        inputs: vec![cst(0x140001010, 8)],
+                        asm_mnemonic: Some("JMP 0x140001010".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140001010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001010,
+                    output: None,
+                    inputs: vec![cst(0, 8), runtime_reg(0x38, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "win64_entry_alias", 0x140001000, &options)
+        .expect("preview render");
+    assert!(code.contains("uint win64_entry_alias(uint param_1)"), "{code}");
+    assert!(code.contains("return param_1;"), "{code}");
+    assert!(
+        !code.contains("return rdi;") && !code.contains("return edi;"),
+        "{code}"
+    );
+}
+
+#[test]
 fn preview_tolerates_branchind_without_targets() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
