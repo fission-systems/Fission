@@ -1,10 +1,16 @@
+//! Criterion benchmarks for static analysis hot paths.
+//!
+//! PE/binary loading benchmarks run only when **`FISSION_BENCH_PE_CORPUS`** is set to an existing
+//! directory that mirrors the layout under `benchmark/binary/x86-64/window` (`small`/`medium`/`large`
+//! plus optional `commercial_binary`). Without it, those benches are skipped so the crate does not
+//! assume the repo `benchmark/` tree.
+
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use fission_static::analysis::cfg::CfgAnalysis;
+use fission_pcode::{cfg::CfgAnalysis, PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_static::analysis::optimizer::OptimizerConfig;
 use fission_static::analysis::optimizer::integration::optimize_c_code;
-use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 /// Build a synthetic PcodeFunction with `n` blocks forming a diamond CFG.
 fn build_diamond_cfg(n: usize) -> PcodeFunction {
@@ -165,13 +171,21 @@ fn binary_load_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("binary_loading");
     group.sample_size(50); // Reduce sample size for I/O-heavy benchmark
 
-    // Construct path to benchmark binary directory
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let binary_dir = Path::new(manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("benchmark/binary/x86-64/window"))
-        .expect("Failed to construct binary directory path");
+    let binary_dir: PathBuf = match std::env::var_os("FISSION_BENCH_PE_CORPUS") {
+        Some(raw) => {
+            let p = PathBuf::from(raw);
+            if p.is_dir() {
+                p
+            } else {
+                group.finish();
+                return;
+            }
+        }
+        None => {
+            group.finish();
+            return;
+        }
+    };
 
     // Benchmark different binary sizes
     let sizes = vec!["small", "medium", "large"];

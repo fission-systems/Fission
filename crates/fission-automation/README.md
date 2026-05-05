@@ -41,7 +41,7 @@ and latest is mirrored to:
   - `full`: broader validation window
 
 - `--manifest <path>`
-  - override the default lane manifest at `benchmark/config/automation/sentinel_sets.toml`
+  - override the default lane manifest at `crates/fission-automation/config/sentinel_sets.toml`
 
 - `--focus-top-mismatch <N>`
   - uses baseline candidates to focus run targets to binaries implicated by top `conditional_tail_exit_mismatch` rows
@@ -145,8 +145,8 @@ Treat this as an operational guardrail, not an absolute truth. Always inspect to
   - `diagnosis.rs`: diagnosis buckets and recommended patch classification
   - `corpus.rs`: candidate aggregation and quality artifact assembly
   - `inventory.rs`: `fission_cli` inventory execution and loading
-- Default automation config lives under `benchmark/config/automation/`
-  - `sentinel_sets.toml`: lane target definitions
-  - `preview_explicit_source_inventory.json`: optional source inventory overlay
+- Default automation config ships with this crate under `crates/fission-automation/config/`
+  - `sentinel_sets.toml`: lane target definitions (paths inside are repo-root-relative)
+  - `preview_explicit_source_inventory.json`: optional source inventory overlay (if present)
 - Tests:
   - `cargo test -p fission-automation`

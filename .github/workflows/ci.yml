@@ -78,7 +78,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-pcode,fission-automation"
+      crates: "fission-pcode,fission-decompiler,fission-automation"
       # Match macOS fast gate: debug tests avoid duplicate release rebuild + timeout/cancel churn.
       profile: debug
       timeout_minutes: 90

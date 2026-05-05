@@ -159,7 +159,11 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if cli.info {
-        return Ok(print_binary_info(&binary, cli.json)?);
+        return Ok(print_binary_info(
+            &binary,
+            cli.json,
+            cli.info_detections,
+        )?);
     }
 
     if cli.sections {

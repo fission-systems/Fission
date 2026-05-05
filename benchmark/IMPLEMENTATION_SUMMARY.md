@@ -12,7 +12,7 @@ Benchmark runner and reporting:
 Config ownership:
 
 - [`benchmark/config/benchmark_corpus/`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus)
-- [`benchmark/config/automation/`](/Users/sjkim1127/Fission/benchmark/config/automation)
+- [`benchmark/config/automation/`](/Users/sjkim1127/Fission/benchmark/config/automation) (README only; sentinel manifest SSOT is [`crates/fission-automation/config/`](../crates/fission-automation/config))
 
 Artifact ownership:
 

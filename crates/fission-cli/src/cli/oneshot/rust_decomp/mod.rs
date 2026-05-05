@@ -40,13 +40,13 @@ fn render_with_rust_sleigh(
         String,
         bool,
         Option<String>,
-        Option<fission_pcode::NirBuildStats>,
-        Option<fission_pcode::NirHintStats>,
+        Option<fission_decompiler::NirBuildStats>,
+        Option<fission_decompiler::NirHintStats>,
     ),
     FissionError,
 > {
-    let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();
-    let result = fission_decompiler_core::decompile_with_rust_sleigh(
+    let config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+    let result = fission_decompiler::decompile_with_rust_sleigh(
         binary,
         func.address,
         &func.name,

@@ -7,11 +7,12 @@
 <!-- Check every area you materially changed; reviewers use this for routing. -->
 
 - [ ] **NIR / structuring / pcode** (`crates/fission-pcode/`, `AGENTS.md` “NIR structuring”)
-- [ ] **Static orchestration / decomp routing** (`crates/fission-static/`, `fission-decompiler-core`)
+- [ ] **Static facts / native prep** (`crates/fission-static/`)
+- [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
 - [ ] **Loader / binary parsing** (`crates/fission-loader/`)
 - [ ] **CLI / UX** (`crates/fission-cli/`)
 - [ ] **Desktop (Tauri)** (`crates/fission-tauri/`)
-- [ ] **Automation / quality lanes** (`crates/fission-automation/`, `benchmark/config/automation/`)
+- [ ] **Automation / quality lanes** (`crates/fission-automation/`, including `crates/fission-automation/config/`)
 - [ ] **Benchmark harness / corpus** (`benchmark/full_benchmark/`, `benchmark/config/`)
 - [ ] **Docs / process only** (no semantic code paths)
 - [ ] **CI / release plumbing** (`.github/`, `docs/RELEASE.md`)

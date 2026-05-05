@@ -91,6 +91,8 @@ fission_cli info app.exe --sections
 fission_cli info app.exe --imports
 fission_cli info app.exe --exports
 fission_cli info app.exe --imports --json
+fission_cli info app.exe --detections
+fission_cli info app.exe --detections --json
 ```
 
 Use `info` when you want quick metadata and binary inventory without starting a decompilation workflow.
@@ -314,6 +316,15 @@ fission_cli info app.exe --exports
 ```
 
 If none of those flags are provided, `info` falls back to the base metadata view.
+
+### Detection (`--detections`)
+
+Add `--detections` on the base metadata path (without `--sections`, `--imports`, or `--exports`) to run integrated binary identification: loader heuristics plus Detect It Easy-style signatures mirrored under `utils/signatures`. Human output appends a **Detections** block; with `--json`, the payload gains a `detections` array (`detection_type`, `name`, `version`, `details`, `confidence`).
+
+```bash
+fission_cli info app.exe --detections
+fission_cli info app.exe --detections --json
+```
 
 ### JSON mode
 

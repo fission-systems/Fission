@@ -3,7 +3,7 @@ use super::schema::{
     FunctionFactsInventorySummary, ProvenanceFactBreakdown,
 };
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
-use fission_pcode::{NirBuildStats, NirHintStats};
+use fission_decompiler::{NirBuildStats, NirHintStats};
 use fission_static::analysis::decomp::{FactStore, FunctionFacts};
 
 #[derive(Debug, Clone)]
@@ -116,7 +116,7 @@ impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCa
 
 fn entry_indirect_classification(
     entry: &InventoryCandidateEntry,
-) -> fission_pcode::IndirectControlClassification {
+) -> fission_decompiler::IndirectControlClassification {
     canonical_indirect_classification(entry.nir_build_stats.as_ref())
 }
 

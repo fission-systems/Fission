@@ -6,14 +6,13 @@ use crate::cli::oneshot::common::{
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
-use fission_decompiler_core::{
-    NativeDecompilerBackend, NativeDecompilerSource, NirEngineMode, NirSurfaceKind, PostProcessor,
-    auto_nir_eligible, classify_native_failure_kind, rescue_nir_output_with_facts,
-    select_nir_output_with_facts,
+use fission_decompiler::{
+    NativeDecompilerBackend, NativeDecompilerSource, NirBuildStats, NirEngineMode, NirHintStats,
+    NirSurfaceKind, PcodeFunction, PcodeOpcode, auto_nir_eligible, classify_native_failure_kind,
+    rescue_nir_output_with_facts, select_nir_output_with_facts,
 };
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{NirBuildStats, NirHintStats, PcodeFunction, PcodeOpcode};
 use fission_static::analysis::decomp::{
     FactStore, PrepareOptions, PrepareTimings, log_type_diag, prepare_native_decompiler_for_binary,
     serialize_api_signatures_json,

@@ -8,15 +8,15 @@ use super::super::*;
 use super::output::{attach_native_timing_if_present, decompile_and_output};
 
 #[cfg(test)]
-fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
+fn is_terminal_control_flow(opcode: fission_decompiler::PcodeOpcode) -> bool {
     fission_sleigh::runtime::is_terminal_control_flow(opcode)
 }
 
 #[cfg(test)]
 fn build_cfg_blocks(
     entry_address: u64,
-    ops: Vec<fission_pcode::PcodeOp>,
-) -> Vec<fission_pcode::PcodeBasicBlock> {
+    ops: Vec<fission_decompiler::PcodeOp>,
+) -> Vec<fission_decompiler::PcodeBasicBlock> {
     fission_sleigh::runtime::build_cfg_blocks(entry_address, ops)
 }
 
@@ -25,8 +25,8 @@ fn maybe_record_debug_decomp(
     effective_json: bool,
     binary: &LoadedBinary,
     func: &FunctionInfo,
-    preview_build_stats: Option<&fission_pcode::NirBuildStats>,
-    preview_hint_stats: Option<&fission_pcode::NirHintStats>,
+    preview_build_stats: Option<&fission_decompiler::NirBuildStats>,
+    preview_hint_stats: Option<&fission_decompiler::NirHintStats>,
     native_timing: Option<serde_json::Value>,
     failed_hard: bool,
     assembly_fallback_no_stats: bool,
@@ -90,8 +90,8 @@ fn render_with_rust_sleigh(
             binary.path
         ))
     })?;
-    let config = fission_decompiler_core::RustSleighDecompileConfig::cli_defaults();
-    let result = fission_decompiler_core::decompile_with_rust_sleigh(
+    let config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+    let result = fission_decompiler::decompile_with_rust_sleigh(
         binary,
         func.address,
         &func.name,
@@ -589,7 +589,7 @@ fn run_sequential_decompilation<'a>(
                 }
                 if effective_json {
                     let routing =
-                        fission_decompiler_core::native_failure_routing_decision(&error_text);
+                        fission_decompiler::native_failure_routing_decision(&error_text);
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
@@ -1303,7 +1303,7 @@ pub(crate) fn run_decompilation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+    use fission_decompiler::{PcodeOp, PcodeOpcode, Varnode};
 
     fn var(offset: u64, size: u32) -> Varnode {
         Varnode {

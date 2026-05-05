@@ -6,8 +6,8 @@ pub(crate) fn debug_bundle_for_record(
     binary: &LoadedBinary,
     func: &FunctionInfo,
     config: RenderConfig,
-    build_stats: Option<&fission_pcode::NirBuildStats>,
-    hint_stats: Option<&fission_pcode::NirHintStats>,
+    build_stats: Option<&fission_decompiler::NirBuildStats>,
+    hint_stats: Option<&fission_decompiler::NirHintStats>,
     nir_hard_fail: bool,
     nir_fallback_without_stats: bool,
 ) -> Option<serde_json::Value> {

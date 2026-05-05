@@ -124,13 +124,8 @@ fn render_legacy_code(
         fact_store.loader_type_facts(),
         &merged_types,
     );
-    let postprocessor = PostProcessor::legacy_semantic_pipeline()
-        .with_inferred_types(merged_types)
-        .with_dwarf_info(fact_store.dwarf_function(address).cloned())
-        .with_string_map(Some(binary.inner().string_map.clone()));
-    let postprocess_start = std::time::Instant::now();
-    let code = postprocessor.process(&result.code);
-    let postprocess_sec = postprocess_start.elapsed().as_secs_f64();
+    let code = result.code.clone();
+    let postprocess_sec = 0.0;
     (code, postprocess_sec)
 }
 

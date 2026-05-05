@@ -17,3 +17,7 @@ Fix incorrect behavior **here**, not in downstream UI layers ([`AGENTS.md`](../.
 
 - Telemetry keyed by [`NirBuildStats`](../../crates/fission-pcode/src/nir/types.rs) is authoritative; automation rolls it up ([`crates/fission-automation/AGENTS.md`](../../crates/fission-automation/AGENTS.md)).
 - Printer tweaks that mask semantic bugs are rejected unless accompanied by pcode fixes.
+
+## Rename note (2026-05)
+
+Workspace crate **`fission-decompiler`** (`fission_decompiler`) now hosts application-layer orchestration and Rust-Sleigh glue previously carried by **`fission-decompiler-core`**, while **`fission-pcode`** remains the semantic owner described above. Downstream code should prefer **`fission_decompiler::`** when consuming both IR re-exports and orchestration APIs.

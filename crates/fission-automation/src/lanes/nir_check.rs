@@ -59,8 +59,8 @@ pub fn run(args: NirCheckArgs) -> Result<()> {
     let manifest_path = args
         .manifest
         .clone()
-        .unwrap_or_else(|| default_manifest_path(&root));
-    let source_inventory_path = default_source_inventory_path(&root);
+        .unwrap_or_else(default_manifest_path);
+    let source_inventory_path = default_source_inventory_path();
     let source_inventory = match source_inventory_path.as_ref() {
         Some(path) => load_source_inventory(path)
             .with_context(|| format!("load source inventory {}", path.display()))?,

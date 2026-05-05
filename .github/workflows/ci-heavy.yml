@@ -59,7 +59,7 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-pcode,fission-automation"
+      crates: "fission-pcode,fission-decompiler,fission-automation"
       profile: release
       timeout_minutes: 120
 

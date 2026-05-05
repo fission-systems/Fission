@@ -19,8 +19,10 @@ Fission/
 │   ├── artifacts/           # Benchmark outputs (automation/, full_benchmark/)
 │   └── binary/              # Curated benchmark binaries and fixtures
 ├── crates/
-│   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, printer
-│   ├── fission-static/       # Static orchestration, preview routing, fact application
+│   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, CFG, printer
+│   ├── fission-decompiler/   # Orchestration + Rust-Sleigh bridge (re-exports IR crate)
+│   ├── fission-sleigh/       # Sleigh decode/lift runtime
+│   ├── fission-static/       # Static facts, native preparation, analysis services
 │   ├── fission-automation/   # Quality lanes, deltas, go/stop signals, artifacts
 │   ├── fission-loader/       # Binary parsing, symbols, sections, strings
 │   ├── fission-signatures/   # FID/signature data and lookup
@@ -49,6 +51,7 @@ Read the nearest child file before editing those areas.
 |---|---|---|
 | NIR structuring / canonicalization | `crates/fission-pcode/src/nir/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
+| Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
 | Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
 | Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |
 | Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
@@ -84,6 +87,7 @@ cargo build -p fission-cli --release
 # Common decompiler validation
 cargo test -p fission-pcode
 cargo check -p fission-pcode
+cargo check -p fission-decompiler
 cargo check -p fission-automation
 
 # Quality lane
@@ -96,6 +100,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 ## Workflow Bias
 
 - For NIR/structuring changes: targeted tests → `cargo test -p fission-pcode` → `cargo check -p fission-pcode`.
+- For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/Tauri surfaces as needed).
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/full_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.

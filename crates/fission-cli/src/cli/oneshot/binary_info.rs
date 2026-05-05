@@ -1,10 +1,16 @@
+use fission_loader::detector;
 use fission_loader::loader::function_view::{
     canonical_exports_sorted, canonical_imports_sorted, canonical_view_counts,
 };
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use serde_json::Value;
 use std::io::{self, Write};
 
-pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result<()> {
+pub(super) fn print_binary_info(
+    binary: &LoadedBinary,
+    json: bool,
+    include_detections: bool,
+) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     let (arch_json, bits) = binary
         .architecture
@@ -25,22 +31,44 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
 
     if json {
         let counts = canonical_view_counts(binary);
+        let mut payload = serde_json::json!({
+            "path": binary.path,
+            "format": binary.format,
+            "arch": arch_json,
+            "bits": bits,
+            "entry": format!("0x{:x}", binary.entry_point),
+            "image_base": format!("0x{:x}", binary.image_base),
+            "sections": binary.sections.len(),
+            "functions": counts.functions,
+            "imports": counts.imports,
+            "exports": counts.exports,
+        });
+        if include_detections {
+            let dr = detector::detect(binary);
+            let detections: Vec<Value> = dr
+                .detections
+                .iter()
+                .map(|d| {
+                    serde_json::json!({
+                        "detection_type": d.detection_type.to_string(),
+                        "name": &d.name,
+                        "version": &d.version,
+                        "details": &d.details,
+                        "confidence": d.confidence.to_string(),
+                    })
+                })
+                .collect();
+            if let Value::Object(ref mut map) = payload {
+                map.insert(
+                    "detections".to_string(),
+                    Value::Array(detections),
+                );
+            }
+        }
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "path": binary.path,
-                "format": binary.format,
-                "arch": arch_json,
-                "bits": bits,
-                "entry": format!("0x{:x}", binary.entry_point),
-                "image_base": format!("0x{:x}", binary.image_base),
-                "sections": binary.sections.len(),
-                "functions": counts.functions,
-                "imports": counts.imports,
-                "exports": counts.exports,
-            }))
-            .map_err(|e| io::Error::new(
+            serde_json::to_string_pretty(&payload).map_err(|e| io::Error::new(
                 io::ErrorKind::Other,
                 format!("JSON serialization failed: {}", e)
             ))?
@@ -97,8 +125,28 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
         )?;
         writeln!(
             stdout,
-            "╚══════════════════════════════════════════════════════════╝"
+            "\x1b[1;36m╚══════════════════════════════════════════════════════════╝\x1b[0m"
         )?;
+
+        if include_detections {
+            let dr = detector::detect(binary);
+            writeln!(stdout)?;
+            writeln!(
+                stdout,
+                "\x1b[1;36m──────────────────────────────────────────────────────────\x1b[0m"
+            )?;
+            writeln!(stdout, "\x1b[1;35mDetections\x1b[0m (heuristics + DiE)")?;
+            if dr.detections.is_empty() {
+                writeln!(stdout, "  (none)")?;
+            } else {
+                for d in &dr.detections {
+                    writeln!(stdout, "  {}", d.display())?;
+                    if let Some(ref details) = d.details {
+                        writeln!(stdout, "    {}", truncate(details, 72))?;
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -34,7 +34,7 @@ src/
 | `--lane` | Sentinel lane name (e.g. `nir`; `preview` aliases to `nir`) |
 | `--release` / `--no-build` | How `fission_cli` is resolved under `target/` |
 | `--fission-bin` | Explicit `fission_cli` path |
-| `--manifest` | Override `benchmark/config/automation/sentinel_sets.toml` |
+| `--manifest` | Override default `crates/fission-automation/config/sentinel_sets.toml` |
 | `--baseline` | Baseline `summary.json` for deltas + perf gate (optional) |
 | `--update-latest` / `--no-update-latest` | Copy run into `benchmark/artifacts/automation/latest/<lane>/` |
 | `--run-profile` | `fast` / `mid` / `full` — adjusts limits/timeouts |
@@ -50,7 +50,7 @@ Heavy workflow builds `fission-cli` (release), runs crate tests, then a **fast**
 
 ## Related config / paths
 
-- Sentinel manifests: `benchmark/config/automation/sentinel_sets.toml`
+- Sentinel manifests (default): `crates/fission-automation/config/sentinel_sets.toml`
 - Automation artifacts: `benchmark/artifacts/automation/`
 - Full benchmark runner: `benchmark/full_benchmark/`
 

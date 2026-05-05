@@ -7,7 +7,7 @@ use super::schema::PreviewCandidateEntry;
 use super::summary::{
     canonicalize_nir_failure_kind, pcode_metrics, preview_block_detail, preview_block_signature,
 };
-use fission_pcode::NirBuildStats;
+use fission_decompiler::NirBuildStats;
 
 fn build_preview_candidate_entry(
     decomp: &mut DecompilerNative,

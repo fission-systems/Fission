@@ -1,4 +1,4 @@
-use fission_decompiler_core::{
+use fission_decompiler::{
     PreviewWorkerRequest, PreviewWorkerResponse, execute_preview_worker,
 };
 use std::io::{self, Read, Write};

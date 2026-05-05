@@ -30,5 +30,5 @@ indexmap = "2"
 
 [dev-dependencies]
 criterion = "0.5"
-insta = "1.47"
+insta = { version = "1.47", features = ["yaml"] }
 petgraph = "0.8"

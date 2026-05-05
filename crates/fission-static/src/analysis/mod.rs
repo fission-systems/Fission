@@ -3,7 +3,6 @@
 //! Contains decompilation, disassembly, binary loading, patching, detection, CFG analysis, and xrefs.
 
 pub mod callgraph;
-pub mod cfg;
 pub mod decomp;
 pub mod function_discovery;
 pub mod optimizer;
@@ -18,14 +17,7 @@ pub use fission_loader::{
     detect,
 };
 
-pub use fission_pcode as pcode;
-
 pub use callgraph::{CallEdge, CallGraph};
-pub use cfg::{
-    BasicBlock, BlockEdge, CfgAnalysis, CfgBuilder, CfgError, CfgMetrics, CfgResult, CfgVisualizer,
-    ComplexityAnalyzer, ControlFlowGraph, DominatorTree, DotOptions, EdgeKind, Loop, LoopAnalyzer,
-    LoopKind,
-};
 pub use function_discovery::{
     FunctionDiscoveryProfile, FunctionDiscoveryReport, discover_functions_with_runtime,
 };

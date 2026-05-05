@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
-use fission_pcode::NirBuildStats;
+use fission_decompiler::NirBuildStats;
 
 fn slot_alias_candidate(code: &str) -> bool {
     code.contains("slot_")

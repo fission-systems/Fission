@@ -13,14 +13,14 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-automation`](../crates/fission-automation) | Quality lanes (`nir-check`), reporting |
 | [`crates/fission-core`](../crates/fission-core) | Shared core types/utilities |
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols |
-| [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, printer |
+| [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printer |
 | [`crates/fission-signatures`](../crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](../crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](../crates/fission-dynamic) | Dynamic analysis support |
 | [`crates/fission-ttd`](../crates/fission-ttd) | Time-travel / trace-adjacent support |
 | [`crates/fission-plugin`](../crates/fission-plugin) | Plugin surface |
 | [`crates/fission-cli`](../crates/fission-cli) | CLI product (`fission_cli`) |
-| [`crates/fission-decompiler-core`](../crates/fission-decompiler-core) | Decompilation orchestration, routing, pipeline glue |
+| [`crates/fission-decompiler`](../crates/fission-decompiler) | Decompilation orchestration, Rust-Sleigh bridge, routing/workers |
 | [`crates/fission-tauri/src-tauri`](../crates/fission-tauri/src-tauri) | Tauri backend crate (workspace member) |
 | [`crates/fission-sleigh`](../crates/fission-sleigh) | Sleigh decode/lift; CFG skeleton |
 

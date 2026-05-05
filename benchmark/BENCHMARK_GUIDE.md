@@ -100,7 +100,8 @@ Config roots:
 - [`benchmark/config/benchmark_corpus/smoke_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/smoke_corpus.json)
 - [`benchmark/config/benchmark_corpus/release_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/release_corpus.json)
 - [`benchmark/config/benchmark_corpus/parity_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/parity_corpus.json)
-- [`benchmark/config/automation/sentinel_sets.toml`](/Users/sjkim1127/Fission/benchmark/config/automation/sentinel_sets.toml)
+- [`crates/fission-automation/config/sentinel_sets.toml`](../crates/fission-automation/config/sentinel_sets.toml) (default `nir-check` manifest)
+- [`benchmark/config/automation/README.md`](config/automation/README.md) (pointer / layout note)
 
 Artifact roots:
 

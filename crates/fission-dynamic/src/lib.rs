@@ -12,7 +12,7 @@
 //! | `--features interactive_runtime` | Full interactive stack (Tokio, plugin facade, OS helpers): **`nix` on Linux**, **`windows` on Windows**. Expect longer builds. |
 //! | `--features unpacker_runtime` | PE unpack path; **`windows` sys crates are intended for Windows targets** — `cargo check` on macOS has been observed to succeed; treat **Windows** as the primary OS for unpack validation. |
 //!
-//! Canonical decompiler crates (`fission-pcode`, `fission-sleigh`, `fission-decompiler-core`) must not depend on this crate.
+//! Canonical decompiler crates (`fission-pcode`, `fission-decompiler`, `fission-sleigh`) must not depend on this crate.
 
 #![allow(clippy::all)]
 

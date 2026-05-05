@@ -4,7 +4,7 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::services::runtime_decode::{decode_window_for_binary, hex_bytes};
 use crate::state::AppState;
-use fission_decompiler_core::{
+use fission_decompiler::{
     decompile_with_rust_sleigh, fallback_reason_with_kind, RustSleighDecompileConfig,
 };
 use fission_loader::loader::LoadedBinary;
@@ -31,7 +31,7 @@ fn decompile_rust_only(
     // Match [`fission_cli::decompile_rust_sleigh`]: same `RustSleighDecompileConfig` and `None`/`None`
     // decode/instruction overrides so lift + NIR output matches CLI for the same function.
     let mut config = RustSleighDecompileConfig::cli_defaults();
-    config.nir_mode = fission_decompiler_core::NirEngineMode::Nir;
+    config.nir_mode = fission_decompiler::NirEngineMode::Nir;
 
     let result = decompile_with_rust_sleigh(binary, address, name, &config, None, None)
         .map_err(CmdError::other)?;

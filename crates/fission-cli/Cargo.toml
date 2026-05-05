@@ -30,8 +30,7 @@ fission-core = { path = "../fission-core" }
 fission-script = { path = "../fission-script" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
-fission-decompiler-core = { path = "../fission-decompiler-core" }
-fission-pcode = { path = "../fission-pcode" }
+fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }
 rayon = { version = "1.10", optional = true }
 tracing = "0.1"

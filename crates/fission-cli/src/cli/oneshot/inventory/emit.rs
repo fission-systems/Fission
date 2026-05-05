@@ -8,7 +8,7 @@ use crate::cli::oneshot::function_select::{
     BatchFunctionSelection, select_batch_functions, select_explicit_functions,
     select_function_by_address, select_functions_from_addresses_file,
 };
-use fission_decompiler_core::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
+use fission_decompiler::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::FactStore;
 use std::fs::{self, OpenOptions};
@@ -35,9 +35,9 @@ use fission_static::analysis::decomp::{
 };
 
 #[cfg(not(feature = "native_decomp"))]
-use fission_decompiler_core::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
+use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
 #[cfg(not(feature = "native_decomp"))]
-use fission_pcode::{
+use fission_decompiler::{
     IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
 };
 #[cfg(not(feature = "native_decomp"))]

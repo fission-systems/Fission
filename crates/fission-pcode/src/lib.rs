@@ -1,7 +1,4 @@
-//! Fission P-code - Intermediate representation and optimizer
-//!
-//! This crate provides the P-code IR (intermediate representation) used for
-//! binary analysis and decompilation, along with optimization passes.
+//! Fission P-code — intermediate representation and optimizer.
 //!
 //! Pipeline stages and conventions live under [`crate::nir`] with directory guides in
 //! `crates/fission-pcode/src/nir/AGENTS.md` and child `*/AGENTS.md` files.
@@ -18,6 +15,7 @@
 pub mod arch;
 pub(crate) mod fast_hash;
 pub mod nir;
+pub mod cfg;
 mod pcode;
 pub mod prelude;
 

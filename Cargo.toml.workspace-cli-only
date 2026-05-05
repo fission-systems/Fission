@@ -11,6 +11,7 @@ members = [
     "crates/fission-core",
     "crates/fission-loader",
     "crates/fission-pcode",
+    "crates/fission-decompiler",
     "crates/fission-signatures",
     "crates/fission-static",
     "crates/fission-dynamic",

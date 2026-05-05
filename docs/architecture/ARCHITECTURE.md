@@ -6,9 +6,9 @@ Updated: 2026-04-15
 
 - Semantic owner: `fission-pcode`
 - Structuring owner: `fission-pcode::nir::structuring`
-- Orchestration owner: `fission-decompiler-core`
+- Orchestration owner: `fission-decompiler`
 - Facts and native preparation owner: `fission-static`
-- Printer and postprocess: consume-only
+- Printer surfaces: consume-only
 
 Ghidra parity gaps are tracked separately in
 `docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md`. That audit is reporting-only:
@@ -29,18 +29,22 @@ approximate P-code success.
 
 Structuring decisions must be made here. Downstream crates must not reconstruct semantic policy or region legality.
 
-### `fission-decompiler-core`
+### `fission-decompiler`
 
-`fission-decompiler-core` owns application-layer orchestration:
+`fission-decompiler` owns application-layer orchestration:
 
 - request/result contracts
 - engine selection
 - routing between legacy and NIR paths
 - type-context assembly from facts
 - worker execution and render orchestration
-- fallback policy and postprocess sequencing
+- Rust-Sleigh decode → NIR pipeline (`rust_sleigh`)
 
-It consumes canonical semantic policy from `fission-pcode`. It does not redefine legality or quality counters.
+It **re-exports** the `fission_pcode` IR surface for convenience and consumes canonical semantic policy from `fission-pcode`. It does not redefine legality or quality counters.
+
+### Cargo layering note
+
+`fission-sleigh` depends only on `fission-pcode` (IR types). Orchestration therefore lives in `fission-decompiler`, which depends on both `fission-pcode` and `fission-sleigh`, avoiding a workspace dependency cycle.
 
 ### `fission-static`
 

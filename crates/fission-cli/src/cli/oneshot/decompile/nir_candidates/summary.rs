@@ -1,7 +1,7 @@
 use super::super::*;
 use super::assessment::canonical_indirect_classification;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
-use fission_pcode::NirBuildStats;
+use fission_decompiler::NirBuildStats;
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()

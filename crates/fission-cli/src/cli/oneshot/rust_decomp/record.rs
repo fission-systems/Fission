@@ -1,5 +1,5 @@
 use fission_loader::loader::FunctionInfo;
-use fission_pcode::{NirBuildStats, NirHintStats};
+use fission_decompiler::{NirBuildStats, NirHintStats};
 
 #[derive(Clone, Copy)]
 pub(crate) struct RenderConfig {

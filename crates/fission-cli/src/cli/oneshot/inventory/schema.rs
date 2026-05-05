@@ -1,4 +1,4 @@
-use fission_pcode::NirBuildStats;
+use fission_decompiler::NirBuildStats;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;

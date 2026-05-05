@@ -29,11 +29,10 @@ tokio = { version = "1", features = ["full"] }
 fission-core = { path = "../../fission-core" }
 fission-loader = { path = "../../fission-loader" }
 fission-static = { path = "../../fission-static" }
-fission-decompiler-core = { path = "../../fission-decompiler-core" }
+fission-decompiler = { path = "../../fission-decompiler" }
 fission-dynamic = { path = "../../fission-dynamic", features = ["interactive_runtime"] }  # needed for plugin/debug/runtime UI
 fission-ttd = { path = "../../fission-ttd" }
 fission-plugin = { path = "../../fission-plugin", features = ["interactive_runtime"] }
-fission-pcode = { path = "../../fission-pcode" }
 fission-sleigh = { path = "../../fission-sleigh" }
 fission-signatures = { path = "../../fission-signatures" }
 tracing = "0.1"

@@ -59,9 +59,9 @@ License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./
 | Component | Role | Ownership |
 |-----------|------|-----------|
 | **fission-sleigh** | Instruction decode, lift semantics, CFG skeleton | Sleigh layer |
-| **fission-pcode** | Canonical IR, NIR/HIR, structuring, pseudocode printer | IR/Structure layers |
+| **fission-pcode** | Canonical IR, NIR/HIR, structuring, CFG analysis, pseudocode printer | IR / structure layers |
 | **fission-static** | Static facts, native helpers, analysis services | Analysis layer |
-| **fission-decompiler-core** | Orchestration, routing, postprocess pipeline | Workflow layer |
+| **fission-decompiler** | Orchestration, routing/workers, Rust-Sleigh bridge (re-exports `fission_pcode`) | Workflow layer |
 | **fission-loader** | Binary format parsing, symbols, sections, strings | Binary layer |
 | **fission-signatures** | Function signatures, type signatures, identifier data | Data layer |
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
@@ -141,9 +141,9 @@ PE x64 has the strongest direct NIR coverage. Other architectures and formats ex
 | Crate | Responsibility | Key Artifacts |
 |-------|-----------------|----------------|
 | [`crates/fission-sleigh`](./crates/fission-sleigh) | Instruction decode, semantics lift, CFG skeleton | Sleigh bindings, lift contracts |
-| [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR layers, structuring, printing | P-Code IR, graph reduction, pseudocode output |
+| [`crates/fission-pcode`](./crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printing | P-Code IR, graph reduction, pseudocode output |
 | [`crates/fission-static`](./crates/fission-static) | Static fact generation, prepare helpers, analysis | Dominance, SCC, value analysis |
-| [`crates/fission-decompiler-core`](./crates/fission-decompiler-core) | Orchestration, routing, postprocess pipeline | End-to-end workflow |
+| [`crates/fission-decompiler`](./crates/fission-decompiler) | Orchestration, routing/workers, Rust-Sleigh glue | End-to-end workflow |
 
 ### Supporting Modules
 

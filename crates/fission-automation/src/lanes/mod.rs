@@ -37,10 +37,9 @@ struct SourceInventoryFile {
     sources: Vec<SourceMeta>,
 }
 
-pub fn default_manifest_path(root: &Path) -> PathBuf {
-    root.join("benchmark")
+pub fn default_manifest_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("config")
-        .join("automation")
         .join("sentinel_sets.toml")
 }
 
@@ -51,11 +50,9 @@ pub fn normalize_lane_name(lane_name: &str) -> (&str, bool) {
     }
 }
 
-pub fn default_source_inventory_path(root: &Path) -> Option<PathBuf> {
-    let candidate = root
-        .join("benchmark")
+pub fn default_source_inventory_path() -> Option<PathBuf> {
+    let candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("config")
-        .join("automation")
         .join("preview_explicit_source_inventory.json");
     candidate.exists().then_some(candidate)
 }

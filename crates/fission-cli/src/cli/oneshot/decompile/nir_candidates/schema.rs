@@ -1,5 +1,5 @@
 use super::super::*;
-use fission_pcode::NirBuildStats;
+use fission_decompiler::NirBuildStats;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct NirCandidateInventory {

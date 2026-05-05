@@ -27,6 +27,8 @@ pub struct OneShotArgs {
     pub sections: bool,
     pub imports: bool,
     pub exports: bool,
+    /// Run packer/compiler/language detection (heuristics + DiE signatures) for `info`.
+    pub info_detections: bool,
     pub strings: Option<usize>,
     pub disasm: Option<u64>,
     pub disasm_function: Option<u64>,
@@ -74,6 +76,7 @@ impl Default for OneShotArgs {
             sections: false,
             imports: false,
             exports: false,
+            info_detections: false,
             strings: None,
             disasm: None,
             disasm_function: None,
@@ -203,11 +206,15 @@ enum CliCommand {
 #[derive(Args, Debug)]
 #[command(
     long_about = "Show binary metadata plus optional section/import/export inventories.\n\nUse this command for quick facts about the loaded binary without entering the decompilation path.",
-    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json"
+    after_help = "Examples:\n  fission_cli info app.exe\n  fission_cli info app.exe --sections\n  fission_cli info app.exe --imports --json\n  fission_cli info app.exe --detections --json"
 )]
 struct InfoArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
+
+    /// Run integrated detection (section/import/string heuristics plus Detect It Easy signatures)
+    #[arg(long)]
+    detections: bool,
 
     /// Show section information
     #[arg(short = 'S', long)]
@@ -806,6 +813,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.sections = info.sections;
                     args.imports = info.imports;
                     args.exports = info.exports;
+                    args.info_detections = info.detections;
                     args.info = !args.sections && !args.imports && !args.exports;
                     args
                 }
@@ -920,6 +928,7 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         sections: cli.sections,
         imports: cli.imports,
         exports: cli.exports,
+        info_detections: false,
         strings: cli.strings,
         disasm: cli.disasm,
         disasm_function: cli.disasm_function,
@@ -1057,6 +1066,21 @@ mod tests {
         assert_eq!(parsed.legacy_warning, None);
         assert!(parsed.args.info);
         assert_eq!(parsed.args.binary, PathBuf::from("bin.exe"));
+        assert!(!parsed.args.info_detections);
+    }
+
+    #[test]
+    fn canonical_info_detections_flag_sets_info_detections() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "info",
+            "bin.exe",
+            "--detections",
+            "--json",
+        ]);
+        assert!(parsed.args.info);
+        assert!(parsed.args.json);
+        assert!(parsed.args.info_detections);
     }
 
     #[test]

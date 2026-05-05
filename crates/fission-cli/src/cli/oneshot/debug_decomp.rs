@@ -5,7 +5,7 @@
 //! heuristic [`owner_buckets`] for benchmarks.
 
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{NirBuildStats, NirHintStats};
+use fission_decompiler::{NirBuildStats, NirHintStats};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;

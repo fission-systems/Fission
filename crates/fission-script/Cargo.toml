@@ -12,13 +12,13 @@ categories = ["development-tools"]
 
 [features]
 default = []
-decomp_debug = ["dep:fission-decompiler-core"]
+decomp_debug = ["dep:fission-decompiler"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static", default-features = false }
-fission-decompiler-core = { path = "../fission-decompiler-core", optional = true }
+fission-decompiler = { path = "../fission-decompiler", optional = true }
 rhai = { version = "1.24", features = ["sync"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

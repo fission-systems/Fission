@@ -1,4 +1,4 @@
-use fission_pcode::{IndirectControlClassification, NirBuildStats};
+use fission_decompiler::{IndirectControlClassification, NirBuildStats};
 
 pub(crate) fn canonical_indirect_classification(
     stats: Option<&NirBuildStats>,
