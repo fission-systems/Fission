@@ -97,24 +97,48 @@ impl Default for PathConfig {
     }
 }
 
+fn workspace_signatures_base(workspace_root: &PathBuf) -> Option<PathBuf> {
+    let direct = workspace_root.join("signatures");
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    let legacy = workspace_root.join("utils").join("signatures");
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    None
+}
+
+fn workspace_gdt_dir(workspace_root: &PathBuf) -> Option<PathBuf> {
+    let direct = workspace_root
+        .join("signatures")
+        .join("typeinfo")
+        .join("win32");
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    let legacy = workspace_root
+        .join("utils")
+        .join("signatures")
+        .join("typeinfo")
+        .join("win32");
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    None
+}
+
 impl PathConfig {
     /// Detect paths based on current working directory and environment
     pub fn detect() -> Self {
         let workspace_root = crate::core::utils::find_workspace_root("FISSION_ROOT");
 
-        let signatures_base = workspace_root.as_ref().and_then(|root| {
-            let direct = root.join("signatures");
-            if direct.exists() {
-                return Some(direct);
-            }
-
-            let legacy = root.join("utils").join("signatures");
-            if legacy.exists() {
-                return Some(legacy);
-            }
-
-            None
-        });
+        let signatures_base = crate::core::resource_roots::resolve_signatures_base_from_bundles()
+            .or_else(|| workspace_root.as_ref().and_then(workspace_signatures_base));
 
         let fid_dir = signatures_base
             .as_ref()
@@ -122,25 +146,11 @@ impl PathConfig {
             .filter(|p| p.exists())
             .or_else(|| crate::core::utils::find_existing_dir(FID_SEARCH_DIRS));
 
-        let gdt_dir = workspace_root
+        let gdt_dir = signatures_base
             .as_ref()
-            .and_then(|root| {
-                let direct = root.join("signatures").join("typeinfo").join("win32");
-                if direct.exists() {
-                    return Some(direct);
-                }
-
-                let legacy = root
-                    .join("utils")
-                    .join("signatures")
-                    .join("typeinfo")
-                    .join("win32");
-                if legacy.exists() {
-                    return Some(legacy);
-                }
-
-                None
-            })
+            .map(|base| base.join("typeinfo").join("win32"))
+            .filter(|p| p.exists())
+            .or_else(|| workspace_root.as_ref().and_then(workspace_gdt_dir))
             .or_else(|| crate::core::utils::find_existing_dir(GDT_SEARCH_PREFIXES));
 
         let die_dir = signatures_base
@@ -163,6 +173,54 @@ impl PathConfig {
             patterns_dir,
             workspace_root,
         }
+    }
+
+    /// `win_api_signatures.txt` (pipe-separated API signatures), if present.
+    pub fn get_win_api_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "win_api_signatures.txt";
+        if let Some(ref gdt_dir) = self.gdt_dir {
+            let path = gdt_dir.join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        if let Some(ref base) = self.signatures_base {
+            let path = base
+                .join("typeinfo")
+                .join("win32")
+                .join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("win32")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
+    /// JSON file under the Windows typeinfo corpus (e.g. `base_types.json`).
+    pub fn get_win32_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        if let Some(ref gdt_dir) = self.gdt_dir {
+            let path = gdt_dir.join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("win32")
+                .join(filename);
+            path.exists().then_some(path)
+        })
     }
 
     /// Find a file within search paths

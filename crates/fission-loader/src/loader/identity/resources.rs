@@ -92,9 +92,20 @@ fn die_mirror_root_for(paths: &PathConfig) -> Option<PathBuf> {
             return Some(candidate);
         }
     }
-    let candidate = paths
-        .workspace_root
-        .as_ref()?
+    if let Some(ref dd) = paths.die_dir {
+        let candidate = dd.join("detect-it-easy");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    if let Some(ref sb) = paths.signatures_base {
+        let candidate = sb.join("die").join("detect-it-easy");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    let root = paths.workspace_root.as_ref()?;
+    let candidate = root
         .join("utils")
         .join("signatures")
         .join("die")
@@ -123,15 +134,7 @@ fn collect_sg_files_bounded(dir: &Path, out: &mut Vec<PathBuf>, max_files: usize
 }
 
 fn win_api_signatures_path(paths: &PathConfig) -> Option<PathBuf> {
-    let filename = "win_api_signatures.txt";
-    if let Some(gdt_dir) = &paths.gdt_dir {
-        let p = gdt_dir.join(filename);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    let p = paths.workspace_root.as_ref()?.join("utils").join("signatures").join("typeinfo").join("win32").join(filename);
-    p.exists().then_some(p)
+    paths.get_win_api_signatures_path()
 }
 
 fn fid_bf_count_bounded(fid_dir: &Path) -> usize {

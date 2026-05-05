@@ -87,7 +87,7 @@ Fission maintains comprehensive, role-based documentation:
 - [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
 - [`docs/onboarding/FIRST_30_MINUTES.md`](./docs/onboarding/FIRST_30_MINUTES.md) — Contributor-oriented first-session checklist (repository docs)
 - [`docs/EVALUATION.md`](./docs/EVALUATION.md) — External headless evaluation path for CLI-first users
-- [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide
+- [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide (runtime bundle: `FISSION_RESOURCE_ROOT`, global `--resource-root`, `resources status`; see § *Runtime resource bundle*)
 
 ### Release & Changelog
 - [`docs/VERSIONING.md`](./docs/VERSIONING.md) — SemVer rules and tagging (`v*.*.*`)

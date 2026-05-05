@@ -56,6 +56,7 @@ Read the nearest child file before editing those areas.
 | Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
+| Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
@@ -101,6 +102,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 
 - For NIR/structuring changes: targeted tests → `cargo test -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/Tauri surfaces as needed).
+- For resource path / bundle resolution changes: `cargo test -p fission-core` and smoke `fission_cli resources status`.
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/full_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.

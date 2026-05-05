@@ -15,6 +15,7 @@ pub mod errors;
 pub mod logging;
 pub mod models;
 pub mod path_config;
+pub mod resource_roots;
 pub mod prelude;
 pub mod settings;
 pub mod toml_config;

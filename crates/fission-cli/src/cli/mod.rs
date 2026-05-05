@@ -5,6 +5,7 @@
 
 pub mod oneshot;
 pub mod output;
+pub mod resources;
 
 mod args;
 

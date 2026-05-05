@@ -137,21 +137,7 @@ impl ApiTypeDatabase {
 }
 
 fn api_signature_path() -> Option<PathBuf> {
-    let filename = "win_api_signatures.txt";
-    if let Some(gdt_dir) = &PATHS.gdt_dir {
-        let path = gdt_dir.join(filename);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    let root = PATHS.workspace_root.as_ref()?;
-    let path = root
-        .join("utils")
-        .join("signatures")
-        .join("typeinfo")
-        .join("win32")
-        .join(filename);
-    path.exists().then_some(path)
+    PATHS.get_win_api_signatures_path()
 }
 
 #[cfg(test)]

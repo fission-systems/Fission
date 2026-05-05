@@ -13,16 +13,11 @@ use fission_core::PATHS;
 use serde::Deserialize;
 
 fn win32_typeinfo_json_path(filename: &str) -> PathBuf {
-    let root = PATHS.workspace_root.as_ref().unwrap_or_else(|| {
+    PATHS.get_win32_typeinfo_json_path(filename).unwrap_or_else(|| {
         panic!(
-            "fission-signatures win_types: workspace root unknown; cannot load utils/signatures/typeinfo/win32/{filename}"
+            "fission-signatures win_types: missing typeinfo JSON `{filename}` (expected under PATHS.gdt_dir or workspace utils/signatures/typeinfo/win32/)"
         )
-    });
-    root.join("utils")
-        .join("signatures")
-        .join("typeinfo")
-        .join("win32")
-        .join(filename)
+    })
 }
 
 fn read_typeinfo_json(filename: &str) -> String {

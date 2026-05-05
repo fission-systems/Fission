@@ -20,8 +20,14 @@ pub use crate::core::settings;
 pub use crate::core::config::{LogConfig, LogLevel};
 pub use crate::core::{CONFIG, FissionError, PATHS, Result};
 
-// Commonly used standalone utilities
 pub use crate::core::path_config::find_sla_dir;
+
+/// Runtime resource bundle roots (`--resource-root`, `FISSION_RESOURCE_ROOT`, install layouts).
+pub mod resource_roots {
+    pub use crate::core::resource_roots::*;
+}
+
+// Commonly used standalone utilities
 pub use crate::core::utils::{
     format_addr, normalize_named_type_identity, parse_address, sanitize_symbol_name,
 };

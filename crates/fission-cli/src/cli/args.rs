@@ -157,6 +157,10 @@ pub struct ParsedOneShotArgs {
 pub enum ParsedInvocation {
     OneShot(ParsedOneShotArgs),
     Script(ScriptInvocation),
+    ResourcesStatus {
+        json: bool,
+        verbose: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +202,10 @@ struct CommonBinaryOutputArgs {
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
+    /// Override resource bundle root (signatures, detectors). Also read from FISSION_RESOURCE_ROOT.
+    #[arg(long = "resource-root", global = true, value_name = "DIR")]
+    resource_root: Option<PathBuf>,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -218,6 +226,8 @@ enum CliCommand {
     Xrefs(XrefsArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
+    /// Inspect resolved resource paths and bundle-root candidates
+    Resources(ResourcesArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
     Script(ScriptArgs),
 }
@@ -422,6 +432,28 @@ struct XrefsArgs {
     #[arg(long, value_parser = parse_hex_address)]
     function: Option<u64>,
 
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Inspect bundled runtime resources (signatures, type corpora, detectors).\n\nUse `resources status` to see candidate bundle roots and paths resolved via `PATHS`.",
+    after_help = "Examples:\n  fission_cli resources status\n  fission_cli resources status --json\n  fission_cli --resource-root /opt/fission-data resources status --json"
+)]
+struct ResourcesArgs {
+    #[command(subcommand)]
+    command: ResourcesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ResourcesCommand {
+    /// Show candidate bundle roots and resolved resource paths
+    Status(ResourcesStatusArgs),
+}
+
+#[derive(Args, Debug)]
+struct ResourcesStatusArgs {
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -802,13 +834,32 @@ struct LegacyCliArgs {
     emit_function_facts_inventory: bool,
 }
 
+const CANONICAL_SUBCOMMANDS: &[&str] = &[
+    "info",
+    "list",
+    "disasm",
+    "decomp",
+    "strings",
+    "xrefs",
+    "inventory",
+    "resources",
+    "script",
+];
+
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
     if argv.len() <= 1 {
         return true;
     }
 
+    // Global flags may precede the subcommand (`fission_cli --resource-root DIR resources status`).
+    if argv.iter().any(|arg| {
+        arg.to_str()
+            .is_some_and(|s| CANONICAL_SUBCOMMANDS.contains(&s))
+    }) {
+        return true;
+    }
+
     match argv[1].to_str() {
-        Some("info" | "list" | "disasm" | "decomp" | "strings" | "xrefs" | "inventory" | "script") => true,
         Some("help" | "--help" | "-h" | "--version" | "-V") => true,
         _ => false,
     }
@@ -825,7 +876,9 @@ where
 {
     let argv: Vec<OsString> = iter.into_iter().map(Into::into).collect();
     if should_use_canonical_parser(&argv) {
-        normalize_canonical(CliArgs::parse_from(argv))
+        let cli = CliArgs::parse_from(argv);
+        fission_core::resource_roots::set_cli_resource_bundle_root(cli.resource_root.clone());
+        normalize_canonical(cli)
     } else {
         ParsedInvocation::OneShot(normalize_legacy(LegacyCliArgs::parse_from(argv)))
     }
@@ -850,6 +903,12 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
             };
             ParsedInvocation::Script(invocation)
         }
+        CliCommand::Resources(resources) => match resources.command {
+            ResourcesCommand::Status(s) => ParsedInvocation::ResourcesStatus {
+                json: s.common.json,
+                verbose: s.common.verbose,
+            },
+        },
         cmd => {
             let args = match cmd {
                 CliCommand::Info(info) => {
@@ -966,6 +1025,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     }
                 },
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
+                CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };
             ParsedInvocation::OneShot(ParsedOneShotArgs {
                 args,
@@ -1057,6 +1117,9 @@ mod tests {
         match parse_oneshot_args_from(args.iter().copied()) {
             ParsedInvocation::OneShot(p) => p,
             ParsedInvocation::Script(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::ResourcesStatus { .. } => {
+                panic!("expected one-shot canonical parse")
+            }
         }
     }
 
@@ -1064,6 +1127,9 @@ mod tests {
         match parse_oneshot_args_from(args.iter().copied()) {
             ParsedInvocation::OneShot(p) => p,
             ParsedInvocation::Script(_) => panic!("legacy parser cannot emit script"),
+            ParsedInvocation::ResourcesStatus { .. } => {
+                panic!("legacy parser cannot emit resources status")
+            }
         }
     }
 
@@ -1115,6 +1181,44 @@ mod tests {
             }
             _ => panic!("expected script invocation"),
         }
+    }
+
+    #[test]
+    fn canonical_resources_status_parsing() {
+        let inv = parse_oneshot_args_from(["fission_cli", "resources", "status", "--json"]);
+        match inv {
+            ParsedInvocation::ResourcesStatus { json, verbose } => {
+                assert!(json);
+                assert!(!verbose);
+            }
+            _ => panic!("expected ResourcesStatus"),
+        }
+    }
+
+    #[test]
+    fn global_resource_root_sets_override() {
+        let tmp = "/tmp/fission-res-root-test";
+        let inv = parse_oneshot_args_from([
+            "fission_cli",
+            "--resource-root",
+            tmp,
+            "resources",
+            "status",
+        ]);
+        match &inv {
+            ParsedInvocation::ResourcesStatus { json, verbose } => {
+                assert!(!*json);
+                assert!(!*verbose);
+            }
+            _ => panic!("expected ResourcesStatus, got {inv:?}"),
+        }
+        assert_eq!(
+            fission_core::resource_roots::cli_resource_bundle_root(),
+            Some(PathBuf::from(tmp))
+        );
+
+        let _cleanup = parse_oneshot_args_from(["fission_cli", "info", "app.exe"]);
+        assert_eq!(fission_core::resource_roots::cli_resource_bundle_root(), None);
     }
 
     #[test]

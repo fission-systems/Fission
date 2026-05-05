@@ -65,6 +65,25 @@ pub fn main() -> Result<()> {
 fn run() -> Result<()> {
     let parsed = parse_oneshot_args();
     match parsed {
+        ParsedInvocation::ResourcesStatus { json, verbose } => {
+            let mut logging_options =
+                fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
+            logging_options.level = if verbose { "info" } else { "warn" }.to_string();
+            logging_options.include_span_events = verbose;
+            fission_core::logging::init_with_options(logging_options);
+
+            if let Err(error) = crate::cli::resources::print_resources_status(json) {
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|err| err.kind() == io::ErrorKind::BrokenPipe)
+                {
+                    return Ok(());
+                }
+                let span_trace = fission_core::logging::capture_span_trace();
+                return Err(error.context(format!("span trace:\n{span_trace}")));
+            }
+            Ok(())
+        }
         ParsedInvocation::Script(invocation) => {
             let mut logging_options =
                 fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);

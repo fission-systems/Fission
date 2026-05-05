@@ -22,7 +22,10 @@ The CLI is intentionally split into explicit subcommands:
 - `disasm`
 - `decomp`
 - `strings`
+- `xrefs`
 - `inventory`
+- `resources` (resolved signature / detector bundle diagnostics)
+- `script` (Rhai)
 
 Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
 
@@ -73,6 +76,31 @@ fission_cli inventory <SUBCOMMAND> ...
 ```
 
 `inventory` is intentionally separated from the normal `decomp` path so the human-facing surface does not keep growing with batch-only flags.
+
+---
+
+## Runtime resource bundle
+
+FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through **`fission_core::PATHS`** (`PathConfig::detect` in [`crates/fission-core/src/core/path_config.rs`](../crates/fission-core/src/core/path_config.rs), with bundle-root probing in [`resource_roots.rs`](../crates/fission-core/src/core/resource_roots.rs)). In this repository the canonical checked-in tree remains **`utils/signatures`**; installs may ship the same layout under a bundle root such as **`{bundle}/signatures/`**.
+
+### Overrides
+
+| Mechanism | Notes |
+|-----------|--------|
+| **`--resource-root <DIR>`** | Global CLI flag (may appear **before** the subcommand). Stored via `fission_core::resource_roots::set_cli_resource_bundle_root` during canonical parsing. Must be applied **before the first read of `PATHS`** in-process (`PATHS` is lazily initialized once). |
+| **`FISSION_RESOURCE_ROOT`** | Environment variable pointing at a bundle root directory (typically containing a `signatures` subdirectory). |
+
+After those, detection considers executable-adjacent paths (`fission-data`, `share/fission`, common Unix prefixes), user data directories (`XDG_DATA_HOME`, platform data dirs), then existing workspace discovery (`FISSION_ROOT` / upward markers with `signatures` or `utils/signatures`), then legacy CWD-relative search paths. Missing optional corpora keep prior **degraded** behavior (optional `None` paths); pipelines must not fail closed solely because DiE or type corpora are absent.
+
+### Inspect resolution
+
+```bash
+fission_cli resources status
+fission_cli resources status --json
+fission_cli --resource-root /path/to/fission-data resources status --json
+```
+
+Use **`--json`** when automation needs stable fields (`resource_roots`, `resources`).
 
 ---
 
