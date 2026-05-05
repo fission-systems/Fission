@@ -47,6 +47,7 @@ pub fn parse_fidbf(path: &Path) -> Result<FidbfDatabase, FidbfParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_core::resources::ResourceProvider;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(file_name: &str) -> std::path::PathBuf {
@@ -73,11 +74,14 @@ mod tests {
 
     #[test]
     fn detects_raw_ghidra_fidbf() {
-        let path = std::path::Path::new("../../utils/signatures/fid/vs2019_x64.fidbf");
+        let Some(path) = ResourceProvider::global().paths().get_fid_path(true, Some("vs2019"))
+        else {
+            return;
+        };
         if !path.exists() {
             return;
         }
-        let parsed = parse_fidbf(path).expect("parse raw fidbf records");
+        let parsed = parse_fidbf(&path).expect("parse raw fidbf records");
         assert!(!parsed.libraries.is_empty());
         assert!(!parsed.functions.is_empty());
         assert_eq!(parsed.libraries[0].language_id, "x86:LE:64:default");
@@ -118,15 +122,18 @@ mod tests {
 
     #[test]
     fn packed_fidb_is_typed_unsupported() {
-        let path =
-            std::path::Path::new("../../utils/signatures/fidb_java/gcc-x86.LE.64.default.fidb");
-        if !path.exists() {
-            return;
-        }
-        let err = parse_fidbf(path).expect_err("packed fidb should be typed unsupported");
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("packed_stub_{ts}.fidb"));
+        std::fs::write(&path, b"x").expect("write stub fidb");
+        let err = parse_fidbf(&path).expect_err("packed fidb should be typed unsupported");
         assert!(matches!(
             err,
             FidbfParseError::UnsupportedPackedFidDatabase(_)
         ));
+
+        let _ = std::fs::remove_file(path);
     }
 }

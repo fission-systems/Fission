@@ -1,6 +1,6 @@
 use super::hash::{FidHashError, FidHashQuad, FidHashUnit, FidHasher};
 use crate::fidbf::{FidbfDatabase, FidbfMatch, FidbfParseError, parse_fidbf};
-use fission_core::PATHS;
+use fission_core::resources::ResourceProvider;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -33,7 +33,9 @@ impl FidDatabaseSet {
         format: Option<&str>,
         is_64bit: bool,
     ) -> Self {
-        let paths = PATHS.get_preferred_fid_paths(is_64bit, format, compiler_id);
+        let paths = ResourceProvider::global()
+            .paths()
+            .get_preferred_fid_paths(is_64bit, format, compiler_id);
         let mut databases = Vec::new();
         let mut errors = Vec::new();
         for path in paths {

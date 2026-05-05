@@ -15,6 +15,6 @@ pub fn win_api_prototype_hint_json(symbol_or_import_name: &str) -> Option<Value>
         "win_api_flat": flat,
         "param_count": sig.params.len(),
         "return_type": sig.return_type,
-        "source": "utils/signatures_win_api",
+        "source": "signatures_win_api_catalog",
     }))
 }

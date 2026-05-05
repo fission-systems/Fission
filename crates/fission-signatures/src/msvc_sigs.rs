@@ -2,9 +2,9 @@
 //!
 //! Collection of binary patterns for identifying MSVC CRT functions,
 //! standard library functions, and common patterns in Windows binaries.
-//! Data is loaded from the repository `utils/signatures/patterns` tree.
+//! Data is loaded from the resolved patterns directory (`ResourceProvider`).
 
-use fission_core::PATHS;
+use fission_core::resources::ResourceProvider;
 use serde::Deserialize;
 use std::fs;
 
@@ -55,10 +55,13 @@ fn crt_pattern_to_vec(pattern: &str, mask: &str) -> Vec<Option<u8>> {
         .collect()
 }
 
-/// Load MSVC/CRT pattern signatures from `utils/signatures/patterns`.
+/// Load MSVC/CRT pattern signatures from the resolved patterns corpus.
 pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     let pattern_file = ["msvc", "_x64", "_crt", ".json"].concat();
-    let Some(path) = PATHS.get_pattern_file(&pattern_file) else {
+    let Some(path) = ResourceProvider::global()
+        .paths()
+        .get_pattern_file(&pattern_file)
+    else {
         return;
     };
     let crt_json = fs::read_to_string(&path)

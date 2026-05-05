@@ -14,7 +14,7 @@ use super::super::wave_stats::{
 ///
 /// 1. Walk every `HirStmt::Assign { rhs: Call { target, args } }` and
 ///    `HirStmt::Expr(Call { target, args })`.
-/// 2. Look up `target` in the `utils/signatures` API type provider.
+/// 2. Look up `target` in the signatures API type provider.
 /// 3. For the return value: if there is a receiver binding (the lhs `Var` of
 ///    the Assign), update `NirBinding.ty` to the resolved return type.
 /// 4. For each argument: if the argument is a `Var(x)` and the corresponding

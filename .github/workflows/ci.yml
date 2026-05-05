@@ -29,6 +29,9 @@ jobs:
       - name: Ghidra + DIE corpus sanity
         run: python3 scripts/test/third_party_data_canary.py
 
+      - name: Resource path literal guard
+        run: bash scripts/test/check_resource_path_literals.sh
+
   # Step 1: Security & Lint (Ubuntu, ~10 min)
   security-check:
     name: 🔒 Security Check

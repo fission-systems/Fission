@@ -1,7 +1,8 @@
-//! Summarize configured signature corpora resolved via [`fission_core::PATHS`].
+//! Summarize configured signature corpora via [`fission_core::resources::ResourceProvider`].
 
 use super::model::IdentityResourceSummary;
 use fission_core::path_config::PathConfig;
+use fission_core::resources::ResourceProvider;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +12,7 @@ const MAX_FID_BF_ENUM: usize = 50_000;
 
 #[must_use]
 pub(super) fn summarize_identity_resources() -> IdentityResourceSummary {
-    summarize_identity_resources_for(&fission_core::PATHS)
+    summarize_identity_resources_for(ResourceProvider::global().paths())
 }
 
 #[must_use]
@@ -71,7 +72,7 @@ fn workspace_relative(paths: &PathConfig, p: &Path) -> Option<String> {
 }
 
 fn die_sg_file_count_bounded(paths: &PathConfig) -> Option<usize> {
-    let mirror = die_mirror_root_for(paths)?;
+    let mirror = paths.die_mirror_root()?;
 
     let mut acc = Vec::new();
     for child in ["db", "db_extra", "db_custom"] {
@@ -81,36 +82,6 @@ fn die_sg_file_count_bounded(paths: &PathConfig) -> Option<usize> {
         collect_sg_files_bounded(&mirror.join(child), &mut acc, MAX_SG_FILES_ENUM);
     }
     Some(acc.len())
-}
-
-fn die_mirror_root_for(paths: &PathConfig) -> Option<PathBuf> {
-    if let Some(die_json) = paths.get_die_signatures_path()
-        && let Some(die_dir) = die_json.parent()
-    {
-        let candidate = die_dir.join("detect-it-easy");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    if let Some(ref dd) = paths.die_dir {
-        let candidate = dd.join("detect-it-easy");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    if let Some(ref sb) = paths.signatures_base {
-        let candidate = sb.join("die").join("detect-it-easy");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    let root = paths.workspace_root.as_ref()?;
-    let candidate = root
-        .join("utils")
-        .join("signatures")
-        .join("die")
-        .join("detect-it-easy");
-    candidate.is_dir().then_some(candidate)
 }
 
 fn collect_sg_files_bounded(dir: &Path, out: &mut Vec<PathBuf>, max_files: usize) {

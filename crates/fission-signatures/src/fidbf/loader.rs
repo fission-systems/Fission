@@ -1,11 +1,13 @@
 use super::parser::{FidbfParseError, parse_fidbf};
 use super::types::FidbfDatabase;
-use fission_core::PATHS;
+use fission_core::resources::ResourceProvider;
 use std::path::PathBuf;
 
 /// Discover candidate `.fidbf` database paths for the target architecture.
 pub fn discover_fidbf_paths(is_64bit: bool) -> Vec<PathBuf> {
-    PATHS.get_all_fid_paths(is_64bit)
+    ResourceProvider::global()
+        .paths()
+        .get_all_fid_paths(is_64bit)
 }
 
 /// Parse all discovered `.fidbf` databases for the target architecture.

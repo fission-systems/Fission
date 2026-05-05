@@ -1,4 +1,4 @@
-//! Facade for signature resources under `utils/signatures`.
+//! Facade for signature resources resolved via [`fission_core::resources::ResourceProvider`].
 
 use crate::api_types::{ApiSignature, ApiTypeDatabase, ApiTypeError};
 use serde::Serialize;

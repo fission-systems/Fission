@@ -2,29 +2,35 @@
 //!
 //! Common Windows API structures for type annotation in decompiled code.
 //! Based on Windows SDK headers and ghidra-data community definitions.
-//! Canonical JSON lives under `utils/signatures/typeinfo/win32/`
-//! (`base_types.json`, `structures.json`), loaded at runtime via [`fission_core::PATHS`].
+//! Canonical JSON lives under the resolved signatures corpus (`ResourceProvider` / workspace layout).
+//! (`base_types.json`, `structures.json`), loaded via [`fission_core::resources::ResourceProvider`].
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use fission_core::PATHS;
+use fission_core::resources::ResourceProvider;
 use serde::Deserialize;
 
+fn resources() -> ResourceProvider {
+    ResourceProvider::global()
+}
+
 fn win32_typeinfo_json_path(filename: &str) -> PathBuf {
-    PATHS.get_win32_typeinfo_json_path(filename).unwrap_or_else(|| {
-        panic!(
-            "fission-signatures win_types: missing typeinfo JSON `{filename}` (expected under PATHS.gdt_dir or workspace utils/signatures/typeinfo/win32/)"
-        )
-    })
+    resources()
+        .win32_typeinfo_json_path(filename)
+        .unwrap_or_else(|| {
+            panic!(
+                "fission-signatures win_types: missing typeinfo JSON `{filename}` (configure bundle/workspace signatures or PATHS.gdt_dir)"
+            )
+        })
 }
 
 fn read_typeinfo_json(filename: &str) -> String {
     let path = win32_typeinfo_json_path(filename);
     if !path.exists() {
         panic!(
-            "fission-signatures win_types: missing canonical data file {} (expected under utils/signatures/typeinfo/win32/)",
+            "fission-signatures win_types: missing canonical data file {} (under resolved Win32 typeinfo dir)",
             path.display()
         );
     }
@@ -65,7 +71,7 @@ pub mod base_types {
         is_signed: bool,
     }
 
-    /// Load all base types from `utils/signatures/typeinfo/win32/base_types.json`.
+    /// Load all base types from `base_types.json` in the Win32 typeinfo corpus.
     pub fn all() -> Vec<TypeInfo> {
         let json_str = read_typeinfo_json("base_types.json");
         let items: Vec<JsonTypeInfo> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
@@ -198,12 +204,12 @@ mod tests {
         let ws = super::WindowsStructures::new();
         assert!(
             ws.get("UNICODE_STRING").is_some(),
-            "expected UNICODE_STRING from utils/signatures/typeinfo/win32/structures.json"
+            "expected UNICODE_STRING from structures.json (Win32 typeinfo corpus)"
         );
         let base = super::base_types::all();
         assert!(
             !base.is_empty(),
-            "expected base_types from utils/signatures/typeinfo/win32/base_types.json"
+            "expected base_types from base_types.json (Win32 typeinfo corpus)"
         );
     }
 }

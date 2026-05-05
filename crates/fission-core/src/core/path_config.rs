@@ -132,6 +132,22 @@ fn workspace_gdt_dir(workspace_root: &PathBuf) -> Option<PathBuf> {
     None
 }
 
+fn workspace_die_mirror(workspace_root: &PathBuf) -> Option<PathBuf> {
+    let direct = workspace_root
+        .join("signatures")
+        .join("die")
+        .join("detect-it-easy");
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    let legacy = workspace_root
+        .join("utils")
+        .join("signatures")
+        .join("die")
+        .join("detect-it-easy");
+    legacy.is_dir().then_some(legacy)
+}
+
 impl PathConfig {
     /// Detect paths based on current working directory and environment
     pub fn detect() -> Self {
@@ -221,6 +237,34 @@ impl PathConfig {
                 .join(filename);
             path.exists().then_some(path)
         })
+    }
+
+    /// Detect It Easy `.sg` mirror root (`detect-it-easy/`), if present.
+    ///
+    /// Resolution uses resolved DIE paths and workspace layout only — no cwd upward walks.
+    #[must_use]
+    pub fn die_mirror_root(&self) -> Option<PathBuf> {
+        if let Some(die_json) = self.get_die_signatures_path() {
+            let candidate = die_json.parent()?.join("detect-it-easy");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+        if let Some(ref dd) = self.die_dir {
+            let candidate = dd.join("detect-it-easy");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+        if let Some(ref sb) = self.signatures_base {
+            let candidate = sb.join("die").join("detect-it-easy");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+        self.workspace_root
+            .as_ref()
+            .and_then(workspace_die_mirror)
     }
 
     /// Find a file within search paths

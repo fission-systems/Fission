@@ -44,9 +44,8 @@ impl SignatureDatabase {
         Self::load(&path).ok()
     }
 
-    /// Load from default path using PathConfig
+    /// Load from default path using [`fission_core::PATHS`] / bundle resolution only (no cwd upward walks).
     pub fn load_default() -> Option<Self> {
-        // Try PathConfig first (centralized path resolution)
         if let Some(path) = fission_core::PATHS.get_die_signatures_path() {
             if let Ok(mut db) = Self::load(&path) {
                 db.extend_from_detect_it_easy_mirror();
@@ -54,36 +53,10 @@ impl SignatureDatabase {
             }
         }
 
-        // Fallback: search upward from current directory and executable path.
-        let suffix = Path::new("utils")
-            .join("signatures")
-            .join("die")
-            .join("pe_signatures.json");
-
-        let mut search_roots = Vec::new();
-        if let Ok(cwd) = std::env::current_dir() {
-            search_roots.push(cwd);
-        }
-        if let Ok(exe) = std::env::current_exe()
-            && let Some(parent) = exe.parent()
-        {
-            search_roots.push(parent.to_path_buf());
-        }
-
-        for root in search_roots {
-            for dir in root.ancestors() {
-                let candidate = dir.join(&suffix);
-                if let Ok(mut db) = Self::load(&candidate) {
-                    db.extend_from_detect_it_easy_mirror();
-                    return Some(db);
-                }
-            }
-        }
-
         let mut db = SignatureDatabase {
             format_version: "die-sg-v1".to_string(),
             description: "Detect-It-Easy .sg signature mirror".to_string(),
-            source: "utils/signatures/die/detect-it-easy".to_string(),
+            source: "detect-it-easy-vendored".to_string(),
             signatures: Vec::new(),
         };
         db.extend_from_detect_it_easy_mirror();
@@ -1290,10 +1263,13 @@ mod tests {
 
     #[test]
     fn test_parse_detect_it_easy_upx_signature() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("utils/signatures/die/detect-it-easy");
+        let Some(root) = fission_core::PATHS.die_mirror_root() else {
+            return;
+        };
         let path = root.join("db/PE/packer_UPX.2.sg");
+        if !path.exists() {
+            return;
+        }
         let content = fs::read_to_string(&path).expect("UPX DIE signature should be checked in");
         let sig = parse_sg_signature(&root, &path, &content)
             .expect("UPX DIE signature should produce static rules");

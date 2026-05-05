@@ -22,6 +22,8 @@ pub use model::{
     WinApiCatalogSummary,
 };
 
+use fission_core::evidence_policy::EvidencePolicy;
+
 use crate::loader::LoadedBinary;
 
 use entropy::{classify_executable_entropy, shannon_entropy};
@@ -30,6 +32,8 @@ use model::{
     BinaryIdentityReport as Report, IdentityDetection as Det, SectionEntropy as SecEnt,
 };
 use scoring::{distinct_evidence_sources, gate_high_for_kind};
+
+const IDENTITY_POLICY: EvidencePolicy = EvidencePolicy::DEFAULT;
 
 #[must_use]
 pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
@@ -170,14 +174,16 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
     );
 
     let mut packed_score_base = 0.0_f32;
+    let p = IDENTITY_POLICY.packed;
     if high_entropy_executable_sections > 0 {
-        packed_score_base += 0.15 * (high_entropy_executable_sections.min(3) as f32);
+        packed_score_base += p.entropy_weight_per_section
+            * (high_entropy_executable_sections.min(p.entropy_section_cap) as f32);
     }
     if detections.iter().any(|d| d.kind == IdentityKind::Packer) {
-        packed_score_base += 0.35;
+        packed_score_base += p.packer_present_bump;
     }
     if overlay_info.is_some() {
-        packed_score_base += 0.1;
+        packed_score_base += p.overlay_bump;
     }
     packed_score_base = packed_score_base.min(1.0);
 

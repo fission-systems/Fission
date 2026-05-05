@@ -22,9 +22,19 @@ pub use crate::core::{CONFIG, FissionError, PATHS, Result};
 
 pub use crate::core::path_config::find_sla_dir;
 
+/// Identity / packed-score numeric thresholds (`EvidencePolicy::DEFAULT`).
+pub mod evidence_policy {
+    pub use crate::core::evidence_policy::*;
+}
+
 /// Runtime resource bundle roots (`--resource-root`, `FISSION_RESOURCE_ROOT`, install layouts).
 pub mod resource_roots {
     pub use crate::core::resource_roots::*;
+}
+
+/// Resolved resource paths ([`ResourceProvider`]).
+pub mod resources {
+    pub use crate::core::resources::*;
 }
 
 // Commonly used standalone utilities

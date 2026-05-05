@@ -3,42 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Locate the checked-in DIE mirror without depending on the vendor source tree.
+/// Locate the DIE `.sg` mirror root via centralized [`fission_core::PATHS`] resolution.
 pub(crate) fn detect_it_easy_mirror_root() -> Option<PathBuf> {
-    let suffix = Path::new("utils")
-        .join("signatures")
-        .join("die")
-        .join("detect-it-easy");
-
-    if let Some(die_path) = fission_core::PATHS.get_die_signatures_path()
-        && let Some(die_dir) = die_path.parent()
-    {
-        let candidate = die_dir.join("detect-it-easy");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-
-    let mut roots = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd);
-    }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(parent) = exe.parent()
-    {
-        roots.push(parent.to_path_buf());
-    }
-
-    for root in roots {
-        for dir in root.ancestors() {
-            let candidate = dir.join(&suffix);
-            if candidate.is_dir() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    None
+    fission_core::PATHS.die_mirror_root()
 }
 
 pub(super) fn collect_sg_files(dir: &Path, out: &mut Vec<PathBuf>) {

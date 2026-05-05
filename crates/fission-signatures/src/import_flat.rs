@@ -1,6 +1,6 @@
 //! Normalize PE-style import spellings for WinAPI signature database lookup (`CloseHandle`).
 
-/// Returns the flat symbol name used in `utils/signatures` Win API tables.
+/// Returns the flat symbol name used in Win API tables from the signatures corpus.
 ///
 /// Handles `KERNEL32.dll!CloseHandle`, `__imp_CloseHandle`, `__imp__CloseHandle`.
 /// Ordinal imports (`*:Ordinal_N`) return `None` (no stable API row key).

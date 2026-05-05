@@ -1,6 +1,6 @@
-//! API type signatures loaded from the repository `utils/signatures` tree.
+//! API type signatures loaded from the resolved signatures corpus (`ResourceProvider`).
 
-use fission_core::PATHS;
+use fission_core::resources::ResourceProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -137,7 +137,7 @@ impl ApiTypeDatabase {
 }
 
 fn api_signature_path() -> Option<PathBuf> {
-    PATHS.get_win_api_signatures_path()
+    ResourceProvider::global().win_api_signatures_txt()
 }
 
 #[cfg(test)]

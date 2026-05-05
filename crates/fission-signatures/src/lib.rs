@@ -2,8 +2,8 @@
 //! Ghidra-style Function ID and type/signature facts.
 //!
 //! **Data ownership:** canonical imported/generated WinAPI/type/FID/signature
-//! files live under `utils/signatures/` (see [`utils/MANIFEST.md`](../../../utils/MANIFEST.md)). This crate reads them at
-//! runtime via [`fission_core::PATHS`]; do not add duplicate corpora under
+//! files live under the repository signatures directory (see [`utils/MANIFEST.md`](../../../utils/MANIFEST.md)). This crate reads them at
+//! runtime via [`fission_core::resources::ResourceProvider`] / [`fission_core::PATHS`]; do not add duplicate corpora under
 //! `crates/fission-signatures/data/` (CI-enforced).
 
 // This crate carries imported/generated signature and FIDBF data where exact

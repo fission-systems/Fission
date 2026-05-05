@@ -1,4 +1,4 @@
-//! Runtime resource bundle roots (`fission-data/`, installs, user data) ahead of workspace `utils/signatures`.
+//! Runtime resource bundle roots (`fission-data/`, installs, user data) ahead of workspace-relative signatures.
 //!
 //! CLI [`set_cli_resource_bundle_root`] must run before the first [`crate::PATHS`] access when using `--resource-root`.
 

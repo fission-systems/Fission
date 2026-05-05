@@ -1,5 +1,6 @@
 //! Negative evidence, DIE promotion gates, summary thresholds, compiler conflicts.
 
+use fission_core::evidence_policy::EvidencePolicy;
 use fission_core::PAGE_SIZE;
 
 use crate::detector::Confidence;
@@ -11,7 +12,7 @@ use super::model::{
 };
 use super::scoring::{distinct_evidence_sources, gate_high_for_kind};
 
-const IMPORT_TABLE_RICH_THRESHOLD: usize = 16;
+const EVIDENCE_POLICY: EvidencePolicy = EvidencePolicy::DEFAULT;
 
 #[must_use]
 pub(super) fn pe_has_rich_header_probe(binary: &LoadedBinary) -> bool {
@@ -63,7 +64,8 @@ pub(super) fn attach_negative_evidence_for_binary(
     high_entropy_exec_sections: usize,
     detections: &mut [IdentityDetection],
 ) {
-    let rich_import_table = binary.iat_symbols.len() >= IMPORT_TABLE_RICH_THRESHOLD;
+    let rich_import_table =
+        binary.iat_symbols.len() >= EVIDENCE_POLICY.auxiliary.import_table_rich_symbol_count;
     let normal_ep_text = entry_in_named_text(binary);
     let rich_present = pe_has_rich_header_probe(binary);
 
@@ -296,24 +298,25 @@ pub(super) fn packed_score_adjusted(
     high_entropy_exec_sections: usize,
     detections: &[IdentityDetection],
 ) -> f32 {
+    let p = EVIDENCE_POLICY.packed;
     let mut score = base_packed_hints;
     if entry_in_named_text(binary) {
-        score -= 0.15;
+        score -= p.deduction_entry_in_text_section;
     }
-    if binary.iat_symbols.len() >= IMPORT_TABLE_RICH_THRESHOLD {
-        score -= 0.12;
+    if binary.iat_symbols.len() >= EVIDENCE_POLICY.auxiliary.import_table_rich_symbol_count {
+        score -= p.deduction_rich_import_table;
     }
     if pdb_present || pe_debug_dirs_present {
-        score -= 0.12;
+        score -= p.deduction_debug_present;
     }
     if high_entropy_exec_sections == 0 {
-        score -= 0.08;
+        score -= p.deduction_no_high_entropy_executable;
     }
     if detections.iter().any(|d| {
         d.kind == IdentityKind::Compiler
             && matches!(d.confidence, Confidence::Medium | Confidence::High)
     }) {
-        score -= 0.1;
+        score -= p.deduction_compiler_medium_or_high;
     }
     score.max(0.0).min(1.0)
 }
@@ -421,8 +424,9 @@ pub(super) fn compute_compiler_conflicts(detections: &[IdentityDetection]) -> Ve
 }
 
 pub(super) fn weak_signal_count_for_summary(detections: &[IdentityDetection]) -> usize {
+    let cap = EVIDENCE_POLICY.auxiliary.weak_signal_score_cap;
     detections
         .iter()
-        .filter(|d| matches!(d.confidence, Confidence::Low) && d.score <= 3)
+        .filter(|d| matches!(d.confidence, Confidence::Low) && d.score <= cap)
         .count()
 }
