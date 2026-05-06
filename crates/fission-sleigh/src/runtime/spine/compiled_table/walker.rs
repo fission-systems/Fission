@@ -333,35 +333,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             _ => None,
         };
 
-        let base_length = self.cursor.max(self.ctx.cursor + self.minimum_length);
-        let direct_relative_length = CompiledTokenCursorPolicy::for_frontend(self.compiled)
-            .uses_shared_token_cursor()
-            && self
-                .selection
-                .constructor
-                .constructor_template
-                .template_source
-                == CompiledTemplateSource::SpecDerived
-            && self
-                .selection
-                .constructor
-                .constructor_template
-                .handles
-                .iter()
-                .any(|handle| {
-                    matches!(
-                        &handle.spec,
-                        CompiledOperandSpec::SubtableEvaluation { table_name, .. }
-                            if shared_token_cursor_policy_relative_trailing_subtable(table_name)
-                    )
-                })
-            && self.cursor > self.ctx.cursor;
-        let length = if direct_relative_length {
-            self.mark_legacy_shared_token_policy();
-            self.cursor
-        } else {
-            base_length
-        };
+        let length = self
+            .cursor
+            .max(self.ctx.cursor + self.minimum_length)
+            .max(self.max_operand_end());
         let absolute_offset = self.ctx.cursor;
         let relative_length = length.saturating_sub(absolute_offset);
 
@@ -656,6 +631,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Some(offset.saturating_add(length))
     }
 
+    fn max_operand_end(&self) -> usize {
+        self.operand_absolute_offsets
+            .iter()
+            .zip(self.operand_relative_lengths.iter())
+            .filter_map(|(offset, length)| Some((*offset)? + (*length)?))
+            .max()
+            .unwrap_or(self.ctx.cursor)
+    }
+
     fn mark_legacy_shared_token_policy(&mut self) {
         self.legacy_path_audit.legacy_shared_token_policy = true;
     }
@@ -928,27 +912,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     Some(operand_absolute_offset),
                 )?;
                 self.legacy_path_audit = self.legacy_path_audit.merge(sub_state.legacy_path_audit);
-                if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                    && shared_token_cursor_policy_shared_token_subtable(table_name)
-                {
-                    self.shared_token_operand_end =
-                        self.shared_token_operand_end.max(sub_state.length);
-                }
-                if shared_token_cursor_policy_zero_width_subtable(table_name) {
-                    self.cursor = cursor_start;
-                } else if CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                    .uses_shared_token_cursor()
-                    && self
-                        .selection
-                        .constructor
-                        .constructor_template
-                        .template_source
-                        == CompiledTemplateSource::SpecDerived
-                    && shared_token_cursor_policy_shared_token_subtable(table_name)
-                {
+                let spec_derived_sla_operand = self
+                    .selection
+                    .constructor
+                    .constructor_template
+                    .template_source
+                    == CompiledTemplateSource::SpecDerived
+                    && operand_spec_offsets(&template.spec).is_some();
+                if spec_derived_sla_operand {
                     self.minimum_length = self
                         .minimum_length
                         .max(sub_state.length.saturating_sub(self.ctx.cursor));
+                    self.cursor = cursor_start;
+                    self.shared_token_operand_end =
+                        self.shared_token_operand_end.max(sub_state.length);
+                } else if shared_token_cursor_policy_zero_width_subtable(table_name) {
                     self.cursor = cursor_start;
                 } else if self
                     .selection

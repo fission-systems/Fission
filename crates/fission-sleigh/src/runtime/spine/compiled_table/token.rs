@@ -447,10 +447,6 @@ pub(super) fn shared_token_cursor_policy_modrm_trailing_subtable(table_name: &st
     )
 }
 
-pub(super) fn shared_token_cursor_policy_relative_trailing_subtable(table_name: &str) -> bool {
-    table_name.starts_with("pcRelSimm") || table_name.starts_with("rel")
-}
-
 pub(super) fn shared_token_cursor_policy_shared_token_subtable(table_name: &str) -> bool {
     matches!(
         table_name,
