@@ -136,9 +136,10 @@ mod construct_state_offset_tests {
                 .expect("decode/lift shared-token sample");
 
             assert_eq!(length as usize, bytes.len());
-            assert!(
-                !details.legacy_path_audit.legacy_shared_token_policy,
-                "SLA operand offsets and ConstructState lengths should decode shared-token forms"
+            assert_eq!(
+                details.legacy_path_audit,
+                crate::runtime::RuntimeLegacyPathAudit::default(),
+                "SLA operand offsets and ConstructState lengths should not need legacy audit paths"
             );
         }
     }

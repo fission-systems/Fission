@@ -134,11 +134,6 @@ fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<Stri
     let mut totals = BTreeMap::new();
     for instruction in instructions {
         let audit = instruction.legacy_path_audit;
-        if audit.legacy_shared_token_policy {
-            *totals
-                .entry("legacy_shared_token_policy".to_string())
-                .or_insert(0) += 1;
-        }
         if audit.compatibility_template_source {
             *totals
                 .entry("compatibility_template_source".to_string())

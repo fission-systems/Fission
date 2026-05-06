@@ -99,15 +99,12 @@ pub struct RuntimeExecutionDetails {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeLegacyPathAudit {
-    pub legacy_shared_token_policy: bool,
     pub compatibility_template_source: bool,
 }
 
 impl RuntimeLegacyPathAudit {
     pub fn merge(self, other: Self) -> Self {
         Self {
-            legacy_shared_token_policy: self.legacy_shared_token_policy
-                || other.legacy_shared_token_policy,
             compatibility_template_source: self.compatibility_template_source
                 || other.compatibility_template_source,
         }
