@@ -69,31 +69,11 @@ fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFront
         return false;
     }
 
-    if frontend_has_variable_length_byte_token_layout(compiled) {
-        return true;
-    }
-
     compiled.subtables.values().any(|subtable| {
         subtable.constructors.iter().any(|constructor| {
             constructor_has_shared_one_byte_subtable_token_operands(compiled, constructor)
         })
     })
-}
-
-fn frontend_has_variable_length_byte_token_layout(compiled: &CompiledFrontend) -> bool {
-    let one_byte_fields = compiled
-        .language_layout
-        .token_fields
-        .iter()
-        .filter(|field| field.bit_width == 8)
-        .count();
-    let has_eight_byte_payload = compiled
-        .language_layout
-        .token_fields
-        .iter()
-        .any(|field| field.bit_width >= 64);
-
-    one_byte_fields >= 3 && has_eight_byte_payload
 }
 
 fn frontend_has_instruction_forms_longer_than_four_bytes(compiled: &CompiledFrontend) -> bool {
