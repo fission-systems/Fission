@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler::{
-    compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery, spec_root_for_arch,
-    CompiledTemplateSource,
+    CompiledTemplateSource, compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery,
+    spec_root_for_arch,
 };
 use std::path::PathBuf;
 
@@ -562,6 +562,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let disabled_branch = ["if", "false"].join(" ");
     let guard_no_export_assignment = ["no_export_subtable_fallback", "= true"].join(" ");
+    let arch_named_policy = ["compiled", "arch"].join(".");
+    let x86_string_policy = ["eq_ignore_ascii_case", "(\"x86\")"].join("");
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -581,6 +583,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             file.display()
         );
         assert!(
+            !source.contains(&arch_named_policy),
+            "{} still gates compiled-table runtime policy by frontend architecture string",
+            file.display()
+        );
+        assert!(
+            !source.contains(&x86_string_policy),
+            "{} still gates compiled-table runtime policy by x86 string comparison",
+            file.display()
+        );
+        assert!(
             !source.contains(&disabled_branch),
             "{} still carries disabled compatibility classifier code",
             file.display()
@@ -591,6 +603,23 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             file.display()
         );
     }
+}
+
+#[test]
+fn shared_token_cursor_policy_follows_sla_layout_not_processor_name() {
+    require_packaged_ghidra_sla!();
+    let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
+    let x86 = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
+    let x86_64 = compile_x86_64_frontend().expect("compile x86-64 frontend");
+
+    assert!(
+        !CompiledTokenCursorPolicy::for_frontend(&x86).uses_shared_token_cursor(),
+        "32-bit SLA should keep Ghidra-style reloffset cursoring for direct token fields"
+    );
+    assert!(
+        CompiledTokenCursorPolicy::for_frontend(&x86_64).uses_shared_token_cursor(),
+        "64-bit SLA should enable transitional shared-token cursoring from token layout metadata"
+    );
 }
 
 #[test]

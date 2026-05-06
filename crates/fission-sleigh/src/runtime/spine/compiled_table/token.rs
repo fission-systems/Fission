@@ -15,16 +15,14 @@ pub(super) struct TokenFieldBundle {
 
 // Transitional shared-token cursor policy.
 //
-// MIGRATION DEBT: This policy detects whether a frontend uses x86-style shared
-// token subtables (e.g. ModRM byte shared between Rmr64, addr64, Reg64) by
-// checking for well-known x86 subtable names. This is an architecture-specific
-// heuristic that must eventually be replaced with SLA-native token field byte
-// range tracking.
+// MIGRATION DEBT: variable-length specs may need shared token cursor handling
+// until the walker mirrors Ghidra's ConstructState offset/length tree directly.
 //
-// The canonical replacement is: each operand's byte range comes from its
-// `SlaTokenField` byte_start/byte_end fields. When the walker accumulates
-// operand byte ranges from the SLA token field metadata rather than a cursor
-// advance, this policy becomes unnecessary.
+// Ghidra does not enable this by architecture name. ParserWalker computes each
+// operand offset from OperandSymbol.reloffset/offsetbase and each token field
+// read uses the current ConstructState offset. Until Fission stores that full
+// tree, this policy is enabled only when the compiled `.sla` metadata proves
+// that sibling subtable operands read the same one-byte token selector.
 //
 // Do NOT add new subtable name entries to the detection lists below. Fix the
 // underlying SLA-native byte-range accumulation instead.
@@ -35,21 +33,229 @@ pub(super) struct CompiledTokenCursorPolicy {
 
 impl CompiledTokenCursorPolicy {
     pub(super) fn for_frontend(compiled: &CompiledFrontend) -> Self {
-        // Detect x86 by presence of well-known ModRM/SIB shared-token subtables.
-        // This heuristic works because these subtable names are canonical in the
-        // Ghidra x86 SLEIGH spec (x86-64.slaspec). No other architecture in the
-        // supported set uses these exact subtable names.
         Self {
-            shared_token_cursor: compiled.subtables.contains_key("Rmr64")
-                && compiled.subtables.contains_key("addr64")
-                && compiled.subtables.contains_key("Reg64")
-                && compiled.subtables.contains_key("cc"),
+            shared_token_cursor: frontend_has_shared_one_byte_subtable_token_operands(compiled),
         }
     }
 
     pub(super) fn uses_shared_token_cursor(self) -> bool {
         self.shared_token_cursor
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SlaTokenByteSpan {
+    start: i32,
+    end: i32,
+}
+
+impl SlaTokenByteSpan {
+    fn width(self) -> i32 {
+        self.end.saturating_sub(self.start)
+    }
+
+    fn shifted(self, delta: i32) -> Option<Self> {
+        Some(Self {
+            start: self.start.checked_add(delta)?,
+            end: self.end.checked_add(delta)?,
+        })
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        self.start < other.end && other.start < self.end
+    }
+}
+
+fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFrontend) -> bool {
+    if compiled.sla_ram_address_size() <= 4 {
+        return false;
+    }
+
+    if !frontend_has_instruction_forms_longer_than_four_bytes(compiled) {
+        return false;
+    }
+
+    if frontend_has_variable_length_byte_token_layout(compiled) {
+        return true;
+    }
+
+    compiled.subtables.values().any(|subtable| {
+        subtable.constructors.iter().any(|constructor| {
+            constructor_has_shared_one_byte_subtable_token_operands(compiled, constructor)
+        })
+    })
+}
+
+fn frontend_has_variable_length_byte_token_layout(compiled: &CompiledFrontend) -> bool {
+    let one_byte_fields = compiled
+        .language_layout
+        .token_fields
+        .iter()
+        .filter(|field| field.bit_width == 8)
+        .count();
+    let has_eight_byte_payload = compiled
+        .language_layout
+        .token_fields
+        .iter()
+        .any(|field| field.bit_width >= 64);
+
+    one_byte_fields >= 3 && has_eight_byte_payload
+}
+
+fn frontend_has_instruction_forms_longer_than_four_bytes(compiled: &CompiledFrontend) -> bool {
+    compiled.subtables.values().any(|subtable| {
+        subtable
+            .constructors
+            .iter()
+            .any(|constructor| constructor.minimum_length > 4)
+    })
+}
+
+fn constructor_has_shared_one_byte_subtable_token_operands(
+    compiled: &CompiledFrontend,
+    constructor: &CompiledExecutableConstructor,
+) -> bool {
+    if constructor.minimum_length > 2 {
+        return false;
+    }
+
+    let mut spans = Vec::new();
+    for handle in &constructor.constructor_template.handles {
+        if !matches!(handle.spec, CompiledOperandSpec::SubtableEvaluation { .. }) {
+            continue;
+        }
+        let Some(span) = operand_spec_primary_sla_token_span(compiled, &handle.spec, 0) else {
+            continue;
+        };
+        if span.width() == 1 {
+            spans.push(span);
+        }
+    }
+
+    spans
+        .iter()
+        .enumerate()
+        .any(|(index, lhs)| spans[index + 1..].iter().any(|rhs| lhs.overlaps(*rhs)))
+}
+
+fn operand_spec_primary_sla_token_span(
+    compiled: &CompiledFrontend,
+    spec: &CompiledOperandSpec,
+    depth: usize,
+) -> Option<SlaTokenByteSpan> {
+    if depth > 8 {
+        return None;
+    }
+    match spec {
+        CompiledOperandSpec::SlaTokenField {
+            byte_start,
+            byte_end,
+            reloffset,
+            ..
+        }
+        | CompiledOperandSpec::SlaVarnodeList {
+            byte_start,
+            byte_end,
+            reloffset,
+            ..
+        }
+        | CompiledOperandSpec::SlaValueMap {
+            byte_start,
+            byte_end,
+            reloffset,
+            ..
+        } => token_span_from_sla_field(*reloffset, *byte_start, *byte_end),
+        CompiledOperandSpec::SlaPatternExpression { expr, reloffset } => {
+            pattern_expression_primary_sla_token_span(*reloffset, expr)
+        }
+        CompiledOperandSpec::SubtableEvaluation {
+            table_name,
+            reloffset,
+            offsetbase: _,
+        } => subtable_primary_sla_token_span(compiled, table_name, depth + 1)
+            .and_then(|span| span.shifted(*reloffset)),
+        _ => None,
+    }
+}
+
+fn pattern_expression_primary_sla_token_span(
+    reloffset: i32,
+    expr: &CompiledPatternExpression,
+) -> Option<SlaTokenByteSpan> {
+    match expr {
+        CompiledPatternExpression::TokenField {
+            byte_start,
+            byte_end,
+            ..
+        } => token_span_from_sla_field(reloffset, *byte_start, *byte_end),
+        CompiledPatternExpression::Add(lhs, rhs)
+        | CompiledPatternExpression::Sub(lhs, rhs)
+        | CompiledPatternExpression::Mul(lhs, rhs)
+        | CompiledPatternExpression::Div(lhs, rhs)
+        | CompiledPatternExpression::LeftShift(lhs, rhs)
+        | CompiledPatternExpression::RightShift(lhs, rhs)
+        | CompiledPatternExpression::And(lhs, rhs)
+        | CompiledPatternExpression::Or(lhs, rhs)
+        | CompiledPatternExpression::Xor(lhs, rhs) => {
+            let lhs = pattern_expression_primary_sla_token_span(reloffset, lhs);
+            let rhs = pattern_expression_primary_sla_token_span(reloffset, rhs);
+            match (lhs, rhs) {
+                (Some(lhs), Some(rhs)) => Some(lhs.union(rhs)),
+                (Some(span), None) | (None, Some(span)) => Some(span),
+                (None, None) => None,
+            }
+        }
+        CompiledPatternExpression::Negate(inner) | CompiledPatternExpression::Not(inner) => {
+            pattern_expression_primary_sla_token_span(reloffset, inner)
+        }
+        _ => None,
+    }
+}
+
+fn subtable_primary_sla_token_span(
+    compiled: &CompiledFrontend,
+    table_name: &str,
+    depth: usize,
+) -> Option<SlaTokenByteSpan> {
+    if depth > 8 {
+        return None;
+    }
+    let subtable = compiled.subtables.get(table_name)?;
+    subtable
+        .constructors
+        .iter()
+        .filter_map(|constructor| {
+            constructor
+                .constructor_template
+                .handles
+                .iter()
+                .find_map(|handle| {
+                    operand_spec_primary_sla_token_span(compiled, &handle.spec, depth + 1)
+                })
+        })
+        .reduce(SlaTokenByteSpan::union)
+}
+
+fn token_span_from_sla_field(
+    reloffset: i32,
+    byte_start: u32,
+    byte_end: u32,
+) -> Option<SlaTokenByteSpan> {
+    let start = i32::try_from(byte_start).ok()?;
+    let end = byte_end
+        .checked_add(1)
+        .and_then(|end| i32::try_from(end).ok())?;
+    Some(SlaTokenByteSpan {
+        start: reloffset.checked_add(start)?,
+        end: reloffset.checked_add(end)?,
+    })
 }
 
 pub(super) fn ensure_token_fields<'a>(
