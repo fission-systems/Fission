@@ -70,10 +70,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
-        let opcode_len = if CompiledTokenCursorPolicy::for_frontend(compiled)
-            .uses_shared_token_cursor()
-            && constructor_replaces_current(selection.constructor)
-        {
+        let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
+        let legacy_replace_current_opcode = token_policy.uses_shared_token_cursor()
+            && constructor_replaces_current(selection.constructor);
+        let opcode_len = if legacy_replace_current_opcode {
             0
         } else if selection.constructor.constructor_template.template_source
             == CompiledTemplateSource::SpecDerived
@@ -94,8 +94,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         } else {
             opcode_len_from_matcher(&selection.constructor.matcher)
         };
-        let minimum_length = if CompiledTokenCursorPolicy::for_frontend(compiled)
-            .uses_shared_token_cursor()
+        let legacy_zero_minimum_length = token_policy.uses_shared_token_cursor()
             && selection.constructor.constructor_template.template_source
                 == CompiledTemplateSource::SpecDerived
             && (matches!(
@@ -104,7 +103,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             ) || matches!(
                 selection.constructor.construct_tpl_kind,
                 CompiledConstructTplKind::Jcc
-            )) {
+            ));
+        let minimum_length = if legacy_zero_minimum_length {
             0
         } else {
             selection.constructor.minimum_length as usize
@@ -123,7 +123,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 selection.constructor.matcher
             );
         }
-        let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
         let compatibility_template_source =
             selection.constructor.constructor_template.template_source
                 != CompiledTemplateSource::SpecDerived;
@@ -145,7 +144,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
-                legacy_shared_token_policy: token_policy.uses_shared_token_cursor(),
+                legacy_shared_token_policy: legacy_replace_current_opcode
+                    || legacy_zero_minimum_length,
                 compatibility_template_source,
                 ..Default::default()
             },
@@ -174,6 +174,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         }
                     )
                 });
+        if shared_token_replace_current_wrapper {
+            self.mark_legacy_shared_token_policy();
+        }
         for step in decode_steps {
             match step {
                 CompiledOperandDecodeStep::ConsumeTokenFields => {
@@ -273,6 +276,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 })
             && self.cursor > self.ctx.cursor;
         let length = if direct_relative_length {
+            self.mark_legacy_shared_token_policy();
             self.cursor
         } else {
             base_length
@@ -560,6 +564,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .ok_or_else(|| anyhow!("failed to decode token fields"))
     }
 
+    fn mark_legacy_shared_token_policy(&mut self) {
+        self.legacy_path_audit.legacy_shared_token_policy = true;
+    }
+
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<OperandBinding> {
         match &template.spec {
             CompiledOperandSpec::TokenFieldExtraction {
@@ -613,11 +621,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                    && shared_token_cursor_policy_sla_field_advances_cursor(
-                        self.selection.trace.root_bucket.as_str(),
-                    )
-                {
+                let shared_sla_field_advances_cursor =
+                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
+                        .uses_shared_token_cursor()
+                        && shared_token_cursor_policy_sla_field_advances_cursor(
+                            self.selection.trace.root_bucket.as_str(),
+                        );
+                if shared_sla_field_advances_cursor {
+                    self.mark_legacy_shared_token_policy();
                     self.cursor = self
                         .cursor
                         .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
@@ -661,11 +672,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                    && shared_token_cursor_policy_sla_field_advances_cursor(
-                        self.selection.trace.root_bucket.as_str(),
-                    )
-                {
+                let shared_sla_field_advances_cursor =
+                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
+                        .uses_shared_token_cursor()
+                        && shared_token_cursor_policy_sla_field_advances_cursor(
+                            self.selection.trace.root_bucket.as_str(),
+                        );
+                if shared_sla_field_advances_cursor {
+                    self.mark_legacy_shared_token_policy();
                     self.cursor = self
                         .cursor
                         .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
@@ -709,11 +723,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                    && shared_token_cursor_policy_sla_field_advances_cursor(
-                        self.selection.trace.root_bucket.as_str(),
-                    )
-                {
+                let shared_sla_field_advances_cursor =
+                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
+                        .uses_shared_token_cursor()
+                        && shared_token_cursor_policy_sla_field_advances_cursor(
+                            self.selection.trace.root_bucket.as_str(),
+                        );
+                if shared_sla_field_advances_cursor {
+                    self.mark_legacy_shared_token_policy();
                     self.cursor = self
                         .cursor
                         .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
@@ -764,6 +781,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         shift,
                     } = expr
                     {
+                        self.mark_legacy_shared_token_policy();
                         let token_base = self.token_base_for_sla_field(0);
                         let value = read_sla_token_field_at(
                             self.ctx,
@@ -863,6 +881,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     && (shared_token_cursor_policy_shared_token_subtable(table_name)
                         || shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name))
                 {
+                    self.mark_legacy_shared_token_policy();
                     self.shared_token_operand_end =
                         self.shared_token_operand_end.max(sub_state.length);
                 }
@@ -885,6 +904,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     // from the matched subconstructor. Treating these as a
                     // sequential byte stream makes exact slices like
                     // `8d 04 11` overrun while decoding Base64 after Index64.
+                    self.mark_legacy_shared_token_policy();
                     self.minimum_length = self
                         .minimum_length
                         .max(sub_state.length.saturating_sub(self.ctx.cursor));
@@ -907,6 +927,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         && CompiledTokenCursorPolicy::for_frontend(self.compiled)
                             .uses_shared_token_cursor()
                     {
+                        self.mark_legacy_shared_token_policy();
                         next_cursor = cursor_start.saturating_add(1);
                     }
                     self.cursor = self.cursor.max(next_cursor);
@@ -924,9 +945,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             template.operand_index,
                         ) {
                             bail!(
-	                                "missing_sla_exported_fixed_handle: subtable {table_name} did not export handle for referenced operand {}",
-	                                template.operand_index
-	                            );
+                                "missing_sla_exported_fixed_handle: subtable {table_name} did not export handle for referenced operand {}",
+                                template.operand_index
+                            );
                         }
                         return Ok(OperandBinding::guard_only(sub_state));
                     }
@@ -1042,7 +1063,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn token_base_for_sla_field(&self, reloffset: i32) -> usize {
+    fn token_base_for_sla_field(&mut self, reloffset: i32) -> usize {
         if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
             // Non-shared-cursor: Ghidra's ParserWalker advances the current
             // point as sequential operands are consumed, while operand
@@ -1053,6 +1074,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             let reloffset_base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
             return self.cursor.max(reloffset_base);
         }
+        self.mark_legacy_shared_token_policy();
         // x86 SLEIGH models opcode, ModRM, and SIB as separate token
         // streams. Fission's compatibility walker keeps SIB subtables rooted
         // at the ModRM cursor so shared-byte operands can compute instruction
@@ -1232,7 +1254,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 
     fn decode_subtable(
-        &self,
+        &mut self,
         table_name: &str,
         reloffset: Option<i32>,
         offsetbase: Option<i32>,
@@ -1254,6 +1276,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && constructor_replaces_current(self.selection.constructor)
             && table_name == "instruction"
         {
+            self.mark_legacy_shared_token_policy();
             self.ctx.cursor
                 + opcode_len_from_matcher(&self.selection.constructor.matcher)
                     .max(self.selection.constructor.minimum_length as usize)
@@ -1263,24 +1286,29 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && self.selection.trace.root_bucket == "instruction"
             && self.selection.constructor.minimum_length <= 1
         {
+            self.mark_legacy_shared_token_policy();
             opcode_cursor_from_context(self.ctx)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_register_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {
+            self.mark_legacy_shared_token_policy();
             opcode_cursor_from_context(self.ctx)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_register_subtable(table_name)
         {
+            self.mark_legacy_shared_token_policy();
             self.cursor
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_opcode_token_subtable(table_name)
         {
+            self.mark_legacy_shared_token_policy();
             opcode_token_cursor_from_context(self.ctx)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {
+            self.mark_legacy_shared_token_policy();
             if constructor_has_shared_token_operand(self.selection.constructor) {
                 self.cursor.saturating_add(1)
             } else if self.shared_token_operand_end
@@ -1296,6 +1324,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.selection.trace.root_bucket.as_str(),
             )
         {
+            self.mark_legacy_shared_token_policy();
             let matched_pattern_len = self
                 .selection
                 .trace
