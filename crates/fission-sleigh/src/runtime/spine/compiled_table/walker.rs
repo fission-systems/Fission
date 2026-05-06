@@ -625,10 +625,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .unwrap_or(self.ctx.cursor)
     }
 
-    fn mark_legacy_shared_token_policy(&mut self) {
-        self.legacy_path_audit.legacy_shared_token_policy = true;
-    }
-
     fn bind_operand(
         &mut self,
         template: &CompiledHandleTemplate,
@@ -1233,7 +1229,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && constructor_replaces_current(self.selection.constructor)
             && table_name == "instruction"
         {
-            self.mark_legacy_shared_token_policy();
             self.ctx.cursor
                 + opcode_len_from_matcher(&self.selection.constructor.matcher)
                     .max(self.selection.constructor.minimum_length as usize)
