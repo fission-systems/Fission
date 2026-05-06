@@ -926,15 +926,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .max(sub_state.length.saturating_sub(self.ctx.cursor));
                     self.cursor = cursor_start;
                 } else {
-                    let mut next_cursor = sub_state.length;
-                    if next_cursor <= cursor_start
-                        && CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                            .uses_shared_token_cursor()
-                    {
-                        self.mark_legacy_shared_token_policy();
-                        next_cursor = cursor_start.saturating_add(1);
-                    }
-                    self.cursor = self.cursor.max(next_cursor);
+                    self.cursor = self.cursor.max(sub_state.length);
                 }
                 // Return the exported handle from the sub-constructor. If no
                 // handle is exported, only pure guard subtables may continue:
