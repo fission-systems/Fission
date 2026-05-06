@@ -133,7 +133,7 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
 }
 
 #[test]
-fn runtime_ready_constructors_do_not_depend_on_compat_token_parser() {
+fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
     if !discovery::ghidra_packaged_sla_available() {
         eprintln!("skip: packaged Ghidra .sla not available for token parser dependency check");
         return;
@@ -166,13 +166,6 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_parser() {
                 constructor.source
             );
             assert!(
-                !constructor.operand_specs.iter().any(|spec| {
-                    matches!(spec, CompiledOperandSpec::TokenFieldExtraction { .. })
-                }),
-                "{entry_id} runtime-ready constructor still uses legacy token-field operand spec: {}",
-                constructor.source
-            );
-            assert!(
                 !constructor
                     .constructor_template
                     .decode_steps
@@ -181,22 +174,28 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_parser() {
                 "{entry_id} runtime-ready constructor still uses legacy token-field decode step: {}",
                 constructor.source
             );
-            assert!(
-                !constructor
-                    .constructor_template
-                    .handles
-                    .iter()
-                    .any(|handle| matches!(
-                        &handle.spec,
-                        CompiledOperandSpec::TokenFieldExtraction { .. }
-                    )),
-                "{entry_id} runtime-ready constructor still binds through legacy token-field handles: {}",
-                constructor.source
-            );
         }
         assert!(
             runtime_ready > 0,
             "packaged {entry_id} .sla should provide runtime-ready canonical constructors"
+        );
+    }
+}
+
+#[test]
+fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
+    let types = include_str!("types.rs");
+    let lowering = include_str!("lowering.rs");
+    let codegen = include_str!("../codegen.rs");
+    for (name, source) in [
+        ("types.rs", types),
+        ("lowering.rs", lowering),
+        ("codegen.rs", codegen),
+    ] {
+        assert!(
+            !source.contains("TokenFieldExtraction")
+                && !source.contains("token_field_extraction"),
+            "{name} still exposes compatibility token-field extraction"
         );
     }
 }

@@ -684,11 +684,6 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     let rows = specs
         .iter()
         .map(|spec| match spec {
-            crate::compiler::CompiledOperandSpec::TokenFieldExtraction { bit_offset, bit_width, sign_extend } => {
-                format!(
-                    "{{\"kind\": \"token_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
-                )
-            }
             crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift, reloffset: _ } => {
                 format!(
                     "{{\"kind\": \"sla_token_field\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}}}"

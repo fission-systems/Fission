@@ -1369,8 +1369,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         .filter(|spec| {
             matches!(
                 spec,
-                CompiledOperandSpec::TokenFieldExtraction { .. }
-                    | CompiledOperandSpec::SlaTokenField { .. }
+                CompiledOperandSpec::SlaTokenField { .. }
                     | CompiledOperandSpec::ContextFieldExtraction { .. }
                     | CompiledOperandSpec::SubtableEvaluation { .. }
             )
@@ -1478,14 +1477,6 @@ fn parse_operand_specs(
             specs.push(CompiledOperandSpec::FixedRegister {
                 reg: CompiledFixedRegister::Accumulator,
                 size,
-            });
-            continue;
-        }
-        if let Some(size) = register_size_token(token) {
-            specs.push(CompiledOperandSpec::TokenFieldExtraction {
-                bit_offset: 0,
-                bit_width: size * 8,
-                sign_extend: false,
             });
             continue;
         }

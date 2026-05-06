@@ -416,8 +416,7 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
     depth: usize,
 ) -> bool {
     match spec {
-        CompiledOperandSpec::TokenFieldExtraction { .. }
-        | CompiledOperandSpec::SlaValueMap { .. }
+        CompiledOperandSpec::SlaValueMap { .. }
         | CompiledOperandSpec::Immediate { .. }
         | CompiledOperandSpec::Relative { .. } => true,
         CompiledOperandSpec::SubtableEvaluation { table_name, .. }

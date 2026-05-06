@@ -545,13 +545,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<OperandBinding> {
         match &template.spec {
-            CompiledOperandSpec::TokenFieldExtraction {
-                ..
-            } => {
-                bail!(
-                    "compatibility token-field extraction operand is not a canonical compiled-table runtime path"
-                );
-            }
             CompiledOperandSpec::SlaTokenField {
                 big_endian,
                 sign_bit,

@@ -462,11 +462,6 @@ fn default_offsetbase() -> i32 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandSpec {
-    TokenFieldExtraction {
-        bit_offset: u32,
-        bit_width: u32,
-        sign_extend: bool,
-    },
     SlaTokenField {
         big_endian: bool,
         sign_bit: bool,

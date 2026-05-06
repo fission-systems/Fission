@@ -317,12 +317,8 @@ pub(super) fn constructor_matches(
         }
     }
 
-    let requires_token_bundle = constructor.mod_constraint.is_some()
-        || !constructor.operand_reg_values.is_empty()
-        || constructor
-            .operand_specs
-            .iter()
-            .any(|spec| matches!(spec, CompiledOperandSpec::TokenFieldExtraction { .. }));
+    let requires_token_bundle =
+        constructor.mod_constraint.is_some() || !constructor.operand_reg_values.is_empty();
     if requires_token_bundle {
         bail!(
             "compatibility token-field constructor selector is not a canonical compiled-table selection path"
