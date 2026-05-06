@@ -776,42 +776,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase: _,
             } => {
                 let mut encoded_size = 0;
-                let value = if CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                    .uses_shared_token_cursor()
-                {
-                    if let CompiledPatternExpression::TokenField {
-                        big_endian,
-                        sign_bit,
-                        bit_start,
-                        bit_end,
-                        byte_start,
-                        byte_end,
-                        shift,
-                    } = expr
-                    {
-                        let token_base = self.token_base_for_sla_field(operand_absolute_offset);
-                        let value = read_sla_token_field_at(
-                            self.ctx,
-                            token_base,
-                            *big_endian,
-                            *sign_bit,
-                            *bit_start,
-                            *bit_end,
-                            *byte_start,
-                            *byte_end,
-                            *shift,
-                        )? as i64;
-                        encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                        if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                            self.cursor = self
-                                .cursor
-                                .max(token_base.saturating_add(encoded_size as usize));
-                        }
-                        value
-                    } else {
-                        self.eval_pattern_expression(expr)?
-                    }
-                } else if let CompiledPatternExpression::TokenField {
+                let value = if let CompiledPatternExpression::TokenField {
                     big_endian,
                     sign_bit,
                     bit_start,
@@ -821,11 +786,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     shift,
                 } = expr
                 {
-                    // Non-shared-cursor (e.g. x86-32): apply reloffset so the token field is
-                    // read from `ctx.cursor + reloffset + byte_start`, matching Ghidra's
-                    // `point.getOffset() + bytestart` computation.
                     let token_base = self.token_base_for_sla_field(operand_absolute_offset);
-                    let raw = read_sla_token_field_at(
+                    let value = read_sla_token_field_at(
                         self.ctx,
                         token_base,
                         *big_endian,
@@ -842,7 +804,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             .cursor
                             .max(token_base.saturating_add(encoded_size as usize));
                     }
-                    raw
+                    value
                 } else {
                     self.eval_pattern_expression(expr)?
                 };
