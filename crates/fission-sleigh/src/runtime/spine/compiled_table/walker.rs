@@ -681,24 +681,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let shared_sla_field_advances_cursor =
-                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                        .uses_shared_token_cursor()
-                        && shared_token_cursor_policy_sla_field_advances_cursor(
-                            self.selection.trace.root_bucket.as_str(),
-                        );
-                if shared_sla_field_advances_cursor {
-                    self.mark_legacy_shared_token_policy();
+                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
                     self.cursor = self
                         .cursor
-                        .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
-                }
-                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                    .uses_shared_token_cursor()
-                    && !self.sla_field_is_within_constructor_minimum(token_base, encoded_size)
-                {
-                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                        .max(token_base.saturating_add(encoded_size as usize));
                 }
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -733,17 +720,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let shared_sla_field_advances_cursor =
-                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                        .uses_shared_token_cursor()
-                        && shared_token_cursor_policy_sla_field_advances_cursor(
-                            self.selection.trace.root_bucket.as_str(),
-                        );
-                if shared_sla_field_advances_cursor {
-                    self.mark_legacy_shared_token_policy();
+                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
                     self.cursor = self
                         .cursor
-                        .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
+                        .max(token_base.saturating_add(encoded_size as usize));
                 }
                 let entry = entries.get(selector as usize).ok_or_else(|| {
                     anyhow!(
@@ -785,18 +766,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let shared_sla_field_advances_cursor =
-                    CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                        .uses_shared_token_cursor()
-                        && shared_token_cursor_policy_sla_field_advances_cursor(
-                            self.selection.trace.root_bucket.as_str(),
-                        );
-                if shared_sla_field_advances_cursor {
-                    self.mark_legacy_shared_token_policy();
-                    self.cursor = self
-                        .cursor
-                        .max(token_base + ((*byte_end - *byte_start) + 1) as usize);
-                }
                 let value = values.get(selector as usize).copied().ok_or_else(|| {
                     anyhow!(
                         "value map selector {} out of range for {} entries",
@@ -805,11 +774,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     )
                 })?;
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !CompiledTokenCursorPolicy::for_frontend(self.compiled)
-                    .uses_shared_token_cursor()
-                    && !self.sla_field_is_within_constructor_minimum(token_base, encoded_size)
-                {
-                    self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
+                    self.cursor = self
+                        .cursor
+                        .max(token_base.saturating_add(encoded_size as usize));
                 }
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -860,7 +828,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             *shift,
                         )? as i64;
                         encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                        self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                        if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
+                            self.cursor = self
+                                .cursor
+                                .max(token_base.saturating_add(encoded_size as usize));
+                        }
                         value
                     } else {
                         self.eval_pattern_expression(expr)?
@@ -892,7 +864,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     )? as i64;
                     encoded_size = ((*byte_end - *byte_start) + 1).max(1);
                     if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                        self.cursor = self.cursor.max(token_base + encoded_size as usize);
+                        self.cursor = self
+                            .cursor
+                            .max(token_base.saturating_add(encoded_size as usize));
                     }
                     raw
                 } else {

@@ -460,10 +460,6 @@ pub(super) fn shared_token_cursor_policy_register_subtable(table_name: &str) -> 
     matches!(table_name, "Reg8" | "Reg16" | "Reg32" | "Reg64")
 }
 
-pub(super) fn shared_token_cursor_policy_sib_token_subtable(table_name: &str) -> bool {
-    matches!(table_name, "Base" | "Base64" | "Index" | "Index64" | "ss")
-}
-
 pub(super) fn shared_token_cursor_policy_opcode_token_subtable(table_name: &str) -> bool {
     matches!(table_name, "cc")
 }
@@ -486,12 +482,6 @@ pub(super) fn shared_token_cursor_policy_modrm_token_subtable(table_name: &str) 
             | "check_Rmr32_dest"
             | "check_rm32_dest"
     )
-}
-
-pub(super) fn shared_token_cursor_policy_sla_field_advances_cursor(table_name: &str) -> bool {
-    !shared_token_cursor_policy_modrm_token_subtable(table_name)
-        && !shared_token_cursor_policy_sib_token_subtable(table_name)
-        && !shared_token_cursor_policy_opcode_token_subtable(table_name)
 }
 
 pub(super) fn shared_token_cursor_policy_modrm_trailing_subtable(table_name: &str) -> bool {
