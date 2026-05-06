@@ -27,12 +27,11 @@ mod context;
 mod display;
 mod feature_audit;
 mod handles;
-#[path = "token.rs"]
-mod legacy_token_policy;
 mod runtime_index;
 mod selection;
 mod strategy;
 mod template_eval;
+mod token;
 mod walker;
 
 pub use feature_audit::{audit_sla_template_features, SlaTemplateFeatureAudit};
@@ -41,11 +40,11 @@ pub use template_eval::{FlowEmitOptions, RuntimeFlowOverride};
 use context::*;
 use display::*;
 use handles::*;
-use legacy_token_policy::*;
 use runtime_index::*;
 use selection::*;
 use strategy::*;
 use template_eval::*;
+use token::*;
 use walker::*;
 
 #[cfg(test)]
