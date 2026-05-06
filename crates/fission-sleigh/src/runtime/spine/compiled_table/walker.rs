@@ -908,15 +908,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     self.cursor = cursor_start;
                     self.shared_token_operand_end =
                         self.shared_token_operand_end.max(sub_state.length);
-                } else if shared_token_cursor_policy_zero_width_subtable(table_name) {
-                    self.cursor = cursor_start;
-                } else if self
-                    .selection
-                    .constructor
-                    .constructor_template
-                    .template_source
-                    == CompiledTemplateSource::SpecDerived
-                    && !subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
+                } else if !subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
                 {
                     self.minimum_length = self
                         .minimum_length

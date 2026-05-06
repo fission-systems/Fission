@@ -330,15 +330,6 @@ pub(super) fn constructor_consumes_sequential_operand_bytes(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
 ) -> bool {
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor()
-        && constructor
-            .constructor_template
-            .handles
-            .iter()
-            .any(|handle| matches!(handle.spec, CompiledOperandSpec::SubtableEvaluation { .. }))
-    {
-        return true;
-    }
     constructor
         .constructor_template
         .handles
@@ -351,12 +342,6 @@ pub(super) fn subtable_consumes_sequential_bytes(
     table_name: &str,
     depth: usize,
 ) -> bool {
-    if shared_token_cursor_policy_zero_width_subtable(table_name) {
-        return false;
-    }
-    if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() {
-        return true;
-    }
     if depth > 8 {
         return false;
     }
@@ -386,39 +371,23 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
     depth: usize,
 ) -> bool {
     match spec {
+        CompiledOperandSpec::SlaTokenField { .. }
+        | CompiledOperandSpec::SlaVarnodeList { .. }
+        | CompiledOperandSpec::SlaValueMap { .. }
+        | CompiledOperandSpec::SlaPatternExpression { .. }
+            if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor()
+                && operand_spec_primary_sla_token_span(compiled, spec, depth).is_some() =>
+        {
+            true
+        }
         CompiledOperandSpec::SlaValueMap { .. }
         | CompiledOperandSpec::Immediate { .. }
         | CompiledOperandSpec::Relative { .. } => true,
-        CompiledOperandSpec::SubtableEvaluation { table_name, .. }
-            if CompiledTokenCursorPolicy::for_frontend(compiled).uses_shared_token_cursor() =>
-        {
-            !shared_token_cursor_policy_zero_width_subtable(table_name)
-        }
         CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
             subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
         }
         _ => false,
     }
-}
-
-pub(super) fn shared_token_cursor_policy_zero_width_subtable(table_name: &str) -> bool {
-    matches!(
-        table_name,
-        "xrelease"
-            | "xacq_xrel_prefx"
-            | "lockx"
-            | "unlock"
-            | "segWide"
-            | "Reg8"
-            | "Reg16"
-            | "Reg32"
-            | "Reg64"
-            | "check_Reg32_dest"
-            | "check_Rmr32_dest"
-            | "check_rm32_dest"
-            | "check_EAX_dest"
-            | "cc"
-    )
 }
 
 pub(super) fn shared_token_cursor_policy_modrm_trailing_subtable(table_name: &str) -> bool {
