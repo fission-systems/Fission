@@ -483,13 +483,6 @@ pub(super) fn shared_token_cursor_policy_modrm_token_subtable(table_name: &str) 
     )
 }
 
-pub(super) fn shared_token_cursor_policy_opcode_row_modrm_subtable(table_name: &str) -> bool {
-    matches!(
-        table_name,
-        "Rmr8" | "Rmr16" | "Rmr32" | "Rmr64" | "CRmr8" | "CRmr16" | "CRmr32"
-    )
-}
-
 pub(super) fn shared_token_cursor_policy_sla_field_advances_cursor(table_name: &str) -> bool {
     !shared_token_cursor_policy_modrm_token_subtable(table_name)
         && !shared_token_cursor_policy_sib_token_subtable(table_name)

@@ -1043,10 +1043,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ) {
             let after_opcode = self.ctx.instruction_cursor
                 + opcode_len_from_instruction_start(self.ctx).unwrap_or(0);
+            let matched_pattern_len = self
+                .selection
+                .trace
+                .matched_leaf_pattern
+                .as_ref()
+                .map(disjoint_pattern_instruction_byte_len)
+                .unwrap_or(0);
             if self.ctx.cursor < after_opcode
-                && shared_token_cursor_policy_opcode_row_modrm_subtable(
-                    self.selection.trace.root_bucket.as_str(),
-                )
+                && matched_pattern_len > 0
             {
                 self.ctx.cursor
             } else {
