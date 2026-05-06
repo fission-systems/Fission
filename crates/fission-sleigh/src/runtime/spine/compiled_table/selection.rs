@@ -75,15 +75,11 @@ pub(super) fn select_constructor<'a>(
 
 pub(super) struct CompiledDecisionProbeEvaluator<'a, 'b> {
     ctx: &'a CompiledInstructionContext<'b>,
-    cached_token_fields: Option<TokenFieldBundle>,
 }
 
 impl<'a, 'b> CompiledDecisionProbeEvaluator<'a, 'b> {
     fn new(ctx: &'a CompiledInstructionContext<'b>) -> Self {
-        Self {
-            ctx,
-            cached_token_fields: None,
-        }
+        Self { ctx }
     }
 }
 
@@ -121,14 +117,14 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 CompiledTokenFieldRef::InstructionWidthProfile,
             ) => vec![self.ctx.instruction_width_profile],
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                    .map(|bundle| bundle.operand_mode)
-                    .unwrap_or(0)]
+                bail!(
+                    "compatibility token-field decision probe is not a canonical compiled-table selection path"
+                );
             }
             CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                vec![ensure_token_fields(self.ctx, &mut self.cached_token_fields)
-                    .map(|bundle| bundle.reg)
-                    .unwrap_or(0)]
+                bail!(
+                    "compatibility token-field decision probe is not a canonical compiled-table selection path"
+                );
             }
             CompiledDecisionProbe::SlaInstructionBits {
                 start_bit,
@@ -261,7 +257,6 @@ pub(super) fn constructor_matches(
         bail!("opsize mismatch");
     }
 
-    let opcode_len = opcode_len_from_matcher(&constructor.matcher);
     match &constructor.matcher {
         CompiledPatternMatcher::ExactBytes(bytes) => {
             if ctx.bytes.get(ctx.cursor..ctx.cursor + bytes.len()) != Some(bytes.as_slice()) {
@@ -329,17 +324,9 @@ pub(super) fn constructor_matches(
             .iter()
             .any(|spec| matches!(spec, CompiledOperandSpec::TokenFieldExtraction { .. }));
     if requires_token_bundle {
-        let token_fields = decode_shared_token_fields(ctx, ctx.cursor + opcode_len)?;
-        if let Some(expected) = constructor.mod_constraint {
-            if token_fields.operand_mode != expected {
-                bail!("mod mismatch");
-            }
-        }
-        if !constructor.operand_reg_values.is_empty()
-            && !constructor.operand_reg_values.contains(&token_fields.reg)
-        {
-            bail!("operand_reg mismatch");
-        }
+        bail!(
+            "compatibility token-field constructor selector is not a canonical compiled-table selection path"
+        );
     }
 
     Ok(())

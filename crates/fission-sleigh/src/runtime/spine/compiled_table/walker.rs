@@ -20,7 +20,6 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     context_known_mask: u64,
     cursor: usize,
     shared_token_operand_end: usize,
-    token_fields: Option<TokenFieldBundle>,
     handles: Vec<Option<RuntimeHandle>>,
     handle_reference_bitmap: Vec<bool>,
     walker: spine::RuntimeParserWalker,
@@ -139,7 +138,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             context_known_mask: ctx.context_known_mask,
             cursor: ctx.cursor + opcode_len,
             shared_token_operand_end: 0,
-            token_fields: None,
             handles,
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
@@ -180,9 +178,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         for step in decode_steps {
             match step {
                 CompiledOperandDecodeStep::ConsumeTokenFields => {
-                    if !shared_token_replace_current_wrapper {
-                        self.ensure_token_fields()?;
-                    }
+                    bail!(
+                        "compatibility token-field decode step is not a canonical compiled-table runtime path"
+                    );
                 }
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                     self.decode_operand(operand_index)?;
@@ -541,29 +539,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn ensure_token_fields(&mut self) -> Result<TokenFieldBundle> {
-        if self.token_fields.is_none() {
-            self.legacy_path_audit.direct_token_parser = true;
-            let token_offset = if self
-                .selection
-                .constructor
-                .constructor_template
-                .template_source
-                == CompiledTemplateSource::SpecDerived
-                && self.selection.trace.root_bucket == "instruction"
-            {
-                self.ctx.cursor + opcode_len_from_context(self.ctx)?
-            } else {
-                self.cursor
-            };
-            let decoded = decode_shared_token_fields(self.ctx, token_offset)?;
-            self.cursor = self.cursor.max(token_offset + decoded.length);
-            self.token_fields = Some(decoded);
-        }
-        self.token_fields
-            .ok_or_else(|| anyhow!("failed to decode token fields"))
-    }
-
     fn mark_legacy_shared_token_policy(&mut self) {
         self.legacy_path_audit.legacy_shared_token_policy = true;
     }
@@ -571,33 +546,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<OperandBinding> {
         match &template.spec {
             CompiledOperandSpec::TokenFieldExtraction {
-                bit_offset,
-                bit_width,
-                sign_extend,
+                ..
             } => {
-                let token_fields = self.ensure_token_fields()?;
-                if token_fields.operand_mode == 3 {
-                    Ok(OperandBinding::plain(BoundOperand::Register {
-                        index: token_fields.rm,
-                        size: *bit_width / 8,
-                    }))
-                } else {
-                    let absolute = token_fields.rip_relative.then(|| {
-                        self.ctx
-                            .address
-                            .wrapping_add(self.cursor as u64)
-                            .wrapping_add_signed(token_fields.displacement)
-                    });
-                    Ok(OperandBinding::plain(BoundOperand::Memory {
-                        base: token_fields.base,
-                        index: token_fields.index,
-                        scale: token_fields.scale,
-                        displacement: token_fields.displacement,
-                        rip_relative: token_fields.rip_relative,
-                        absolute,
-                        size: *bit_width / 8,
-                    }))
-                }
+                bail!(
+                    "compatibility token-field extraction operand is not a canonical compiled-table runtime path"
+                );
             }
             CompiledOperandSpec::SlaTokenField {
                 big_endian,

@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::lowering::Collector;
 use super::*;
-use crate::compiler::{compile_frontend_for_entry_spec, discovery, x86_64_entry_spec_path};
+use crate::compiler::{
+    compile_frontend_for_entry_spec, discovery, spec_root_for_arch, x86_64_entry_spec_path,
+};
 
 #[test]
 fn compile_frontend_collects_pcode_ops_and_patterns() {
@@ -128,4 +130,73 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
         runtime_ready > 0,
         "packaged x86-64 .sla should provide runtime-ready canonical constructors"
     );
+}
+
+#[test]
+fn runtime_ready_constructors_do_not_depend_on_compat_token_parser() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for token parser dependency check");
+        return;
+    }
+
+    let entry_specs = [
+        ("x86-64", x86_64_entry_spec_path()),
+        ("x86", spec_root_for_arch("x86").join("x86.slaspec")),
+    ];
+
+    for (entry_id, entry_spec) in entry_specs {
+        let compiled = compile_frontend_for_entry_spec(&entry_spec)
+            .unwrap_or_else(|error| panic!("compile {entry_id} frontend: {error:#}"));
+        let mut runtime_ready = 0usize;
+        for constructor in compiled
+            .subtables
+            .values()
+            .flat_map(|subtable| subtable.constructors.iter())
+            .filter(|constructor| constructor.runtime_ready)
+        {
+            runtime_ready += 1;
+            assert!(
+                constructor.mod_constraint.is_none(),
+                "{entry_id} runtime-ready constructor still uses legacy mod selector: {}",
+                constructor.source
+            );
+            assert!(
+                constructor.operand_reg_values.is_empty(),
+                "{entry_id} runtime-ready constructor still uses legacy reg selector: {}",
+                constructor.source
+            );
+            assert!(
+                !constructor.operand_specs.iter().any(|spec| {
+                    matches!(spec, CompiledOperandSpec::TokenFieldExtraction { .. })
+                }),
+                "{entry_id} runtime-ready constructor still uses legacy token-field operand spec: {}",
+                constructor.source
+            );
+            assert!(
+                !constructor
+                    .constructor_template
+                    .decode_steps
+                    .iter()
+                    .any(|step| matches!(step, CompiledOperandDecodeStep::ConsumeTokenFields)),
+                "{entry_id} runtime-ready constructor still uses legacy token-field decode step: {}",
+                constructor.source
+            );
+            assert!(
+                !constructor
+                    .constructor_template
+                    .handles
+                    .iter()
+                    .any(|handle| matches!(
+                        &handle.spec,
+                        CompiledOperandSpec::TokenFieldExtraction { .. }
+                    )),
+                "{entry_id} runtime-ready constructor still binds through legacy token-field handles: {}",
+                constructor.source
+            );
+        }
+        assert!(
+            runtime_ready > 0,
+            "packaged {entry_id} .sla should provide runtime-ready canonical constructors"
+        );
+    }
 }

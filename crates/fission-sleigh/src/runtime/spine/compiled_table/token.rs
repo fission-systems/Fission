@@ -1,18 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct TokenFieldBundle {
-    pub(super) operand_mode: u8,
-    pub(super) reg: u8,
-    pub(super) rm: u8,
-    pub(super) base: Option<u8>,
-    pub(super) index: Option<u8>,
-    pub(super) scale: u8,
-    pub(super) displacement: i64,
-    pub(super) rip_relative: bool,
-    pub(super) length: usize,
-}
-
 // Transitional shared-token cursor policy.
 //
 // MIGRATION DEBT: variable-length specs may need shared token cursor handling
@@ -258,21 +245,6 @@ fn token_span_from_sla_field(
     })
 }
 
-pub(super) fn ensure_token_fields<'a>(
-    ctx: &CompiledInstructionContext<'_>,
-    cached_token_fields: &'a mut Option<TokenFieldBundle>,
-) -> Result<&'a TokenFieldBundle> {
-    if cached_token_fields.is_none() {
-        *cached_token_fields = Some(decode_shared_token_fields(
-            ctx,
-            ctx.cursor + opcode_len_from_context(ctx)?,
-        )?);
-    }
-    cached_token_fields
-        .as_ref()
-        .ok_or_else(|| anyhow!("missing cached token fields"))
-}
-
 pub(super) fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
     opcode_len_from_cursor(ctx, ctx.cursor)
 }
@@ -343,90 +315,6 @@ pub(super) fn is_instruction_prefix_byte(byte: u8) -> bool {
         byte,
         0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x66 | 0x67 | 0xf0 | 0xf2 | 0xf3
     ) || (0x40..=0x4f).contains(&byte)
-}
-
-pub(super) fn decode_shared_token_fields(
-    ctx: &CompiledInstructionContext<'_>,
-    offset: usize,
-) -> Result<TokenFieldBundle> {
-    let byte = *ctx
-        .bytes
-        .get(offset)
-        .ok_or_else(|| anyhow!("missing token field bundle at {offset}"))?;
-    let operand_mode = byte >> 6;
-    let reg = ((byte >> 3) & 0x7) | ((false as u8) << 3);
-    let rm_low = byte & 0x7;
-    let rm = rm_low | ((false as u8) << 3);
-    if operand_mode == 3 {
-        return Ok(TokenFieldBundle {
-            operand_mode,
-            reg,
-            rm,
-            base: Some(rm),
-            index: None,
-            scale: 1,
-            displacement: 0,
-            rip_relative: false,
-            length: 1,
-        });
-    }
-
-    let mut length = 1usize;
-    let mut displacement = 0i64;
-    let mut rip_relative = false;
-    let mut base = Some(rm);
-    let mut index = None;
-    let mut scale = 1u8;
-
-    if rm_low == 4 {
-        let sib = *ctx
-            .bytes
-            .get(offset + length)
-            .ok_or_else(|| anyhow!("missing sib"))?;
-        length += 1;
-        scale = 1u8 << (sib >> 6);
-        let index_low = (sib >> 3) & 0x7;
-        let base_low = sib & 0x7;
-        if index_low != 4 {
-            index = Some(index_low | ((false as u8) << 3));
-        }
-        if operand_mode == 0 && base_low == 5 {
-            base = None;
-            displacement = read_sint(ctx.bytes, offset + length, 4)?;
-            length += 4;
-        } else {
-            base = Some(base_low | ((false as u8) << 3));
-        }
-    } else if operand_mode == 0 && rm_low == 5 {
-        base = None;
-        rip_relative = true;
-        displacement = read_sint(ctx.bytes, offset + length, 4)?;
-        length += 4;
-    }
-
-    match operand_mode {
-        1 => {
-            displacement = displacement.wrapping_add(read_sint(ctx.bytes, offset + length, 1)?);
-            length += 1;
-        }
-        2 => {
-            displacement = displacement.wrapping_add(read_sint(ctx.bytes, offset + length, 4)?);
-            length += 4;
-        }
-        _ => {}
-    }
-
-    Ok(TokenFieldBundle {
-        operand_mode,
-        reg,
-        rm,
-        base,
-        index,
-        scale,
-        displacement,
-        rip_relative,
-        length,
-    })
 }
 
 pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
