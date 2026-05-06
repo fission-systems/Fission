@@ -4,36 +4,39 @@ This document is the top-level benchmark guide for the repository.
 
 Current policy is intentionally split:
 
-- Canonical decompilation-quality validation: [`benchmark/full_benchmark/README.md`](/Users/sjkim1127/Fission/benchmark/full_benchmark/README.md)
+- Canonical decompilation-quality validation: [`benchmark/source_semantic_benchmark/README.md`](/Users/sjkim1127/Fission/benchmark/source_semantic_benchmark/README.md)
+- Ghidra reference/comparison validation: [`benchmark/full_benchmark/README.md`](/Users/sjkim1127/Fission/benchmark/full_benchmark/README.md)
 - Legacy microbenchmark / perf helpers: `cargo bench`, `scripts/benchmark/*`
 
-The canonical validation surface for Ghidra-parity and release-quality work is:
+The canonical validation surface for release-quality decompiler work is:
 
-- `python3 benchmark/full_benchmark/full_decomp_benchmark.py ...`
-- manifests under [`benchmark/config/benchmark_corpus/`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus)
-- artifacts under [`benchmark/artifacts/full_benchmark/`](/Users/sjkim1127/Fission/benchmark/artifacts/full_benchmark)
+- `python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py ...`
+- manifests under [`benchmark/source_semantic_benchmark/manifests/`](/Users/sjkim1127/Fission/benchmark/source_semantic_benchmark/manifests)
+- artifacts under [`benchmark/artifacts/source_semantic_benchmark/`](/Users/sjkim1127/Fission/benchmark/artifacts/source_semantic_benchmark)
 
 ## Canonical Workflow
 
-Use the whole-binary corpus benchmark for decompilation quality work.
+Use the source semantic benchmark for decompilation quality work. It compares
+Fission output against checked-in original source code and does not use Ghidra
+as the quality oracle.
 
 Primary operator guide:
 
-- [`benchmark/full_benchmark/README.md`](/Users/sjkim1127/Fission/benchmark/full_benchmark/README.md)
+- [`benchmark/source_semantic_benchmark/README.md`](/Users/sjkim1127/Fission/benchmark/source_semantic_benchmark/README.md)
 
 Current scope:
 
-- Primary corpus binaries live under [`benchmark/binary/`](/Users/sjkim1127/Fission/benchmark/binary) (window/small C builds + vendor PE fixtures); optional local-only corpora may still reference [`samples/windows/`](/Users/sjkim1127/Fission/samples/windows).
-- explicit `smoke`, `release`, and `parity` suites
+- Primary corpus binaries and source files live under [`benchmark/binary/`](/Users/sjkim1127/Fission/benchmark/binary).
+- explicit source-owned smoke and full source-owned suites
 - advisory-first corpus gating
-- compact summary JSON as the preferred AI-facing artifact
+- row JSON and summary JSON/Markdown as the preferred review artifacts
 
 Recommended loop:
 
 1. targeted trace or targeted crate validation
-2. smoke corpus benchmark
-3. parity corpus benchmark for Ghidra-reference work
-4. release corpus benchmark only for promotion candidates
+2. source semantic smoke benchmark
+3. source-owned corpus benchmark
+4. Ghidra reference/comparison benchmark only when investigating parity against local Ghidra code
 
 ## Real-World Sample Automation
 
@@ -97,6 +100,8 @@ corpus artifacts and must not be staged or pushed.
 
 Config roots:
 
+- [`benchmark/source_semantic_benchmark/manifests/smoke_windows_small_c.json`](/Users/sjkim1127/Fission/benchmark/source_semantic_benchmark/manifests/smoke_windows_small_c.json)
+- [`benchmark/source_semantic_benchmark/manifests/source_owned_all.json`](/Users/sjkim1127/Fission/benchmark/source_semantic_benchmark/manifests/source_owned_all.json)
 - [`benchmark/config/benchmark_corpus/smoke_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/smoke_corpus.json)
 - [`benchmark/config/benchmark_corpus/release_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/release_corpus.json)
 - [`benchmark/config/benchmark_corpus/parity_corpus.json`](/Users/sjkim1127/Fission/benchmark/config/benchmark_corpus/parity_corpus.json)
@@ -105,11 +110,13 @@ Config roots:
 
 Artifact roots:
 
+- [`benchmark/artifacts/source_semantic_benchmark/`](/Users/sjkim1127/Fission/benchmark/artifacts/source_semantic_benchmark)
 - [`benchmark/artifacts/full_benchmark/`](/Users/sjkim1127/Fission/benchmark/artifacts/full_benchmark)
 - [`benchmark/artifacts/automation/`](/Users/sjkim1127/Fission/benchmark/artifacts/automation)
 
 Naming contract:
 
+- source semantic latest: `benchmark/artifacts/source_semantic_benchmark/<suite>-latest`
 - full benchmark latest: `benchmark/artifacts/full_benchmark/<target>-<profile>-latest`
 - full benchmark baseline: `benchmark/artifacts/full_benchmark/<target>-<profile>-baseline`
 - full benchmark timestamped run: `benchmark/artifacts/full_benchmark/<target>-<profile>-<YYYYmmdd-HHMMSS>`
@@ -118,11 +125,13 @@ Naming contract:
 
 ## Corpus Semantics
 
-The checked-in suites are intentionally Windows-only for this phase.
+The canonical source semantic suites are source-owned. Every source-defined
+function produces a row; mapping, decompilation, candidate compilation, and
+behavior failures are recorded as failures rather than skipped cases.
 
-- `smoke`: fast local validation across a small x86/x64 suite
-- `parity`: Ghidra-reference workbench for parity owners
-- `release`: broader advisory suite for promotion candidates
+- `smoke`: deterministic source-owned C fixture validation
+- `source-owned-all`: auto-discovered checked-in source/binary pairs
+- Ghidra parity/release manifests remain reference/comparison inputs, not the primary oracle
 
 `putty` remains the primary canary, but it is not the only release narrative.
 Cross-binary degraded rows, x86/x64 split reporting, owner metrics, and shape-drift
@@ -144,12 +153,13 @@ When a same-axis baseline is present, summaries should expose:
 
 ## Compact Summary
 
-The preferred machine-readable artifact is:
+The preferred machine-readable artifacts are:
 
-- `benchmark_compact_summary.json`
+- `source_semantic_rows.json`
+- `source_semantic_summary.json`
 
-Use it for first-pass review, AI tooling, and advisory summarization. Keep the
-verbose JSON/Markdown artifacts for deep debugging only.
+Use them for first-pass review, AI tooling, and advisory summarization. Keep the
+Markdown artifact for operator-facing triage.
 
 ## Legacy Microbenchmarks
 

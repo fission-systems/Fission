@@ -1,0 +1,16 @@
+{
+  "name": "source-semantic-smoke-windows-small-c",
+  "suite_tier": "source_semantic_smoke",
+  "gate_mode": "advisory",
+  "notes": "Deterministic smoke corpus for source-vs-Fission semantic benchmark validation. Ghidra is intentionally not used.",
+  "entries": [
+    {
+      "id": "x86-64-windows-small-c-test-functions",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "source_path": "benchmark/binary/x86-64/window/small/source/c/test_functions.c",
+      "language": "c",
+      "tags": ["smoke", "source-owned", "x86-64", "windows", "c"],
+      "weight": 1.0
+    }
+  ]
+}

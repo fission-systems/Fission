@@ -14,7 +14,7 @@ Fission represents a fundamental rearchitecture of decompilation workflows, plac
 
 - **Instruction Semantics**: Precision lift via Sleigh, with semantics-preserving IR normalization
 - **Canonical Intermediate Representation**: NIR/HIR layers ensuring deterministic, auditable transformations
-- **Control-Flow Recovery**: Graph-based structuring with algorithmic soundness, not heuristics
+- **Control-Flow Recovery**: Graph-based structuring with algorithmic soundness
 - **Pseudocode Rendering**: Type-aware, context-sensitive output generation
 
 Fission pursues **independent decompilation excellence** with Ghidra available as a benchmarking and validation reference.
@@ -78,7 +78,8 @@ Fission maintains comprehensive, role-based documentation:
 - [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) — One-page repo layout (crates, `benchmark/`, `utils/`, `vendor/`)
 - [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
 - [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
-- [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Canonical decompilation benchmark workflow
+- [`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md) — Canonical source-vs-Fission semantic benchmark workflow
+- [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Ghidra reference/comparison benchmark workflow
 
 ### For Operators & Users
 - [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
@@ -119,13 +120,14 @@ Fission maintains comprehensive, role-based documentation:
 - ✅ Headless CLI (`fission_cli`: subcommands, JSON/automation paths, `inventory`, Rhai `script`)
 - ✅ Rust-native decompilation pipeline
 - ✅ Quality assurance and regression testing
-- ✅ Automated benchmarking against Ghidra
+- ✅ Automated source-semantic benchmarking against checked-in original source
 - ✅ Deterministic, reproducible output
 
 **In Active Development:**
 - 🔄 Large function readability and precision
-- 🔄 Advanced data abstraction and memory modeling
-- 🔄 Rich type inference and name recovery
+- 🔄 SLEIGH ConstructTpl lift completeness and compatibility-debt removal
+- 🔄 Advanced data abstraction: structures, pointers, arrays, field access, calling convention, parameter, and local recovery
+- 🔄 Rich type inference, FID, signature, and name recovery
 - 🔄 Desktop UI polish and end-user experience
 - 🔄 Additional architecture targets (MIPS, PPC, etc.)
 
@@ -216,9 +218,11 @@ payloads.
 Library-level use is possible at the Rust crate level, but the CLI is the
 current primary documented product surface.
 
-If you want comparative evaluation rather than a first manual CLI pass, use the
-canonical benchmark workflow in
-[`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md).
+If you want benchmark evaluation rather than a first manual CLI pass, use the
+canonical source-semantic workflow in
+[`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md).
+The Ghidra benchmark remains available as a reference/comparison lane, not as
+the primary quality oracle.
 
 ### Run the Desktop GUI
 
@@ -279,16 +283,18 @@ cargo test --all
 
 | Area | Target | Timeline |
 |------|--------|----------|
+| **SLEIGH Lift Accuracy** | Complete ConstructTpl execution as the success source; remove legacy token cursor, BoundOperand fallback, and compatibility classifier debt | Q2 2026 |
+| **Type/Data Abstraction** | Structures, pointers, arrays, field access, calling convention, parameter, and local recovery | Q2 2026 |
 | **Large Function Handling** | >10K instruction functions | Q2 2026 |
-| **Data Abstraction** | Field/type-aware modeling | Q2 2026 |
-| **Name Recovery** | Symbol and identifier inference | Q3 2026 |
+| **Name Recovery** | FID, signatures, symbols, and identifier inference | Q3 2026 |
 | **UI/UX Polish** | Desktop workflow optimization | Q3 2026 |
 | **Additional Targets** | MIPS, PPC, additional architectures | Q4 2026 |
 
 ### Known Limitations
 
 - Large functions (>10K instructions) may produce simplified output
-- Advanced data abstraction patterns in progress
+- Advanced type/data abstraction patterns in progress
+- FID/name recovery is partial, especially packed `.fidb`, exact hash inputs, and broad program seeker coverage
 - Limited cross-architecture coverage (PE x64 is primary target)
 - Desktop UI is functional but undergoing refinement
 
@@ -296,27 +302,25 @@ cargo test --all
 
 ## Advanced Usage
 
-### Benchmark Against Ghidra
+### Source Semantic Benchmark
 
-For comparative quality analysis:
+For canonical decompilation-quality analysis against checked-in original source:
 
 ```bash
-python3 benchmark/full_benchmark/full_decomp_benchmark.py \
-  <binary> \
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/smoke_windows_small_c.json \
   --fission-bin target/release/fission_cli \
-  --ghidra-dir vendor/ghidra/ghidra_11.4.2_PUBLIC \
-  --output-dir benchmark/artifacts/full_benchmark/<run-name> \
-  --limit 50
+  --output-dir benchmark/artifacts/source_semantic_benchmark/smoke-latest
 ```
 
 Canonical benchmark config and artifacts now live under:
 
-- [`benchmark/config/benchmark_corpus/`](./benchmark/config/benchmark_corpus/)
-- [`benchmark/artifacts/full_benchmark/`](./benchmark/artifacts/full_benchmark/)
+- [`benchmark/source_semantic_benchmark/manifests/`](./benchmark/source_semantic_benchmark/manifests/)
+- [`benchmark/artifacts/source_semantic_benchmark/`](./benchmark/artifacts/source_semantic_benchmark/)
 - [`benchmark/artifacts/automation/`](./benchmark/artifacts/automation/)
 
-Use `benchmark_compact_summary.json` for first-pass machine review and the
-verbose JSON/Markdown artifacts for deep debugging.
+Rows compare Fission pseudocode with source-derived static fingerprints and
+dynamic behavior harnesses. Ghidra is not used as the baseline.
 
 ### Inspect Quality Reports
 
@@ -324,7 +328,8 @@ Automated quality metrics are stored in:
 
 ```
 benchmark/artifacts/automation/          # Fast-lane test results
-benchmark/artifacts/full_benchmark/      # Detailed benchmark runs
+benchmark/artifacts/source_semantic_benchmark/ # Canonical source semantic runs
+benchmark/artifacts/full_benchmark/      # Ghidra reference/comparison runs
 ```
 
 ### Extended Architecture

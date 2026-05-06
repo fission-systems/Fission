@@ -1,0 +1,15 @@
+{
+  "name": "source-owned-all",
+  "suite_tier": "source_semantic",
+  "gate_mode": "advisory",
+  "notes": "Auto-discovered benchmark entries for checked-in binaries that have checked-in source. Ghidra is intentionally not used.",
+  "discovery": [
+    {
+      "root": "benchmark/binary",
+      "languages": ["c", "cpp", "go", "rust"],
+      "require_binary": true,
+      "tags": ["source-owned"]
+    }
+  ],
+  "entries": []
+}

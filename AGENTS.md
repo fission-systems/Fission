@@ -15,8 +15,9 @@ Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-nati
 Fission/
 ├── benchmark/
 │   ├── config/              # Benchmark corpus + automation manifests
+│   ├── source_semantic_benchmark/ # Canonical source-vs-Fission semantic benchmark
 │   ├── full_benchmark/      # Benchmark runner, support modules, rendering
-│   ├── artifacts/           # Benchmark outputs (automation/, full_benchmark/)
+│   ├── artifacts/           # Benchmark outputs (automation/, source_semantic_benchmark/, full_benchmark/)
 │   └── binary/              # Curated benchmark binaries and fixtures
 ├── crates/
 │   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, CFG, printer
@@ -53,19 +54,20 @@ Read the nearest child file before editing those areas.
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
 | Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
 | Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |
-| Benchmark runner / corpus reports | `benchmark/full_benchmark/` | Python-only benchmark surface; keep reporting/gating additive |
+| Source semantic benchmark / corpus reports | `benchmark/source_semantic_benchmark/` | Canonical source-vs-Fission semantic quality surface; Ghidra is not used as the oracle |
+| Ghidra reference benchmark | `benchmark/full_benchmark/` | Reference/comparison lane only; keep reporting/gating additive |
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
-| Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
+| Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific shortcuts |
 
 ## Core Rules
 
 1. Fix behavior at the canonical owner, not downstream UI/surface layers.
-2. Prefer algorithmic CFG / dom / postdom / SCC facts over lexical or binary-specific heuristics.
+2. Prefer algorithmic CFG / dom / postdom / SCC facts over lexical or binary-specific shortcuts.
 3. Use typed contracts; do not invent parallel telemetry payloads outside `NirBuildStats`.
 4. Keep behavior deterministic when outputs feed snapshots, metrics, or automation comparisons.
 5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
@@ -73,7 +75,7 @@ Read the nearest child file before editing those areas.
 ## Anti-Patterns
 
 - Do not patch semantic gaps only in printer/UI output.
-- Do not add one-off binary-specific heuristics without invariant-based guards.
+- Do not add one-off binary-specific shortcuts without invariant-based guards.
 - Do not duplicate the same metric definition across pcode and automation.
 - Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
@@ -94,8 +96,8 @@ cargo check -p fission-automation
 # Quality lane
 cargo run -p fission-automation -- nir-check --lane nir
 
-# Benchmark runner
-python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
+# Canonical benchmark runner
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --help
 ```
 
 ## Workflow Bias
@@ -104,7 +106,7 @@ python3 benchmark/full_benchmark/full_decomp_benchmark.py --help
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/Tauri surfaces as needed).
 - For resource path / bundle resolution changes: `cargo test -p fission-core` and smoke `fission_cli resources status`.
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
-- If benchmark/reporting changes: validate under `benchmark/full_benchmark/` and keep artifacts under `benchmark/artifacts/`.
+- If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): it only tags a commit after `ci.yml` has a successful **push** run for that SHA, then `cd.yml` builds assets.
 
