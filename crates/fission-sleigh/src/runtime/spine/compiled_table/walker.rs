@@ -928,7 +928,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 	                                template.operand_index
 	                            );
                         }
-                        self.legacy_path_audit.no_export_subtable_fallback = true;
                         return Ok(OperandBinding::guard_only(sub_state));
                     }
                 };

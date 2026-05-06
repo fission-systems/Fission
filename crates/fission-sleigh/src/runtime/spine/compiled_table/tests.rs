@@ -560,6 +560,8 @@ fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
 #[test]
 fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let disabled_branch = ["if", "false"].join(" ");
+    let guard_no_export_assignment = ["no_export_subtable_fallback", "= true"].join(" ");
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -576,6 +578,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains("is_x86_compat_language"),
             "{} still uses architecture-named compatibility predicate",
+            file.display()
+        );
+        assert!(
+            !source.contains(&disabled_branch),
+            "{} still carries disabled compatibility classifier code",
+            file.display()
+        );
+        assert!(
+            !source.contains(&guard_no_export_assignment),
+            "{} still counts guard-only no-export subtables as fallback debt",
             file.display()
         );
     }

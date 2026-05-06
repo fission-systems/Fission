@@ -340,9 +340,6 @@ pub(super) fn constructor_matches(
         {
             bail!("operand_reg mismatch");
         }
-        if false && token_fields.operand_mode == 3 {
-            bail!("memory-only token field mismatch");
-        }
     }
 
     Ok(())
