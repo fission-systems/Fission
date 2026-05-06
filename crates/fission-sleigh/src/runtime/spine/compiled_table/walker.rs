@@ -175,21 +175,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         } else {
             opcode_len_from_matcher(&selection.constructor.matcher)
         };
-        let legacy_zero_minimum_length = token_policy.uses_shared_token_cursor()
-            && selection.constructor.constructor_template.template_source
-                == CompiledTemplateSource::SpecDerived
-            && (matches!(
-                selection.constructor.matcher,
-                CompiledPatternMatcher::RowCc { .. }
-            ) || matches!(
-                selection.constructor.construct_tpl_kind,
-                CompiledConstructTplKind::Jcc
-            ));
-        let minimum_length = if legacy_zero_minimum_length {
-            0
-        } else {
-            selection.constructor.minimum_length as usize
-        };
+        let minimum_length = selection.constructor.minimum_length as usize;
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
         let operand_absolute_offsets =
             vec![None; selection.constructor.constructor_template.handles.len()];
@@ -230,7 +216,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
-                legacy_shared_token_policy: legacy_zero_minimum_length,
                 compatibility_template_source,
                 ..Default::default()
             },
