@@ -9,7 +9,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
     load_construct_templates_from_sla, resolve_ghidra_install_paths, CompiledSpaceRef,
 };
-use fission_sleigh::runtime::{DecodedInstruction, RuntimeLegacyPathAudit, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use serde::Serialize;
 
 /// Maps Fission's internal dense `space_id` → Ghidra-native `CompiledSpaceRef`.
@@ -82,7 +82,6 @@ struct ProbeReport {
     entry_id: String,
     execution_mode: String,
     compat_emitter_used: bool,
-    legacy_path_audit_totals: BTreeMap<String, u64>,
     start_address: u64,
     requested_count: usize,
     space_map: BTreeMap<String, u64>,
@@ -107,7 +106,6 @@ struct InstructionReport {
     length: Option<u64>,
     compat_emitter_used: bool,
     template_source: Option<String>,
-    legacy_path_audit: RuntimeLegacyPathAudit,
     pcode: Vec<SerializablePcodeOp>,
 }
 
@@ -128,19 +126,6 @@ struct SerializableVarnode {
     size: u32,
     is_constant: bool,
     constant_val: i64,
-}
-
-fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<String, u64> {
-    let mut totals = BTreeMap::new();
-    for instruction in instructions {
-        let audit = instruction.legacy_path_audit;
-        if audit.compatibility_template_source {
-            *totals
-                .entry("compatibility_template_source".to_string())
-                .or_insert(0) += 1;
-        }
-    }
-    totals
 }
 
 impl SerializableVarnode {
@@ -288,7 +273,6 @@ fn main() -> Result<()> {
                 length: None,
                 compat_emitter_used: false,
                 template_source: None,
-                legacy_path_audit: RuntimeLegacyPathAudit::default(),
                 pcode: Vec::new(),
             });
             break;
@@ -310,7 +294,6 @@ fn main() -> Result<()> {
                     template_source: details
                         .template_source
                         .map(|source| format!("{:?}", source)),
-                    legacy_path_audit: details.legacy_path_audit,
                     pcode: ops
                         .iter()
                         .map(|op| SerializablePcodeOp::from_op(op, &space_map))
@@ -330,7 +313,6 @@ fn main() -> Result<()> {
                     length: None,
                     compat_emitter_used: false,
                     template_source: None,
-                    legacy_path_audit: RuntimeLegacyPathAudit::default(),
                     pcode: Vec::new(),
                 });
                 break;
@@ -354,7 +336,6 @@ fn main() -> Result<()> {
         compat_emitter_used: instructions
             .iter()
             .any(|instruction| instruction.compat_emitter_used),
-        legacy_path_audit_totals: legacy_path_audit_totals(&instructions),
         start_address: args.address,
         requested_count: args.count,
         space_map: space_map_json,

@@ -25,7 +25,6 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     operand_relative_lengths: Vec<Option<usize>>,
     handle_reference_bitmap: Vec<bool>,
     walker: spine::RuntimeParserWalker,
-    legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit,
 }
 
 pub(super) struct OperandBinding {
@@ -136,10 +135,10 @@ mod construct_state_offset_tests {
                 .expect("decode/lift shared-token sample");
 
             assert_eq!(length as usize, bytes.len());
+            assert!(!details.compat_emitter_used);
             assert_eq!(
-                details.legacy_path_audit,
-                crate::runtime::RuntimeLegacyPathAudit::default(),
-                "SLA operand offsets and ConstructState lengths should not need legacy audit paths"
+                details.template_source,
+                Some(crate::compiler::CompiledTemplateSource::SpecDerived)
             );
         }
     }
@@ -195,9 +194,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 selection.constructor.matcher
             );
         }
-        let compatibility_template_source =
-            selection.constructor.constructor_template.template_source
-                != CompiledTemplateSource::SpecDerived;
         let handle_reference_bitmap = constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
         );
@@ -216,10 +212,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_relative_lengths,
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
-            legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
-                compatibility_template_source,
-                ..Default::default()
-            },
         })
     }
 
@@ -346,7 +338,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             relative_length,
             length,
             match_trace: self.selection.trace,
-            legacy_path_audit: self.legacy_path_audit,
         })
     }
 
@@ -855,7 +846,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     Some(*offsetbase),
                     Some(operand_absolute_offset),
                 )?;
-                self.legacy_path_audit = self.legacy_path_audit.merge(sub_state.legacy_path_audit);
                 let spec_derived_sla_operand = self
                     .selection
                     .constructor

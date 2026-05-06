@@ -79,7 +79,6 @@ mod tests {
             match_trace: empty_trace(),
             named_templates: Vec::new(),
             context_commits: Vec::new(),
-            legacy_path_audit: Default::default(),
         };
 
         let err = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
@@ -120,7 +119,6 @@ mod tests {
             match_trace: empty_trace(),
             named_templates: Vec::new(),
             context_commits: Vec::new(),
-            legacy_path_audit: Default::default(),
         };
 
         let details = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
@@ -191,7 +189,6 @@ where
         Ok(RuntimeExecutionDetails {
             compat_emitter_used: false,
             template_source: Some(state.constructor_template.template_source),
-            legacy_path_audit: state.legacy_path_audit,
         })
     }
 }

@@ -3,8 +3,6 @@ use crate::compiler::{
     CompiledContextCommit, CompiledDisplayOperand, CompiledDisplayTemplate, CompiledOperandSpec,
     CompiledSpaceRef,
 };
-use crate::runtime::RuntimeLegacyPathAudit;
-
 use super::RuntimeMatchTrace;
 
 #[derive(Debug, Clone)]
@@ -38,7 +36,6 @@ pub struct RuntimeConstructState {
     /// callers use this as the instruction length for the root state.
     pub length: usize,
     pub match_trace: RuntimeMatchTrace,
-    pub legacy_path_audit: RuntimeLegacyPathAudit,
 }
 
 #[derive(Debug, Clone)]

@@ -93,22 +93,6 @@ impl std::error::Error for RuntimeSleighError {}
 pub struct RuntimeExecutionDetails {
     pub compat_emitter_used: bool,
     pub template_source: Option<crate::compiler::CompiledTemplateSource>,
-    #[serde(default)]
-    pub legacy_path_audit: RuntimeLegacyPathAudit,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeLegacyPathAudit {
-    pub compatibility_template_source: bool,
-}
-
-impl RuntimeLegacyPathAudit {
-    pub fn merge(self, other: Self) -> Self {
-        Self {
-            compatibility_template_source: self.compatibility_template_source
-                || other.compatibility_template_source,
-        }
-    }
 }
 
 use crate::runtime::native::NativeBackend;
