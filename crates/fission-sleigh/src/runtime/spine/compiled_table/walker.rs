@@ -1227,16 +1227,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .max(self.selection.constructor.minimum_length as usize)
                     .max(1)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
+            && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
             && self.selection.trace.root_bucket == "instruction"
         {
             self.shared_token_operand_end
                 .max(self.cursor)
                 .max(self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0))
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
-            && shared_token_cursor_policy_shared_token_subtable(
+            && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
+            && subtable_consumes_sequential_bytes(
+                self.compiled,
                 self.selection.trace.root_bucket.as_str(),
+                0,
             )
         {
             let matched_pattern_len = self

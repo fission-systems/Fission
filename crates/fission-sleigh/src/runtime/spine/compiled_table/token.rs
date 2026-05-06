@@ -390,54 +390,6 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
     }
 }
 
-pub(super) fn shared_token_cursor_policy_modrm_trailing_subtable(table_name: &str) -> bool {
-    matches!(
-        table_name,
-        "simm8_16"
-            | "simm8_32"
-            | "simm8_64"
-            | "simm16"
-            | "simm16_32"
-            | "simm16_64"
-            | "simm32"
-            | "simm32_64"
-            | "pcRelSimm8"
-            | "pcRelSimm16"
-            | "pcRelSimm32"
-            | "pcRelSimm64"
-            | "rel8"
-            | "rel16"
-            | "rel32"
-            | "rel64"
-            | "imm8"
-            | "imm16"
-            | "imm32"
-            | "imm64"
-    )
-}
-
-pub(super) fn shared_token_cursor_policy_shared_token_subtable(table_name: &str) -> bool {
-    matches!(
-        table_name,
-        "addr16"
-            | "addr32"
-            | "addr64"
-            | "Addr32_64"
-            | "Base"
-            | "Base64"
-            | "Index"
-            | "Index64"
-            | "Rmr8"
-            | "Rmr16"
-            | "Rmr32"
-            | "Rmr64"
-            | "CRmr8"
-            | "CRmr16"
-            | "CRmr32"
-            | "ss"
-    )
-}
-
 pub(super) fn constructor_replaces_current(constructor: &CompiledExecutableConstructor) -> bool {
     constructor
         .constructor_template
