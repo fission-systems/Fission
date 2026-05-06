@@ -28,6 +28,14 @@ pub struct RuntimeConstructState {
     pub exported_handle: Option<RuntimeHandle>,
     pub operands: Vec<BoundOperand>,
     pub condition_code: Option<u8>,
+    /// Absolute byte offset of this constructor state from the instruction start.
+    /// Mirrors Ghidra ConstructState.offset.
+    pub absolute_offset: usize,
+    /// Byte length of this constructor state relative to `absolute_offset`.
+    /// Mirrors Ghidra ConstructState.length.
+    pub relative_length: usize,
+    /// Absolute byte end of the decoded instruction/subconstructor. Existing
+    /// callers use this as the instruction length for the root state.
     pub length: usize,
     pub match_trace: RuntimeMatchTrace,
     pub legacy_path_audit: RuntimeLegacyPathAudit,

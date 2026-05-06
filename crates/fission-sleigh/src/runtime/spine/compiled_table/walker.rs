@@ -279,6 +279,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         } else {
             base_length
         };
+        let absolute_offset = self.ctx.cursor;
+        let relative_length = length.saturating_sub(absolute_offset);
 
         Ok(RuntimeConstructState {
             subtable_id: self.selection.subtable_id,
@@ -296,6 +298,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             exported_handle,
             operands,
             condition_code,
+            absolute_offset,
+            relative_length,
             length,
             match_trace: self.selection.trace,
             legacy_path_audit: self.legacy_path_audit,
