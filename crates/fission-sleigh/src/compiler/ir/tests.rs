@@ -199,3 +199,39 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
         );
     }
 }
+
+#[test]
+fn sla_operand_minimum_lengths_are_preserved_on_handle_templates() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for operand minlen check");
+        return;
+    }
+    let compiled = compile_frontend_for_entry_spec(&x86_64_entry_spec_path())
+        .expect("compile x86-64 frontend");
+    let mut handles = 0usize;
+    let mut nonzero_minlen = 0usize;
+    for constructor in compiled
+        .subtables
+        .values()
+        .flat_map(|subtable| subtable.constructors.iter())
+        .filter(|constructor| constructor.runtime_ready)
+    {
+        assert_eq!(
+            constructor.constructor_template.handles.len(),
+            constructor.operand_specs.len(),
+            "runtime-ready constructor handle/spec count mismatch: {}",
+            constructor.source
+        );
+        for handle in &constructor.constructor_template.handles {
+            handles += 1;
+            if handle.minimum_length > 0 {
+                nonzero_minlen += 1;
+            }
+        }
+    }
+    assert!(handles > 0, "expected runtime-ready operand handles");
+    assert!(
+        nonzero_minlen > 0,
+        "packaged x86-64 .sla should preserve nonzero OperandSymbol.minimumlength values"
+    );
+}

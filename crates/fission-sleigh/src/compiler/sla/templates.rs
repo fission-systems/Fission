@@ -176,6 +176,7 @@ pub(super) fn decode_construct_templates(
         let mut opprint_indices = Vec::new();
         let mut display_pieces = Vec::new();
         let mut operand_specs_by_index = BTreeMap::new();
+        let mut operand_minimum_lengths_by_index = BTreeMap::new();
         let mut display_operands_by_index = BTreeMap::new();
         let mut flowthru_operand_index = None;
         for child in &constructor.children {
@@ -210,6 +211,8 @@ pub(super) fn decode_construct_templates(
                         return None;
                     };
                     operand_specs_by_index.insert(operand_symbol.hand_index, spec);
+                    operand_minimum_lengths_by_index
+                        .insert(operand_symbol.hand_index, operand_symbol.minimum_length);
                     display_operands_by_index.insert(
                         operand_symbol.hand_index,
                         CompiledDisplayOperand {
@@ -239,6 +242,7 @@ pub(super) fn decode_construct_templates(
             .map(|value| value + 1)
             .unwrap_or(0);
         let mut operand_specs = Vec::with_capacity(operand_count);
+        let mut operand_minimum_lengths = Vec::with_capacity(operand_count);
         let mut display_operands = Vec::with_capacity(operand_count);
         for slot in 0..operand_count {
             let Some(spec) = operand_specs_by_index.remove(&slot) else {
@@ -250,6 +254,11 @@ pub(super) fn decode_construct_templates(
                 return None;
             };
             operand_specs.push(spec);
+            operand_minimum_lengths.push(
+                operand_minimum_lengths_by_index
+                    .remove(&slot)
+                    .unwrap_or(0),
+            );
             display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
                 CompiledDisplayOperand {
                     operand_index: slot,
@@ -353,6 +362,7 @@ pub(super) fn decode_construct_templates(
             display_operands,
             opprint_indices,
             operand_specs,
+            operand_minimum_lengths,
             context_changes,
             context_commits,
             flowthru_operand_index,
@@ -404,6 +414,7 @@ pub(super) fn decode_construct_templates(
                     display_operands: Vec::new(),
                     opprint_indices: Vec::new(),
                     operand_specs: Vec::new(),
+                    operand_minimum_lengths: Vec::new(),
                     context_changes: Vec::new(),
                     context_commits: Vec::new(),
                     flowthru_operand_index: None,
@@ -449,6 +460,7 @@ pub(super) fn decode_construct_templates(
                     display_operands: Vec::new(),
                     opprint_indices: Vec::new(),
                     operand_specs: Vec::new(),
+                    operand_minimum_lengths: Vec::new(),
                     context_changes: Vec::new(),
                     context_commits: Vec::new(),
                     flowthru_operand_index: None,

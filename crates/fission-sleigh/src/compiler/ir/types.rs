@@ -566,6 +566,10 @@ pub struct CompiledConstructorTemplate {
 pub struct CompiledHandleTemplate {
     pub operand_index: usize,
     pub spec: CompiledOperandSpec,
+    /// Ghidra OperandSymbol.minimumlength, in bytes. Used when building
+    /// ConstructState-compatible operand lengths before parent length calculation.
+    #[serde(default)]
+    pub minimum_length: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

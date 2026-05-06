@@ -519,7 +519,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_index,
             0,
             operand_cursor_start,
-            self.cursor.saturating_sub(operand_cursor_start),
+            self.cursor
+                .saturating_sub(operand_cursor_start)
+                .max(template.minimum_length as usize),
             handle_index,
         );
         let fixed = match binding.fixed {

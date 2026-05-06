@@ -786,8 +786,9 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         .iter()
         .map(|handle| {
             format!(
-                "{{\"operand_index\": {}, \"spec\": {}}}",
+                "{{\"operand_index\": {}, \"minimum_length\": {}, \"spec\": {}}}",
                 handle.operand_index,
+                handle.minimum_length,
                 render_operand_specs(std::slice::from_ref(&handle.spec))
             )
         })

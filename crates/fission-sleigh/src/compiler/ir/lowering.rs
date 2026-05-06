@@ -413,9 +413,17 @@ fn executable_constructor_from_sla_template(
                 .iter()
                 .cloned()
                 .enumerate()
-                .map(|(operand_index, spec)| CompiledHandleTemplate {
-                    operand_index,
-                    spec,
+                .map(|(operand_index, spec)| {
+                    let minimum_length = sla_template
+                        .operand_minimum_lengths
+                        .get(operand_index)
+                        .copied()
+                        .unwrap_or(0);
+                    CompiledHandleTemplate {
+                        operand_index,
+                        spec,
+                        minimum_length,
+                    }
                 })
                 .collect(),
             decode_steps,
@@ -799,6 +807,7 @@ impl Collector {
                 .map(|(operand_index, spec)| CompiledHandleTemplate {
                     operand_index,
                     spec,
+                    minimum_length: 0,
                 })
                 .collect(),
             decode_steps,

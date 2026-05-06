@@ -50,6 +50,7 @@ pub struct CompiledSlaConstructorTemplate {
     pub display_operands: Vec<CompiledDisplayOperand>,
     pub opprint_indices: Vec<usize>,
     pub operand_specs: Vec<CompiledOperandSpec>,
+    pub operand_minimum_lengths: Vec<u32>,
     pub context_changes: Vec<CompiledContextOp>,
     /// Deferred global context commits (Ghidra `globalset` / `ELEM_COMMIT` elements).
     pub context_commits: Vec<CompiledContextCommit>,
@@ -70,6 +71,9 @@ pub(super) struct DecodedOperandSymbol {
     /// Index of the base operand for the offset calculation, or -1 if relative to
     /// the constructor's own start. Corresponds to `ATTRIB_BASE` (OperandSymbol.offsetbase).
     pub(super) offsetbase: i32,
+    /// Minimum byte length of this operand state. Corresponds to `ATTRIB_MINLEN`
+    /// (OperandSymbol.minimumlength), used by Ghidra before parent `calcCurrentLength()`.
+    pub(super) minimum_length: u32,
     pub(super) subtable_name: Option<String>,
     pub(super) display_kind: CompiledDisplayOperandKind,
     pub(super) token_field: Option<DecodedTokenField>,
@@ -202,6 +206,7 @@ pub(super) fn decode_operand_symbols(
             .ok_or_else(|| anyhow!("operand_sym missing index"))? as usize;
         let reloffset = operand.attr_signed(sla_format::ATTR_OFF).unwrap_or(0) as i32;
         let offsetbase = operand.attr_signed(sla_format::ATTR_BASE).unwrap_or(-1) as i32;
+        let minimum_length = operand.attr_unsigned(sla_format::ATTR_MINLEN).unwrap_or(0) as u32;
         let direct_pattern_expression = operand
             .children
             .iter()
@@ -303,6 +308,7 @@ pub(super) fn decode_operand_symbols(
                 hand_index,
                 reloffset,
                 offsetbase,
+                minimum_length,
                 subtable_name,
                 display_kind,
                 token_field,
