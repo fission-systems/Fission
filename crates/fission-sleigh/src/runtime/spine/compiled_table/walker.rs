@@ -1284,29 +1284,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .max(self.selection.constructor.minimum_length as usize)
                     .max(1)
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_modrm_token_subtable(table_name)
-            && self.selection.trace.root_bucket == "instruction"
-            && self.selection.constructor.minimum_length <= 1
-        {
-            self.mark_legacy_shared_token_policy();
-            opcode_cursor_from_context(self.ctx)
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_register_subtable(table_name)
-            && self.selection.trace.root_bucket == "instruction"
-        {
-            self.mark_legacy_shared_token_policy();
-            opcode_cursor_from_context(self.ctx)
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_register_subtable(table_name)
-        {
-            self.mark_legacy_shared_token_policy();
-            self.cursor
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-            && shared_token_cursor_policy_opcode_token_subtable(table_name)
-        {
-            self.mark_legacy_shared_token_policy();
-            opcode_token_cursor_from_context(self.ctx)
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {

@@ -260,25 +260,6 @@ pub(super) fn opcode_len_from_instruction_start(
     opcode_len_from_cursor(ctx, ctx.instruction_cursor)
 }
 
-pub(super) fn opcode_cursor_from_context(ctx: &CompiledInstructionContext<'_>) -> usize {
-    opcode_cursor_from_cursor(ctx, ctx.cursor)
-}
-
-pub(super) fn opcode_token_cursor_from_context(ctx: &CompiledInstructionContext<'_>) -> usize {
-    let offset = opcode_cursor_from_context(ctx);
-    let opcode = ctx.bytes.get(offset).copied().unwrap_or(0);
-    let opcode_bytes: usize = if opcode == 0x0f {
-        match ctx.bytes.get(offset + 1).copied() {
-            Some(0x38 | 0x3a) => 3,
-            Some(_) => 2,
-            None => 1,
-        }
-    } else {
-        1
-    };
-    offset + opcode_bytes.saturating_sub(1)
-}
-
 pub(super) fn opcode_cursor_from_cursor(
     ctx: &CompiledInstructionContext<'_>,
     cursor: usize,
@@ -437,34 +418,6 @@ pub(super) fn shared_token_cursor_policy_zero_width_subtable(table_name: &str) -
             | "check_rm32_dest"
             | "check_EAX_dest"
             | "cc"
-    )
-}
-
-pub(super) fn shared_token_cursor_policy_register_subtable(table_name: &str) -> bool {
-    matches!(table_name, "Reg8" | "Reg16" | "Reg32" | "Reg64")
-}
-
-pub(super) fn shared_token_cursor_policy_opcode_token_subtable(table_name: &str) -> bool {
-    matches!(table_name, "cc")
-}
-
-pub(super) fn shared_token_cursor_policy_modrm_token_subtable(table_name: &str) -> bool {
-    matches!(
-        table_name,
-        "Reg8"
-            | "Reg16"
-            | "Reg32"
-            | "Reg64"
-            | "Rmr8"
-            | "Rmr16"
-            | "Rmr32"
-            | "Rmr64"
-            | "CRmr8"
-            | "CRmr16"
-            | "CRmr32"
-            | "check_Reg32_dest"
-            | "check_Rmr32_dest"
-            | "check_rm32_dest"
     )
 }
 
