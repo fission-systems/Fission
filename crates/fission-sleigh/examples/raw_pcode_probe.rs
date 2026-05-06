@@ -134,16 +134,6 @@ fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<Stri
     let mut totals = BTreeMap::new();
     for instruction in instructions {
         let audit = instruction.legacy_path_audit;
-        if audit.bound_operand_fixed_handle_fallback {
-            *totals
-                .entry("bound_operand_fixed_handle_fallback".to_string())
-                .or_insert(0) += 1;
-        }
-        if audit.no_export_subtable_fallback {
-            *totals
-                .entry("no_export_subtable_fallback".to_string())
-                .or_insert(0) += 1;
-        }
         if audit.legacy_shared_token_policy {
             *totals
                 .entry("legacy_shared_token_policy".to_string())
@@ -152,11 +142,6 @@ fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<Stri
         if audit.compatibility_template_source {
             *totals
                 .entry("compatibility_template_source".to_string())
-                .or_insert(0) += 1;
-        }
-        if audit.source_line_or_opprint_remap {
-            *totals
-                .entry("source_line_or_opprint_remap".to_string())
                 .or_insert(0) += 1;
         }
     }
