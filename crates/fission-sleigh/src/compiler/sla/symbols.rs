@@ -364,6 +364,7 @@ pub(super) fn compiled_operand_spec_for_symbol(
         return Some(CompiledOperandSpec::SlaPatternExpression {
             expr: expr.clone(),
             reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
         });
     }
     if let (Some(token_field), Some(entries)) = (&symbol.token_field, &symbol.varnode_list) {
@@ -377,6 +378,7 @@ pub(super) fn compiled_operand_spec_for_symbol(
             shift: token_field.shift,
             entries: entries.clone(),
             reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
         });
     }
     if let (Some(token_field), Some(values)) = (&symbol.token_field, &symbol.value_map) {
@@ -390,6 +392,7 @@ pub(super) fn compiled_operand_spec_for_symbol(
             shift: token_field.shift,
             values: values.clone(),
             reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
         });
     }
     symbol
@@ -404,6 +407,7 @@ pub(super) fn compiled_operand_spec_for_symbol(
             byte_end: field.byte_end,
             shift: field.shift,
             reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
         })
 }
 

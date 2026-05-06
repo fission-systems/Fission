@@ -684,9 +684,9 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
     let rows = specs
         .iter()
         .map(|spec| match spec {
-            crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift, reloffset: _ } => {
+            crate::compiler::CompiledOperandSpec::SlaTokenField { big_endian, sign_bit, bit_start, bit_end, byte_start, byte_end, shift, reloffset, offsetbase } => {
                 format!(
-                    "{{\"kind\": \"sla_token_field\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}}}"
+                    "{{\"kind\": \"sla_token_field\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}}}"
                 )
             }
             crate::compiler::CompiledOperandSpec::SlaVarnodeList {
@@ -698,7 +698,8 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 byte_end,
                 shift,
                 entries,
-                reloffset: _,
+                reloffset,
+                offsetbase,
             } => {
                 let entries = entries
                     .iter()
@@ -714,7 +715,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "{{\"kind\": \"sla_varnode_list\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"entries\": [{entries}]}}"
+                    "{{\"kind\": \"sla_varnode_list\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"entries\": [{entries}]}}"
                 )
             }
             crate::compiler::CompiledOperandSpec::SlaValueMap {
@@ -726,7 +727,8 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 byte_end,
                 shift,
                 values,
-                reloffset: _,
+                reloffset,
+                offsetbase,
             } => {
                 let values = values
                     .iter()
@@ -734,7 +736,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "{{\"kind\": \"sla_value_map\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"values\": [{values}]}}"
+                    "{{\"kind\": \"sla_value_map\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"values\": [{values}]}}"
                 )
             }
             crate::compiler::CompiledOperandSpec::SlaFixedVarnode { varnode } => {
@@ -751,8 +753,15 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     "{{\"kind\": \"context_field_extraction\", \"bit_offset\": {bit_offset}, \"bit_width\": {bit_width}, \"sign_extend\": {sign_extend}}}"
                 )
             }
-            crate::compiler::CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
-                format!("{{\"kind\": \"subtable_evaluation\", \"table_name\": {}}}", json_string(table_name))
+            crate::compiler::CompiledOperandSpec::SubtableEvaluation {
+                table_name,
+                reloffset,
+                offsetbase,
+            } => {
+                format!(
+                    "{{\"kind\": \"subtable_evaluation\", \"table_name\": {}, \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}}}",
+                    json_string(table_name),
+                )
             }
             crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
                 format!("{{\"kind\": \"immediate\", \"size\": {size}, \"signed\": {signed}}}")
@@ -768,10 +777,10 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
                 })
             ),
-            crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr, reloffset: _ } => {
+            crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr, reloffset, offsetbase } => {
                 format!(
-                    "{{\"kind\": \"sla_pattern_expression\", \"expr\": {}}}",
-                    json_string(&format!("{expr:?}"))
+                    "{{\"kind\": \"sla_pattern_expression\", \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"expr\": {}}}",
+                    json_string(&format!("{expr:?}")),
                 )
             }
         })

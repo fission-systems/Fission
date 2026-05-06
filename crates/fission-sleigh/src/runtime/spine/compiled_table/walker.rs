@@ -21,6 +21,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     cursor: usize,
     shared_token_operand_end: usize,
     handles: Vec<Option<RuntimeHandle>>,
+    operand_absolute_offsets: Vec<Option<usize>>,
+    operand_relative_lengths: Vec<Option<usize>>,
     handle_reference_bitmap: Vec<bool>,
     walker: spine::RuntimeParserWalker,
     legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit,
@@ -59,6 +61,63 @@ impl OperandBinding {
             fixed: None,
             requires_fixed: false,
         }
+    }
+}
+
+fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
+    match spec {
+        CompiledOperandSpec::SlaTokenField {
+            reloffset,
+            offsetbase,
+            ..
+        }
+        | CompiledOperandSpec::SlaVarnodeList {
+            reloffset,
+            offsetbase,
+            ..
+        }
+        | CompiledOperandSpec::SlaValueMap {
+            reloffset,
+            offsetbase,
+            ..
+        }
+        | CompiledOperandSpec::SlaPatternExpression {
+            reloffset,
+            offsetbase,
+            ..
+        }
+        | CompiledOperandSpec::SubtableEvaluation {
+            reloffset,
+            offsetbase,
+            ..
+        } => Some((*reloffset, *offsetbase)),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod construct_state_offset_tests {
+    use crate::compiler::{compile_x86_64_frontend, discovery};
+
+    #[test]
+    fn opcode_register_subtable_reads_from_sla_operand_offset() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for x86-64 push decode");
+            return;
+        }
+
+        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let decoded = crate::runtime::spine::compiled_table::decode_instruction(
+            &compiled,
+            None,
+            &[0x57],
+            0x1000,
+        )
+        .expect("decode push rdi");
+
+        assert_eq!(decoded.length, 1);
+        assert_eq!(decoded.mnemonic, "push");
+        assert_eq!(decoded.operands_text, "RDI");
     }
 }
 
@@ -109,6 +168,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             selection.constructor.minimum_length as usize
         };
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
+        let operand_absolute_offsets =
+            vec![None; selection.constructor.constructor_template.handles.len()];
+        let operand_relative_lengths =
+            vec![None; selection.constructor.constructor_template.handles.len()];
         if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
             let matcher_len = opcode_len_from_matcher(&selection.constructor.matcher);
             let seq_bytes =
@@ -139,6 +202,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             cursor: ctx.cursor + opcode_len,
             shared_token_operand_end: 0,
             handles,
+            operand_absolute_offsets,
+            operand_relative_lengths,
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
@@ -189,9 +254,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     table_name,
                     replace_current,
                 } => {
-                    // For non-shared-cursor architectures, look up reloffset/offsetbase
-                    // from the handle template whose spec is SubtableEvaluation for this table.
-                    let (reloffset, offsetbase) = self
+                    // Mirror Ghidra's operand positioning from the handle template:
+                    // ParserWalker uses getOffset(offsetbase) + reloffset before
+                    // descending into a subtable.
+                    let (reloffset, offsetbase, operand_absolute_offset) = self
                         .selection
                         .constructor
                         .constructor_template
@@ -205,13 +271,22 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             } = h.spec
                             {
                                 if tn.as_str() == table_name.as_str() {
-                                    return Some((Some(reloffset), Some(offsetbase)));
+                                    return Some((
+                                        Some(reloffset),
+                                        Some(offsetbase),
+                                        self.operand_absolute_offset(&h.spec),
+                                    ));
                                 }
                             }
                             None
                         })
-                        .unwrap_or((None, None));
-                    let sub_state = self.decode_subtable(&table_name, reloffset, offsetbase)?;
+                        .unwrap_or((None, None, None));
+                    let sub_state = self.decode_subtable(
+                        &table_name,
+                        reloffset,
+                        offsetbase,
+                        operand_absolute_offset,
+                    )?;
                     if replace_current {
                         return Ok(sub_state);
                     }
@@ -516,18 +591,29 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .get(operand_index)
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
-        let operand_cursor_start = self.cursor;
-        let binding = self.bind_operand(&template)?;
+        let operand_absolute_offset = self
+            .operand_absolute_offset(&template.spec)
+            .unwrap_or(self.cursor);
+        let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
+        let operand_relative_length = binding
+            .subtable_state
+            .as_ref()
+            .map(|state| state.relative_length)
+            .unwrap_or_else(|| {
+                self.cursor
+                    .saturating_sub(operand_absolute_offset)
+                    .max(template.minimum_length as usize)
+            });
         self.walker.record_operand_node(
             operand_index,
             0,
-            operand_cursor_start,
-            self.cursor
-                .saturating_sub(operand_cursor_start)
-                .max(template.minimum_length as usize),
+            operand_absolute_offset,
+            operand_relative_length,
             handle_index,
         );
+        self.operand_absolute_offsets[operand_index] = Some(operand_absolute_offset);
+        self.operand_relative_lengths[operand_index] = Some(operand_relative_length);
         let fixed = match binding.fixed {
             Some(fixed) => fixed,
             None if !binding.requires_fixed => RuntimeFixedHandle::default(),
@@ -545,11 +631,32 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
+    fn operand_absolute_offset(&self, spec: &CompiledOperandSpec) -> Option<usize> {
+        let (reloffset, offsetbase) = operand_spec_offsets(spec)?;
+        let base = self.offset_for_operand_base(offsetbase)?;
+        let offset = base as i64 + i64::from(reloffset);
+        usize::try_from(offset.max(0)).ok()
+    }
+
+    fn offset_for_operand_base(&self, offsetbase: i32) -> Option<usize> {
+        if offsetbase < 0 {
+            return Some(self.ctx.cursor);
+        }
+        let index = usize::try_from(offsetbase).ok()?;
+        let offset = (*self.operand_absolute_offsets.get(index)?)?;
+        let length = (*self.operand_relative_lengths.get(index)?)?;
+        Some(offset.saturating_add(length))
+    }
+
     fn mark_legacy_shared_token_policy(&mut self) {
         self.legacy_path_audit.legacy_shared_token_policy = true;
     }
 
-    fn bind_operand(&mut self, template: &CompiledHandleTemplate) -> Result<OperandBinding> {
+    fn bind_operand(
+        &mut self,
+        template: &CompiledHandleTemplate,
+        operand_absolute_offset: usize,
+    ) -> Result<OperandBinding> {
         match &template.spec {
             CompiledOperandSpec::SlaTokenField {
                 big_endian,
@@ -559,9 +666,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_start,
                 byte_end,
                 shift,
-                reloffset,
+                reloffset: _,
+                offsetbase: _,
             } => {
-                let token_base = self.token_base_for_sla_field(*reloffset);
+                let token_base = self.token_base_for_sla_field(operand_absolute_offset);
                 let value = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -610,9 +718,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_end,
                 shift,
                 entries,
-                reloffset,
+                reloffset: _,
+                offsetbase: _,
             } => {
-                let token_base = self.token_base_for_sla_field(*reloffset);
+                let token_base = self.token_base_for_sla_field(operand_absolute_offset);
                 let selector = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -661,9 +770,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_end,
                 shift,
                 values,
-                reloffset,
+                reloffset: _,
+                offsetbase: _,
             } => {
-                let token_base = self.token_base_for_sla_field(*reloffset);
+                let token_base = self.token_base_for_sla_field(operand_absolute_offset);
                 let selector = read_sla_token_field_at(
                     self.ctx,
                     token_base,
@@ -718,7 +828,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 },
                 fixed_handle_from_resolved_varnode(varnode),
             )),
-            CompiledOperandSpec::SlaPatternExpression { expr, reloffset } => {
+            CompiledOperandSpec::SlaPatternExpression {
+                expr,
+                reloffset: _,
+                offsetbase: _,
+            } => {
                 let mut encoded_size = 0;
                 let value = if CompiledTokenCursorPolicy::for_frontend(self.compiled)
                     .uses_shared_token_cursor()
@@ -733,8 +847,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         shift,
                     } = expr
                     {
-                        self.mark_legacy_shared_token_policy();
-                        let token_base = self.token_base_for_sla_field(0);
+                        let token_base = self.token_base_for_sla_field(operand_absolute_offset);
                         let value = read_sla_token_field_at(
                             self.ctx,
                             token_base,
@@ -765,7 +878,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     // Non-shared-cursor (e.g. x86-32): apply reloffset so the token field is
                     // read from `ctx.cursor + reloffset + byte_start`, matching Ghidra's
                     // `point.getOffset() + bytestart` computation.
-                    let token_base = self.token_base_for_sla_field(*reloffset);
+                    let token_base = self.token_base_for_sla_field(operand_absolute_offset);
                     let raw = read_sla_token_field_at(
                         self.ctx,
                         token_base,
@@ -826,8 +939,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase,
             } => {
                 let cursor_start = self.cursor;
-                let sub_state =
-                    self.decode_subtable(table_name, Some(*reloffset), Some(*offsetbase))?;
+                let sub_state = self.decode_subtable(
+                    table_name,
+                    Some(*reloffset),
+                    Some(*offsetbase),
+                    Some(operand_absolute_offset),
+                )?;
                 self.legacy_path_audit = self.legacy_path_audit.merge(sub_state.legacy_path_audit);
                 if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
                     && (shared_token_cursor_policy_shared_token_subtable(table_name)
@@ -1015,57 +1132,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn token_base_for_sla_field(&mut self, reloffset: i32) -> usize {
+    fn token_base_for_sla_field(&mut self, operand_absolute_offset: usize) -> usize {
         if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            // Non-shared-cursor: Ghidra's ParserWalker advances the current
-            // point as sequential operands are consumed, while operand
-            // `reloffset` anchors subconstructors at an instruction-relative
-            // point. Use the later of the current construct point and the
-            // explicit reloffset anchor; same-token fields avoid advancing the
-            // cursor via `sla_field_is_within_constructor_minimum`.
-            let reloffset_base = (self.ctx.cursor as i64 + reloffset as i64).max(0) as usize;
-            return self.cursor.max(reloffset_base);
+            return self.cursor.max(operand_absolute_offset);
         }
-        self.mark_legacy_shared_token_policy();
-        // x86 SLEIGH models opcode, ModRM, and SIB as separate token
-        // streams. Fission's compatibility walker keeps SIB subtables rooted
-        // at the ModRM cursor so shared-byte operands can compute instruction
-        // length without over-consuming. When the selected subconstructor is a
-        // SIB-field table, read the field from the following SIB byte instead
-        // of falling back to ModRM. This keeps BUILD execution tied to .sla
-        // token fields rather than re-synthesizing an effective address.
-        if shared_token_cursor_policy_opcode_token_subtable(
-            self.selection.trace.root_bucket.as_str(),
-        ) {
-            opcode_token_cursor_from_context(self.ctx)
-        } else if shared_token_cursor_policy_modrm_token_subtable(
-            self.selection.trace.root_bucket.as_str(),
-        ) {
-            let after_opcode = self.ctx.instruction_cursor
-                + opcode_len_from_instruction_start(self.ctx).unwrap_or(0);
-            let matched_pattern_len = self
-                .selection
-                .trace
-                .matched_leaf_pattern
-                .as_ref()
-                .map(disjoint_pattern_instruction_byte_len)
-                .unwrap_or(0);
-            if self.ctx.cursor < after_opcode
-                && matched_pattern_len > 0
-            {
-                self.ctx.cursor
-            } else {
-                after_opcode
-            }
-        } else if shared_token_cursor_policy_sib_token_subtable(
-            self.selection.trace.root_bucket.as_str(),
-        ) {
-            self.ctx.instruction_cursor
-                + opcode_len_from_instruction_start(self.ctx).unwrap_or(0)
-                + 1
-        } else {
-            self.cursor
-        }
+        operand_absolute_offset
     }
 
     fn sla_field_is_within_constructor_minimum(
@@ -1215,6 +1286,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         table_name: &str,
         reloffset: Option<i32>,
         offsetbase: Option<i32>,
+        operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let mut sub_ctx = (*self.ctx).clone();
         let consumed_instruction_bytes =
@@ -1228,8 +1300,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .map(disjoint_pattern_instruction_byte_len)
                     .unwrap_or(0)
             };
-        sub_ctx.cursor = if CompiledTokenCursorPolicy::for_frontend(self.compiled)
-            .uses_shared_token_cursor()
+        sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
+            offset
+        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && constructor_replaces_current(self.selection.constructor)
             && table_name == "instruction"
         {

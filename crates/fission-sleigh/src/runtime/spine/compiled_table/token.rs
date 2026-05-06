@@ -145,23 +145,28 @@ fn operand_spec_primary_sla_token_span(
             byte_start,
             byte_end,
             reloffset,
+            offsetbase: _,
             ..
         }
         | CompiledOperandSpec::SlaVarnodeList {
             byte_start,
             byte_end,
             reloffset,
+            offsetbase: _,
             ..
         }
         | CompiledOperandSpec::SlaValueMap {
             byte_start,
             byte_end,
             reloffset,
+            offsetbase: _,
             ..
         } => token_span_from_sla_field(*reloffset, *byte_start, *byte_end),
-        CompiledOperandSpec::SlaPatternExpression { expr, reloffset } => {
-            pattern_expression_primary_sla_token_span(*reloffset, expr)
-        }
+        CompiledOperandSpec::SlaPatternExpression {
+            expr,
+            reloffset,
+            offsetbase: _,
+        } => pattern_expression_primary_sla_token_span(*reloffset, expr),
         CompiledOperandSpec::SubtableEvaluation {
             table_name,
             reloffset,

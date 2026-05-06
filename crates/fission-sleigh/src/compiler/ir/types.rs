@@ -476,6 +476,10 @@ pub enum CompiledOperandSpec {
         /// absolute instruction-stream byte position (matches Ghidra's `point.getOffset() + bytestart`).
         #[serde(default)]
         reloffset: i32,
+        /// Base operand index for the offset, or -1 if relative to constructor start.
+        /// Derived from `ATTRIB_BASE` in Ghidra's SLA (OperandSymbol.offsetbase).
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
     },
     SlaVarnodeList {
         big_endian: bool,
@@ -489,6 +493,9 @@ pub enum CompiledOperandSpec {
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,
+        /// See `SlaTokenField::offsetbase`.
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
     },
     SlaValueMap {
         big_endian: bool,
@@ -502,6 +509,9 @@ pub enum CompiledOperandSpec {
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,
+        /// See `SlaTokenField::offsetbase`.
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
     },
     SlaFixedVarnode {
         varnode: CompiledResolvedVarnode,
@@ -540,6 +550,9 @@ pub enum CompiledOperandSpec {
         /// the expression is a direct TokenField (e.g. `imm32` as a sequential operand).
         #[serde(default)]
         reloffset: i32,
+        /// See `SlaTokenField::offsetbase`.
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
     },
 }
 
