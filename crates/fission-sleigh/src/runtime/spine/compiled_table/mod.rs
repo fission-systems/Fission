@@ -162,7 +162,6 @@ fn decode_instruction_inner(
 ) -> Result<DecodedInstruction> {
     let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
     let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
-    let mut fallback_state = None;
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
@@ -212,18 +211,11 @@ fn decode_instruction_inner(
                 return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded);
             }
             Err(err) => {
-                if fallback_state.is_none() {
-                    fallback_state = Some(decoded);
-                }
                 if first_error.is_none() {
                     first_error = Some(err);
                 }
             }
         }
-    }
-
-    if let Some(decoded) = fallback_state {
-        return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded);
     }
 
     return Err(first_error.unwrap_or_else(|| {
