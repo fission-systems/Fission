@@ -1049,9 +1049,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 
     fn token_base_for_sla_field(&mut self, operand_absolute_offset: usize) -> usize {
-        if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-            return self.cursor.max(operand_absolute_offset);
-        }
         operand_absolute_offset
     }
 
