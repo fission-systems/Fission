@@ -149,9 +149,6 @@ fn legacy_path_audit_totals(instructions: &[InstructionReport]) -> BTreeMap<Stri
                 .entry("legacy_shared_token_policy".to_string())
                 .or_insert(0) += 1;
         }
-        if audit.direct_token_parser {
-            *totals.entry("direct_token_parser".to_string()).or_insert(0) += 1;
-        }
         if audit.compatibility_template_source {
             *totals
                 .entry("compatibility_template_source".to_string())

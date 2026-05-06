@@ -102,7 +102,6 @@ pub struct RuntimeLegacyPathAudit {
     pub bound_operand_fixed_handle_fallback: bool,
     pub no_export_subtable_fallback: bool,
     pub legacy_shared_token_policy: bool,
-    pub direct_token_parser: bool,
     pub compatibility_template_source: bool,
     pub source_line_or_opprint_remap: bool,
 }
@@ -116,7 +115,6 @@ impl RuntimeLegacyPathAudit {
                 || other.no_export_subtable_fallback,
             legacy_shared_token_policy: self.legacy_shared_token_policy
                 || other.legacy_shared_token_policy,
-            direct_token_parser: self.direct_token_parser || other.direct_token_parser,
             compatibility_template_source: self.compatibility_template_source
                 || other.compatibility_template_source,
             source_line_or_opprint_remap: self.source_line_or_opprint_remap
