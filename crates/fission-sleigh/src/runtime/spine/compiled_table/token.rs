@@ -365,22 +365,6 @@ pub(super) fn constructor_consumes_sequential_operand_bytes(
         .any(|handle| operand_spec_consumes_sequential_bytes(compiled, &handle.spec, 0))
 }
 
-pub(super) fn constructor_has_shared_token_operand(
-    constructor: &CompiledExecutableConstructor,
-) -> bool {
-    constructor
-        .constructor_template
-        .handles
-        .iter()
-        .any(|handle| {
-            matches!(
-                &handle.spec,
-                CompiledOperandSpec::SubtableEvaluation { table_name, .. }
-                    if shared_token_cursor_policy_shared_token_subtable(table_name)
-            )
-        })
-}
-
 pub(super) fn subtable_consumes_sequential_bytes(
     compiled: &CompiledFrontend,
     table_name: &str,
@@ -534,10 +518,6 @@ pub(super) fn shared_token_cursor_policy_shared_token_subtable(table_name: &str)
             | "CRmr32"
             | "ss"
     )
-}
-
-pub(super) fn shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name: &str) -> bool {
-    matches!(table_name, "rm8" | "rm16" | "rm32" | "rm64")
 }
 
 pub(super) fn constructor_replaces_current(constructor: &CompiledExecutableConstructor) -> bool {

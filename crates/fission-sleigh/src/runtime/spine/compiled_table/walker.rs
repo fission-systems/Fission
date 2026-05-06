@@ -119,6 +119,29 @@ mod construct_state_offset_tests {
         assert_eq!(decoded.mnemonic, "push");
         assert_eq!(decoded.operands_text, "RDI");
     }
+
+    #[test]
+    fn shared_token_operands_do_not_require_legacy_cursor_policy() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for x86-64 shared token decode");
+            return;
+        }
+
+        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        for bytes in [&[0x57][..], &[0x48, 0x89, 0x5c, 0x24, 0x08][..]] {
+            let (_ops, length, details) =
+                crate::runtime::spine::compiled_table::decode_and_lift_with_details(
+                    &compiled, None, bytes, 0x1000,
+                )
+                .expect("decode/lift shared-token sample");
+
+            assert_eq!(length as usize, bytes.len());
+            assert!(
+                !details.legacy_path_audit.legacy_shared_token_policy,
+                "SLA operand offsets and ConstructState lengths should decode shared-token forms"
+            );
+        }
+    }
 }
 
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
@@ -129,9 +152,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
         let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
-        let legacy_replace_current_opcode = token_policy.uses_shared_token_cursor()
+        let replace_current_wrapper = token_policy.uses_shared_token_cursor()
             && constructor_replaces_current(selection.constructor);
-        let opcode_len = if legacy_replace_current_opcode {
+        let opcode_len = if replace_current_wrapper {
             0
         } else if selection.constructor.constructor_template.template_source
             == CompiledTemplateSource::SpecDerived
@@ -207,8 +230,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             handle_reference_bitmap,
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             legacy_path_audit: crate::runtime::RuntimeLegacyPathAudit {
-                legacy_shared_token_policy: legacy_replace_current_opcode
-                    || legacy_zero_minimum_length,
+                legacy_shared_token_policy: legacy_zero_minimum_length,
                 compatibility_template_source,
                 ..Default::default()
             },
@@ -226,20 +248,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .constructor_template
             .decode_steps
             .clone();
-        let shared_token_replace_current_wrapper =
-            CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                && decode_steps.iter().any(|step| {
-                    matches!(
-                        step,
-                        CompiledOperandDecodeStep::DescendSubtable {
-                            replace_current: true,
-                            ..
-                        }
-                    )
-                });
-        if shared_token_replace_current_wrapper {
-            self.mark_legacy_shared_token_policy();
-        }
         for step in decode_steps {
             match step {
                 CompiledOperandDecodeStep::ConsumeTokenFields => {
@@ -921,10 +929,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 )?;
                 self.legacy_path_audit = self.legacy_path_audit.merge(sub_state.legacy_path_audit);
                 if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
-                    && (shared_token_cursor_policy_shared_token_subtable(table_name)
-                        || shared_token_cursor_policy_modrm_operand_wrapper_subtable(table_name))
+                    && shared_token_cursor_policy_shared_token_subtable(table_name)
                 {
-                    self.mark_legacy_shared_token_policy();
                     self.shared_token_operand_end =
                         self.shared_token_operand_end.max(sub_state.length);
                 }
@@ -940,14 +946,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         == CompiledTemplateSource::SpecDerived
                     && shared_token_cursor_policy_shared_token_subtable(table_name)
                 {
-                    // x86 SLEIGH subtables such as addr64, Index64, Base64,
-                    // and Reg32 often read fields from the same ModRM/SIB
-                    // token. Ghidra's ParserWalker keeps the token-relative
-                    // cursor stable and computes the final instruction length
-                    // from the matched subconstructor. Treating these as a
-                    // sequential byte stream makes exact slices like
-                    // `8d 04 11` overrun while decoding Base64 after Index64.
-                    self.mark_legacy_shared_token_policy();
                     self.minimum_length = self
                         .minimum_length
                         .max(sub_state.length.saturating_sub(self.ctx.cursor));
@@ -1312,23 +1310,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
             && self.selection.trace.root_bucket == "instruction"
         {
-            self.mark_legacy_shared_token_policy();
-            if constructor_has_shared_token_operand(self.selection.constructor) {
-                self.cursor.saturating_add(1)
-            } else if self.shared_token_operand_end
-                > self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
-            {
-                self.shared_token_operand_end
-            } else {
-                self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0)
-            }
+            self.shared_token_operand_end
+                .max(self.cursor)
+                .max(self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0))
         } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && shared_token_cursor_policy_modrm_trailing_subtable(table_name)
             && shared_token_cursor_policy_shared_token_subtable(
                 self.selection.trace.root_bucket.as_str(),
             )
         {
-            self.mark_legacy_shared_token_policy();
             let matched_pattern_len = self
                 .selection
                 .trace
@@ -1339,7 +1329,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             if matched_pattern_len > 0 {
                 self.ctx.cursor.saturating_add(matched_pattern_len)
             } else {
-                self.cursor.saturating_add(1)
+                self.cursor
             }
         } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
             && reloffset.is_some_and(|rel| rel >= 0)
