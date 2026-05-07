@@ -151,8 +151,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
-        let token_policy = CompiledTokenCursorPolicy::for_frontend(compiled);
-        let replace_current_wrapper = token_policy.uses_shared_token_cursor()
+        let shared_token_cursor =
+            constructor_uses_shared_token_cursor(compiled, selection.constructor);
+        let replace_current_wrapper = shared_token_cursor
             && constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
             0
@@ -1154,20 +1155,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let mut sub_ctx = (*self.ctx).clone();
-        let consumed_instruction_bytes =
-            if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor() {
-                0
-            } else {
-                self.selection
-                    .trace
-                    .matched_leaf_pattern
-                    .as_ref()
-                    .map(disjoint_pattern_instruction_byte_len)
-                    .unwrap_or(0)
-            };
+        let shared_token_cursor =
+            constructor_uses_shared_token_cursor(self.compiled, self.selection.constructor);
+        let consumed_instruction_bytes = if shared_token_cursor {
+            0
+        } else {
+            self.selection
+                .trace
+                .matched_leaf_pattern
+                .as_ref()
+                .map(disjoint_pattern_instruction_byte_len)
+                .unwrap_or(0)
+        };
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
+        } else if shared_token_cursor
             && constructor_replaces_current(self.selection.constructor)
             && table_name == "instruction"
         {
@@ -1175,14 +1177,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 + opcode_len_from_matcher(&self.selection.constructor.matcher)
                     .max(self.selection.constructor.minimum_length as usize)
                     .max(1)
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
+        } else if shared_token_cursor
             && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
             && self.selection.trace.root_bucket == "instruction"
         {
             self.shared_token_operand_end
                 .max(self.cursor)
                 .max(self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0))
-        } else if CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
+        } else if shared_token_cursor
             && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
             && subtable_consumes_sequential_bytes(
                 self.compiled,
@@ -1202,7 +1204,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             } else {
                 self.cursor
             }
-        } else if !CompiledTokenCursorPolicy::for_frontend(self.compiled).uses_shared_token_cursor()
+        } else if !shared_token_cursor
             && reloffset.is_some_and(|rel| rel >= 0)
             && offsetbase.unwrap_or(-1) < 0
         {

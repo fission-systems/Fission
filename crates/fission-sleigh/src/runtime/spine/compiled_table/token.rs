@@ -13,11 +13,13 @@ use super::*;
 //
 // Do NOT add new subtable name entries to the detection lists below. Fix the
 // underlying SLA-native byte-range accumulation instead.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CompiledTokenCursorPolicy {
     shared_token_cursor: bool,
 }
 
+#[cfg(test)]
 impl CompiledTokenCursorPolicy {
     pub(super) fn for_frontend(compiled: &CompiledFrontend) -> Self {
         Self {
@@ -60,6 +62,7 @@ impl SlaTokenByteSpan {
     }
 }
 
+#[cfg(test)]
 fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFrontend) -> bool {
     if compiled.sla_ram_address_size() <= 4 {
         return false;
@@ -71,11 +74,12 @@ fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFront
 
     compiled.subtables.values().any(|subtable| {
         subtable.constructors.iter().any(|constructor| {
-            constructor_has_shared_one_byte_subtable_token_operands(compiled, constructor)
+            constructor_uses_shared_token_cursor(compiled, constructor)
         })
     })
 }
 
+#[cfg(test)]
 fn frontend_has_instruction_forms_longer_than_four_bytes(compiled: &CompiledFrontend) -> bool {
     compiled.subtables.values().any(|subtable| {
         subtable
@@ -85,10 +89,14 @@ fn frontend_has_instruction_forms_longer_than_four_bytes(compiled: &CompiledFron
     })
 }
 
-fn constructor_has_shared_one_byte_subtable_token_operands(
+pub(super) fn constructor_uses_shared_token_cursor(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
 ) -> bool {
+    if compiled.sla_ram_address_size() <= 4 {
+        return false;
+    }
+
     if constructor.minimum_length > 2 {
         return false;
     }
