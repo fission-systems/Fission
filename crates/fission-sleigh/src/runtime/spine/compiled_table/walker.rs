@@ -75,7 +75,17 @@ fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
             offsetbase,
             ..
         }
+        | CompiledOperandSpec::SlaVarnodeListExpression {
+            reloffset,
+            offsetbase,
+            ..
+        }
         | CompiledOperandSpec::SlaValueMap {
+            reloffset,
+            offsetbase,
+            ..
+        }
+        | CompiledOperandSpec::SlaValueMapExpression {
             reloffset,
             offsetbase,
             ..
@@ -681,6 +691,31 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     fixed_handle_from_resolved_varnode(entry),
                 ))
             }
+            CompiledOperandSpec::SlaVarnodeListExpression {
+                expr,
+                entries,
+                reloffset: _,
+                offsetbase: _,
+            } => {
+                let selector = self.eval_pattern_expression(expr)?;
+                let selector_index = usize::try_from(selector)
+                    .map_err(|_| anyhow!("varnode list selector {selector} is negative"))?;
+                let entry = entries.get(selector_index).ok_or_else(|| {
+                    anyhow!(
+                        "varnode list selector {} out of range for {} entries",
+                        selector,
+                        entries.len()
+                    )
+                })?;
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::NamedVarnode {
+                        name: entry.name.clone(),
+                        display_index: Some(selector_index as u32),
+                        size: entry.size,
+                    },
+                    fixed_handle_from_resolved_varnode(entry),
+                ))
+            }
             CompiledOperandSpec::SlaValueMap {
                 big_endian,
                 sign_bit,
@@ -725,6 +760,31 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         signed: *sign_bit || value < 0,
                     },
                     fixed_handle_for_const_value(value as u64, encoded_size),
+                ))
+            }
+            CompiledOperandSpec::SlaValueMapExpression {
+                expr,
+                values,
+                reloffset: _,
+                offsetbase: _,
+            } => {
+                let selector = self.eval_pattern_expression(expr)?;
+                let selector_index = usize::try_from(selector)
+                    .map_err(|_| anyhow!("value map selector {selector} is negative"))?;
+                let value = values.get(selector_index).copied().ok_or_else(|| {
+                    anyhow!(
+                        "value map selector {} out of range for {} entries",
+                        selector,
+                        values.len()
+                    )
+                })?;
+                Ok(OperandBinding::with_fixed(
+                    BoundOperand::Immediate {
+                        value: value as u64,
+                        encoded_size: 0,
+                        signed: value < 0,
+                    },
+                    fixed_handle_for_const_value(value as u64, 0),
                 ))
             }
             CompiledOperandSpec::SlaFixedVarnode { varnode } => Ok(OperandBinding::with_fixed(

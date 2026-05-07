@@ -87,7 +87,7 @@ pub(super) fn decode_construct_templates(
                                  subtable_name: &str,
                                  constructor: &PackedElement,
                                  local_index: usize|
-     -> Option<CompiledSlaConstructorTemplate> {
+     -> std::result::Result<CompiledSlaConstructorTemplate, String> {
         // Ghidra SubtableSymbol.decode() assigns constructor ids by local
         // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
         // through sub.getConstructor(id). The constructor element's own ATTR_ID
@@ -131,7 +131,7 @@ pub(super) fn decode_construct_templates(
                     constructor.attrs
                 );
             }
-            return None;
+            return Err("missing_construct_tpl".to_string());
         };
 
         let template = match decode_construct_tpl(main_tpl, &spaces) {
@@ -142,7 +142,7 @@ pub(super) fn decode_construct_templates(
                         "[sla-parse] decode_construct_tpl failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
                     );
                 }
-                return None;
+                return Err(format!("decode_construct_tpl:{err:#}"));
             }
         };
 
@@ -190,7 +190,7 @@ pub(super) fn decode_construct_templates(
                                 "[sla-parse] oper missing symbol id subtable={subtable_name} slot={local_index} source_key={source_key}"
                             );
                         }
-                        return None;
+                        return Err("oper_missing_symbol_id".to_string());
                     };
                     let Some(operand_symbol) = operand_symbols.get(&symbol_id) else {
                         if trace_sla_parse {
@@ -198,7 +198,7 @@ pub(super) fn decode_construct_templates(
                                 "[sla-parse] missing operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id}"
                             );
                         }
-                        return None;
+                        return Err("missing_operand_symbol".to_string());
                     };
                     let Some(spec) =
                         compiled_operand_spec_for_symbol(operand_symbol, &subtable_names_by_id)
@@ -208,7 +208,7 @@ pub(super) fn decode_construct_templates(
                                 "[sla-parse] unsupported operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id} symbol={operand_symbol:?}"
                             );
                         }
-                        return None;
+                        return Err("unsupported_operand_symbol".to_string());
                     };
                     operand_specs_by_index.insert(operand_symbol.hand_index, spec);
                     operand_minimum_lengths_by_index
@@ -251,7 +251,7 @@ pub(super) fn decode_construct_templates(
                         "[sla-parse] missing operand spec subtable={subtable_name} slot={local_index} operand={slot} source_key={source_key}"
                     );
                 }
-                return None;
+                return Err("missing_operand_spec".to_string());
             };
             operand_specs.push(spec);
             operand_minimum_lengths.push(
@@ -302,7 +302,7 @@ pub(super) fn decode_construct_templates(
                             "[sla-parse] decode_context_op failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
                         );
                     }
-                    return None;
+                    return Err(format!("decode_context_op:{err:#}"));
                 }
             }
         }
@@ -342,12 +342,13 @@ pub(super) fn decode_construct_templates(
             });
         }
 
-        Some(CompiledSlaConstructorTemplate {
+        Ok(CompiledSlaConstructorTemplate {
             id,
             subtable_id,
             subtable_name: subtable_name.to_string(),
             constructor_slot: local_index,
             decode_status: CompiledSlaDecodeStatus::Decoded,
+            decode_error: None,
             source_key,
             source_file,
             line,
@@ -399,33 +400,8 @@ pub(super) fn decode_construct_templates(
                 .attr_unsigned(sla_format::ATTR_ID)
                 .map(|value| value as usize)
                 .unwrap_or(local_index);
-            let template = parse_constructor(id, &name, child, slot).unwrap_or_else(|| {
-                CompiledSlaConstructorTemplate {
-                    id: slot as u32,
-                    subtable_id: id,
-                    subtable_name: name.clone(),
-                    constructor_slot: slot,
-                    decode_status: CompiledSlaDecodeStatus::Unsupported,
-                    source_key: format!("sla_decode_failed_constructor:{name}:{slot}"),
-                    source_file: "unknown".to_string(),
-                    line: 0,
-                    minimum_length: 0,
-                    display_template: CompiledDisplayTemplate::empty(),
-                    display_operands: Vec::new(),
-                    opprint_indices: Vec::new(),
-                    operand_specs: Vec::new(),
-                    operand_minimum_lengths: Vec::new(),
-                    context_changes: Vec::new(),
-                    context_commits: Vec::new(),
-                    flowthru_operand_index: None,
-                    constructor_template: CompiledConstructTpl {
-                        constructor_hash: 0,
-                        num_labels: 0,
-                        result: None,
-                        ops: Vec::new(),
-                    },
-                    named_templates: Vec::new(),
-                }
+            let template = parse_constructor(id, &name, child, slot).unwrap_or_else(|reason| {
+                unsupported_sla_constructor_template(id, &name, slot, reason)
             });
             constructors_by_index.insert(slot, template);
         }
@@ -445,34 +421,14 @@ pub(super) fn decode_construct_templates(
             .unwrap_or(0);
         let mut subtable_constructors = Vec::with_capacity(constructor_count);
         for slot in 0..constructor_count {
-            subtable_constructors.push(constructors_by_index.remove(&slot).unwrap_or(
-                CompiledSlaConstructorTemplate {
-                    id: slot as u32,
-                    subtable_id: id,
-                    subtable_name: name.clone(),
-                    constructor_slot: slot,
-                    decode_status: CompiledSlaDecodeStatus::Unsupported,
-                    source_key: format!("sla_decode_failed_constructor:{name}:{slot}"),
-                    source_file: "unknown".to_string(),
-                    line: 0,
-                    minimum_length: 0,
-                    display_template: CompiledDisplayTemplate::empty(),
-                    display_operands: Vec::new(),
-                    opprint_indices: Vec::new(),
-                    operand_specs: Vec::new(),
-                    operand_minimum_lengths: Vec::new(),
-                    context_changes: Vec::new(),
-                    context_commits: Vec::new(),
-                    flowthru_operand_index: None,
-                    constructor_template: CompiledConstructTpl {
-                        constructor_hash: 0,
-                        num_labels: 0,
-                        result: None,
-                        ops: Vec::new(),
-                    },
-                    named_templates: Vec::new(),
-                },
-            ));
+            subtable_constructors.push(constructors_by_index.remove(&slot).unwrap_or_else(|| {
+                unsupported_sla_constructor_template(
+                    id,
+                    &name,
+                    slot,
+                    "missing_constructor_slot".to_string(),
+                )
+            }));
         }
 
         for tpl in &subtable_constructors {
@@ -529,6 +485,41 @@ pub(super) fn decode_construct_templates(
     };
     library.native = SlaLanguage::from_compiled_library(&library);
     Ok(library)
+}
+
+fn unsupported_sla_constructor_template(
+    subtable_id: u32,
+    subtable_name: &str,
+    slot: usize,
+    decode_error: String,
+) -> CompiledSlaConstructorTemplate {
+    CompiledSlaConstructorTemplate {
+        id: slot as u32,
+        subtable_id,
+        subtable_name: subtable_name.to_string(),
+        constructor_slot: slot,
+        decode_status: CompiledSlaDecodeStatus::Unsupported,
+        decode_error: Some(decode_error),
+        source_key: format!("sla_decode_failed_constructor:{subtable_name}:{slot}"),
+        source_file: "unknown".to_string(),
+        line: 0,
+        minimum_length: 0,
+        display_template: CompiledDisplayTemplate::empty(),
+        display_operands: Vec::new(),
+        opprint_indices: Vec::new(),
+        operand_specs: Vec::new(),
+        operand_minimum_lengths: Vec::new(),
+        context_changes: Vec::new(),
+        context_commits: Vec::new(),
+        flowthru_operand_index: None,
+        constructor_template: CompiledConstructTpl {
+            constructor_hash: 0,
+            num_labels: 0,
+            result: None,
+            ops: Vec::new(),
+        },
+        named_templates: Vec::new(),
+    }
 }
 
 pub fn decode_decision_tree(

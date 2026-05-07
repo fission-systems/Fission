@@ -150,6 +150,18 @@ fn operand_spec_primary_sla_token_span(
             offsetbase: _,
             ..
         } => token_span_from_sla_field(*reloffset, *byte_start, *byte_end),
+        CompiledOperandSpec::SlaVarnodeListExpression {
+            expr,
+            reloffset,
+            offsetbase: _,
+            ..
+        }
+        | CompiledOperandSpec::SlaValueMapExpression {
+            expr,
+            reloffset,
+            offsetbase: _,
+            ..
+        } => pattern_expression_primary_sla_token_span(*reloffset, expr),
         CompiledOperandSpec::SlaPatternExpression {
             expr,
             reloffset,
@@ -362,6 +374,8 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         CompiledOperandSpec::SlaTokenField { .. }
         | CompiledOperandSpec::SlaVarnodeList { .. }
         | CompiledOperandSpec::SlaValueMap { .. }
+        | CompiledOperandSpec::SlaVarnodeListExpression { .. }
+        | CompiledOperandSpec::SlaValueMapExpression { .. }
         | CompiledOperandSpec::SlaPatternExpression { .. }
             if operand_spec_primary_sla_token_span(compiled, spec, depth).is_some() =>
         {

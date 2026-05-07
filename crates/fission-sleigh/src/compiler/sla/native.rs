@@ -42,6 +42,7 @@ pub struct SlaConstructor {
     pub constructor_id: u32,
     pub constructor_slot: usize,
     pub decode_status: CompiledSlaDecodeStatus,
+    pub decode_error: Option<String>,
     pub operands: Vec<SlaOperandSymbol>,
     pub print: CompiledDisplayTemplate,
     pub construct_tpl: SlaConstructTpl,
@@ -145,6 +146,7 @@ impl SlaConstructor {
             constructor_id: template.id,
             constructor_slot: template.constructor_slot,
             decode_status: template.decode_status,
+            decode_error: template.decode_error.clone(),
             operands: template
                 .operand_specs
                 .iter()

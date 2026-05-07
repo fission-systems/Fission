@@ -14,14 +14,17 @@ pub(super) enum DecodedDisplaySymbol {
     NameTable {
         names: Vec<String>,
         token_field: Option<DecodedTokenField>,
+        selector_expr: Option<CompiledPatternExpression>,
     },
     ValueMap {
         values: Vec<i64>,
         token_field: Option<DecodedTokenField>,
+        selector_expr: Option<CompiledPatternExpression>,
     },
     VarnodeList {
         entries: Vec<CompiledResolvedVarnode>,
         token_field: Option<DecodedTokenField>,
+        selector_expr: Option<CompiledPatternExpression>,
     },
     FixedVarnode(CompiledResolvedVarnode),
 }
@@ -114,6 +117,10 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
+            let selector_expr = symbol
+                .children
+                .iter()
+                .find_map(|child| decode_pattern_expression(child).ok());
             let names = symbol
                 .children
                 .iter()
@@ -125,7 +132,14 @@ pub(super) fn decode_display_symbols(
                         .to_string()
                 })
                 .collect::<Vec<_>>();
-            out.insert(id, DecodedDisplaySymbol::NameTable { names, token_field });
+            out.insert(
+                id,
+                DecodedDisplaySymbol::NameTable {
+                    names,
+                    token_field,
+                    selector_expr,
+                },
+            );
         }
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VALUEMAP_SYM) {
@@ -139,6 +153,10 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
+            let selector_expr = symbol
+                .children
+                .iter()
+                .find_map(|child| decode_pattern_expression(child).ok());
             let values = symbol
                 .children
                 .iter()
@@ -150,6 +168,7 @@ pub(super) fn decode_display_symbols(
                 DecodedDisplaySymbol::ValueMap {
                     values,
                     token_field,
+                    selector_expr,
                 },
             );
         }
@@ -165,6 +184,10 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
+            let selector_expr = symbol
+                .children
+                .iter()
+                .find_map(|child| decode_pattern_expression(child).ok());
             let entries = symbol
                 .children
                 .iter()
@@ -177,6 +200,7 @@ pub(super) fn decode_display_symbols(
                 DecodedDisplaySymbol::VarnodeList {
                     entries,
                     token_field,
+                    selector_expr,
                 },
             );
         }

@@ -42,6 +42,7 @@ pub struct CompiledSlaConstructorTemplate {
     pub subtable_name: String,
     pub constructor_slot: usize,
     pub decode_status: CompiledSlaDecodeStatus,
+    pub decode_error: Option<String>,
     pub source_key: String,
     pub source_file: String,
     pub line: u64,
@@ -78,6 +79,7 @@ pub(super) struct DecodedOperandSymbol {
     pub(super) display_kind: CompiledDisplayOperandKind,
     pub(super) token_field: Option<DecodedTokenField>,
     pub(super) pattern_expression: Option<CompiledPatternExpression>,
+    pub(super) selector_expression: Option<CompiledPatternExpression>,
     pub(super) varnode_list: Option<Vec<CompiledResolvedVarnode>>,
     pub(super) value_map: Option<Vec<i64>>,
     pub(super) fixed_varnode: Option<CompiledResolvedVarnode>,
@@ -218,6 +220,7 @@ pub(super) fn decode_operand_symbols(
             display_kind,
             display_token_field,
             pattern_expression,
+            selector_expression,
             varnode_list,
             value_map,
             fixed_varnode,
@@ -233,6 +236,7 @@ pub(super) fn decode_operand_symbols(
                     None,
                     None,
                     None,
+                    None,
                 ),
                 DecodedDisplaySymbol::ValueHex { expression } => (
                     None,
@@ -242,11 +246,17 @@ pub(super) fn decode_operand_symbols(
                     None,
                     None,
                     None,
+                    None,
                 ),
-                DecodedDisplaySymbol::NameTable { token_field, .. } => (
+                DecodedDisplaySymbol::NameTable {
+                    token_field,
+                    selector_expr,
+                    ..
+                } => (
                     None,
                     decoded_display_kind(symbol),
                     token_field.clone(),
+                    selector_expr.clone(),
                     None,
                     None,
                     None,
@@ -255,11 +265,13 @@ pub(super) fn decode_operand_symbols(
                 DecodedDisplaySymbol::ValueMap {
                     token_field,
                     values,
+                    selector_expr,
                 } => (
                     None,
                     decoded_display_kind(symbol),
                     token_field.clone(),
                     None,
+                    selector_expr.clone(),
                     None,
                     Some(values.clone()),
                     None,
@@ -267,11 +279,13 @@ pub(super) fn decode_operand_symbols(
                 DecodedDisplaySymbol::VarnodeList {
                     entries,
                     token_field,
+                    selector_expr,
                 } => (
                     None,
                     decoded_display_kind(symbol),
                     token_field.clone(),
                     None,
+                    selector_expr.clone(),
                     Some(entries.clone()),
                     None,
                     None,
@@ -279,6 +293,7 @@ pub(super) fn decode_operand_symbols(
                 DecodedDisplaySymbol::FixedVarnode(varnode) => (
                     None,
                     decoded_display_kind(symbol),
+                    None,
                     None,
                     None,
                     None,
@@ -291,6 +306,7 @@ pub(super) fn decode_operand_symbols(
                 CompiledDisplayOperandKind::Generic,
                 None,
                 direct_pattern_expression.clone(),
+                None,
                 None,
                 None,
                 None,
@@ -313,6 +329,7 @@ pub(super) fn decode_operand_symbols(
                 display_kind,
                 token_field,
                 pattern_expression: pattern_expression.or(direct_pattern_expression),
+                selector_expression,
                 varnode_list,
                 value_map,
                 fixed_varnode,
@@ -381,6 +398,14 @@ pub(super) fn compiled_operand_spec_for_symbol(
             offsetbase: symbol.offsetbase,
         });
     }
+    if let (Some(expr), Some(entries)) = (&symbol.selector_expression, &symbol.varnode_list) {
+        return Some(CompiledOperandSpec::SlaVarnodeListExpression {
+            expr: expr.clone(),
+            entries: entries.clone(),
+            reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
+        });
+    }
     if let (Some(token_field), Some(values)) = (&symbol.token_field, &symbol.value_map) {
         return Some(CompiledOperandSpec::SlaValueMap {
             big_endian: token_field.big_endian,
@@ -390,6 +415,14 @@ pub(super) fn compiled_operand_spec_for_symbol(
             byte_start: token_field.byte_start,
             byte_end: token_field.byte_end,
             shift: token_field.shift,
+            values: values.clone(),
+            reloffset: symbol.reloffset,
+            offsetbase: symbol.offsetbase,
+        });
+    }
+    if let (Some(expr), Some(values)) = (&symbol.selector_expression, &symbol.value_map) {
+        return Some(CompiledOperandSpec::SlaValueMapExpression {
+            expr: expr.clone(),
             values: values.clone(),
             reloffset: symbol.reloffset,
             offsetbase: symbol.offsetbase,

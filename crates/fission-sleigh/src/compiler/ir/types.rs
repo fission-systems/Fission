@@ -481,6 +481,16 @@ pub enum CompiledOperandSpec {
         #[serde(default = "default_offsetbase")]
         offsetbase: i32,
     },
+    SlaVarnodeListExpression {
+        expr: CompiledPatternExpression,
+        entries: Vec<CompiledResolvedVarnode>,
+        /// See `SlaTokenField::reloffset`.
+        #[serde(default)]
+        reloffset: i32,
+        /// See `SlaTokenField::offsetbase`.
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
+    },
     SlaValueMap {
         big_endian: bool,
         sign_bit: bool,
@@ -489,6 +499,16 @@ pub enum CompiledOperandSpec {
         byte_start: u32,
         byte_end: u32,
         shift: i32,
+        values: Vec<i64>,
+        /// See `SlaTokenField::reloffset`.
+        #[serde(default)]
+        reloffset: i32,
+        /// See `SlaTokenField::offsetbase`.
+        #[serde(default = "default_offsetbase")]
+        offsetbase: i32,
+    },
+    SlaValueMapExpression {
+        expr: CompiledPatternExpression,
         values: Vec<i64>,
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]

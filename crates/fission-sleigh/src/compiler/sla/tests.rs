@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::compiler::{CompiledOperandSpec, CompiledSlaDecodeStatus};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
@@ -64,6 +65,34 @@ fn decodes_real_x86_64_sla_construct_templates() {
             .iter()
             .any(|ctor| !ctor.construct_tpl.ops.is_empty() || ctor.construct_tpl.result.is_some()),
         "native constructors must preserve decoded ConstructTpl payloads"
+    );
+}
+
+#[test]
+fn decodes_x86_varnode_list_selector_expressions() {
+    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    }
+    let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
+    let constructors = library
+        .constructors_by_source
+        .get("avx.sinc:6")
+        .expect("AVX constructor using a varnode-list selector expression");
+    assert!(
+        constructors
+            .iter()
+            .any(|ctor| ctor.decode_status == CompiledSlaDecodeStatus::Decoded
+                && ctor
+                    .operand_specs
+                    .iter()
+                    .any(|spec| matches!(
+                        spec,
+                        CompiledOperandSpec::SlaVarnodeListExpression { .. }
+                    ))),
+        "avx.sinc:6 should decode through a spec-derived varnode-list selector expression"
     );
 }
 

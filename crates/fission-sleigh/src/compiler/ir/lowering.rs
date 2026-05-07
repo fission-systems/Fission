@@ -440,7 +440,11 @@ fn sla_constructor_unsupported_reason(
     sla_template: &crate::compiler::sla::CompiledSlaConstructorTemplate,
 ) -> Option<String> {
     if sla_template.decode_status != CompiledSlaDecodeStatus::Decoded {
-        return Some("sla_constructor_decode_failed".to_string());
+        let reason = sla_template
+            .decode_error
+            .as_deref()
+            .unwrap_or("unknown_decode_failure");
+        return Some(format!("sla_constructor_decode_failed:{reason}"));
     }
     sla_template
         .constructor_template
