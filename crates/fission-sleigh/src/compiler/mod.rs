@@ -34,7 +34,7 @@ pub use equivalence::{
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
     CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledContextCommit, CompiledContextField, CompiledContextFieldRef, CompiledContextOp,
+    CompiledContextCommit, CompiledContextField, CompiledContextOp,
     CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode,
     CompiledDecisionProbe, CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
@@ -45,8 +45,8 @@ pub use ir::{
     CompiledPatternNode, CompiledPcodeOp, CompiledRegister, CompiledResolvedVarnode,
     CompiledSemanticTemplate, CompiledSlaConstructorIdentity, CompiledSlaDecodeStatus,
     CompiledSpaceRef, CompiledSpaceTpl, CompiledSpecDefinition, CompiledSubtable,
-    CompiledSubtableDefinition, CompiledTemplateSource, CompiledTokenField, CompiledTokenFieldRef,
-    CompiledVarnodeTpl, ControlFlowClass, PatternConstraint,
+    CompiledSubtableDefinition, CompiledTemplateSource, CompiledTokenField, CompiledVarnodeTpl,
+    ControlFlowClass, PatternConstraint,
 };
 pub use preprocessor::{expand_entry_spec, ExpandedSpec, IncludeManifestEntry, PreprocessedLine};
 pub use sla::{

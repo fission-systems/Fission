@@ -659,21 +659,6 @@ fn render_decision_probe(probe: crate::compiler::CompiledDecisionProbe) -> Strin
         } => format!(
             "{{\"kind\": \"sla_context_bits\", \"start_bit\": {start_bit}, \"bit_size\": {bit_size}}}"
         ),
-        crate::compiler::CompiledDecisionProbe::TokenFieldRef(field) => format!(
-            "{{\"kind\": \"token_field_ref\", \"field\": {}}}",
-            json_string(match field {
-                crate::compiler::CompiledTokenFieldRef::InstructionWidthProfile =>
-                    "instruction_width_profile",
-                crate::compiler::CompiledTokenFieldRef::AddressingForm => "addressing_form",
-                crate::compiler::CompiledTokenFieldRef::RegisterSelector => "register_selector",
-            })
-        ),
-        crate::compiler::CompiledDecisionProbe::ContextFieldRef(field) => format!(
-            "{{\"kind\": \"context_field_ref\", \"field\": {}}}",
-            json_string(match field {
-                crate::compiler::CompiledContextFieldRef::DefaultContext => "default_context",
-            })
-        ),
         crate::compiler::CompiledDecisionProbe::TerminalPatternCheck => {
             json_string("terminal_pattern_check")
         }
@@ -807,9 +792,6 @@ fn render_constructor_template(template: &crate::compiler::CompiledConstructorTe
         .decode_steps
         .iter()
         .map(|step| match step {
-            crate::compiler::CompiledOperandDecodeStep::ConsumeTokenFields => {
-                "{\"kind\": \"consume_token_fields\"}".to_string()
-            }
             crate::compiler::CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                 format!("{{\"kind\": \"decode_operand\", \"operand_index\": {operand_index}}}")
             }

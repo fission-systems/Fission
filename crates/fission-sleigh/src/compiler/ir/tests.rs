@@ -139,6 +139,12 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
         return;
     }
 
+    let legacy_decode_step = ["Consume", "TokenFields"].concat();
+    assert!(
+        !include_str!("types.rs").contains(&legacy_decode_step),
+        "CompiledOperandDecodeStep must not expose legacy token-field decode variants"
+    );
+
     let entry_specs = [
         ("x86-64", x86_64_entry_spec_path()),
         ("x86", spec_root_for_arch("x86").join("x86.slaspec")),
@@ -163,15 +169,6 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
             assert!(
                 constructor.operand_reg_values.is_empty(),
                 "{entry_id} runtime-ready constructor still uses legacy reg selector: {}",
-                constructor.source
-            );
-            assert!(
-                !constructor
-                    .constructor_template
-                    .decode_steps
-                    .iter()
-                    .any(|step| matches!(step, CompiledOperandDecodeStep::ConsumeTokenFields)),
-                "{entry_id} runtime-ready constructor still uses legacy token-field decode step: {}",
                 constructor.source
             );
         }

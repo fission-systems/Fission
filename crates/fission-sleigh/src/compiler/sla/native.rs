@@ -189,7 +189,6 @@ impl SlaDecisionTree {
                         node.probe,
                         crate::compiler::ir::CompiledDecisionProbe::SlaContextBits { .. }
                             | crate::compiler::ir::CompiledDecisionProbe::ContextBitSlice { .. }
-                            | crate::compiler::ir::CompiledDecisionProbe::ContextFieldRef(_)
                     ),
                     start_bit: match node.probe {
                         crate::compiler::ir::CompiledDecisionProbe::SlaInstructionBits {

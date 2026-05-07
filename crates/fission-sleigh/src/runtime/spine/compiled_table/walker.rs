@@ -229,11 +229,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .clone();
         for step in decode_steps {
             match step {
-                CompiledOperandDecodeStep::ConsumeTokenFields => {
-                    bail!(
-                        "compatibility token-field decode step is not a canonical compiled-table runtime path"
-                    );
-                }
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
                     self.decode_operand(operand_index)?;
                 }

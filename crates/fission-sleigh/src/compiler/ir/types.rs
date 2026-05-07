@@ -384,8 +384,6 @@ pub enum CompiledDecisionProbe {
     ContextBitSlice { offset: u8, mask: u8, shift: u8 },
     SlaInstructionBits { start_bit: u32, bit_size: u32 },
     SlaContextBits { start_bit: u32, bit_size: u32 },
-    TokenFieldRef(CompiledTokenFieldRef),
-    ContextFieldRef(CompiledContextFieldRef),
     TerminalPatternCheck,
 }
 
@@ -401,18 +399,6 @@ pub enum CompiledPatternMatcher {
     RowCc { prefix: Vec<u8>, row: u8 },
     RowPage { row: u8, page: u8 },
     BitConstraints(Vec<PatternConstraint>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompiledTokenFieldRef {
-    InstructionWidthProfile,
-    AddressingForm,
-    RegisterSelector,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompiledContextFieldRef {
-    DefaultContext,
 }
 
 impl CompiledPatternMatcher {
@@ -587,7 +573,6 @@ pub struct CompiledHandleTemplate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompiledOperandDecodeStep {
-    ConsumeTokenFields,
     DecodeOperand {
         operand_index: usize,
     },
@@ -998,18 +983,6 @@ impl CompiledDecisionProbe {
             Self::ContextBitSlice { .. } => "context_bit_slice",
             Self::SlaInstructionBits { .. } => "sla_instruction_bits",
             Self::SlaContextBits { .. } => "sla_context_bits",
-            Self::TokenFieldRef(CompiledTokenFieldRef::InstructionWidthProfile) => {
-                "token_field_instruction_width"
-            }
-            Self::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                "token_field_addressing_form"
-            }
-            Self::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                "token_field_register_selector"
-            }
-            Self::ContextFieldRef(CompiledContextFieldRef::DefaultContext) => {
-                "context_field_default"
-            }
             Self::TerminalPatternCheck => "terminal_pattern_check",
         }
     }

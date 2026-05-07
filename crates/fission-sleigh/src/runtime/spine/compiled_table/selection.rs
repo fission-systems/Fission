@@ -112,20 +112,6 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             .into_iter()
             .map(|value| ((value & u64::from(mask)) >> shift) as u8)
             .collect(),
-            CompiledDecisionProbe::ContextFieldRef(_) => vec![0],
-            CompiledDecisionProbe::TokenFieldRef(
-                CompiledTokenFieldRef::InstructionWidthProfile,
-            ) => vec![self.ctx.instruction_width_profile],
-            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::AddressingForm) => {
-                bail!(
-                    "compatibility token-field decision probe is not a canonical compiled-table selection path"
-                );
-            }
-            CompiledDecisionProbe::TokenFieldRef(CompiledTokenFieldRef::RegisterSelector) => {
-                bail!(
-                    "compatibility token-field decision probe is not a canonical compiled-table selection path"
-                );
-            }
             CompiledDecisionProbe::SlaInstructionBits {
                 start_bit,
                 bit_size,
