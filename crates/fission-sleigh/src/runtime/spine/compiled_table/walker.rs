@@ -890,7 +890,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         return Ok(OperandBinding::guard_only(sub_state));
                     }
                 };
-                let value = display_value_for_exported_handle(exported, &sub_state);
+                let value = display_value_for_exported_handle(exported, &sub_state)?;
                 Ok(OperandBinding {
                     debug_value: Some(value),
                     fixed: Some(exported.fixed.clone()),

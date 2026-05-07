@@ -427,7 +427,7 @@ fn decoded_instruction_from_state(
     decoded: RuntimeConstructState,
 ) -> Result<DecodedInstruction> {
     let length = decoded.length;
-    let (mnemonic, operands_text) = render_instruction_display(&decoded);
+    let (mnemonic, operands_text) = render_instruction_display(&decoded)?;
     let direct_target = decoded.operands.first().and_then(|operand| match operand {
         BoundOperand::Relative { target } => Some(*target),
         _ => None,

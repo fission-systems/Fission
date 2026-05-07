@@ -3,14 +3,8 @@ use super::*;
 pub(super) fn display_value_for_exported_handle(
     exported: &RuntimeHandle,
     sub_state: &RuntimeConstructState,
-) -> BoundOperand {
-    let exported_value = exported.debug_value.clone().unwrap_or_else(|| {
-        bound_operand_from_fixed_handle(&exported.fixed).unwrap_or(BoundOperand::Immediate {
-            value: 0,
-            encoded_size: 0,
-            signed: false,
-        })
-    });
+) -> Result<BoundOperand> {
+    let exported_value = display_value_from_handle(exported, "exported subtable handle")?;
     let exported_is_direct_memory = matches!(
         exported_value,
         BoundOperand::Memory {
@@ -23,11 +17,11 @@ pub(super) fn display_value_for_exported_handle(
     );
     if exported_is_direct_memory {
         if let Some(rip_relative_operand) = first_rip_relative_memory(sub_state) {
-            return rip_relative_operand.clone();
+            return Ok(rip_relative_operand.clone());
         }
         if let Some(relative_target) = first_relative_target(sub_state) {
             if let BoundOperand::Memory { size, .. } = exported_value {
-                return BoundOperand::Memory {
+                return Ok(BoundOperand::Memory {
                     base: None,
                     index: None,
                     scale: 1,
@@ -35,11 +29,23 @@ pub(super) fn display_value_for_exported_handle(
                     rip_relative: true,
                     absolute: Some(relative_target),
                     size,
-                };
+                });
             }
         }
     }
-    exported_value
+    Ok(exported_value)
+}
+
+fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<BoundOperand> {
+    if let Some(value) = handle.debug_value.clone() {
+        return Ok(value);
+    }
+    bound_operand_from_fixed_handle(&handle.fixed).map_err(|error| {
+        anyhow!(
+            "{role} {} has no debug value and no displayable fixed handle: {error}",
+            handle.operand_index
+        )
+    })
 }
 
 pub(super) fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
@@ -96,9 +102,11 @@ pub(super) fn disasm_mnemonic(state: &RuntimeConstructState) -> String {
     state.mnemonic.replace('^', "").to_ascii_lowercase()
 }
 
-pub(super) fn render_instruction_display(state: &RuntimeConstructState) -> (String, String) {
+pub(super) fn render_instruction_display(
+    state: &RuntimeConstructState,
+) -> Result<(String, String)> {
     if state.display_template.pieces.is_empty() {
-        return (
+        return Ok((
             disasm_mnemonic(state),
             state
                 .operands
@@ -106,19 +114,21 @@ pub(super) fn render_instruction_display(state: &RuntimeConstructState) -> (Stri
                 .map(format_operand)
                 .collect::<Vec<_>>()
                 .join(", "),
-        );
+        ));
     }
 
-    let (mnemonic, body) = render_display_template_parts(state);
+    let (mnemonic, body) = render_display_template_parts(state)?;
     let mnemonic = if mnemonic.is_empty() {
         disasm_mnemonic(state)
     } else {
         mnemonic.replace('^', "").to_ascii_lowercase()
     };
-    (mnemonic, body)
+    Ok((mnemonic, body))
 }
 
-pub(super) fn render_display_template_parts(state: &RuntimeConstructState) -> (String, String) {
+pub(super) fn render_display_template_parts(
+    state: &RuntimeConstructState,
+) -> Result<(String, String)> {
     if let Some(flow_index) = state.display_template.flowthru_operand_index {
         if let Some(child) = state
             .handles
@@ -133,60 +143,57 @@ pub(super) fn render_display_template_parts(state: &RuntimeConstructState) -> (S
         .display_template
         .first_whitespace
         .unwrap_or(state.display_template.pieces.len());
-    let mnemonic = render_display_pieces(state, &state.display_template.pieces[..split]);
+    let mnemonic = render_display_pieces(state, &state.display_template.pieces[..split])?;
     let body = if state.display_template.first_whitespace.is_some()
         && split < state.display_template.pieces.len()
     {
-        render_display_pieces(state, &state.display_template.pieces[split + 1..])
+        render_display_pieces(state, &state.display_template.pieces[split + 1..])?
     } else {
         String::new()
     };
-    (mnemonic, body)
+    Ok((mnemonic, body))
 }
 
 pub(super) fn render_display_pieces(
     state: &RuntimeConstructState,
     pieces: &[crate::compiler::CompiledDisplayPiece],
-) -> String {
+) -> Result<String> {
     let mut rendered = String::new();
     for piece in pieces {
         match piece {
             crate::compiler::CompiledDisplayPiece::Literal(literal) => rendered.push_str(literal),
             crate::compiler::CompiledDisplayPiece::OperandRef(index) => {
-                rendered.push_str(&render_operand_display(state, *index));
+                rendered.push_str(&render_operand_display(state, *index)?);
             }
         }
     }
-    rendered
+    Ok(rendered)
 }
 
 pub(super) fn render_operand_display(
     state: &RuntimeConstructState,
     operand_index: usize,
-) -> String {
+) -> Result<String> {
     let Some(handle) = state.handles.get(operand_index) else {
-        return String::new();
+        bail!(
+            "display operand {operand_index} is missing for constructor {}",
+            state.constructor_id
+        );
     };
     if let Some(child) = handle.subtable_state.as_deref() {
-        let (mnemonic, body) = render_display_template_parts(child);
-        return if body.is_empty() {
+        let (mnemonic, body) = render_display_template_parts(child)?;
+        return Ok(if body.is_empty() {
             mnemonic
         } else {
             format!("{mnemonic} {body}")
-        };
+        });
     }
     let display_kind = state
         .display_operands
         .get(operand_index)
         .map(|operand| &operand.kind);
-    let value = handle.debug_value.clone().unwrap_or_else(|| {
-        bound_operand_from_fixed_handle(&handle.fixed).unwrap_or(BoundOperand::Immediate {
-            value: 0,
-            encoded_size: 0,
-            signed: false,
-        })
-    });
-    format_operand_with_display_kind(&value, display_kind)
+    let value = display_value_from_handle(handle, "display operand")?;
+    Ok(format_operand_with_display_kind(&value, display_kind))
 }
 
 pub(super) fn jcc_mnemonic(cc: u8) -> Option<&'static str> {
@@ -492,5 +499,24 @@ pub(super) fn add_signed(base: u64, delta: i64) -> u64 {
         base.saturating_add(delta as u64)
     } else {
         base.saturating_sub(delta.unsigned_abs())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn display_renderer_has_no_zero_bound_operand_fallback() {
+        let source = include_str!("display.rs");
+        let dummy_immediate_fallback = ["unwrap_or", "(BoundOperand::Immediate"].concat();
+        let dummy_zero_size = ["encoded_size: ", "0"].concat();
+
+        assert!(
+            !source.contains(&dummy_immediate_fallback),
+            "display rendering must fail on unresolved handles instead of inventing dummy immediates"
+        );
+        assert!(
+            !source.contains(&dummy_zero_size),
+            "display rendering must not materialize zero-size dummy operands"
+        );
     }
 }
