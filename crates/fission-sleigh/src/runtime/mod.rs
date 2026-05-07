@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(aarch64.processor, "AARCH64");
         let arm_alias = registry
             .lookup("arm32")
-            .expect("legacy ARM alias registered");
+            .expect("ARM language alias registered");
         assert_eq!(arm_alias.processor, "ARM");
     }
 

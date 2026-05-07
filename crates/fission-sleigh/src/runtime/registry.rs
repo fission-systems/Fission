@@ -45,7 +45,7 @@ pub struct RuntimeVariantDescriptor {
     pub entry_spec: String,
     pub entry_id: String,
     pub language_ids: Vec<String>,
-    pub compatibility_aliases: Vec<String>,
+    pub language_aliases: Vec<String>,
     pub generated_path: String,
     pub endian: RuntimeEndian,
     pub support_level: RuntimeSupportLevel,
@@ -59,7 +59,7 @@ pub struct RuntimeFrontendDescriptor {
     pub entry_spec: String,
     pub entry_id: String,
     pub language_ids: Vec<String>,
-    pub compatibility_aliases: Vec<String>,
+    pub language_aliases: Vec<String>,
     pub generated_path: String,
     pub status: RuntimeFrontendStatus,
 }
@@ -205,7 +205,7 @@ impl CompiledRuntimeRegistry {
                     .language_ids
                     .iter()
                     .any(|id| id == language_name || id.eq_ignore_ascii_case(language_name))
-                || frontend.compatibility_aliases.iter().any(|alias| {
+                || frontend.language_aliases.iter().any(|alias| {
                     alias == language_name || alias.eq_ignore_ascii_case(language_name)
                 })
         })
@@ -331,7 +331,7 @@ fn load_registry_data() -> RegistryData {
             entry_spec: entry.entry_spec.clone(),
             entry_id: entry.entry_id.clone(),
             language_ids: entry.language_ids.clone(),
-            compatibility_aliases: entry.compatibility_aliases.clone(),
+            language_aliases: entry.language_aliases.clone(),
             generated_path: format!("{}/{}", entry.processor, entry.entry_id),
             endian: endian_from_manifest(entry),
             support_level,
@@ -343,7 +343,7 @@ fn load_registry_data() -> RegistryData {
             entry_spec: variant.entry_spec.clone(),
             entry_id: variant.entry_id.clone(),
             language_ids: variant.language_ids.clone(),
-            compatibility_aliases: variant.compatibility_aliases.clone(),
+            language_aliases: variant.language_aliases.clone(),
             generated_path: variant.generated_path.clone(),
             status: variant.support_level.as_frontend_status(),
         });

@@ -56,7 +56,7 @@ pub(super) fn is_executable_candidate_entry(entry_id: &str) -> Result<bool> {
         .any(|&id| id == entry_id))
 }
 
-pub(super) fn compatibility_aliases_for(processor: &str) -> Vec<String> {
+pub(super) fn language_aliases_for(processor: &str) -> Vec<String> {
     let manifest_path = ghidra_language_manifest_path();
     if !manifest_path.exists() {
         return Vec::new();
@@ -73,7 +73,7 @@ pub(super) fn compatibility_aliases_for(processor: &str) -> Vec<String> {
         .into_iter()
         .filter(|entry| entry.processor == processor)
     {
-        aliases.extend(entry.compatibility_aliases);
+        aliases.extend(entry.language_aliases);
     }
     aliases.into_iter().collect()
 }
@@ -83,12 +83,7 @@ pub(super) fn canonical_processor_name(name: &str) -> Option<String> {
     let contents = fs::read_to_string(manifest_path).ok()?;
     let manifest = serde_json::from_str::<GhidraLanguageManifest>(&contents).ok()?;
     manifest.entries.into_iter().find_map(|entry| {
-        if entry.processor == name
-            || entry
-                .compatibility_aliases
-                .iter()
-                .any(|alias| alias == name)
-        {
+        if entry.processor == name || entry.language_aliases.iter().any(|alias| alias == name) {
             Some(entry.processor)
         } else {
             None

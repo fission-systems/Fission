@@ -15,7 +15,7 @@ pub(super) fn entry_matches_language_name(entry: &EntrySpec, language_name: &str
             .iter()
             .any(|id| id == language_name || id.eq_ignore_ascii_case(language_name))
         || entry
-            .compatibility_aliases
+            .language_aliases
             .iter()
             .any(|alias| alias == language_name || alias.eq_ignore_ascii_case(language_name))
 }

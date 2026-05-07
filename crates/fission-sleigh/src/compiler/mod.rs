@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use policy::{canonical_processor_name, compatibility_aliases_for, is_executable_candidate_entry};
+use policy::{canonical_processor_name, is_executable_candidate_entry, language_aliases_for};
 use serde::{Deserialize, Serialize};
 
 pub use ast::parse_expanded_spec;
@@ -34,9 +34,9 @@ pub use equivalence::{
 pub use ir::{
     CompiledAddressSpace, CompiledArithmeticOpcode, CompiledConstTpl, CompiledConstructTpl,
     CompiledConstructTplKind, CompiledConstructor, CompiledConstructorTemplate,
-    CompiledContextCommit, CompiledContextField, CompiledContextOp,
-    CompiledDecisionBucket, CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode,
-    CompiledDecisionProbe, CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledContextCommit, CompiledContextField, CompiledContextOp, CompiledDecisionBucket,
+    CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode, CompiledDecisionProbe,
+    CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
     CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
     CompiledHandleTemplate, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
@@ -68,7 +68,7 @@ pub struct EntrySpec {
     pub entry_spec: String,
     pub entry_id: String,
     pub language_ids: Vec<String>,
-    pub compatibility_aliases: Vec<String>,
+    pub language_aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,8 +84,8 @@ pub struct GhidraLanguageManifestEntry {
     #[serde(default)]
     pub imported_aux_files: Vec<String>,
     pub runtime_status: String,
-    #[serde(default)]
-    pub compatibility_aliases: Vec<String>,
+    #[serde(default, alias = "compatibility_aliases")]
+    pub language_aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,7 +351,7 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
                 } else {
                     "registered_compile_only".to_string()
                 },
-                compatibility_aliases: compatibility_aliases_for(&spec.arch),
+                language_aliases: language_aliases_for(&spec.arch),
             });
         }
     }
@@ -412,7 +412,7 @@ fn discover_all_entry_specs_from_manifest() -> Result<Option<Vec<EntrySpec>>> {
             entry_spec: entry.entry_spec,
             entry_id: entry.entry_id,
             language_ids: entry.language_ids,
-            compatibility_aliases: entry.compatibility_aliases,
+            language_aliases: entry.language_aliases,
         })
         .collect::<Vec<_>>();
     entries.sort_by(|lhs, rhs| {
@@ -439,7 +439,7 @@ pub fn discover_entry_specs_for_arch(arch: &str) -> Result<Vec<EntrySpec>> {
             .unwrap_or(false);
         if is_slaspec {
             let mut spec = entry_spec_from_path(path)?;
-            spec.compatibility_aliases = compatibility_aliases_for(&spec.arch);
+            spec.language_aliases = language_aliases_for(&spec.arch);
             entries.push(spec);
         }
     }

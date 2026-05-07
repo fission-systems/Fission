@@ -219,6 +219,6 @@ pub fn entry_spec_from_path(entry_spec: PathBuf) -> Result<EntrySpec> {
         entry_spec: entry_spec_name,
         entry_id,
         language_ids: Vec::new(),
-        compatibility_aliases: Vec::new(),
+        language_aliases: Vec::new(),
     })
 }
