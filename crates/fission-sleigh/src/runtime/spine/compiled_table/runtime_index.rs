@@ -38,19 +38,6 @@ fn mark_varnode_tpl_references(varnode: &CompiledVarnodeTpl, refs: &mut [bool]) 
             mark_const_tpl_references(size, refs);
         }
         CompiledVarnodeTpl::HandleTpl(handle) => mark_handle_tpl_references(handle, refs),
-        CompiledVarnodeTpl::Handle { operand_index }
-        | CompiledVarnodeTpl::EffectiveAddress { operand_index } => {
-            if let Some(reference) = refs.get_mut(*operand_index) {
-                *reference = true;
-            }
-        }
-        CompiledVarnodeTpl::Const(value) => mark_const_tpl_references(value, refs),
-        CompiledVarnodeTpl::Space(_)
-        | CompiledVarnodeTpl::Temp { .. }
-        | CompiledVarnodeTpl::Register { .. }
-        | CompiledVarnodeTpl::FixedRegister { .. }
-        | CompiledVarnodeTpl::Flag { .. }
-        | CompiledVarnodeTpl::ConditionPredicate => {}
     }
 }
 

@@ -14,9 +14,8 @@ pub trait RuntimeTemplateExecutor {
 mod tests {
     use super::*;
     use crate::compiler::{
-        CompiledConstTpl, CompiledConstructTplKind, CompiledConstructorTemplate,
-        CompiledDisplayTemplate, CompiledOpTpl, CompiledOpTplOpcode, CompiledTemplateSource,
-        CompiledVarnodeTpl,
+        CompiledConstructTplKind, CompiledConstructorTemplate, CompiledDisplayTemplate,
+        CompiledOpTpl, CompiledTemplateSource,
     };
     use crate::runtime::spine::RuntimeMatchTrace;
 
@@ -39,55 +38,6 @@ mod tests {
             leaf_constructor_indexes: Vec::new(),
             matched_leaf_pattern: None,
         }
-    }
-
-    #[test]
-    fn spec_derived_template_rejects_compatibility_varnode() {
-        let state = RuntimeConstructState {
-            subtable_id: 0,
-            constructor_id: 0,
-            constructor_slot: 0,
-            mnemonic: "mov".to_string(),
-            construct_tpl_kind: CompiledConstructTplKind::Mov,
-            constructor_template: CompiledConstructorTemplate {
-                handles: Vec::new(),
-                decode_steps: Vec::new(),
-                num_labels: 0,
-                result: None,
-                ops: vec![CompiledOpTpl {
-                    sla_raw_pcode_opcode: 0,
-                    opcode: CompiledOpTplOpcode::Copy,
-                    output: Some(CompiledVarnodeTpl::Handle { operand_index: 0 }),
-                    inputs: vec![CompiledVarnodeTpl::Const(CompiledConstTpl::Integer {
-                        value: 1,
-                        size: 1,
-                    })],
-                    label: None,
-                }],
-                template_source: CompiledTemplateSource::SpecDerived,
-            },
-            display_template: CompiledDisplayTemplate::empty(),
-            display_operands: Vec::new(),
-            construct_nodes: Vec::new(),
-            handles: Vec::new(),
-            exported_handle: None,
-            operands: Vec::new(),
-            condition_code: None,
-            absolute_offset: 0,
-            relative_length: 1,
-            length: 1,
-            match_trace: empty_trace(),
-            named_templates: Vec::new(),
-            context_commits: Vec::new(),
-        };
-
-        let err = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
-            .emit("test-language", &state)
-            .expect_err("SpecDerived must reject compatibility varnodes");
-        let rendered = err.to_string();
-        assert!(rendered.contains("UnsupportedPcodeTemplate"));
-        assert!(rendered.contains("spec_derived_construct_tpl_contains_"));
-        assert!(rendered.contains("compatibility_handle_varnode"));
     }
 
     #[test]

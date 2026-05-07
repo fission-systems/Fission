@@ -758,30 +758,6 @@ pub enum CompiledVarnodeTpl {
         size: Box<CompiledConstTpl>,
     },
     HandleTpl(Box<CompiledHandleTpl>),
-    Handle {
-        operand_index: usize,
-    },
-    EffectiveAddress {
-        operand_index: usize,
-    },
-    ConditionPredicate,
-    Const(CompiledConstTpl),
-    Space(CompiledSpaceRef),
-    Temp {
-        id: u32,
-        size: u32,
-    },
-    Register {
-        name: String,
-        size: u32,
-    },
-    FixedRegister {
-        reg: CompiledFixedRegister,
-        size: u32,
-    },
-    Flag {
-        bit: u8,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -888,15 +864,6 @@ impl CompiledVarnodeTpl {
         match self {
             Self::Varnode { .. } => None,
             Self::HandleTpl(handle) => handle.ghidra_template_shape_error(),
-            Self::Handle { .. } => Some("compatibility_handle_varnode"),
-            Self::EffectiveAddress { .. } => Some("compatibility_effective_address_varnode"),
-            Self::ConditionPredicate => Some("compatibility_condition_predicate_varnode"),
-            Self::Const(_) => Some("compatibility_const_varnode"),
-            Self::Space(_) => Some("compatibility_space_varnode"),
-            Self::Temp { .. } => Some("compatibility_temp_varnode"),
-            Self::Register { .. } => Some("compatibility_register_varnode"),
-            Self::FixedRegister { .. } => Some("compatibility_fixed_register_varnode"),
-            Self::Flag { .. } => Some("compatibility_flag_varnode"),
         }
     }
 }

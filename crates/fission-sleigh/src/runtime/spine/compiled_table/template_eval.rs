@@ -135,10 +135,9 @@ fn indirect_placeholder_delay_bytes(op: &CompiledOpTpl) -> Result<u32> {
                 .map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32")),
             _ => bail!("INDIRECT delay size must be ConstTpl::Real (Ghidra walkTemplates)"),
         },
-        CompiledVarnodeTpl::Const(CompiledConstTpl::Real { value }) => {
-            u32::try_from(*value).map_err(|_| anyhow!("INDIRECT delay byte count does not fit u32"))
+        CompiledVarnodeTpl::HandleTpl(_) => {
+            bail!("INDIRECT delay placeholder has unexpected HandleTpl shape")
         }
-        _ => bail!("INDIRECT delay placeholder has unexpected varnode shape"),
     }
 }
 
@@ -171,7 +170,6 @@ pub(super) fn template_emit_error(
     if msg.contains("HandleTpl")
         || msg.contains("ConstTpl")
         || msg.contains("unsupported")
-        || msg.contains("compatibility varnode template")
     {
         RuntimeSleighError::UnsupportedPcodeTemplate {
             language: compiled.entry_id.clone(),
@@ -866,7 +864,6 @@ impl<'c> CompiledTableEmitter<'c> {
                     Ok(0)
                 }
             }
-            _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
     }
 
@@ -897,13 +894,6 @@ impl<'c> CompiledTableEmitter<'c> {
                 }
                 Ok(varnode)
             }
-            CompiledVarnodeTpl::ConditionPredicate => {
-                bail!("ConditionPredicate is display/compatibility-only and cannot emit raw P-code")
-            }
-            _ => bail!(
-                "compiled-table executor rejects compatibility varnode template: {:?}",
-                template
-            ),
         }
     }
 
@@ -947,7 +937,6 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledVarnodeTpl::Varnode { .. } | CompiledVarnodeTpl::HandleTpl(_) => {
                 self.resolve_varnode_tpl(template, state)
             }
-            _ => bail!("compiled-table executor rejects compatibility varnode template"),
         }
     }
 
@@ -1212,7 +1201,6 @@ impl<'c> CompiledTableEmitter<'c> {
                     constant_val: 0,
                 })
             }
-            _ => bail!("expected Ghidra VarnodeTpl or HandleTpl"),
         }
     }
 

@@ -45,7 +45,6 @@ fn audit_construct_tpl_ops(ops: &[CompiledOpTpl], audit: &mut SlaTemplateFeature
 
 fn audit_varnode_tpl_flow_consts(vn: &CompiledVarnodeTpl, audit: &mut SlaTemplateFeatureAudit) {
     match vn {
-        CompiledVarnodeTpl::Const(c) => audit_const_tpl_flow(c, audit),
         CompiledVarnodeTpl::Varnode {
             space,
             offset,
@@ -68,7 +67,6 @@ fn audit_varnode_tpl_flow_consts(vn: &CompiledVarnodeTpl, audit: &mut SlaTemplat
                 audit_const_tpl_flow(o, audit);
             }
         }
-        _ => {}
     }
 }
 
