@@ -91,7 +91,6 @@ impl std::error::Error for RuntimeSleighError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeExecutionDetails {
-    pub compat_emitter_used: bool,
     pub template_source: Option<crate::compiler::CompiledTemplateSource>,
 }
 

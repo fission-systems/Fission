@@ -135,7 +135,6 @@ mod construct_state_offset_tests {
                 .expect("decode/lift shared-token sample");
 
             assert_eq!(length as usize, bytes.len());
-            assert!(!details.compat_emitter_used);
             assert_eq!(
                 details.template_source,
                 Some(crate::compiler::CompiledTemplateSource::SpecDerived)

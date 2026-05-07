@@ -25,10 +25,6 @@ fn assert_spec_derived_lift_or_typed_unsupported(
         Ok((ops, length, details)) => {
             assert_eq!(length as usize, bytes.len());
             assert!(
-                !details.compat_emitter_used,
-                "raw p-code path must not use compatibility emitter"
-            );
-            assert!(
                 details.template_source == Some(CompiledTemplateSource::SpecDerived),
                 "expected SpecDerived, got {:?}",
                 details.template_source
@@ -136,7 +132,6 @@ fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert_eq!(ops.len(), 2);
     assert_eq!(ops[0].opcode, PcodeOpcode::Copy);
     assert_eq!(ops[1].opcode, PcodeOpcode::Store);
@@ -175,7 +170,6 @@ fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lif
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].opcode, PcodeOpcode::Copy);
     assert_eq!(ops[0].inputs[0].space_id, 3);
@@ -217,7 +211,6 @@ fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert_eq!(ops.len(), 1);
     assert_eq!(ops[0].opcode, PcodeOpcode::Copy);
     assert_eq!(ops[0].inputs[0].constant_val, 0);
@@ -246,7 +239,6 @@ fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     let call = ops
         .iter()
         .find(|op| op.opcode == PcodeOpcode::Call)
@@ -290,7 +282,6 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert_eq!(
         ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
         vec![
@@ -325,7 +316,6 @@ fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_erro
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert_eq!(
         ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
         vec![
@@ -351,7 +341,6 @@ fn generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent() {
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
 
     let int_add = ops
         .iter()
@@ -524,7 +513,6 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert!(
         ops.iter().any(|op| op.opcode == PcodeOpcode::IntOr
             && op
@@ -553,7 +541,6 @@ fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
         details.template_source,
         Some(CompiledTemplateSource::SpecDerived)
     );
-    assert!(!details.compat_emitter_used);
     assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
 }
 

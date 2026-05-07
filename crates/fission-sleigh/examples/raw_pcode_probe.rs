@@ -81,7 +81,6 @@ struct ProbeReport {
     compiler_spec_id: Option<String>,
     entry_id: String,
     execution_mode: String,
-    compat_emitter_used: bool,
     start_address: u64,
     requested_count: usize,
     space_map: BTreeMap<String, u64>,
@@ -104,7 +103,6 @@ struct InstructionReport {
     error: Option<String>,
     decoded: Option<DecodedInstruction>,
     length: Option<u64>,
-    compat_emitter_used: bool,
     template_source: Option<String>,
     pcode: Vec<SerializablePcodeOp>,
 }
@@ -271,7 +269,6 @@ fn main() -> Result<()> {
                 error: Some(format!("unable to read bytes at 0x{current:x}")),
                 decoded: None,
                 length: None,
-                compat_emitter_used: false,
                 template_source: None,
                 pcode: Vec::new(),
             });
@@ -290,7 +287,6 @@ fn main() -> Result<()> {
                     error: None,
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: Some(len),
-                    compat_emitter_used: details.compat_emitter_used,
                     template_source: details
                         .template_source
                         .map(|source| format!("{:?}", source)),
@@ -311,7 +307,6 @@ fn main() -> Result<()> {
                     error: Some(err.to_string()),
                     decoded: decoded.ok().and_then(|mut window| window.pop()),
                     length: None,
-                    compat_emitter_used: false,
                     template_source: None,
                     pcode: Vec::new(),
                 });
@@ -333,9 +328,6 @@ fn main() -> Result<()> {
         compiler_spec_id: Some(load_spec.pair.compiler_spec_id.as_str().to_string()),
         entry_id: frontend.entry().entry_id.clone(),
         execution_mode: "compiled_table_mixed".to_string(),
-        compat_emitter_used: instructions
-            .iter()
-            .any(|instruction| instruction.compat_emitter_used),
         start_address: args.address,
         requested_count: args.count,
         space_map: space_map_json,

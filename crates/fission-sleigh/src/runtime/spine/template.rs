@@ -73,7 +73,6 @@ mod tests {
         let details = RuntimeTemplateEvaluator::new(&mut NoopExecutor)
             .emit("test-language", &state)
             .expect("SpecDerived empty templates are valid zero-op constructors");
-        assert!(!details.compat_emitter_used);
         assert_eq!(
             details.template_source,
             Some(CompiledTemplateSource::SpecDerived)
@@ -136,7 +135,6 @@ where
             self.emitter.emit_op_template(state, op)?;
         }
         Ok(RuntimeExecutionDetails {
-            compat_emitter_used: false,
             template_source: Some(state.constructor_template.template_source),
         })
     }
