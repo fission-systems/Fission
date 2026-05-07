@@ -166,7 +166,12 @@ impl<'a> PreviewBuilder<'a> {
             self.def_sites
                 .keys()
                 .filter(|candidate| *candidate != key)
-                .filter(|candidate| Self::register_key_covers(candidate, key))
+                .filter(|candidate| {
+                    Self::register_key_covers(candidate, key)
+                        || self.register_key_zero_extends(candidate, key)
+                        || self.register_key_cross_space_covers(candidate, key)
+                        || self.register_key_cross_space_zero_extends(candidate, key)
+                })
                 .cloned(),
         );
         candidates
@@ -192,17 +197,103 @@ impl<'a> PreviewBuilder<'a> {
         candidate_start <= requested_start && candidate_end >= requested_end
     }
 
+    fn register_key_zero_extends(&self, candidate: &VarnodeKey, requested: &VarnodeKey) -> bool {
+        self.options.is_64bit
+            && !candidate.is_constant
+            && !requested.is_constant
+            && candidate.space_id == requested.space_id
+            && is_register_space_id(candidate.space_id)
+            && candidate.offset == requested.offset
+            && candidate.size == 4
+            && requested.size == 8
+            && x64_ghidra_reg_name(candidate.offset).is_some()
+    }
+
+    fn register_key_cross_space_covers(
+        &self,
+        candidate: &VarnodeKey,
+        requested: &VarnodeKey,
+    ) -> bool {
+        self.options.is_64bit
+            && !candidate.is_constant
+            && !requested.is_constant
+            && candidate.space_id != requested.space_id
+            && candidate.size >= requested.size
+            && self.x64_gpr_family_index_for_key(candidate)
+                == self.x64_gpr_family_index_for_key(requested)
+            && self.x64_gpr_family_index_for_key(candidate).is_some()
+    }
+
+    fn register_key_cross_space_zero_extends(
+        &self,
+        candidate: &VarnodeKey,
+        requested: &VarnodeKey,
+    ) -> bool {
+        self.options.is_64bit
+            && !candidate.is_constant
+            && !requested.is_constant
+            && candidate.space_id != requested.space_id
+            && candidate.size == 4
+            && requested.size == 8
+            && self.x64_gpr_family_index_for_key(candidate)
+                == self.x64_gpr_family_index_for_key(requested)
+            && self.x64_gpr_family_index_for_key(candidate).is_some()
+    }
+
+    fn x64_gpr_family_index_for_key(&self, key: &VarnodeKey) -> Option<usize> {
+        if key.is_constant {
+            return None;
+        }
+        if is_register_space_id(key.space_id) {
+            let name = x64_ghidra_reg_name(key.offset)?;
+            return crate::arch::x86::x86_gpr_family_index(name);
+        }
+        if key.space_id == UNIQUE_SPACE_ID {
+            let name = unique_register_name(key.offset, key.size)?;
+            return crate::arch::x86::x86_gpr_family_index(name);
+        }
+        None
+    }
+
     fn varnode_covers(candidate: &Varnode, requested: &Varnode) -> bool {
         Self::register_key_covers(&VarnodeKey::from(candidate), &VarnodeKey::from(requested))
+    }
+
+    fn varnode_aliases_value(&self, candidate: &Varnode, requested: &Varnode) -> bool {
+        let candidate_key = VarnodeKey::from(candidate);
+        let requested_key = VarnodeKey::from(requested);
+        Self::varnode_covers(candidate, requested)
+            || self.register_key_zero_extends(&candidate_key, &requested_key)
+            || self.register_key_cross_space_covers(&candidate_key, &requested_key)
+            || self.register_key_cross_space_zero_extends(&candidate_key, &requested_key)
     }
 
     fn project_alias_def_expr(&self, requested: &Varnode, op: &PcodeOp, expr: HirExpr) -> HirExpr {
         let Some(output) = op.output.as_ref() else {
             return expr;
         };
-        if VarnodeKey::from(output) == VarnodeKey::from(requested)
-            || !Self::varnode_covers(output, requested)
-        {
+        if VarnodeKey::from(output) == VarnodeKey::from(requested) {
+            return expr;
+        }
+        if self.register_key_zero_extends(&VarnodeKey::from(output), &VarnodeKey::from(requested)) {
+            return HirExpr::Cast {
+                ty: type_from_size(requested.size, false),
+                expr: Box::new(expr),
+            };
+        }
+        if self.register_key_cross_space_zero_extends(
+            &VarnodeKey::from(output),
+            &VarnodeKey::from(requested),
+        ) || self.register_key_cross_space_covers(
+            &VarnodeKey::from(output),
+            &VarnodeKey::from(requested),
+        ) {
+            return HirExpr::Cast {
+                ty: type_from_size(requested.size, false),
+                expr: Box::new(expr),
+            };
+        }
+        if !Self::varnode_covers(output, requested) {
             return expr;
         }
         let byte_offset = requested.offset.saturating_sub(output.offset);
@@ -256,116 +347,122 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         let target = if let Some(target) = op.inputs.first() {
-            match self.lower_varnode(target, visiting) {
-                Ok(HirExpr::Const(val, _)) => {
-                    let addr = val as u64;
-                    if let Some(name) = self.resolve_call_target_by_address(addr) {
-                        if matches!(op.opcode, PcodeOpcode::CallInd) {
-                            self.call_target_indirect_const_resolved_count += 1;
-                        }
-                        name
-                    } else {
-                        self.call_target_unresolved_sub_fallback_count += 1;
-                        format!("sub_{addr:x}")
-                    }
-                }
-                Ok(HirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
-                    if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
+            if let Some(name) = self.resolve_constant_call_target_name(op, target) {
+                name
+            } else {
+                match self.lower_varnode(target, visiting) {
+                    Ok(HirExpr::Const(val, _)) => {
+                        let addr = val as u64;
                         if let Some(name) = self.resolve_call_target_by_address(addr) {
-                            self.call_target_indirect_const_resolved_count += 1;
+                            if matches!(op.opcode, PcodeOpcode::CallInd) {
+                                self.call_target_indirect_const_resolved_count += 1;
+                            }
                             name
                         } else {
                             self.call_target_unresolved_sub_fallback_count += 1;
                             format!("sub_{addr:x}")
                         }
-                    } else if let Some(name) = self.resolve_iat_load_call_target(target) {
-                        name
-                    } else {
-                        name
                     }
-                }
-                Ok(HirExpr::Var(name)) => name,
-                Ok(other) if matches!(op.opcode, PcodeOpcode::CallInd) => {
-                    if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
-                        if let Some(name) = self.resolve_call_target_by_address(addr) {
-                            self.call_target_indirect_const_resolved_count += 1;
+                    Ok(HirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
+                        if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
+                            if let Some(name) = self.resolve_call_target_by_address(addr) {
+                                self.call_target_indirect_const_resolved_count += 1;
+                                name
+                            } else {
+                                self.call_target_unresolved_sub_fallback_count += 1;
+                                format!("sub_{addr:x}")
+                            }
+                        } else if let Some(name) = self.resolve_iat_load_call_target(target) {
                             name
                         } else {
-                            self.call_target_unresolved_sub_fallback_count += 1;
-                            format!("sub_{addr:x}")
-                        }
-                    } else if matches!(other, HirExpr::Load { .. }) {
-                        if let Some(name) = self.resolve_iat_load_call_target(target) {
                             name
+                        }
+                    }
+                    Ok(HirExpr::Var(name)) => self
+                        .resolve_address_like_call_target_name(&name)
+                        .unwrap_or(name),
+                    Ok(other) if matches!(op.opcode, PcodeOpcode::CallInd) => {
+                        if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
+                            if let Some(name) = self.resolve_call_target_by_address(addr) {
+                                self.call_target_indirect_const_resolved_count += 1;
+                                name
+                            } else {
+                                self.call_target_unresolved_sub_fallback_count += 1;
+                                format!("sub_{addr:x}")
+                            }
+                        } else if matches!(other, HirExpr::Load { .. }) {
+                            if let Some(name) = self.resolve_iat_load_call_target(target) {
+                                name
+                            } else {
+                                print_expr(&other)
+                            }
                         } else {
                             print_expr(&other)
                         }
-                    } else {
-                        print_expr(&other)
                     }
-                }
-                Ok(other) => print_expr(&other),
-                Err(MlilPreviewError::UnsupportedPattern("opcode"))
-                    if matches!(op.opcode, PcodeOpcode::CallInd) =>
-                {
-                    if let Some(target) = self.recover_opaque_callind_target(target) {
-                        target
-                    } else {
-                        let target_expr = self.lower_varnode(target, visiting).ok();
-                        self.record_unsupported_inventory_event(
-                            "call_target_unsupported",
-                            Some(target),
-                            Some(op),
-                            Some(op.opcode),
-                            self.current_lowering_site
-                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
-                            Some(u64::from(op.seq_num)),
-                            true,
-                            "callind_target_recovery_failed",
-                        );
-                        self.debug_preview_log(&format!(
-                            "[mlil-preview] stage=call_target_unsupported asm={} target_space={} target_off=0x{:x} target_size={}\n",
-                            op.asm_mnemonic.as_deref().unwrap_or("<none>"),
-                            target.space_id,
-                            target.offset,
-                            target.size
-                        ));
-                        let _evidence = self.build_unsupported_control_evidence(
-                            op.opcode,
-                            self.current_lowering_site
-                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
-                            target_expr.as_ref(),
-                            Vec::new(),
-                            UnsupportedControlFamily::CallRegion,
-                            IndirectControlSurface::CallInd,
-                            24,
-                        );
-                        "__fission_callind_opaque".to_string()
+                    Ok(other) => print_expr(&other),
+                    Err(MlilPreviewError::UnsupportedPattern("opcode"))
+                        if matches!(op.opcode, PcodeOpcode::CallInd) =>
+                    {
+                        if let Some(target) = self.recover_opaque_callind_target(target) {
+                            target
+                        } else {
+                            let target_expr = self.lower_varnode(target, visiting).ok();
+                            self.record_unsupported_inventory_event(
+                                "call_target_unsupported",
+                                Some(target),
+                                Some(op),
+                                Some(op.opcode),
+                                self.current_lowering_site
+                                    .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                                Some(u64::from(op.seq_num)),
+                                true,
+                                "callind_target_recovery_failed",
+                            );
+                            self.debug_preview_log(&format!(
+                                "[mlil-preview] stage=call_target_unsupported asm={} target_space={} target_off=0x{:x} target_size={}\n",
+                                op.asm_mnemonic.as_deref().unwrap_or("<none>"),
+                                target.space_id,
+                                target.offset,
+                                target.size
+                            ));
+                            let _evidence = self.build_unsupported_control_evidence(
+                                op.opcode,
+                                self.current_lowering_site
+                                    .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                                target_expr.as_ref(),
+                                Vec::new(),
+                                UnsupportedControlFamily::CallRegion,
+                                IndirectControlSurface::CallInd,
+                                24,
+                            );
+                            "__fission_callind_opaque".to_string()
+                        }
                     }
-                }
-                Err(err) => {
-                    if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
-                        self.record_unsupported_inventory_event(
-                            "call_target_lowering_error",
-                            Some(target),
-                            Some(op),
-                            Some(op.opcode),
-                            self.current_lowering_site
-                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
-                            Some(u64::from(op.seq_num)),
-                            false,
-                            "call_target_lowering_error",
-                        );
-                        self.debug_preview_log(&format!(
-                            "[mlil-preview] stage=call_target_lowering_error opcode={:?} asm={} target_space={} target_off=0x{:x} target_size={}\n",
-                            op.opcode,
-                            op.asm_mnemonic.as_deref().unwrap_or("<none>"),
-                            target.space_id,
-                            target.offset,
-                            target.size
-                        ));
+                    Err(err) => {
+                        if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+                            self.record_unsupported_inventory_event(
+                                "call_target_lowering_error",
+                                Some(target),
+                                Some(op),
+                                Some(op.opcode),
+                                self.current_lowering_site
+                                    .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                                Some(u64::from(op.seq_num)),
+                                false,
+                                "call_target_lowering_error",
+                            );
+                            self.debug_preview_log(&format!(
+                                "[mlil-preview] stage=call_target_lowering_error opcode={:?} asm={} target_space={} target_off=0x{:x} target_size={}\n",
+                                op.opcode,
+                                op.asm_mnemonic.as_deref().unwrap_or("<none>"),
+                                target.space_id,
+                                target.offset,
+                                target.size
+                            ));
+                        }
+                        return Err(err);
                     }
-                    return Err(err);
                 }
             }
         } else {
@@ -389,6 +486,51 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|out| type_from_size(out.size, false))
                 .unwrap_or(NirType::Unknown),
         })
+    }
+
+    fn resolve_constant_call_target_name(
+        &mut self,
+        op: &PcodeOp,
+        target: &Varnode,
+    ) -> Option<String> {
+        if !target.is_constant {
+            return None;
+        }
+        let addr = if target.offset != 0 {
+            target.offset
+        } else if target.constant_val >= 0 {
+            target.constant_val as u64
+        } else {
+            return None;
+        };
+        if addr == 0 {
+            return None;
+        }
+        if let Some(name) = self.resolve_call_target_by_address(addr) {
+            if matches!(op.opcode, PcodeOpcode::CallInd) {
+                self.call_target_indirect_const_resolved_count += 1;
+            }
+            Some(name)
+        } else {
+            self.call_target_unresolved_sub_fallback_count += 1;
+            Some(format!("sub_{addr:x}"))
+        }
+    }
+
+    pub(in crate::nir::builder) fn resolve_address_like_call_target_name(
+        &mut self,
+        target: &str,
+    ) -> Option<String> {
+        let raw = target
+            .strip_prefix("tmp_")
+            .or_else(|| target.strip_prefix("DAT_"))?;
+        let addr = u64::from_str_radix(raw.trim_start_matches("0x"), 16).ok()?;
+        if let Some(name) = self.resolve_call_target_by_address(addr) {
+            Some(name)
+        } else {
+            self.call_target_unresolved_sub_fallback_count += 1;
+            Some(format!("sub_{addr:x}"))
+        }
     }
 
     pub(in crate::nir) fn lower_intrinsic_call(
@@ -476,10 +618,12 @@ impl<'a> PreviewBuilder<'a> {
             let producer_site = self
                 .lookup_def_site(target)
                 .map(|(site, _)| site)
-                .unwrap_or_else(|| self.current_lowering_site.unwrap_or(LoweringSite {
-                    block_idx: 0,
-                    op_idx: usize::MAX,
-                }));
+                .unwrap_or_else(|| {
+                    self.current_lowering_site.unwrap_or(LoweringSite {
+                        block_idx: 0,
+                        op_idx: usize::MAX,
+                    })
+                });
             match self.resolve_exact_scalar_const_for_call_target(
                 ptr,
                 producer_site,
@@ -681,22 +825,22 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(name.to_string()));
             }
             if !self.options.is_64bit
-                && vn.space_id == REGISTER_SPACE_ID
+                && is_register_space_id(vn.space_id)
                 && let Some(name) = register_name_32(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
-            if vn.space_id == REGISTER_SPACE_ID {
+            if is_register_space_id(vn.space_id) {
                 return Ok(HirExpr::Var(register_name(vn.offset, vn.size).to_string()));
             }
         }
         let stack_reg_name = match vn.space_id {
             UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
-            REGISTER_SPACE_ID => Some(register_name(vn.offset, vn.size)),
+            space_id if is_register_space_id(space_id) => Some(register_name(vn.offset, vn.size)),
             _ => None,
         };
         if let Some(name) = stack_reg_name
-            && matches!(name, "rsp" | "rbp" | "esp" | "ebp")
+            && matches!(name, "rsp" | "esp")
         {
             return Ok(HirExpr::Var(name.to_string()));
         }
@@ -717,7 +861,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(name.clone()));
             }
             if let Some(output) = op.output.as_ref()
-                && Self::varnode_covers(output, vn)
+                && self.varnode_aliases_value(output, vn)
             {
                 let output_materialized_key = MaterializedVarnodeKey::new(output, op);
                 if let Some(name) = self.materialized_vns.get(&output_materialized_key) {
@@ -780,15 +924,18 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     classified
                 }),
+            None if self.options.global_names.contains_key(&vn.offset) => Ok(HirExpr::Var(
+                self.options
+                    .global_names
+                    .get(&vn.offset)
+                    .expect("global name exists after contains_key")
+                    .clone(),
+            )),
             None if vn.space_id == UNIQUE_SPACE_ID => {
                 Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
             }
             None if self.options.is_mapped_global(vn.offset) => {
-                if let Some(name) = self.options.global_names.get(&vn.offset) {
-                    Ok(HirExpr::Var(name.clone()))
-                } else {
-                    Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
-                }
+                Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
             }
             None => Ok(HirExpr::Var(format!("var_{:x}", vn.offset))),
         };
@@ -1070,6 +1217,15 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<HirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Err(MlilPreviewError::UnsupportedExprVarnodeLowering);
+        }
+        if op.opcode == PcodeOpcode::IntXor
+            && VarnodeKey::from(&op.inputs[0]) == VarnodeKey::from(&op.inputs[1])
+        {
+            let output = op
+                .output
+                .as_ref()
+                .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+            return Ok(HirExpr::Const(0, type_from_size(output.size, false)));
         }
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;

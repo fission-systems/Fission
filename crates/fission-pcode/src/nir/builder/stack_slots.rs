@@ -82,7 +82,7 @@ impl<'a> PreviewBuilder<'a> {
         ptr: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<(StackBase, i64)> {
-        if ptr.space_id == REGISTER_SPACE_ID {
+        if is_register_space_id(ptr.space_id) {
             return match ptr.offset {
                 0x20 => Some((StackBase::Rsp, 0)),
                 0x28 => Some((StackBase::Rbp, 0)),

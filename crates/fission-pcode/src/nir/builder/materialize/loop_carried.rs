@@ -19,10 +19,16 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
             return Some(name);
         }
-        if self.abi_state().param_slot_for_varnode(output).is_some() {
+        if self.abi_state().param_slot_for_varnode(output).is_some()
+            && !self.loop_carried_output_has_prior_definition(output)
+        {
             return self.register_param(output);
         }
         None
+    }
+
+    fn loop_carried_output_has_prior_definition(&self, output: &Varnode) -> bool {
+        self.lookup_def_site(output).is_some()
     }
 
     pub(super) fn bind_materialized_output_to_existing_name(
@@ -54,12 +60,25 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let prior_output = op.output.as_ref()?;
-        if VarnodeKey::from(prior_output) != VarnodeKey::from(output) {
+        if VarnodeKey::from(prior_output) != VarnodeKey::from(output)
+            && !Self::prior_output_aliases_loop_carried_update(prior_output, output)
+        {
             return None;
         }
         self.materialized_vns
             .get(&MaterializedVarnodeKey::new(prior_output, op))
             .cloned()
+    }
+
+    fn prior_output_aliases_loop_carried_update(prior: &Varnode, current: &Varnode) -> bool {
+        !prior.is_constant
+            && !current.is_constant
+            && prior.space_id == current.space_id
+            && is_register_space_id(prior.space_id)
+            && prior.offset == current.offset
+            && prior.size == 8
+            && current.size == 4
+            && x64_ghidra_reg_name(prior.offset).is_some()
     }
 
     fn output_is_loop_carried_register_update(
@@ -74,7 +93,12 @@ impl<'a> PreviewBuilder<'a> {
             loop_body.body.contains(&block_idx)
                 && self.loop_update_reaches_backedge_tail(block_idx, loop_body)
                 && (Self::op_reads_varnode_key(op, &output_key)
-                    || self.loop_reads_varnode_before_update(loop_body, block_idx, op_idx, &output_key))
+                    || self.loop_reads_varnode_before_update(
+                        loop_body,
+                        block_idx,
+                        op_idx,
+                        &output_key,
+                    ))
         })
     }
 
@@ -83,10 +107,9 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
     ) -> bool {
-        loop_body
-            .tails
-            .iter()
-            .any(|tail| *tail == block_idx || self.block_can_reach(block_idx, *tail, loop_body.head))
+        loop_body.tails.iter().any(|tail| {
+            *tail == block_idx || self.block_can_reach(block_idx, *tail, loop_body.head)
+        })
     }
 
     fn loop_reads_varnode_before_update(
@@ -106,10 +129,9 @@ impl<'a> PreviewBuilder<'a> {
         if loop_body.head == block_idx {
             return false;
         }
-        self.pcode
-            .blocks
-            .get(loop_body.head)
-            .is_some_and(|head| Self::block_reads_varnode_before_redefinition(head, head.ops.len(), output_key))
+        self.pcode.blocks.get(loop_body.head).is_some_and(|head| {
+            Self::block_reads_varnode_before_redefinition(head, head.ops.len(), output_key)
+        })
     }
 
     fn block_reads_varnode_before_redefinition(
@@ -121,11 +143,9 @@ impl<'a> PreviewBuilder<'a> {
             if Self::op_reads_varnode_key(candidate, output_key) {
                 return true;
             }
-            if candidate
-                .output
-                .as_ref()
-                .is_some_and(|output| Self::varnode_key_may_alias_output(&VarnodeKey::from(output), output_key))
-            {
+            if candidate.output.as_ref().is_some_and(|output| {
+                Self::varnode_key_may_alias_output(&VarnodeKey::from(output), output_key)
+            }) {
                 return false;
             }
         }
@@ -133,9 +153,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn op_reads_varnode_key(op: &PcodeOp, output_key: &VarnodeKey) -> bool {
-        op.inputs.iter().any(|input| {
-            Self::varnode_key_may_alias_output(&VarnodeKey::from(input), output_key)
-        })
+        op.inputs
+            .iter()
+            .any(|input| Self::varnode_key_may_alias_output(&VarnodeKey::from(input), output_key))
     }
 
     fn varnode_key_may_alias_output(candidate: &VarnodeKey, output_key: &VarnodeKey) -> bool {
@@ -681,12 +701,106 @@ mod tests {
             .expect("loop lowering");
 
         assert!(
-            loop_body.iter().any(|stmt| lhs_var(stmt) == Some(init_name)),
+            loop_body
+                .iter()
+                .any(|stmt| lhs_var(stmt) == Some(init_name)),
             "loop-carried accumulator update should reuse the preheader binding: {loop_body:?}"
         );
         assert!(
-            loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+            loop_body
+                .iter()
+                .any(|stmt| lhs_var(stmt) == Some("param_1")),
             "loop-carried parameter register update should assign back to the parameter: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn loop_carried_register_update_does_not_promote_prior_defined_abi_scratch() {
+        let rdx = reg(0x10, 8);
+        let mut blocks = vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rdx.clone()), vec![constant(5)]),
+                op(
+                    1,
+                    PcodeOpcode::IntAdd,
+                    Some(rdx.clone()),
+                    vec![rdx.clone(), constant(1)],
+                ),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+            ],
+        )];
+        blocks[0].successors = vec![0];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::WindowsX64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 1,
+        });
+
+        let name = builder.loop_carried_output_binding_name(
+            &pcode.blocks[0],
+            1,
+            &pcode.blocks[0].ops[1],
+            &rdx,
+        );
+
+        assert_ne!(name.as_deref(), Some("param_2"));
+        assert!(
+            name.is_none(),
+            "prior-defined ABI scratch should not be promoted to param_2: {name:?}"
+        );
+    }
+
+    #[test]
+    fn loop_carried_register_update_reuses_wide_prior_for_gpr32_update() {
+        let rax = reg(0x00, 8);
+        let eax = reg(0x00, 4);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(rax), vec![constant(0)]),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(eax.clone()),
+                        vec![eax, constant(1)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![1];
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let preheader = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("preheader lowering");
+        let init_name = lhs_var(&preheader[0]).expect("preheader init binding");
+        let loop_body = builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .expect("loop lowering");
+
+        assert!(
+            loop_body
+                .iter()
+                .any(|stmt| lhs_var(stmt) == Some(init_name)),
+            "32-bit loop update should reuse the 64-bit zero initializer binding: {loop_body:?}"
         );
     }
 

@@ -471,13 +471,12 @@ impl<'a> PreviewBuilder<'a> {
         fn output_base_reg(builder: &PreviewBuilder<'_>, output: &Varnode) -> StackAddressBaseReg {
             let name = match output.space_id {
                 UNIQUE_SPACE_ID => unique_register_name(output.offset, output.size),
-                REGISTER_SPACE_ID if !builder.options.is_64bit => {
+                space_id if is_register_space_id(space_id) && !builder.options.is_64bit => {
                     crate::nir::support::register_name_32(output.offset, output.size)
                 }
-                REGISTER_SPACE_ID => Some(crate::nir::support::register_name(
-                    output.offset,
-                    output.size,
-                )),
+                space_id if is_register_space_id(space_id) => Some(
+                    crate::nir::support::register_name(output.offset, output.size),
+                ),
                 _ => None,
             };
             match name {

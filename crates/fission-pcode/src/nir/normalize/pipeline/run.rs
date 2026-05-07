@@ -26,6 +26,7 @@ use super::super::global_opt::{
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_security_cookie_pass, remove_callee_save_prologue_epilogue,
+    remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
     apply_aggregate_fields_pass, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
@@ -195,6 +196,22 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     // Prologue/epilogue elimination: remove callee-saved register save/restore
     // pairs (`*spill = r15` / `r15 = *spill`) from the function body.
+    if run_pass_logged(
+        func,
+        "remove_entry_stack_scaffold_stores",
+        perf,
+        remove_entry_stack_scaffold_stores,
+    ) {
+        run_cleanup_block(func, "cleanup_defuse_entry_stack_scaffold", perf, |f| {
+            cleanup_func_stmt_list(f);
+
+            defuse_dead_assignment_pass(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     if run_pass_logged(
         func,
         "remove_callee_save_prologue_epilogue",
@@ -396,7 +413,28 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             func,
             "defuse_dead_assignment_after_cast_elision",
             perf,
-            defuse_dead_assignment_pass,
+            apply_wide_dead_assignment_pass,
+        );
+    }
+    if run_pass_logged(
+        func,
+        "remove_entry_stack_scaffold_stores_late",
+        perf,
+        remove_entry_stack_scaffold_stores,
+    ) {
+        run_cleanup_block(
+            func,
+            "cleanup_defuse_entry_stack_scaffold_late",
+            perf,
+            |f| {
+                cleanup_func_stmt_list(f);
+
+                defuse_dead_assignment_pass(f);
+
+                prune_unused_temp_bindings(f);
+
+                prune_unused_dead_local_bindings(f);
+            },
         );
     }
     let allow_expensive_passes = !is_large_hir_function(func);
@@ -488,7 +526,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             func,
             "defuse_dead_assignment_after_ptr_arith",
             perf,
-            defuse_dead_assignment_pass,
+            apply_wide_dead_assignment_pass,
         );
     }
     // Memory SSA dead store elimination: remove stack-slot stores that are
@@ -1099,6 +1137,7 @@ fn run_cleanup_family_passes(
         changed |= run_pass_logged(func, &format!("cleanup_dead_binding_{stage}"), perf, |f| {
             let before = hir_shape(f);
             eliminate_dead_local_clobber_assigns(f);
+            apply_wide_dead_assignment_pass(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);
             before != hir_shape(f)
@@ -1635,15 +1674,15 @@ fn cleanup_stmt_list_with_options_and_preserved(
         iterations += 1;
         let mut changed = false;
         let mut last_changed_pass = None;
-        if collapse_trivial_assign_returns(stmts, preserved_temps) {
+        if depth == 0 && collapse_trivial_assign_returns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
         }
-        if inline_single_use_temps(stmts, preserved_temps) {
+        if depth == 0 && inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
         }
-        if eliminate_dead_temp_assigns(stmts, preserved_temps) {
+        if depth == 0 && eliminate_dead_temp_assigns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("eliminate_dead_temp_assigns");
         }

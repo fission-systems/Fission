@@ -44,6 +44,101 @@ fn is_callee_saved(name: &str) -> bool {
     CALLEE_SAVED_REGS.contains(&name)
 }
 
+fn looks_like_stack_scaffold_name(name: &str) -> bool {
+    name.starts_with("var_") || name.starts_with("xVar")
+}
+
+fn stack_scaffold_ptr_expr(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(name) => looks_like_stack_scaffold_name(name),
+        HirExpr::PtrOffset { base, .. }
+        | HirExpr::Cast { expr: base, .. }
+        | HirExpr::Unary { expr: base, .. } => stack_scaffold_ptr_expr(base),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            stack_scaffold_ptr_expr(lhs) || stack_scaffold_ptr_expr(rhs)
+        }
+        _ => false,
+    }
+}
+
+fn is_entry_stack_scaffold_store(stmt: &HirStmt) -> bool {
+    let HirStmt::Assign {
+        lhs: HirLValue::Deref { ptr, .. },
+        rhs: HirExpr::Var(_),
+    } = stmt
+    else {
+        return false;
+    };
+    stack_scaffold_ptr_expr(ptr)
+}
+
+fn looks_like_stack_slot_name(name: &str) -> bool {
+    name.starts_with("home_") || name.starts_with("local_") || name.starts_with("ret_scaffold_")
+}
+
+fn var_name_through_cast(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name.as_str()),
+        HirExpr::Cast { expr, .. } => var_name_through_cast(expr),
+        _ => None,
+    }
+}
+
+fn is_entry_stack_slot_scaffold_store(stmt: &HirStmt) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            rhs,
+        } if looks_like_stack_slot_name(lhs) && var_name_through_cast(rhs).is_some()
+    )
+}
+
+fn is_entry_stack_slot_callee_saved_store(stmt: &HirStmt) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            rhs,
+        } if looks_like_stack_slot_name(lhs)
+            && var_name_through_cast(rhs).is_some_and(is_callee_saved)
+    )
+}
+
+/// Remove leading stack-growth scaffold stores emitted from x86-64 prologue
+/// pushes once they have survived raw p-code lowering as generic dereference
+/// stores. These are only removed as a contiguous function-entry prefix and
+/// only when the destination pointer is a synthetic stack scaffold name, so
+/// ordinary early stores through parameters or globals are left intact.
+pub(crate) fn remove_entry_stack_scaffold_stores(func: &mut HirFunction) -> bool {
+    remove_entry_stack_scaffold_stores_from_body(&mut func.body)
+}
+
+fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool {
+    let remove_count = body
+        .iter()
+        .take_while(|stmt| {
+            is_entry_stack_scaffold_store(stmt) || is_entry_stack_slot_scaffold_store(stmt)
+        })
+        .count();
+    if remove_count > 0 {
+        let prefix = &body[..remove_count];
+        let has_scaffold_evidence = prefix.iter().any(is_entry_stack_scaffold_store)
+            || prefix.iter().any(is_entry_stack_slot_callee_saved_store);
+        if !has_scaffold_evidence {
+            return false;
+        }
+        body.drain(0..remove_count);
+        return true;
+    }
+
+    if let Some(HirStmt::Block(inner)) = body.first_mut() {
+        return remove_entry_stack_scaffold_stores_from_body(inner);
+    }
+
+    false
+}
+
 // ── Pattern matching ──────────────────────────────────────────────────────────
 
 /// Attempt to match a prologue SAVE statement:
@@ -405,4 +500,129 @@ fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
         }
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    fn scaffold_store(ptr: &str, rhs: &str) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var(ptr.to_owned())),
+                    offset: -8,
+                }),
+                ty: u64_ty(),
+            },
+            rhs: HirExpr::Var(rhs.to_owned()),
+        }
+    }
+
+    #[test]
+    fn removes_contiguous_entry_stack_scaffold_stores() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                scaffold_store("var_20", "var_38"),
+                scaffold_store("xVar0", "param_2"),
+                HirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    }
+
+    #[test]
+    fn removes_contiguous_entry_stack_slot_callee_saved_saves() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("r15".to_owned()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("param_1".to_owned()),
+                },
+                HirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    }
+
+    #[test]
+    fn removes_entry_stack_slot_callee_saved_saves_inside_entry_block() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![HirStmt::Block(vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("r15".to_owned()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("param_1".to_owned()),
+                },
+                HirStmt::Return(None),
+            ])],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body, vec![HirStmt::Block(vec![HirStmt::Return(None)])]);
+    }
+
+    #[test]
+    fn keeps_entry_stack_slot_initializers_without_callee_saved_evidence() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_8".to_owned()),
+                    rhs: HirExpr::Var("param_1".to_owned()),
+                },
+                HirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), 2);
+    }
+
+    #[test]
+    fn keeps_non_entry_and_non_scaffold_stores() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Expr(HirExpr::Const(1, u64_ty())),
+                scaffold_store("var_20", "var_38"),
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("param_1".to_owned())),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Var("param_2".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), 3);
+    }
 }

@@ -47,7 +47,7 @@ use super::super::wave_stats::{
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use super::super::*;
 use crate::nir::var_rename::rename_vars_in_stmts;
-use fission_signatures::{symbol_for_win_api_database_lookup, ApiSignature, SIGNATURE_RESOURCES};
+use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
 use std::collections::{HashMap, HashSet};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -200,9 +200,8 @@ pub(crate) fn api_signature(name: &str) -> Option<&'static ApiSignature> {
 
 #[inline]
 fn api_signature_via_import_aliases(name: &str) -> Option<&'static ApiSignature> {
-    api_signature(name).or_else(|| {
-        symbol_for_win_api_database_lookup(name).and_then(|flat| api_signature(flat))
-    })
+    api_signature(name)
+        .or_else(|| symbol_for_win_api_database_lookup(name).and_then(|flat| api_signature(flat)))
 }
 
 /// Return the NirType implied by the API signature's return type string.
@@ -595,6 +594,12 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
         add_call_prototype_exact_api_arity_pruned(pruned_count);
         changed = true;
     }
+    let self_pruned_count =
+        prune_self_call_args_stmts(&mut func.body, &func.name, func.params.len());
+    if self_pruned_count > 0 {
+        add_call_signature_refinements(self_pruned_count);
+        changed = true;
+    }
     add_call_prototype_wrapper_resolved(wrapper_resolved_count);
     add_call_prototype_signature_missing(signature_missing_count);
     add_call_prototype_unknown_target_kept(unknown_target_kept_count);
@@ -698,6 +703,85 @@ fn prune_known_api_call_args_expr(
         HirExpr::Index { base, index, .. } => {
             pruned += prune_known_api_call_args_expr(base, summaries);
             pruned += prune_known_api_call_args_expr(index, summaries);
+        }
+        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+    pruned
+}
+
+fn prune_self_call_args_stmts(stmts: &mut [HirStmt], func_name: &str, arity: usize) -> usize {
+    let mut pruned = 0usize;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+                pruned += prune_self_call_args_expr(rhs, func_name, arity);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                pruned += prune_self_call_args_expr(va_list, func_name, arity);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                pruned += prune_self_call_args_stmts(body, func_name, arity);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                pruned += prune_self_call_args_expr(expr, func_name, arity);
+                for case in cases {
+                    pruned += prune_self_call_args_stmts(&mut case.body, func_name, arity);
+                }
+                pruned += prune_self_call_args_stmts(default, func_name, arity);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                pruned += prune_self_call_args_expr(cond, func_name, arity);
+                pruned += prune_self_call_args_stmts(then_body, func_name, arity);
+                pruned += prune_self_call_args_stmts(else_body, func_name, arity);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    pruned
+}
+
+fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) -> usize {
+    let mut pruned = 0usize;
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            for arg in args.iter_mut() {
+                pruned += prune_self_call_args_expr(arg, func_name, arity);
+            }
+            if target == func_name && args.len() > arity {
+                let removed = args.len() - arity;
+                args.truncate(arity);
+                pruned += removed;
+            }
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            pruned += prune_self_call_args_expr(lhs, func_name, arity);
+            pruned += prune_self_call_args_expr(rhs, func_name, arity);
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            pruned += prune_self_call_args_expr(expr, func_name, arity);
+        }
+        HirExpr::Index { base, index, .. } => {
+            pruned += prune_self_call_args_expr(base, func_name, arity);
+            pruned += prune_self_call_args_expr(index, func_name, arity);
         }
         HirExpr::Var(_) | HirExpr::Const(_, _) => {}
     }
@@ -989,6 +1073,50 @@ mod tests {
         match &func.body[1] {
             HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
             other => panic!("unexpected second stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_prunes_self_recursive_args_to_function_arity() {
+        reset_normalize_wave_stats();
+        let mut func = HirFunction {
+            name: "fib".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "fib".to_string(),
+                args: vec![
+                    HirExpr::Const(1, NirType::Unknown),
+                    HirExpr::Const(2, NirType::Unknown),
+                    HirExpr::Const(3, NirType::Unknown),
+                    HirExpr::Const(4, NirType::Unknown),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
+        assert_eq!(stats.call_signature_refined_count, 3);
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
+            other => panic!("unexpected stmt: {other:?}"),
         }
     }
 

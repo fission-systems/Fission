@@ -18,14 +18,22 @@ impl<'a> PreviewBuilder<'a> {
         if vn.space_id == UNIQUE_SPACE_ID {
             return unique_register_name(vn.offset, vn.size).map(str::to_string);
         }
-        if vn.space_id == REGISTER_SPACE_ID {
+        if is_register_varnode(vn) {
             return Some(register_name(vn.offset, vn.size).to_string());
         }
         None
     }
 
-    fn param_index_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if vn.space_id != REGISTER_SPACE_ID {
+    fn param_index_for_varnode(
+        &self,
+        vn: &Varnode,
+        include_rust_sleigh_space: bool,
+    ) -> Option<usize> {
+        if include_rust_sleigh_space {
+            if !is_register_varnode(vn) {
+                return None;
+            }
+        } else if vn.space_id != REGISTER_SPACE_ID {
             return None;
         }
         self.abi_state().param_slot_for_varnode(vn)
@@ -37,8 +45,31 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn normalize_recovered_call_arg(&self, expr: HirExpr) -> HirExpr {
+        let (value, fallback) = match expr {
+            HirExpr::Const(value, ty) => (value, HirExpr::Const(value, ty)),
+            HirExpr::Cast { ty, expr } => {
+                let HirExpr::Const(value, _) = *expr else {
+                    return HirExpr::Cast { ty, expr };
+                };
+                (value, HirExpr::Const(value, ty))
+            }
+            expr => return expr,
+        };
+        if value <= 0 {
+            return fallback;
+        }
+        let Some(ctx) = self.type_context else {
+            return fallback;
+        };
+        ctx.call_target_refs
+            .get(&(value as u64))
+            .map(|target_ref| HirExpr::Var(target_ref.symbol.clone()))
+            .unwrap_or(fallback)
+    }
+
     fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
-        let reg_name = if vn.space_id == REGISTER_SPACE_ID {
+        let reg_name = if is_register_varnode(vn) {
             register_name(vn.offset, vn.size)
         } else if vn.space_id == UNIQUE_SPACE_ID {
             unique_register_name(vn.offset, vn.size).unwrap_or("")
@@ -140,7 +171,24 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
     ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
-        if !self.options.is_64bit || call_idx == 0 {
+        self.recover_call_args_from_block_with_mode(block, call_idx, false)
+    }
+
+    pub(in crate::nir::builder) fn recover_tail_call_args_from_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
+        self.recover_call_args_from_block_with_mode(block, call_idx, true)
+    }
+
+    fn recover_call_args_from_block_with_mode(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+        prefer_source_values: bool,
+    ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
+        if !self.options.is_64bit {
             return Ok(None);
         }
 
@@ -156,14 +204,20 @@ impl<'a> PreviewBuilder<'a> {
             let Some(output) = &prev.output else {
                 continue;
             };
-            let Some(param_index) = self.param_index_for_varnode(output) else {
+            let Some(param_index) = self.param_index_for_varnode(output, prefer_source_values)
+            else {
                 continue;
             };
             if param_index >= recovered.len() || recovered[param_index].is_some() {
                 continue;
             }
 
-            let expr = match self.lower_varnode(output, &mut HashSet::new()) {
+            let source = if prefer_source_values {
+                prev.inputs.first().unwrap_or(output)
+            } else {
+                output
+            };
+            let expr = match self.lower_varnode(source, &mut HashSet::new()) {
                 Ok(expr) => expr,
                 Err(MlilPreviewError::UnsupportedPattern("opcode"))
                     if self.surface_call_carrier_name(output).is_some() =>
@@ -196,14 +250,10 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
             };
-            recovered[param_index] = Some(expr.clone());
+            recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
         }
 
-        let assignments = abi.assign_carriers(
-            block.ops[..call_idx]
-                .iter()
-                .filter_map(|op| op.output.as_ref()),
-        );
+        let assignments = self.call_arg_carrier_assignments(block, call_idx, &abi);
         for assignment in assignments {
             let param_index = assignment.resource.slot;
             if recovered[param_index].is_some() {
@@ -220,9 +270,15 @@ impl<'a> PreviewBuilder<'a> {
             };
 
             let key = VarnodeKey::from(&vn);
-            if let Some(def_site) = self.defs.get(&key) {
-                if self.check_ancestor_realistic(&vn, def_site, block.index as usize, call_idx) {
-                    recovered[param_index] = Some(self.lower_varnode(&vn, &mut HashSet::new())?);
+            if let Some((site, _)) = self.lookup_def_site(&vn) {
+                let def_site = crate::nir::support::DefSite {
+                    block_idx: site.block_idx,
+                    op_idx: site.op_idx,
+                    _marker: std::marker::PhantomData,
+                };
+                if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
+                    let expr = self.lower_varnode(&vn, &mut HashSet::new())?;
+                    recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
                     continue;
                 }
             }
@@ -247,5 +303,33 @@ impl<'a> PreviewBuilder<'a> {
             args.len()
         ));
         Ok(Some(args))
+    }
+
+    fn call_arg_carrier_assignments(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+        abi: &AbiState,
+    ) -> Vec<CarrierAssignment> {
+        let same_block_carriers = block.ops[..call_idx]
+            .iter()
+            .filter_map(|op| op.output.as_ref())
+            .collect::<Vec<_>>();
+        let same_block = abi.assign_carriers(same_block_carriers.iter().copied());
+        if !same_block.is_empty() {
+            return same_block;
+        }
+
+        let block_idx = block.index as usize;
+        let Some(pred_indices) = self.predecessors.get(block_idx) else {
+            return same_block;
+        };
+        let mut predecessor_carriers = Vec::new();
+        for pred_idx in pred_indices {
+            let pred = self.pcode_block(*pred_idx);
+            let end = self.block_terminator_index(pred).unwrap_or(pred.ops.len());
+            predecessor_carriers.extend(pred.ops[..end].iter().filter_map(|op| op.output.as_ref()));
+        }
+        abi.assign_carriers(predecessor_carriers)
     }
 }

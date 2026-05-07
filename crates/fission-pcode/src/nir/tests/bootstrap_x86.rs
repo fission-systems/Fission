@@ -198,6 +198,138 @@ fn preview_x64_ret_prefers_abi_return_register_over_stack_target() {
 }
 
 #[test]
+fn preview_x64_ret_recovers_single_predecessor_return_register() {
+    let ret_target = uniq(0x510, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140002200,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140002200,
+                        output: Some(reg(0x00, 8)),
+                        inputs: vec![cst(7, 8)],
+                        asm_mnemonic: Some("MOV RAX,7".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x140002207,
+                        output: None,
+                        inputs: vec![cst(0x140002210, 8)],
+                        asm_mnemonic: Some("JMP 0x140002210".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140002210,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x140002210,
+                        output: Some(ret_target.clone()),
+                        inputs: vec![cst(0, 8), reg(0x20, 8)],
+                        asm_mnemonic: Some("MOV RCX,qword ptr [RSP]".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140002211,
+                        output: None,
+                        inputs: vec![cst(0, 8), ret_target],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "x64_predecessor_value_ret",
+        0x140002200,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(code.contains("return 7;"), "{code}");
+    assert!(!code.contains("return;"), "{code}");
+    assert!(!code.contains("return *"), "{code}");
+}
+
+#[test]
+fn preview_x64_ret_recovers_predecessor_computed_return_register() {
+    let ret_target = uniq(0x518, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140002300,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x140002300,
+                        output: Some(reg(0x00, 4)),
+                        inputs: vec![reg(0x08, 4), cst(5, 4)],
+                        asm_mnemonic: Some("LEA EAX,[RCX+5]".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x140002303,
+                        output: None,
+                        inputs: vec![cst(0x140002310, 8)],
+                        asm_mnemonic: Some("JMP 0x140002310".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140002310,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x140002310,
+                        output: Some(ret_target.clone()),
+                        inputs: vec![cst(0, 8), reg(0x20, 8)],
+                        asm_mnemonic: Some("MOV RCX,qword ptr [RSP]".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140002311,
+                        output: None,
+                        inputs: vec![cst(0, 8), ret_target],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "x64_predecessor_computed_value_ret",
+        0x140002300,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(code.contains("return param_1 + 5;"), "{code}");
+    assert!(!code.contains("return;"), "{code}");
+    assert!(!code.contains("return *"), "{code}");
+}
+
+#[test]
 fn preview_uses_entry_register_alias_for_non_abi_register() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;
@@ -251,7 +383,10 @@ fn preview_uses_entry_register_alias_for_non_abi_register() {
 
     let code = render_mlil_preview(&func, "win64_entry_alias", 0x140001000, &options)
         .expect("preview render");
-    assert!(code.contains("uint win64_entry_alias(uint param_1)"), "{code}");
+    assert!(
+        code.contains("uint win64_entry_alias(uint param_1)"),
+        "{code}"
+    );
     assert!(code.contains("return param_1;"), "{code}");
     assert!(
         !code.contains("return rdi;") && !code.contains("return edi;"),
@@ -517,6 +652,243 @@ fn preview_projects_narrow_read_from_wide_register_write() {
         .expect("preview render");
     assert!(code.contains("return 0;"), "{code}");
     assert!(!code.contains("param_2"), "{code}");
+}
+
+#[test]
+fn preview_projects_wide_read_from_zero_extending_narrow_register_write() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001920,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001920,
+                    output: Some(runtime_reg(0x10, 4)),
+                    inputs: vec![cst(7, 4)],
+                    asm_mnemonic: Some("MOV EDX,7".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001925,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x10, 8)],
+                    asm_mnemonic: Some("MOV RAX,RDX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001926,
+                    output: None,
+                    inputs: vec![cst(0, 8), runtime_reg(0x00, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "narrow_to_wide", 0x140001920, &options)
+        .expect("preview render");
+    assert!(
+        code.contains("return 7;") || code.contains("return (ulonglong)7;"),
+        "{code}"
+    );
+    assert!(!code.contains("param_2"), "{code}");
+    assert!(!code.contains("return rdx;"), "{code}");
+}
+
+#[test]
+fn preview_recovers_stack_slot_from_rust_sleigh_rsp_space() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rsp = runtime_reg(0x20, 8);
+    let rax = runtime_reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001940,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140001940,
+                    output: Some(rsp.clone()),
+                    inputs: vec![rsp.clone(), cst(8, 8)],
+                    asm_mnemonic: Some("PUSH RBX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140001940,
+                    output: None,
+                    inputs: vec![cst(3, 8), rsp.clone(), cst(42, 8)],
+                    asm_mnemonic: Some("PUSH RBX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140001941,
+                    output: Some(rax.clone()),
+                    inputs: vec![cst(3, 8), rsp.clone()],
+                    asm_mnemonic: Some("MOV RAX,qword ptr [RSP]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001942,
+                    output: None,
+                    inputs: vec![cst(3, 8), rax],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "rust_sleigh_rsp_slot", 0x140001940, &options)
+        .expect("preview render");
+    assert!(!code.contains("var_20"), "{code}");
+    assert!(!code.contains("undefined *"), "{code}");
+    assert!(
+        code.contains("local_") || code.contains("return 42;"),
+        "{code}"
+    );
+}
+
+#[test]
+fn preview_lowers_register_xor_self_to_zero() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r12 = runtime_reg(0xa0, 8);
+    let rax = runtime_reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001960,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntXor,
+                    address: 0x140001960,
+                    output: Some(r12.clone()),
+                    inputs: vec![r12.clone(), r12],
+                    asm_mnemonic: Some("XOR R12D,R12D".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001962,
+                    output: Some(rax.clone()),
+                    inputs: vec![runtime_reg(0xa0, 8)],
+                    asm_mnemonic: Some("MOV RAX,R12".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001963,
+                    output: None,
+                    inputs: vec![cst(3, 8), rax],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "xor_self_zero", 0x140001960, &options).expect("preview render");
+    assert!(code.contains("return 0;"), "{code}");
+    assert!(!code.contains("r12"), "{code}");
+}
+
+#[test]
+fn preview_projects_cross_space_gpr32_write_to_rust_sleigh_gpr64_read() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let unique_reg = |index: u64, size| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: crate::arch::x86::X86_REG_BASE + index * 8,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ebp = unique_reg(5, 4);
+    let rbp = runtime_reg(0x28, 8);
+    let rax = runtime_reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001970,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001970,
+                    output: Some(ebp),
+                    inputs: vec![cst(9, 4)],
+                    asm_mnemonic: Some("MOV EBP,9".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001974,
+                    output: Some(rax.clone()),
+                    inputs: vec![rbp.clone()],
+                    asm_mnemonic: Some("MOV RAX,RBP".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001975,
+                    output: None,
+                    inputs: vec![cst(3, 8), rax],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "cross_space_gpr_alias", 0x140001970, &options)
+        .expect("preview render");
+    assert!(
+        code.contains("return 9;") || code.contains("return (ulonglong)9;"),
+        "{code}"
+    );
+    assert!(!code.contains("rbp"), "{code}");
 }
 
 fn preview_structures_intra_instruction_conditional_return_copy() {
@@ -921,6 +1293,194 @@ fn preview_tolerates_unresolved_direct_branch_target() {
     )
     .expect("preview render");
     assert!(code.contains("__fission_branchind("), "{code}");
+}
+
+#[test]
+fn preview_known_forward_external_direct_branch_becomes_tail_call() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x406000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: 0x406000,
+                output: None,
+                inputs: vec![cst(0x407000, 8)],
+                asm_mnemonic: Some("JMP 0x407000".to_string()),
+            }],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x407000,
+        CallTargetRef {
+            address: Some(0x407000),
+            symbol: "external_tail".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x86_forward_external_direct_branch",
+        0x406000,
+        &preview_options_x86(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(code.contains("external_tail();"), "{code}");
+    assert!(!code.contains("__fission_branchind("), "{code}");
+    assert!(!code.contains("goto block_406000;"), "{code}");
+}
+
+#[test]
+fn preview_known_external_tail_call_recovers_same_block_register_arg() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006000,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(0x140005000, 8)],
+                    asm_mnemonic: Some("LEA RCX,[callback]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x140006007,
+                    output: None,
+                    inputs: vec![cst(0x140007000, 8)],
+                    asm_mnemonic: Some("JMP external_tail".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140005000,
+        CallTargetRef {
+            address: Some(0x140005000),
+            symbol: "callback".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "external_tail".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_known_external_tail_arg",
+        0x140006000,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(code.contains("external_tail(callback);"), "{code}");
+    assert!(!code.contains("__fission_branchind("), "{code}");
+}
+
+#[test]
+fn preview_recovers_cross_block_rust_sleigh_register_call_arg() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140006100,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140006100,
+                        output: Some(runtime_reg(0x08, 4)),
+                        inputs: vec![cst(7, 4)],
+                        asm_mnemonic: Some("MOV ECX,7".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x140006105,
+                        output: None,
+                        inputs: vec![cst(0x140006110, 8)],
+                        asm_mnemonic: Some("JMP 0x140006110".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140006110,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x140006110,
+                        output: None,
+                        inputs: vec![cst(0x140007000, 8)],
+                        asm_mnemonic: Some("CALL external_call".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140006115,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "external_call".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_cross_block_call_arg",
+        0x140006100,
+        &options,
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(code.contains("external_call(7);"), "{code}");
+    assert!(!code.contains("external_call();"), "{code}");
 }
 
 #[test]
