@@ -79,6 +79,7 @@ class BenchmarkEntry:
     language: str
     tags: list[str]
     weight: float = 1.0
+    behavior_cases: dict[str, list[dict[str, Any]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class SourceFunction:
     body: str
     return_kind: str
     param_kinds: list[str]
+    param_names: list[str]
     line: int
 
 
@@ -135,6 +137,7 @@ def discover_source_entries(manifest: dict[str, Any]) -> list[BenchmarkEntry]:
                 language=language,
                 tags=list(raw.get("tags") or []),
                 weight=float(raw.get("weight", 1.0) or 1.0),
+                behavior_cases=raw.get("behavior_cases"),
             )
         )
 
@@ -165,6 +168,7 @@ def discover_source_entries(manifest: dict[str, Any]) -> list[BenchmarkEntry]:
                         source_path=source_path,
                         language=language,
                         tags=tags + [language],
+                        behavior_cases=spec.get("behavior_cases"),
                     )
                 )
 
@@ -255,9 +259,13 @@ def split_params(params: str) -> list[str]:
 
 def classify_param(param: str, language: str) -> str:
     lowered = param.lower()
+    words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", lowered))
+    if language in {"c", "cpp"} and any(token in lowered for token in ["*", "[]", "["]):
+        if words.intersection(INTEGRAL_WORDS):
+            return "int_ptr"
+        return "aggregate_or_pointer"
     if any(token in lowered for token in ["*", "&", "[]", "slice", "vec", "vector", "["]):
         return "aggregate_or_pointer"
-    words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", lowered))
     if language == "go" and "int" in words:
         return "int"
     if language == "rust" and words.intersection({"i32", "u32", "usize", "isize", "i64", "u64"}):
@@ -267,6 +275,33 @@ def classify_param(param: str, language: str) -> str:
     if not words:
         return "unknown"
     return "unsupported"
+
+
+def param_name(param: str, index: int) -> str:
+    cleaned = re.sub(r"\[[^\]]*\]", "", param)
+    words = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", cleaned)
+    type_words = {
+        "const",
+        "volatile",
+        "restrict",
+        "signed",
+        "unsigned",
+        "short",
+        "long",
+        "int",
+        "char",
+        "void",
+        "bool",
+        "static",
+    }
+    for word in reversed(words):
+        if word.lower() not in type_words:
+            return word
+    return f"param_{index + 1}"
+
+
+def param_names(params: str) -> list[str]:
+    return [param_name(param, index) for index, param in enumerate(split_params(params))]
 
 
 def classify_return(signature: str, name: str, params: str, language: str) -> str:
@@ -314,13 +349,15 @@ def extract_go_functions(text: str) -> list[SourceFunction]:
         name = match.group(1)
         params = match.group(2)
         signature = text[match.start() : match.end() - 1].strip()
+        params_split = split_params(params)
         funcs.append(
             SourceFunction(
                 name=name,
                 signature=signature,
                 body=text[match.end() : end],
                 return_kind=classify_return(signature, name, params, "go"),
-                param_kinds=[classify_param(p, "go") for p in split_params(params)],
+                param_kinds=[classify_param(p, "go") for p in params_split],
+                param_names=param_names(params),
                 line=text.count("\n", 0, match.start()) + 1,
             )
         )
@@ -339,13 +376,15 @@ def extract_rust_functions(text: str) -> list[SourceFunction]:
         name = match.group(1)
         params = match.group(2)
         signature = text[match.start() : match.end() - 1].strip()
+        params_split = split_params(params)
         funcs.append(
             SourceFunction(
                 name=name,
                 signature=signature,
                 body=text[match.end() : end],
                 return_kind=classify_return(signature, name, params, "rust"),
-                param_kinds=[classify_param(p, "rust") for p in split_params(params)],
+                param_kinds=[classify_param(p, "rust") for p in params_split],
+                param_names=param_names(params),
                 line=text.count("\n", 0, match.start()) + 1,
             )
         )
@@ -378,13 +417,15 @@ def extract_c_like_functions(text: str, language: str) -> list[SourceFunction]:
         if end is None:
             continue
         params = m.group(2)
+        params_split = split_params(params)
         funcs.append(
             SourceFunction(
                 name=name,
                 signature=signature,
                 body=text[open_idx + 1 : end],
                 return_kind=classify_return(signature, name, params, language),
-                param_kinds=[classify_param(p, language) for p in split_params(params)],
+                param_kinds=[classify_param(p, language) for p in params_split],
+                param_names=param_names(params),
                 line=text.count("\n", 0, start) + 1,
             )
         )
@@ -573,7 +614,7 @@ def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
     return round(inter / union, 6) if union else 1.0
 
 
-def behavior_cases(param_count: int) -> list[tuple[int, ...]]:
+def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
     if param_count == 1:
@@ -585,22 +626,78 @@ def behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     return []
 
 
-def behavior_supported(func: SourceFunction, language: str) -> tuple[bool, str | None]:
+def explicit_behavior_cases(entry: BenchmarkEntry, func: SourceFunction) -> list[dict[str, Any]] | None:
+    if not entry.behavior_cases:
+        return None
+    cases = entry.behavior_cases.get(func.name)
+    if cases is None:
+        return None
+    return cases
+
+
+def behavior_supported(
+    entry: BenchmarkEntry, func: SourceFunction, explicit_cases: list[dict[str, Any]] | None
+) -> tuple[bool, str | None]:
+    language = entry.language
     if language != "c":
         return False, "dynamic harness currently supports C source functions only"
     if func.name == "main":
         return False, "main is not called as a unit function"
+    if explicit_cases is not None:
+        if func.return_kind not in {"int", "void"}:
+            return False, f"unsupported return kind: {func.return_kind}"
+        unsupported = [kind for kind in func.param_kinds if kind not in {"int", "int_ptr"}]
+        if unsupported:
+            return False, f"unsupported parameter kinds: {func.param_kinds}"
+        valid, reason = validate_explicit_behavior_cases(func, explicit_cases)
+        if not valid:
+            return False, reason
+        return True, None
     if func.return_kind != "int":
         return False, f"unsupported return kind: {func.return_kind}"
     if any(kind != "int" for kind in func.param_kinds):
         return False, f"unsupported parameter kinds: {func.param_kinds}"
-    if not behavior_cases(len(func.param_kinds)):
+    if not default_behavior_cases(len(func.param_kinds)):
         return False, "unsupported arity"
     return True, None
 
 
-def source_harness(source_path: Path, func: SourceFunction, cases: list[tuple[int, ...]]) -> str:
-    calls = "\n".join(render_case_call(func.name, case) for case in cases)
+def validate_explicit_behavior_cases(
+    func: SourceFunction, cases: list[dict[str, Any]]
+) -> tuple[bool, str | None]:
+    if not cases:
+        return False, "empty explicit behavior case list"
+    for case_index, case in enumerate(cases):
+        args = case.get("args")
+        if not isinstance(args, list):
+            return False, f"case {case_index} missing args list"
+        if len(args) != len(func.param_kinds):
+            return False, f"case {case_index} arity mismatch"
+        for arg_index, (arg, kind) in enumerate(zip(args, func.param_kinds)):
+            if kind == "int" and not isinstance(arg, int):
+                return False, f"case {case_index} arg {arg_index} must be int"
+            if kind == "int_ptr":
+                if not isinstance(arg, dict) or "int_array" not in arg:
+                    return False, f"case {case_index} arg {arg_index} must be int_array"
+                values = arg["int_array"]
+                if not isinstance(values, list) or not all(isinstance(v, int) for v in values):
+                    return False, f"case {case_index} arg {arg_index} has invalid int_array"
+    return True, None
+
+
+def behavior_cases_for(
+    entry: BenchmarkEntry, func: SourceFunction
+) -> list[tuple[int, ...]] | list[dict[str, Any]]:
+    explicit_cases = explicit_behavior_cases(entry, func)
+    if explicit_cases is not None:
+        return explicit_cases
+    return default_behavior_cases(len(func.param_kinds))
+
+
+def source_harness(
+    source_path: Path, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
+) -> str:
+    calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
     return f"""
 #include <stdio.h>
 #define main source_original_main
@@ -613,8 +710,10 @@ int main(void) {{
 """
 
 
-def candidate_harness(candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]]) -> str:
-    calls = "\n".join(render_case_call(func.name, case) for case in cases)
+def candidate_harness(
+    candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
+) -> str:
+    calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
     return f"""
 #include <stdint.h>
 #include <stdbool.h>
@@ -651,9 +750,60 @@ int main(void) {{
 """
 
 
-def render_case_call(name: str, case: tuple[int, ...]) -> str:
+def render_case_call(func: SourceFunction, case: tuple[int, ...] | dict[str, Any], index: int) -> str:
+    if isinstance(case, dict):
+        return render_explicit_case_call(func, case, index)
     args = ", ".join(str(v) for v in case)
-    return f'    printf("%lld\\n", (long long){name}({args}));'
+    return f'    printf("%lld\\n", (long long){func.name}({args}));'
+
+
+def c_int_array(values: list[int]) -> str:
+    return ", ".join(str(v) for v in values) or "0"
+
+
+def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index: int) -> str:
+    args = case["args"]
+    setup: list[str] = []
+    call_args: list[str] = []
+    pointer_arrays: list[tuple[int, str, int]] = []
+    for arg_index, (arg, kind) in enumerate(zip(args, func.param_kinds)):
+        if kind == "int":
+            call_args.append(str(arg))
+            continue
+        if kind == "int_ptr":
+            values = arg["int_array"]
+            name = f"case_{index}_arg_{arg_index}"
+            setup.append(f"    int {name}[] = {{{c_int_array(values)}}};")
+            call_args.append(name)
+            pointer_arrays.append((arg_index, name, len(values)))
+            continue
+        raise AssertionError(f"unsupported explicit behavior kind: {kind}")
+
+    joined_args = ", ".join(call_args)
+    lines = setup
+    if func.return_kind == "void":
+        lines.append(f"    {func.name}({joined_args});")
+        lines.append('    printf("ret=void");')
+    else:
+        lines.append(f"    long long case_{index}_ret = (long long){func.name}({joined_args});")
+        lines.append(f'    printf("ret=%lld", case_{index}_ret);')
+    for arg_index, array_name, length in pointer_arrays:
+        lines.append(f'    printf(" arg{arg_index}=");')
+        lines.append(f"    for (int i = 0; i < {length}; ++i) {{")
+        lines.append(f'        printf("%s%d", i ? "," : "", {array_name}[i]);')
+        lines.append("    }")
+    lines.append('    printf("\\n");')
+    return "\n".join(lines)
+
+
+def serialize_behavior_cases(cases: list[tuple[int, ...]] | list[dict[str, Any]]) -> list[Any]:
+    serialized: list[Any] = []
+    for case in cases:
+        if isinstance(case, dict):
+            serialized.append(case)
+        else:
+            serialized.append(list(case))
+    return serialized
 
 
 def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict[str, Any]:
@@ -723,7 +873,8 @@ def run_behavior_check(
     timeout_sec: int,
     host_execution: dict[str, Any],
 ) -> dict[str, Any]:
-    supported, reason = behavior_supported(func, entry.language)
+    explicit_cases = explicit_behavior_cases(entry, func)
+    supported, reason = behavior_supported(entry, func, explicit_cases)
     if not supported:
         return {"status": "unsupported_signature", "score": 0.0, "reason": reason}
     if host_execution.get("status") != "ok":
@@ -736,7 +887,7 @@ def run_behavior_check(
     if not decomp_code:
         return {"status": "decomp_failed", "score": 0.0}
 
-    cases = behavior_cases(len(func.param_kinds))
+    cases = behavior_cases_for(entry, func)
     with tempfile.TemporaryDirectory(prefix="source-semantic-") as tmp:
         tmp_path = Path(tmp)
         oracle = compile_and_run_c(source_harness(entry.source_path, func, cases), tmp_path, "oracle", timeout_sec)
@@ -751,7 +902,7 @@ def run_behavior_check(
         return {
             "status": "pass" if passed else "mismatch",
             "score": 1.0 if passed else 0.0,
-            "cases": [list(case) for case in cases],
+            "cases": serialize_behavior_cases(cases),
             "oracle": oracle_lines,
             "candidate": candidate_lines,
         }

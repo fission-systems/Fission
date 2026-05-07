@@ -44,7 +44,8 @@ Generated artifacts:
 The static comparison uses language-neutral fingerprints for control-flow,
 operators, constants, calls, memory access shape, and signature shape. Dynamic
 behavior currently compiles C-like decompiler output with a compatibility
-header and runs deterministic cases for supported scalar integral signatures.
-If the local host cannot execute a freshly compiled C probe, supported dynamic
-rows fail closed as `host_execution_unavailable` instead of being silently
-skipped.
+header and runs deterministic cases for supported scalar integral signatures,
+plus manifest-owned `behavior_cases` for C `int *` arguments and `void`
+side-effect functions. If the local host cannot execute a freshly compiled C
+probe, supported dynamic rows fail closed as `host_execution_unavailable`
+instead of being silently skipped.

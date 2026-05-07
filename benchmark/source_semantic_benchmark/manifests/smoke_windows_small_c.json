@@ -10,7 +10,24 @@
       "source_path": "benchmark/binary/x86-64/window/small/source/c/test_functions.c",
       "language": "c",
       "tags": ["smoke", "source-owned", "x86-64", "windows", "c"],
-      "weight": 1.0
+      "weight": 1.0,
+      "behavior_cases": {
+        "sum_array": [
+          {"args": [{"int_array": [1, 2, 3, 4, 5]}, 5]},
+          {"args": [{"int_array": [9, -2, 7, 0]}, 4]},
+          {"args": [{"int_array": [5, 6, 7]}, 0]}
+        ],
+        "fill_matrix": [
+          {"args": [{"int_array": [0, 0, 0, 0, 0, 0]}, 2, 3, 7]},
+          {"args": [{"int_array": [1, 1, 1, 1]}, 1, 4, -3]},
+          {"args": [{"int_array": [8, 8, 8, 8]}, 0, 2, 5]}
+        ],
+        "swap": [
+          {"args": [{"int_array": [1]}, {"int_array": [2]}]},
+          {"args": [{"int_array": [-3]}, {"int_array": [7]}]},
+          {"args": [{"int_array": [42]}, {"int_array": [-1]}]}
+        ]
+      }
     }
   ]
 }
