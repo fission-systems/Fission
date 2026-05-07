@@ -401,8 +401,6 @@ fn executable_constructor_from_sla_template(
         context_changes: sla_template.context_changes.clone(),
         context_commits: sla_template.context_commits.clone(),
         matcher: CompiledPatternMatcher::BitConstraints(vec![]),
-        mod_constraint: None,
-        operand_reg_values: Vec::new(),
         opsize_variants: Vec::new(),
         operand_specs: sla_template.operand_specs.clone(),
         display_operands: sla_template.display_operands.clone(),
@@ -780,8 +778,6 @@ impl Collector {
         let matcher = self
             .parse_opcode_matcher(signature)
             .unwrap_or_else(|| CompiledPatternMatcher::BitConstraints(vec![]));
-        let mod_constraint = parse_single_value(signature, "mod=");
-        let operand_reg_values = parse_value_list(signature, "reg=");
         let opsize_variants = parse_opsize_variants(signature);
         let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
         let hidden_subtables = parse_hidden_subtables(signature, &self.field_info);
@@ -829,8 +825,6 @@ impl Collector {
             minimum_length: native_matcher_minimum_length(&matcher) as u32,
             context_changes,
             matcher,
-            mod_constraint,
-            operand_reg_values,
             opsize_variants,
             operand_specs: operand_specs.clone(),
             display_operands: operand_specs
@@ -1353,8 +1347,6 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
         }
     }
     score += constructor.opsize_variants.len().min(1) * 2;
-    score += constructor.operand_reg_values.len().min(1) * 3;
-    score += usize::from(constructor.mod_constraint.is_some()) * 2;
     match &constructor.matcher {
         CompiledPatternMatcher::ExactBytes(bytes) => score += bytes.len() * 80,
         CompiledPatternMatcher::RowCc { prefix, .. } => score += prefix.len() * 80 + 40,
@@ -1651,26 +1643,6 @@ fn parse_single_value(signature: &str, key: &str) -> Option<u8> {
         search_start = value_start;
     }
     None
-}
-
-fn parse_value_list(signature: &str, key: &str) -> Vec<u8> {
-    if let Some(single) = parse_single_value(signature, key) {
-        return vec![single];
-    }
-    let Some(start) = signature.find(key) else {
-        return Vec::new();
-    };
-    let rest = &signature[start + key.len()..];
-    if !rest.starts_with('(') {
-        return Vec::new();
-    }
-    let Some(end) = rest.find(')') else {
-        return Vec::new();
-    };
-    rest[1..end]
-        .split('|')
-        .filter_map(|value| value.trim().parse().ok())
-        .collect()
 }
 
 fn parse_opsize_variants(signature: &str) -> Vec<u8> {

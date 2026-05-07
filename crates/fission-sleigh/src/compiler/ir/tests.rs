@@ -144,6 +144,12 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
         !include_str!("types.rs").contains(&legacy_decode_step),
         "CompiledOperandDecodeStep must not expose legacy token-field decode variants"
     );
+    for forbidden in ["mod_constraint", "operand_reg_values"] {
+        assert!(
+            !include_str!("types.rs").contains(forbidden),
+            "CompiledExecutableConstructor must not expose legacy token selector field {forbidden}"
+        );
+    }
 
     let entry_specs = [
         ("x86-64", x86_64_entry_spec_path()),
@@ -161,16 +167,6 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
             .filter(|constructor| constructor.runtime_ready)
         {
             runtime_ready += 1;
-            assert!(
-                constructor.mod_constraint.is_none(),
-                "{entry_id} runtime-ready constructor still uses legacy mod selector: {}",
-                constructor.source
-            );
-            assert!(
-                constructor.operand_reg_values.is_empty(),
-                "{entry_id} runtime-ready constructor still uses legacy reg selector: {}",
-                constructor.source
-            );
         }
         assert!(
             runtime_ready > 0,

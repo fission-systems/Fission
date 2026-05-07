@@ -244,8 +244,6 @@ pub struct CompiledExecutableConstructor {
     #[serde(default)]
     pub context_commits: Vec<CompiledContextCommit>,
     pub matcher: CompiledPatternMatcher,
-    pub mod_constraint: Option<u8>,
-    pub operand_reg_values: Vec<u8>,
     pub opsize_variants: Vec<u8>,
     pub operand_specs: Vec<CompiledOperandSpec>,
     #[serde(default)]

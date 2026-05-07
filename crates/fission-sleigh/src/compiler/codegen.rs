@@ -327,7 +327,7 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
                 .map(|identity| identity.constructor_slot)
                 .unwrap_or(0);
             format!(
-                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"sla_subtable_id\": {}, \"sla_constructor_id\": {}, \"sla_constructor_slot\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"mod_constraint\": {}, \"operand_reg_values\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
+                "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"sla_subtable_id\": {}, \"sla_constructor_id\": {}, \"sla_constructor_slot\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
                 json_string(&ctor.source),
                 json_string(&ctor.display),
@@ -337,8 +337,6 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
                 ctor.signature_hash,
                 ctor.minimum_length,
                 render_matcher(&ctor.matcher),
-                render_optional_u8(ctor.mod_constraint),
-                render_u8_array(&ctor.operand_reg_values),
                 render_u8_array(&ctor.opsize_variants),
                 render_operand_specs(&ctor.operand_specs),
                 json_string(ctor.construct_tpl_kind.as_str()),
@@ -989,13 +987,6 @@ fn render_u8_array(values: &[u8]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!("[{joined}]")
-}
-
-fn render_optional_u8(value: Option<u8>) -> String {
-    match value {
-        Some(value) => value.to_string(),
-        None => "null".to_string(),
-    }
 }
 
 fn render_optional_string(value: Option<&str>) -> String {
