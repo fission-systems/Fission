@@ -45,16 +45,18 @@ enum UseConstraint {
 fn collect_constraints(
     stmts: &[HirStmt],
     return_type: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     for stmt in stmts {
-        collect_constraints_stmt(stmt, return_type, out);
+        collect_constraints_stmt(stmt, return_type, known_binding_types, out);
     }
 }
 
 fn collect_constraints_stmt(
     stmt: &HirStmt,
     return_type: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     match stmt {
@@ -64,30 +66,30 @@ fn collect_constraints_stmt(
             // Use-site on the rhs: look for Cast(T, Var(x)) → x: T.
             collect_constraints_cast_source(rhs, out);
             // Recurse into rhs for nested uses.
-            collect_constraints_expr(rhs, return_type, out);
+            collect_constraints_expr(rhs, return_type, known_binding_types, out);
         }
         HirStmt::Expr(expr) => {
-            collect_constraints_expr(expr, return_type, out);
+            collect_constraints_expr(expr, return_type, known_binding_types, out);
         }
         HirStmt::Block(body) => {
-            collect_constraints(body, return_type, out);
+            collect_constraints(body, return_type, known_binding_types, out);
         }
         HirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            collect_constraints_expr(cond, return_type, out);
-            collect_constraints(then_body, return_type, out);
-            collect_constraints(else_body, return_type, out);
+            collect_constraints_expr(cond, return_type, known_binding_types, out);
+            collect_constraints(then_body, return_type, known_binding_types, out);
+            collect_constraints(else_body, return_type, known_binding_types, out);
         }
         HirStmt::While { cond, body } => {
-            collect_constraints_expr(cond, return_type, out);
-            collect_constraints(body, return_type, out);
+            collect_constraints_expr(cond, return_type, known_binding_types, out);
+            collect_constraints(body, return_type, known_binding_types, out);
         }
         HirStmt::DoWhile { body, cond } => {
-            collect_constraints(body, return_type, out);
-            collect_constraints_expr(cond, return_type, out);
+            collect_constraints(body, return_type, known_binding_types, out);
+            collect_constraints_expr(cond, return_type, known_binding_types, out);
         }
         HirStmt::For {
             init,
@@ -96,26 +98,26 @@ fn collect_constraints_stmt(
             body,
         } => {
             if let Some(i) = init {
-                collect_constraints_stmt(i, return_type, out);
+                collect_constraints_stmt(i, return_type, known_binding_types, out);
             }
             if let Some(c) = cond {
-                collect_constraints_expr(c, return_type, out);
+                collect_constraints_expr(c, return_type, known_binding_types, out);
             }
             if let Some(u) = update {
-                collect_constraints_stmt(u, return_type, out);
+                collect_constraints_stmt(u, return_type, known_binding_types, out);
             }
-            collect_constraints(body, return_type, out);
+            collect_constraints(body, return_type, known_binding_types, out);
         }
         HirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            collect_constraints_expr(expr, return_type, out);
+            collect_constraints_expr(expr, return_type, known_binding_types, out);
             for case in cases {
-                collect_constraints(&case.body, return_type, out);
+                collect_constraints(&case.body, return_type, known_binding_types, out);
             }
-            collect_constraints(default, return_type, out);
+            collect_constraints(default, return_type, known_binding_types, out);
         }
         HirStmt::Return(Some(expr)) => {
             // If the function's return type is already known and the expression
@@ -127,7 +129,7 @@ fn collect_constraints_stmt(
                         .push(UseConstraint::Exact(return_type.clone()));
                 }
             }
-            collect_constraints_expr(expr, return_type, out);
+            collect_constraints_expr(expr, return_type, known_binding_types, out);
         }
         _ => {}
     }
@@ -179,6 +181,7 @@ fn collect_constraints_cast_source(expr: &HirExpr, out: &mut HashMap<String, Vec
 fn collect_constraints_expr(
     expr: &HirExpr,
     return_type: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     match expr {
@@ -190,42 +193,26 @@ fn collect_constraints_expr(
                     .push(UseConstraint::Ptr(ty.clone()));
             }
             // Recurse into the pointer expression itself.
-            collect_constraints_expr(ptr, return_type, out);
+            collect_constraints_expr(ptr, return_type, known_binding_types, out);
         }
         HirExpr::Binary { op, lhs, rhs, ty } => {
-            // Signed comparison → operands are signed integers.
             match op {
+                // Signed comparison → operands are signed integers.  The
+                // comparison expression itself is Bool, so operand width must
+                // come from an actual operand or an existing binding type.
                 HirBinaryOp::SLt | HirBinaryOp::SLe => {
-                    let bits = nir_type_bits(ty).unwrap_or(64);
-                    if let HirExpr::Var(name) = lhs.as_ref() {
-                        out.entry(name.clone())
-                            .or_default()
-                            .push(UseConstraint::Signed { bits });
-                    }
-                    if let HirExpr::Var(name) = rhs.as_ref() {
-                        out.entry(name.clone())
-                            .or_default()
-                            .push(UseConstraint::Signed { bits });
-                    }
+                    collect_compare_constraints(lhs, rhs, ty, known_binding_types, true, out)
                 }
                 // Unsigned comparison → operands are unsigned integers.
                 HirBinaryOp::Lt | HirBinaryOp::Le => {
-                    let bits = nir_type_bits(ty).unwrap_or(64);
-                    if let HirExpr::Var(name) = lhs.as_ref() {
-                        out.entry(name.clone())
-                            .or_default()
-                            .push(UseConstraint::Unsigned { bits });
-                    }
-                    if let HirExpr::Var(name) = rhs.as_ref() {
-                        out.entry(name.clone())
-                            .or_default()
-                            .push(UseConstraint::Unsigned { bits });
-                    }
+                    collect_compare_constraints(lhs, rhs, ty, known_binding_types, false, out)
                 }
                 // Arithmetic right-shift: the left operand must be a signed integer.
                 // `x >> k` where `>>` is Sar (arithmetic) means x is signed.
                 HirBinaryOp::Sar => {
-                    let bits = nir_type_bits(ty).unwrap_or(32);
+                    let bits = nir_type_bits(ty)
+                        .or_else(|| expr_int_bits(lhs.as_ref(), known_binding_types))
+                        .unwrap_or(32);
                     if let HirExpr::Var(name) = lhs.as_ref() {
                         out.entry(name.clone())
                             .or_default()
@@ -234,22 +221,22 @@ fn collect_constraints_expr(
                 }
                 _ => {}
             }
-            collect_constraints_expr(lhs, return_type, out);
-            collect_constraints_expr(rhs, return_type, out);
+            collect_constraints_expr(lhs, return_type, known_binding_types, out);
+            collect_constraints_expr(rhs, return_type, known_binding_types, out);
         }
         HirExpr::Unary { expr: inner, .. } => {
-            collect_constraints_expr(inner, return_type, out);
+            collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
         HirExpr::Cast { expr: inner, .. } => {
-            collect_constraints_expr(inner, return_type, out);
+            collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
         HirExpr::Call { args, .. } => {
             for arg in args {
-                collect_constraints_expr(arg, return_type, out);
+                collect_constraints_expr(arg, return_type, known_binding_types, out);
             }
         }
         HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
-            collect_constraints_expr(base, return_type, out);
+            collect_constraints_expr(base, return_type, known_binding_types, out);
         }
         HirExpr::Index {
             base,
@@ -262,10 +249,59 @@ fn collect_constraints_expr(
                     .or_default()
                     .push(UseConstraint::Ptr(elem_ty.clone()));
             }
-            collect_constraints_expr(base, return_type, out);
-            collect_constraints_expr(index, return_type, out);
+            collect_constraints_expr(base, return_type, known_binding_types, out);
+            collect_constraints_expr(index, return_type, known_binding_types, out);
         }
         HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn collect_compare_constraints(
+    lhs: &HirExpr,
+    rhs: &HirExpr,
+    result_ty: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
+    signed: bool,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let lhs_bits = expr_int_bits(lhs, known_binding_types)
+        .or_else(|| expr_int_bits(rhs, known_binding_types))
+        .or_else(|| nir_type_bits(result_ty));
+    let rhs_bits = expr_int_bits(rhs, known_binding_types)
+        .or_else(|| expr_int_bits(lhs, known_binding_types))
+        .or_else(|| nir_type_bits(result_ty));
+
+    if let (HirExpr::Var(name), Some(bits)) = (lhs, lhs_bits) {
+        out.entry(name.clone())
+            .or_default()
+            .push(compare_constraint(bits, signed));
+    }
+    if let (HirExpr::Var(name), Some(bits)) = (rhs, rhs_bits) {
+        out.entry(name.clone())
+            .or_default()
+            .push(compare_constraint(bits, signed));
+    }
+}
+
+fn compare_constraint(bits: u32, signed: bool) -> UseConstraint {
+    if signed {
+        UseConstraint::Signed { bits }
+    } else {
+        UseConstraint::Unsigned { bits }
+    }
+}
+
+fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
+    match expr {
+        HirExpr::Var(name) => known_binding_types.get(name).and_then(nir_type_bits),
+        HirExpr::Const(_, ty)
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::Index { elem_ty: ty, .. }
+        | HirExpr::Cast { ty, .. } => nir_type_bits(ty),
+        HirExpr::Binary { ty, .. } => nir_type_bits(ty),
+        HirExpr::PtrOffset { .. } | HirExpr::AggregateCopy { .. } => None,
     }
 }
 
@@ -273,8 +309,121 @@ fn collect_constraints_expr(
 fn nir_type_bits(ty: &NirType) -> Option<u32> {
     match ty {
         NirType::Int { bits, .. } => Some(*bits),
-        NirType::Bool => Some(1),
+        NirType::Bool => None,
         _ => None,
+    }
+}
+
+fn collect_known_binding_types(func: &HirFunction) -> HashMap<String, NirType> {
+    let mut known = HashMap::new();
+    for binding in func.locals.iter().chain(func.params.iter()) {
+        if binding.ty != NirType::Unknown {
+            known.insert(binding.name.clone(), binding.ty.clone());
+        }
+    }
+    known
+}
+
+fn return_expr_type(
+    expr: &HirExpr,
+    known_binding_types: &HashMap<String, NirType>,
+) -> Option<NirType> {
+    match expr {
+        HirExpr::Var(name) => known_binding_types.get(name).cloned(),
+        other => {
+            let ty = expr_type(other);
+            (ty != NirType::Unknown).then_some(ty)
+        }
+    }
+}
+
+fn collect_value_return_types(
+    stmts: &[HirStmt],
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut Vec<NirType>,
+) -> usize {
+    let mut value_return_count = 0usize;
+    for stmt in stmts {
+        value_return_count += collect_value_return_types_stmt(stmt, known_binding_types, out);
+    }
+    value_return_count
+}
+
+fn collect_value_return_types_stmt(
+    stmt: &HirStmt,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut Vec<NirType>,
+) -> usize {
+    match stmt {
+        HirStmt::Return(Some(expr)) => {
+            if let Some(ty) = return_expr_type(expr, known_binding_types) {
+                out.push(ty);
+            }
+            1
+        }
+        HirStmt::Return(None) => 0,
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => {
+            collect_value_return_types(stmts, known_binding_types, out)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_value_return_types(then_body, known_binding_types, out)
+                + collect_value_return_types(else_body, known_binding_types, out)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut value_return_count = 0usize;
+            for case in cases {
+                value_return_count +=
+                    collect_value_return_types(&case.body, known_binding_types, out);
+            }
+            value_return_count + collect_value_return_types(default, known_binding_types, out)
+        }
+        _ => 0,
+    }
+}
+
+fn promote_return_signedness_from_returns(func: &mut HirFunction) -> bool {
+    if func.surface_return_type_name.is_some() {
+        return false;
+    }
+    let NirType::Int {
+        bits: return_bits,
+        signed: false,
+    } = &func.return_type
+    else {
+        return false;
+    };
+    let return_bits = *return_bits;
+
+    let known_binding_types = collect_known_binding_types(func);
+    let mut candidates = Vec::new();
+    let value_return_count =
+        collect_value_return_types(&func.body, &known_binding_types, &mut candidates);
+    if value_return_count == 0 || candidates.len() != value_return_count {
+        return false;
+    }
+    if candidates.iter().all(|ty| {
+        matches!(
+            ty,
+            NirType::Int {
+                bits,
+                signed: true
+            } if *bits == return_bits
+        )
+    }) {
+        func.return_type = NirType::Int {
+            bits: return_bits,
+            signed: true,
+        };
+        true
+    } else {
+        false
     }
 }
 
@@ -377,7 +526,13 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
         let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::new();
-        collect_constraints(&func.body, &func.return_type, &mut constraints);
+        let known_binding_types = collect_known_binding_types(func);
+        collect_constraints(
+            &func.body,
+            &func.return_type,
+            &known_binding_types,
+            &mut constraints,
+        );
 
         let mut round_changed = false;
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
@@ -387,6 +542,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
                 }
             }
         }
+        round_changed |= promote_return_signedness_from_returns(func);
         if !round_changed {
             break;
         }
@@ -405,6 +561,16 @@ mod tests {
             ty: NirType::Unknown,
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn make_typed_binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> NirBinding {
+        NirBinding {
+            name: name.to_owned(),
+            ty,
+            surface_type_name: None,
+            origin: Some(origin),
             initializer: None,
         }
     }
@@ -501,11 +667,103 @@ mod tests {
         }];
         let mut func = make_func(vec![make_binding("a")], body, NirType::Unknown);
         super::apply_use_driven_type_infer_pass(&mut func);
-        // a should be inferred as signed 64-bit (default bits from Bool type)
-        assert!(matches!(
+        assert_eq!(
             func.locals[0].ty,
-            NirType::Int { signed: true, .. }
-        ));
+            NirType::Int {
+                bits: 32,
+                signed: true
+            }
+        );
+    }
+
+    #[test]
+    fn signed_compare_promotes_unsigned_params_and_return() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::SLt,
+                lhs: Box::new(HirExpr::Var("a".to_owned())),
+                rhs: Box::new(HirExpr::Var("b".to_owned())),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Return(Some(HirExpr::Var("b".to_owned())))],
+            else_body: vec![HirStmt::Return(Some(HirExpr::Var("a".to_owned())))],
+        }];
+        let mut func = HirFunction {
+            name: "signed_max".to_owned(),
+            params: vec![
+                make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("b", u32_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: u32_ty,
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        let signed_i32 = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        assert_eq!(func.params[0].ty, signed_i32);
+        assert_eq!(func.params[1].ty, signed_i32);
+        assert_eq!(func.return_type, signed_i32);
+    }
+
+    #[test]
+    fn signed_compare_without_width_evidence_does_not_invent_type() {
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::SLt,
+                lhs: Box::new(HirExpr::Var("a".to_owned())),
+                rhs: Box::new(HirExpr::Var("b".to_owned())),
+                ty: NirType::Bool,
+            },
+            then_body: vec![],
+            else_body: vec![],
+        }];
+        let mut func = make_func(
+            vec![make_binding("a"), make_binding("b")],
+            body,
+            NirType::Unknown,
+        );
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.locals[0].ty, NirType::Unknown);
+        assert_eq!(func.locals[1].ty, NirType::Unknown);
+    }
+
+    #[test]
+    fn signed_compare_uses_constant_width_evidence() {
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::SLt,
+                lhs: Box::new(HirExpr::Var("a".to_owned())),
+                rhs: Box::new(HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 16,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Bool,
+            },
+            then_body: vec![],
+            else_body: vec![],
+        }];
+        let mut func = make_func(vec![make_binding("a")], body, NirType::Unknown);
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int {
+                bits: 16,
+                signed: true
+            }
+        );
     }
 
     /// Return(Var("r")) + known return_type → r gets return_type
