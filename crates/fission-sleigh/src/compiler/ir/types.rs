@@ -310,7 +310,7 @@ impl CompiledDisplayTemplate {
         }
     }
 
-    pub fn fallback(display: String) -> Self {
+    pub fn from_literal_display(display: String) -> Self {
         Self {
             display,
             ..Self::empty()

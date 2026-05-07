@@ -287,26 +287,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .filter_map(|handle| handle.debug_value.clone())
             .collect::<Vec<_>>();
 
-        let condition_code = match &self.selection.constructor.matcher {
-            CompiledPatternMatcher::RowCc { prefix, .. } => {
-                Some(self.ctx.bytes[self.ctx.cursor + prefix.len()] & 0x0f)
-            }
-            _ if matches!(
-                self.selection.constructor.construct_tpl_kind,
-                CompiledConstructTplKind::Setcc
-            ) && matches!(
-                self.selection.constructor.matcher,
-                CompiledPatternMatcher::ExactBytes(_)
-            ) =>
-            {
-                let opcode = self.ctx.bytes[self.ctx.cursor
-                    + opcode_len_from_matcher(&self.selection.constructor.matcher)
-                    - 1];
-                Some(opcode & 0x0f)
-            }
-            _ => None,
-        };
-
         let length = self
             .cursor
             .max(self.ctx.cursor + self.minimum_length)
@@ -329,7 +309,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             handles,
             exported_handle,
             operands,
-            condition_code,
             absolute_offset,
             relative_length,
             length,

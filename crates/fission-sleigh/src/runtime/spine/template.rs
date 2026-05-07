@@ -62,7 +62,6 @@ mod tests {
             handles: Vec::new(),
             exported_handle: None,
             operands: Vec::new(),
-            condition_code: None,
             absolute_offset: 0,
             relative_length: 1,
             length: 1,

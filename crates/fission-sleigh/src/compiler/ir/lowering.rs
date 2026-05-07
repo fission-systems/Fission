@@ -820,7 +820,7 @@ impl Collector {
             mnemonic: mnemonic.to_string(),
             source: source.to_string(),
             display: signature.to_string(),
-            display_template: CompiledDisplayTemplate::fallback(signature.to_string()),
+            display_template: CompiledDisplayTemplate::from_literal_display(signature.to_string()),
             signature_hash,
             minimum_length: native_matcher_minimum_length(&matcher) as u32,
             context_changes,

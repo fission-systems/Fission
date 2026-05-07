@@ -88,17 +88,6 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
 }
 
 pub(super) fn disasm_mnemonic(state: &RuntimeConstructState) -> String {
-    // Final rendering must come from SLEIGH display templates. Until that
-    // template IR is executable, keep condition-code rendering isolated to
-    // the display-only Jcc compatibility holdout. This must not affect p-code
-    // template execution.
-    if matches!(state.construct_tpl_kind, CompiledConstructTplKind::Jcc) {
-        if let Some(cc) = state.condition_code {
-            if let Some(mnemonic) = jcc_mnemonic(cc) {
-                return mnemonic.to_string();
-            }
-        }
-    }
     state.mnemonic.replace('^', "").to_ascii_lowercase()
 }
 
@@ -194,28 +183,6 @@ pub(super) fn render_operand_display(
         .map(|operand| &operand.kind);
     let value = display_value_from_handle(handle, "display operand")?;
     Ok(format_operand_with_display_kind(&value, display_kind))
-}
-
-pub(super) fn jcc_mnemonic(cc: u8) -> Option<&'static str> {
-    Some(match cc {
-        0 => "jo",
-        1 => "jno",
-        2 => "jb",
-        3 => "jnb",
-        4 => "jz",
-        5 => "jnz",
-        6 => "jbe",
-        7 => "ja",
-        8 => "js",
-        9 => "jns",
-        10 => "jp",
-        11 => "jnp",
-        12 => "jl",
-        13 => "jge",
-        14 => "jle",
-        15 => "jg",
-        _ => return None,
-    })
 }
 
 pub(super) fn format_operand(operand: &BoundOperand) -> String {
@@ -517,6 +484,21 @@ mod tests {
         assert!(
             !source.contains(&dummy_zero_size),
             "display rendering must not materialize zero-size dummy operands"
+        );
+    }
+
+    #[test]
+    fn display_renderer_has_no_decoded_cc_mnemonic_table() {
+        let source = include_str!("display.rs");
+        let cc_mnemonic_symbol = ["jcc", "_mnemonic"].concat();
+        let decoded_cc_field = ["condition", "_code"].concat();
+        assert!(
+            !source.contains(&cc_mnemonic_symbol),
+            "display rendering must come from SLEIGH display templates, not a condition-code table"
+        );
+        assert!(
+            !source.contains(&decoded_cc_field),
+            "display rendering must not carry decoded condition-code side channels"
         );
     }
 }

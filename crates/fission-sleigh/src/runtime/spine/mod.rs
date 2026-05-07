@@ -3,8 +3,8 @@
 //! This module owns the shared runtime concepts that map to Ghidra's
 //! SleighParserContext, DecisionNode, ConstructState/ParserWalker, ConstructTpl,
 //! and PcodeEmit. Processor-specific runtime policy must not live in side
-//! modules; temporary compiled-table compatibility paths must be made visible
-//! through telemetry and replaced by spec-derived template execution.
+//! modules; unsupported generated constructors must surface as typed runtime
+//! errors rather than alternate semantic success paths.
 
 pub mod compiled_table;
 #[allow(unused_imports)] // Re-exported API (flow overrides, SLA audits).

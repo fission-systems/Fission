@@ -92,7 +92,7 @@ where
                     .map(|entry| entry.constructor_index)
                     .collect()
             };
-            let mut unsupported_fallback = None;
+            let mut first_unsupported_match = None;
             let trace_terminal = std::env::var_os("FISSION_TRACE_TERMINAL_VERIFY").is_some();
             let mut matched_any_pattern = false;
             let leaf_entries: Vec<CompiledDecisionLeafEntry> = if node.leaf_entries.is_empty() {
@@ -151,8 +151,8 @@ where
                             trace,
                         });
                     }
-                    if unsupported_fallback.is_none() {
-                        unsupported_fallback = Some((
+                    if first_unsupported_match.is_none() {
+                        first_unsupported_match = Some((
                             constructor,
                             constructor_index,
                             entry.subtable_id,
@@ -164,7 +164,7 @@ where
             if !matched_any_pattern {
                 return None;
             }
-            unsupported_fallback.map(
+            first_unsupported_match.map(
                 |(constructor, constructor_index, subtable_id, constructor_id)| RuntimeSelection {
                     constructor,
                     constructor_index,

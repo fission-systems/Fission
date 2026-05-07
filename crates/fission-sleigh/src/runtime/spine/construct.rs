@@ -25,7 +25,6 @@ pub struct RuntimeConstructState {
     pub handles: Vec<RuntimeHandle>,
     pub exported_handle: Option<RuntimeHandle>,
     pub operands: Vec<BoundOperand>,
-    pub condition_code: Option<u8>,
     /// Absolute byte offset of this constructor state from the instruction start.
     /// Mirrors Ghidra ConstructState.offset.
     pub absolute_offset: usize,
