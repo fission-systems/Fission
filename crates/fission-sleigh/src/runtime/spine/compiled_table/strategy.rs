@@ -74,9 +74,9 @@ fn native_backend_allowed(
     {
         // Native backends currently return a constructor slot only.  Ghidra
         // .sla identity requires terminal DisjointPattern verification and
-        // subtable/constructor-id lookup before a constructor is final.  Until
+        // subtable/constructor-id lookup before a constructor is final. Until
         // codegen emits the same checked terminal verifier, native remains an
-        // acceleration target for legacy tables only.
+        // acceleration target only for tables without SLA identity.
         // After build_frontend_from_sla_native_model, all SLA-loaded subtables
         // have sla_subtable_id != 0 or leaf_entries, so this returns false for
         // all current architectures.
@@ -84,9 +84,8 @@ fn native_backend_allowed(
     }
     // Note: the previous `shared_token_cursor` short-circuit that allowed native
     // for x86 has been removed. For SLA-migrated frontends the check above already
-    // returns false for all subtables that have SLA identity. The shared_token_cursor
-    // heuristic was x86-specific and is no longer a valid gate for architecture-neutral
-    // native backend selection.
+    // returns false for all subtables that have SLA identity, which keeps native
+    // backend selection architecture-neutral.
     !subtable
         .decision_tree
         .nodes
