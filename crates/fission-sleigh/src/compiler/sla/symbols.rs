@@ -216,7 +216,7 @@ pub(super) fn decode_operand_symbols(
         let (
             subtable_name,
             display_kind,
-            fallback_token_field,
+            display_token_field,
             pattern_expression,
             varnode_list,
             value_map,
@@ -301,7 +301,7 @@ pub(super) fn decode_operand_symbols(
             .find(|child| child.id == sla_format::ELEM_TOKENFIELD)
             .map(decode_token_field)
             .transpose()?
-            .or(fallback_token_field);
+            .or(display_token_field);
         out.insert(
             id,
             DecodedOperandSymbol {
