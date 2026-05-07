@@ -343,14 +343,182 @@ fn preview_inlines_lea_register_return() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "lea_add", 0x140001450, &options)
-        .expect("preview render");
-    assert!(code.contains("lea_add(ulonglong param_1, ulonglong param_2)"), "{code}");
+    let code =
+        render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
+    assert!(
+        code.contains("lea_add(ulonglong param_1, ulonglong param_2)"),
+        "{code}"
+    );
     assert!(code.contains("param_1 + param_2"), "{code}");
     assert!(!code.contains("*var_"), "{code}");
 }
 
 #[test]
+fn preview_inlines_read_modify_write_register_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = |offset, size| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001850,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntMult,
+                    address: 0x140001853,
+                    output: Some(tmp(0x9300, 8)),
+                    inputs: vec![runtime_reg(0x08, 8), cst(4, 8)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140001853,
+                    output: Some(tmp(0x9500, 8)),
+                    inputs: vec![runtime_reg(0x08, 8), tmp(0x9300, 8)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::SubPiece,
+                    address: 0x140001853,
+                    output: Some(runtime_reg(0x00, 4)),
+                    inputs: vec![tmp(0x9500, 8), cst(0, 4)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x140001853,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x00, 4)],
+                    asm_mnemonic: Some("LEA".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140001856,
+                    output: Some(runtime_reg(0x00, 4)),
+                    inputs: vec![runtime_reg(0x00, 4), runtime_reg(0x00, 4)],
+                    asm_mnemonic: Some("ADD EAX,EAX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x140001856,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x00, 4)],
+                    asm_mnemonic: Some("ADD EAX,EAX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140001863,
+                    output: Some(runtime_reg(0x288, 8)),
+                    inputs: vec![cst(3, 8), runtime_reg(0x20, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001863,
+                    output: None,
+                    inputs: vec![cst(3, 8), runtime_reg(0x288, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "lea_double", 0x140001850, &options).expect("preview render");
+    assert!(code.contains("param_1"), "{code}");
+    assert!(!code.contains("tmp_0"), "{code}");
+    assert!(!code.contains("*var_"), "{code}");
+}
+
+#[test]
+fn preview_projects_narrow_read_from_wide_register_write() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001900,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001900,
+                    output: Some(runtime_reg(0x10, 8)),
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("MOV EDX,0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001905,
+                    output: Some(runtime_reg(0x00, 4)),
+                    inputs: vec![runtime_reg(0x10, 4)],
+                    asm_mnemonic: Some("MOV EAX,EDX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x140001905,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x00, 4)],
+                    asm_mnemonic: Some("MOV EAX,EDX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140001906,
+                    output: Some(runtime_reg(0x288, 8)),
+                    inputs: vec![cst(3, 8), runtime_reg(0x20, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001906,
+                    output: None,
+                    inputs: vec![cst(3, 8), runtime_reg(0x288, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "wide_to_narrow", 0x140001900, &options)
+        .expect("preview render");
+    assert!(code.contains("return 0;"), "{code}");
+    assert!(!code.contains("param_2"), "{code}");
+}
+
 fn preview_structures_intra_instruction_conditional_return_copy() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;

@@ -81,57 +81,69 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
 
+        let candidate_keys = self.lookup_candidate_def_keys(&key);
         let mut resolved_site: Option<LoweringSite> = None;
         if let Some(site) = scope {
-            if let Some(defs_in_block) = self.block_defs.get(site.block_idx)
-                && let Some(def_indices) = defs_in_block.get(&key)
-            {
-                let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
-                if prior_count > 0 {
-                    let def_idx = def_indices[prior_count - 1];
-                    resolved_site = Some(LoweringSite {
-                        block_idx: site.block_idx,
-                        op_idx: def_idx,
-                    });
+            if let Some(defs_in_block) = self.block_defs.get(site.block_idx) {
+                for candidate_key in &candidate_keys {
+                    if let Some(def_indices) = defs_in_block.get(candidate_key) {
+                        let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                        if prior_count > 0 {
+                            let def_idx = def_indices[prior_count - 1];
+                            let candidate = LoweringSite {
+                                block_idx: site.block_idx,
+                                op_idx: def_idx,
+                            };
+                            if resolved_site
+                                .is_none_or(|resolved| candidate.op_idx > resolved.op_idx)
+                            {
+                                resolved_site = Some(candidate);
+                            }
+                        }
+                    }
                 }
             }
         }
 
         if resolved_site.is_none() {
             if let Some(scope_site) = scope {
-                resolved_site = self.def_sites.get(&key).and_then(|sites| {
-                    sites
-                        .iter()
-                        .filter_map(|site| {
-                            let candidate = LoweringSite {
-                                block_idx: site.block_idx,
-                                op_idx: site.op_idx,
-                            };
-                            if candidate.block_idx == scope_site.block_idx {
-                                return (candidate.op_idx < scope_site.op_idx).then_some((
-                                    usize::MAX,
-                                    candidate.op_idx,
-                                    candidate,
-                                ));
-                            }
-                            self.dom_tree
-                                .dominates(candidate.block_idx, scope_site.block_idx)
-                                .then_some((
-                                    self.dom_tree.dominance_depth(candidate.block_idx),
-                                    candidate.op_idx,
-                                    candidate,
-                                ))
-                        })
-                        .max_by_key(|(dom_depth, op_idx, candidate)| {
-                            (*dom_depth, candidate.block_idx, *op_idx)
-                        })
-                        .map(|(_, _, candidate)| candidate)
-                });
+                resolved_site = candidate_keys
+                    .iter()
+                    .filter_map(|candidate_key| self.def_sites.get(candidate_key))
+                    .flat_map(|sites| sites.iter())
+                    .filter_map(|site| {
+                        let candidate = LoweringSite {
+                            block_idx: site.block_idx,
+                            op_idx: site.op_idx,
+                        };
+                        if candidate.block_idx == scope_site.block_idx {
+                            return (candidate.op_idx < scope_site.op_idx).then_some((
+                                usize::MAX,
+                                candidate.op_idx,
+                                candidate,
+                            ));
+                        }
+                        self.dom_tree
+                            .dominates(candidate.block_idx, scope_site.block_idx)
+                            .then_some((
+                                self.dom_tree.dominance_depth(candidate.block_idx),
+                                candidate.op_idx,
+                                candidate,
+                            ))
+                    })
+                    .max_by_key(|(dom_depth, op_idx, candidate)| {
+                        (*dom_depth, candidate.block_idx, *op_idx)
+                    })
+                    .map(|(_, _, candidate)| candidate);
             } else {
-                resolved_site = self.defs.get(&key).map(|def| LoweringSite {
-                    block_idx: def.block_idx,
-                    op_idx: def.op_idx,
-                });
+                resolved_site = candidate_keys
+                    .iter()
+                    .filter_map(|candidate_key| self.defs.get(candidate_key))
+                    .map(|def| LoweringSite {
+                        block_idx: def.block_idx,
+                        op_idx: def.op_idx,
+                    })
+                    .max_by_key(|site| (site.block_idx, site.op_idx));
             }
         }
 
@@ -143,6 +155,77 @@ impl<'a> PreviewBuilder<'a> {
             let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
             (site, op)
         })
+    }
+
+    fn lookup_candidate_def_keys(&self, key: &VarnodeKey) -> Vec<VarnodeKey> {
+        let mut candidates = vec![key.clone()];
+        if !is_register_space_id(key.space_id) || key.is_constant {
+            return candidates;
+        }
+        candidates.extend(
+            self.def_sites
+                .keys()
+                .filter(|candidate| *candidate != key)
+                .filter(|candidate| Self::register_key_covers(candidate, key))
+                .cloned(),
+        );
+        candidates
+    }
+
+    fn register_key_covers(candidate: &VarnodeKey, requested: &VarnodeKey) -> bool {
+        if candidate.is_constant
+            || requested.is_constant
+            || candidate.space_id != requested.space_id
+            || !is_register_space_id(candidate.space_id)
+            || candidate.size < requested.size
+        {
+            return false;
+        }
+        let candidate_start = candidate.offset;
+        let requested_start = requested.offset;
+        let Some(candidate_end) = candidate_start.checked_add(u64::from(candidate.size)) else {
+            return false;
+        };
+        let Some(requested_end) = requested_start.checked_add(u64::from(requested.size)) else {
+            return false;
+        };
+        candidate_start <= requested_start && candidate_end >= requested_end
+    }
+
+    fn varnode_covers(candidate: &Varnode, requested: &Varnode) -> bool {
+        Self::register_key_covers(&VarnodeKey::from(candidate), &VarnodeKey::from(requested))
+    }
+
+    fn project_alias_def_expr(&self, requested: &Varnode, op: &PcodeOp, expr: HirExpr) -> HirExpr {
+        let Some(output) = op.output.as_ref() else {
+            return expr;
+        };
+        if VarnodeKey::from(output) == VarnodeKey::from(requested)
+            || !Self::varnode_covers(output, requested)
+        {
+            return expr;
+        }
+        let byte_offset = requested.offset.saturating_sub(output.offset);
+        let shifted = if byte_offset == 0 {
+            expr
+        } else {
+            HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(expr),
+                rhs: Box::new(HirExpr::Const(
+                    (byte_offset * 8) as i64,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: type_from_size(output.size, false),
+            }
+        };
+        HirExpr::Cast {
+            ty: type_from_size(requested.size, false),
+            expr: Box::new(shifted),
+        }
     }
 
     pub(in crate::nir) fn lower_call(
@@ -633,8 +716,41 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(name) = self.materialized_vns.get(&materialized_key) {
                 return Ok(HirExpr::Var(name.clone()));
             }
+            if let Some(output) = op.output.as_ref()
+                && Self::varnode_covers(output, vn)
+            {
+                let output_materialized_key = MaterializedVarnodeKey::new(output, op);
+                if let Some(name) = self.materialized_vns.get(&output_materialized_key) {
+                    return Ok(self.project_alias_def_expr(vn, op, HirExpr::Var(name.clone())));
+                }
+            }
         }
         if !visiting.insert(key.clone()) {
+            if let Some((site, op)) = def_site
+                && Some(site) != self.current_lowering_site
+            {
+                let mut prior_visiting = visiting.clone();
+                prior_visiting.remove(&key);
+                return self
+                    .with_lowering_site(site, |this| this.lower_def_op(op, &mut prior_visiting))
+                    .map(|expr| self.project_alias_def_expr(vn, op, expr))
+                    .map_err(|err| {
+                        let classified = self.classify_varnode_lowering_error(op, err);
+                        if matches!(classified, MlilPreviewError::UnsupportedPattern("opcode")) {
+                            self.record_unsupported_inventory_event(
+                                "lower_varnode_prior_def_reentry",
+                                Some(vn),
+                                Some(op),
+                                Some(op.opcode),
+                                Some(self.pcode.blocks[site.block_idx].start_address),
+                                Some(u64::from(op.seq_num)),
+                                false,
+                                "varnode_prior_def_reentry_failed",
+                            );
+                        }
+                        classified
+                    });
+            }
             let cycle_name = if vn.space_id == UNIQUE_SPACE_ID {
                 unique_register_name(vn.offset, vn.size)
                     .map_or_else(|| format!("tmp_{:x}", vn.offset), ToString::to_string)
@@ -647,6 +763,7 @@ impl<'a> PreviewBuilder<'a> {
         let result = match def_site {
             Some((site, op)) => self
                 .with_lowering_site(site, |this| this.lower_def_op(op, visiting))
+                .map(|expr| self.project_alias_def_expr(vn, op, expr))
                 .map_err(|err| {
                     let classified = self.classify_varnode_lowering_error(op, err);
                     if matches!(classified, MlilPreviewError::UnsupportedPattern("opcode")) {
