@@ -10,11 +10,13 @@
 ///
 /// still have purely-integer semantics in the HIR even though `ptr` is now
 /// known to be a pointer.  This pass converts them to the higher-level
-/// `PtrOffset` and `Index` HIR nodes, which the printer renders as:
+/// pointer-valued HIR expressions, or to `Index` when the arithmetic is the
+/// address operand of a load/store. The printer renders these as:
 ///
 /// ```c
 /// ptr + k          (PtrOffset with stride 1)
-/// ptr[idx]         (Index)
+/// ptr + idx        (pointer-valued scaled add)
+/// ptr[idx]         (Index load/store)
 /// ```
 ///
 /// rather than the verbose `(uint8_t *)(ptr) + k` produced by the generic
@@ -25,15 +27,20 @@
 /// For every expression tree:
 ///
 /// 1. `Add(Var(x), Mul(idx, Const(stride)))` where `x.ty == Ptr(T)` and
-///    `stride == sizeof(T)` (or T is Unknown/byte) → `Index { base, index, elem_ty: T }`
+///    `stride == sizeof(T)` (or T is Unknown/byte) → pointer-valued
+///    `Add(Var(x), idx)`. The C printer's pointer arithmetic supplies the
+///    element scaling.
 ///
 /// 2. `Add(Var(x), Const(k))` where `x.ty == Ptr(_)` → `PtrOffset { base, offset: k }`
 ///
-/// 3. `Cast { ty: Ptr(Int8), expr: Add(Var(x), ...) }` where `x` is already
+/// 3. `Load/Deref(Add(Var(x), Mul(idx, Const(stride))))` where the stride
+///    matches the accessed type → `Index { base, index, elem_ty }`.
+///
+/// 4. `Cast { ty: Ptr(Int8), expr: Add(Var(x), ...) }` where `x` is already
 ///    known to be a pointer → strip the `Ptr(Int8)` cast (it was added as a
 ///    `uint8_t *` cast by the builder; now that the base is typed we don't need it).
 ///
-/// 4. `Sub(Var(x), Const(k))` where `x.ty == Ptr(_)` → `PtrOffset { base, offset: -k }`
+/// 5. `Sub(Var(x), Const(k))` where `x.ty == Ptr(_)` → `PtrOffset { base, offset: -k }`
 ///
 /// All transformations are conservative: we only act when the pointer type is
 /// concretely known (`Ptr(_)`), never for `Unknown`.
@@ -119,7 +126,7 @@ fn try_recover_ptr_arith(
     };
     let elem_ty = pointee_ty(ptr_ty).cloned().unwrap_or(NirType::Unknown);
 
-    // Pattern 1: Add(ptr, Mul(idx, Const(stride))) → Index when stride matches.
+    // Pattern 1: Add(ptr, Mul(idx, Const(stride))) → pointer add when stride matches.
     if !neg {
         if let Some((idx_expr, stride)) = try_extract_index_mul(rhs_expr) {
             let stride_matches = match type_byte_size(&elem_ty) {
@@ -127,18 +134,20 @@ fn try_recover_ptr_arith(
                 None => stride == 1, // unknown elem_ty → only allow stride-1
             };
             if stride_matches && stride > 0 {
-                return Some(HirExpr::Index {
-                    base: Box::new(ptr_expr.clone()),
-                    index: Box::new(idx_expr),
-                    elem_ty,
+                return Some(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(ptr_expr.clone()),
+                    rhs: Box::new(idx_expr),
+                    ty: ptr_ty.clone(),
                 });
             }
             // stride == 1 with byte pointer is also a valid index
             if stride == 1 && matches!(elem_ty, NirType::Int { bits: 8, .. } | NirType::Unknown) {
-                return Some(HirExpr::Index {
-                    base: Box::new(ptr_expr.clone()),
-                    index: Box::new(idx_expr),
-                    elem_ty,
+                return Some(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(ptr_expr.clone()),
+                    rhs: Box::new(idx_expr),
+                    ty: ptr_ty.clone(),
                 });
             }
         }
@@ -160,16 +169,55 @@ fn try_recover_ptr_arith(
         }
     }
 
-    // Pattern 3: Add(ptr, non-const-index) → Index with stride 1 for byte pointers.
+    // Pattern 3: Add(ptr, non-const-index) → pointer add with stride 1 for byte pointers.
     if !neg && matches!(elem_ty, NirType::Int { bits: 8, .. } | NirType::Unknown) {
-        return Some(HirExpr::Index {
-            base: Box::new(ptr_expr.clone()),
-            index: Box::new(rhs_expr.clone()),
-            elem_ty,
+        return Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(ptr_expr.clone()),
+            rhs: Box::new(rhs_expr.clone()),
+            ty: ptr_ty.clone(),
         });
     }
 
     None
+}
+
+fn try_recover_index_access(
+    ptr: &HirExpr,
+    access_ty: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs,
+        ..
+    } = ptr
+    else {
+        return None;
+    };
+    let ptr_ty = match lhs.as_ref() {
+        HirExpr::Var(name) => binding_types.get(name.as_str()).and_then(|t| {
+            if matches!(t, NirType::Ptr(_)) {
+                Some(t)
+            } else {
+                None
+            }
+        })?,
+        _ => return None,
+    };
+    let elem_ty = pointee_ty(ptr_ty).cloned().unwrap_or_else(|| access_ty.clone());
+    let (idx_expr, stride) = try_extract_index_mul(rhs.as_ref())?;
+    let access_size = type_byte_size(access_ty).or_else(|| type_byte_size(&elem_ty))?;
+    if stride > 0 && stride as u64 == access_size {
+        Some(HirExpr::Index {
+            base: lhs.clone(),
+            index: Box::new(idx_expr),
+            elem_ty: access_ty.clone(),
+        })
+    } else {
+        None
+    }
 }
 
 /// Recursively rewrite all pointer-arithmetic sub-expressions in `expr`.
@@ -210,7 +258,11 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
                 }
             }
         }
-        HirExpr::Load { ptr, .. } => {
+        HirExpr::Load { ptr, ty } => {
+            if let Some(index_expr) = try_recover_index_access(ptr, ty, binding_types) {
+                *expr = index_expr;
+                return true;
+            }
             changed |= recover_in_expr(ptr, binding_types);
         }
         HirExpr::Call { args, .. } => {
@@ -235,7 +287,23 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
 
 fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirType>) -> bool {
     match lhs {
-        HirLValue::Deref { ptr, .. } => recover_in_expr(ptr, binding_types),
+        HirLValue::Deref { ptr, ty } => {
+            if let Some(HirExpr::Index {
+                base,
+                index,
+                elem_ty,
+            }) = try_recover_index_access(ptr, ty, binding_types)
+            {
+                *lhs = HirLValue::Index {
+                    base,
+                    index,
+                    elem_ty,
+                };
+                true
+            } else {
+                recover_in_expr(ptr, binding_types)
+            }
+        }
         HirLValue::Index { base, index, .. } => {
             let a = recover_in_expr(base, binding_types);
             let b = recover_in_expr(index, binding_types);
@@ -243,6 +311,88 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
         }
         HirLValue::Var(_) => false,
     }
+}
+
+fn collect_pointer_assignment_types(stmts: &[HirStmt], out: &mut HashMap<String, Option<NirType>>) {
+    for stmt in stmts {
+        collect_pointer_assignment_types_stmt(stmt, out);
+    }
+}
+
+fn record_pointer_assignment(out: &mut HashMap<String, Option<NirType>>, name: &str, ty: NirType) {
+    if !matches!(ty, NirType::Ptr(_)) {
+        return;
+    }
+    match out.get_mut(name) {
+        Some(slot) => {
+            if slot.as_ref().is_some_and(|existing| existing != &ty) {
+                *slot = None;
+            }
+        }
+        None => {
+            out.insert(name.to_string(), Some(ty));
+        }
+    }
+}
+
+fn collect_pointer_assignment_types_stmt(
+    stmt: &HirStmt,
+    out: &mut HashMap<String, Option<NirType>>,
+) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } => record_pointer_assignment(out, name, expr_type(rhs)),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_pointer_assignment_types(body, out);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_pointer_assignment_types(then_body, out);
+            collect_pointer_assignment_types(else_body, out);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(init) = init {
+                collect_pointer_assignment_types_stmt(init, out);
+            }
+            if let Some(update) = update {
+                collect_pointer_assignment_types_stmt(update, out);
+            }
+            collect_pointer_assignment_types(body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_pointer_assignment_types(&case.body, out);
+            }
+            collect_pointer_assignment_types(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn propagate_pointer_assignment_types(func: &mut HirFunction) -> bool {
+    let mut inferred = HashMap::new();
+    collect_pointer_assignment_types(&func.body, &mut inferred);
+    if inferred.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
+        let Some(Some(ty)) = inferred.get(binding.name.as_str()) else {
+            continue;
+        };
+        if !matches!(binding.ty, NirType::Ptr(_)) {
+            binding.ty = ty.clone();
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn recover_in_stmts(stmts: &mut Vec<HirStmt>, binding_types: &HashMap<String, NirType>) -> bool {
@@ -327,7 +477,8 @@ pub(crate) fn apply_ptr_arith_recovery_pass(func: &mut HirFunction) -> bool {
     if binding_types.is_empty() {
         return false;
     }
-    recover_in_stmts(&mut func.body, &binding_types)
+    let changed = recover_in_stmts(&mut func.body, &binding_types);
+    propagate_pointer_assignment_types(func) || changed
 }
 
 #[cfg(test)]
@@ -392,9 +543,10 @@ mod tests {
         }
     }
 
-    /// Add(Var("p"), Mul(Var("i"), Const(4))) where p: Ptr(uint32) → Index
+    /// Pointer-valued Add(Var("p"), Mul(Var("i"), Const(4))) where p: Ptr(uint32)
+    /// keeps address semantics and becomes Add(Var("p"), Var("i")).
     #[test]
-    fn converts_add_stride_to_index() {
+    fn converts_add_stride_to_pointer_add() {
         let elem_ty = NirType::Int {
             bits: 32,
             signed: false,
@@ -424,6 +576,62 @@ mod tests {
                     bits: 64,
                     signed: false,
                 },
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+        assert!(changed);
+        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+            assert!(matches!(
+                rhs,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs,
+                    rhs,
+                    ty: NirType::Ptr(_),
+                } if matches!(lhs.as_ref(), HirExpr::Var(name) if name == "p")
+                    && matches!(rhs.as_ref(), HirExpr::Var(name) if name == "i")
+            ));
+        } else {
+            panic!("expected assign");
+        }
+    }
+
+    /// Load(Add(Var("p"), Mul(Var("i"), Const(4)))) where p: Ptr(uint32) → p[i].
+    #[test]
+    fn converts_load_stride_to_index_value() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("result".to_owned()),
+            rhs: HirExpr::Load {
+                ptr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("p".to_owned())),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Mul,
+                        lhs: Box::new(HirExpr::Var("i".to_owned())),
+                        rhs: Box::new(HirExpr::Const(
+                            4,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    }),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                }),
+                ty: elem_ty.clone(),
             },
         }];
         let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);

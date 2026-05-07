@@ -70,13 +70,20 @@ pub(crate) fn inline_single_use_temps(
             continue;
         }
 
-        let Some(target_idx) = find_inline_forward_target(stmts, idx, &name) else {
+        let prefers_stable_materialization = expr_prefers_stable_materialization(&rhs);
+        let Some(target_idx) =
+            find_inline_forward_target(stmts, idx, &name, prefers_stable_materialization)
+        else {
             idx += 1;
             continue;
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
+        let total_uses = count_uses_in_stmt_list(stmts, &name);
+        if total_uses != target_uses {
+            idx += 1;
+            continue;
+        }
         let predicate_sensitive = stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
-        let prefers_stable_materialization = expr_prefers_stable_materialization(&rhs);
         let low_cost_inline = expr_is_low_cost_inline_candidate(&rhs);
         if predicate_sensitive && prefers_stable_materialization {
             idx += 1;
@@ -891,7 +898,12 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
     changed
 }
 
-fn find_inline_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> Option<usize> {
+fn find_inline_forward_target(
+    stmts: &[HirStmt],
+    def_idx: usize,
+    name: &str,
+    stable_materialization: bool,
+) -> Option<usize> {
     let mut scan_idx = def_idx + 1;
     while scan_idx < stmts.len() {
         let stmt = &stmts[scan_idx];
@@ -907,6 +919,9 @@ fn find_inline_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> 
         // read nor redefined), we can skip past it — even if it is a loop,
         // switch, or block that would otherwise stop the scan.
         if uses == 0 {
+            if stable_materialization && stmt_blocks_stable_inline_scan(stmt) {
+                return None;
+            }
             scan_idx += 1;
             continue;
         }
@@ -917,6 +932,27 @@ fn find_inline_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> 
         return None;
     }
     None
+}
+
+fn stmt_blocks_stable_inline_scan(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            !matches!(lhs, HirLValue::Var(_)) || expr_has_side_effects(rhs)
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
+        HirStmt::Label(_) => false,
+        HirStmt::Return(None)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Block(_)
+        | HirStmt::Switch { .. }
+        | HirStmt::If { .. }
+        | HirStmt::While { .. }
+        | HirStmt::DoWhile { .. }
+        | HirStmt::For { .. }
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => true,
+    }
 }
 
 fn stmt_allows_forward_scan(stmt: &HirStmt) -> bool {
@@ -1383,12 +1419,19 @@ pub(crate) fn cast_elision_pass(func: &mut HirFunction) -> bool {
         .map(|b| (b.name.clone(), b.ty.clone()))
         .collect();
 
-    if binding_types.is_empty() {
+    let return_type = is_scalar_non_unknown(&func.return_type).then(|| func.return_type.clone());
+
+    if binding_types.is_empty() && return_type.is_none() {
         return false;
     }
 
     let mut changed = false;
-    elide_casts_in_stmts(&mut func.body, &binding_types, &mut changed);
+    elide_casts_in_stmts(
+        &mut func.body,
+        &binding_types,
+        return_type.as_ref(),
+        &mut changed,
+    );
     changed
 }
 
@@ -1399,16 +1442,18 @@ fn is_scalar_non_unknown(ty: &NirType) -> bool {
 fn elide_casts_in_stmts(
     stmts: &mut Vec<HirStmt>,
     binding_types: &std::collections::HashMap<String, NirType>,
+    return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
-        elide_casts_in_stmt(stmt, binding_types, changed);
+        elide_casts_in_stmt(stmt, binding_types, return_type, changed);
     }
 }
 
 fn elide_casts_in_stmt(
     stmt: &mut HirStmt,
     binding_types: &std::collections::HashMap<String, NirType>,
+    return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
     match stmt {
@@ -1425,36 +1470,44 @@ fn elide_casts_in_stmt(
                 }
             }
         }
-        HirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, changed),
+        HirStmt::Return(Some(expr)) => {
+            if let Some(return_type) = return_type
+                && let Some(stripped) = try_strip_return_outer_cast(expr, return_type)
+            {
+                *expr = stripped;
+                *changed = true;
+            }
+        }
+        HirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
         HirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            elide_casts_in_stmts(then_body, binding_types, changed);
-            elide_casts_in_stmts(else_body, binding_types, changed);
+            elide_casts_in_stmts(then_body, binding_types, return_type, changed);
+            elide_casts_in_stmts(else_body, binding_types, return_type, changed);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            elide_casts_in_stmts(body, binding_types, changed)
+            elide_casts_in_stmts(body, binding_types, return_type, changed)
         }
         HirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
-                elide_casts_in_stmt(i, binding_types, changed);
+                elide_casts_in_stmt(i, binding_types, return_type, changed);
             }
             if let Some(u) = update {
-                elide_casts_in_stmt(u, binding_types, changed);
+                elide_casts_in_stmt(u, binding_types, return_type, changed);
             }
-            elide_casts_in_stmts(body, binding_types, changed);
+            elide_casts_in_stmts(body, binding_types, return_type, changed);
         }
         HirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                elide_casts_in_stmts(&mut case.body, binding_types, changed);
+                elide_casts_in_stmts(&mut case.body, binding_types, return_type, changed);
             }
-            elide_casts_in_stmts(default, binding_types, changed);
+            elide_casts_in_stmts(default, binding_types, return_type, changed);
         }
-        // Return, Expr, Label, Goto, Break, Continue — not assignment context.
+        // Expr, Label, Goto, Break, Continue — not an implied cast context.
         _ => {}
     }
 }
@@ -1501,6 +1554,23 @@ fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr>
         _ => false,
     };
     if compatible {
+        Some((**inner).clone())
+    } else {
+        None
+    }
+}
+
+/// If `return_type` already declares the scalar conversion performed by a
+/// top-level return cast, the cast is implied by C return semantics.
+fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<HirExpr> {
+    let HirExpr::Cast {
+        ty: cast_ty,
+        expr: inner,
+    } = expr
+    else {
+        return None;
+    };
+    if cast_ty == return_type && is_scalar_non_unknown(cast_ty) {
         Some((**inner).clone())
     } else {
         None

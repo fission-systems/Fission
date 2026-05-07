@@ -2,6 +2,160 @@ use super::contracts::*;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    pub(super) fn loop_carried_output_binding_name(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> Option<String> {
+        if !Self::is_loop_carried_register_update_candidate(output) {
+            return None;
+        }
+        let block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        if !self.output_is_loop_carried_register_update(block_idx, op_idx, op, output) {
+            return None;
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+            return Some(name);
+        }
+        if self.abi_state().param_slot_for_varnode(output).is_some() {
+            return self.register_param(output);
+        }
+        None
+    }
+
+    pub(super) fn bind_materialized_output_to_existing_name(
+        &mut self,
+        op: &PcodeOp,
+        output: &Varnode,
+        name: &str,
+        preserve_materialization: bool,
+    ) {
+        self.materialized_vns
+            .insert(MaterializedVarnodeKey::new(output, op), name.to_string());
+        if preserve_materialization
+            && let Some(binding) = self.temps.get_mut(name)
+            && !binding.preserves_materialization()
+            && binding.is_temp_like()
+        {
+            binding.origin = Some(NirBindingOrigin::TempPreserved);
+            self.materialization_stabilized_count += 1;
+        }
+    }
+
+    fn is_loop_carried_register_update_candidate(output: &Varnode) -> bool {
+        !output.is_constant && is_register_space_id(output.space_id) && output.size >= 4
+    }
+
+    fn prior_materialized_loop_carried_output_name(&self, output: &Varnode) -> Option<String> {
+        let (site, op) = self.lookup_def_site(output)?;
+        if Some(site) == self.current_lowering_site {
+            return None;
+        }
+        let prior_output = op.output.as_ref()?;
+        if VarnodeKey::from(prior_output) != VarnodeKey::from(output) {
+            return None;
+        }
+        self.materialized_vns
+            .get(&MaterializedVarnodeKey::new(prior_output, op))
+            .cloned()
+    }
+
+    fn output_is_loop_carried_register_update(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> bool {
+        let output_key = VarnodeKey::from(output);
+        self.loop_bodies.iter().any(|loop_body| {
+            loop_body.body.contains(&block_idx)
+                && self.loop_update_reaches_backedge_tail(block_idx, loop_body)
+                && (Self::op_reads_varnode_key(op, &output_key)
+                    || self.loop_reads_varnode_before_update(loop_body, block_idx, op_idx, &output_key))
+        })
+    }
+
+    fn loop_update_reaches_backedge_tail(
+        &self,
+        block_idx: usize,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+    ) -> bool {
+        loop_body
+            .tails
+            .iter()
+            .any(|tail| *tail == block_idx || self.block_can_reach(block_idx, *tail, loop_body.head))
+    }
+
+    fn loop_reads_varnode_before_update(
+        &self,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        block_idx: usize,
+        op_idx: usize,
+        output_key: &VarnodeKey,
+    ) -> bool {
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return false;
+        };
+        if Self::block_reads_varnode_before_redefinition(block, op_idx, output_key) {
+            return true;
+        }
+
+        if loop_body.head == block_idx {
+            return false;
+        }
+        self.pcode
+            .blocks
+            .get(loop_body.head)
+            .is_some_and(|head| Self::block_reads_varnode_before_redefinition(head, head.ops.len(), output_key))
+    }
+
+    fn block_reads_varnode_before_redefinition(
+        block: &crate::pcode::PcodeBasicBlock,
+        limit: usize,
+        output_key: &VarnodeKey,
+    ) -> bool {
+        for candidate in block.ops.iter().take(limit) {
+            if Self::op_reads_varnode_key(candidate, output_key) {
+                return true;
+            }
+            if candidate
+                .output
+                .as_ref()
+                .is_some_and(|output| Self::varnode_key_may_alias_output(&VarnodeKey::from(output), output_key))
+            {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn op_reads_varnode_key(op: &PcodeOp, output_key: &VarnodeKey) -> bool {
+        op.inputs.iter().any(|input| {
+            Self::varnode_key_may_alias_output(&VarnodeKey::from(input), output_key)
+        })
+    }
+
+    fn varnode_key_may_alias_output(candidate: &VarnodeKey, output_key: &VarnodeKey) -> bool {
+        candidate == output_key
+            || (is_register_space_id(candidate.space_id)
+                && is_register_space_id(output_key.space_id)
+                && candidate.space_id == output_key.space_id
+                && Self::register_key_ranges_overlap(candidate, output_key))
+    }
+
+    fn register_key_ranges_overlap(lhs: &VarnodeKey, rhs: &VarnodeKey) -> bool {
+        let Some(lhs_end) = lhs.offset.checked_add(u64::from(lhs.size)) else {
+            return false;
+        };
+        let Some(rhs_end) = rhs.offset.checked_add(u64::from(rhs.size)) else {
+            return false;
+        };
+        lhs.offset < rhs_end && rhs.offset < lhs_end
+    }
+
     pub(super) fn describe_loop_carried_overwrite_provenance(
         &self,
         _block: &crate::pcode::PcodeBasicBlock,
@@ -456,6 +610,132 @@ impl<'a> PreviewBuilder<'a> {
 mod tests {
     use super::super::test_support::*;
     use super::*;
+
+    fn reg(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn lhs_var(stmt: &HirStmt) -> Option<&str> {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn loop_carried_register_update_reuses_prior_binding_and_param() {
+        let rax = reg(0x00, 8);
+        let rcx = reg(0x08, 8);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(0)]),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(rax.clone()),
+                        vec![rax.clone(), constant(1)],
+                    ),
+                    op(
+                        3,
+                        PcodeOpcode::IntAdd,
+                        Some(rcx.clone()),
+                        vec![rcx.clone(), constant(4)],
+                    ),
+                    op(4, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(0x1020, 2, vec![op(5, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![1, 2];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::WindowsX64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let preheader = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("preheader lowering");
+        let init_name = lhs_var(&preheader[0]).expect("preheader init binding");
+        let loop_body = builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .expect("loop lowering");
+
+        assert!(
+            loop_body.iter().any(|stmt| lhs_var(stmt) == Some(init_name)),
+            "loop-carried accumulator update should reuse the preheader binding: {loop_body:?}"
+        );
+        assert!(
+            loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+            "loop-carried parameter register update should assign back to the parameter: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn nonlocal_use_scan_ignores_unreachable_preheader_use() {
+        let rax = reg(0x00, 8);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntXor,
+                        Some(rax.clone()),
+                        vec![rax.clone(), rax.clone()],
+                    ),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(rax.clone()),
+                        vec![rax.clone(), constant(1)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![1];
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert_eq!(
+            builder.first_output_use_site_outside_block(0x1010, &rax),
+            None
+        );
+        assert_eq!(
+            builder.first_output_use_site_outside_block(0x1000, &rax),
+            Some((0x1010, 0, 2))
+        );
+    }
 
     #[test]
     fn loop_carried_overwrite_provenance_marks_boolean_flag_without_multiequal() {

@@ -78,6 +78,16 @@ fn make_func(name: &str, locals: Vec<NirBinding>, body: Vec<HirStmt>) -> HirFunc
     }
 }
 
+fn param_binding(name: &str, bits: u32) -> NirBinding {
+    NirBinding {
+        name: name.to_string(),
+        ty: int(bits),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::ParamIndex(0)),
+        initializer: None,
+    }
+}
+
 // ── Constant folding (via normalize_hir_function) ────────────────────────────
 
 #[test]
@@ -99,6 +109,37 @@ fn constant_folding_binary_add_via_normalize() {
         code.contains("return 8;"),
         "expected 'return 8;' in: {code}"
     );
+}
+
+#[test]
+fn normalize_hir_function_elides_return_cast_implied_by_return_type() {
+    let mut func = HirFunction {
+        name: "add".to_string(),
+        params: vec![param_binding("param_1", 64), param_binding("param_2", 64)],
+        locals: vec![],
+        return_type: int(32),
+        surface_return_type_name: None,
+        body: vec![return_expr(HirExpr::Cast {
+            ty: int(32),
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(varexpr("param_1")),
+                rhs: Box::new(varexpr("param_2")),
+                ty: int(64),
+            }),
+        })],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("return param_1 + param_2;"),
+        "rendered:\n{}",
+        rendered
+    );
+    assert!(!rendered.contains("(uint)"), "rendered:\n{}", rendered);
 }
 
 #[test]
@@ -263,6 +304,463 @@ fn defuse_preserves_used_temp_assignment() {
     assert!(
         code.contains("return"),
         "return should be present; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_loop_assigned_temp_used_after_loop() {
+    let mut func = HirFunction {
+        name: "test_loop_carried_return_temp".to_string(),
+        params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
+        locals: vec![temp_binding("xVar27", 32), temp_binding("bVar29", 1)],
+        return_type: int(32),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::DoWhile {
+                body: vec![
+                    assign(
+                        "xVar27",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(varexpr("param_1")),
+                            rhs: Box::new(const_expr(1, 32)),
+                            ty: int(32),
+                        },
+                    ),
+                    assign(
+                        "bVar29",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Eq,
+                            lhs: Box::new(varexpr("xVar27")),
+                            rhs: Box::new(const_expr(0, 32)),
+                            ty: NirType::Bool,
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("xVar27")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("xVar27 = param_1 + 1;"),
+        "loop-carried return temp assignment must be preserved; got: {code}"
+    );
+    assert!(
+        code.contains("return xVar27;"),
+        "post-loop return must still read the loop-assigned temp; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_preheader_temp_used_inside_loop() {
+    let mut func = HirFunction {
+        name: "test_preheader_loop_input_temp".to_string(),
+        params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
+        locals: vec![
+            temp_binding("xVar10", 32),
+            temp_binding("uVar21", 32),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(32),
+        surface_return_type_name: None,
+        body: vec![
+            assign("xVar10", const_expr(0, 32)),
+            HirStmt::DoWhile {
+                body: vec![
+                    assign("uVar21", varexpr("param_1")),
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(varexpr("xVar10")),
+                            rhs: Box::new(varexpr("uVar21")),
+                            ty: int(32),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("uVar22")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("xVar10 = 0;"),
+        "preheader temp used in loop body must be preserved; got: {code}"
+    );
+    assert!(
+        code.contains("uVar22 = xVar10 + param_1;"),
+        "loop body must still read the preheader temp; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_preheader_loop_carried_self_update() {
+    let mut func = HirFunction {
+        name: "test_preheader_loop_carried_self_update".to_string(),
+        params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
+        locals: vec![
+            temp_binding("xVar10", 64),
+            temp_binding("uVar21", 32),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(64),
+        surface_return_type_name: None,
+        body: vec![
+            assign("xVar10", const_expr(0, 64)),
+            HirStmt::DoWhile {
+                body: vec![
+                    assign("uVar21", varexpr("param_1")),
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                ty: int(32),
+                                expr: Box::new(varexpr("xVar10")),
+                            }),
+                            rhs: Box::new(varexpr("uVar21")),
+                            ty: int(32),
+                        },
+                    ),
+                    assign(
+                        "xVar10",
+                        HirExpr::Cast {
+                            ty: int(64),
+                            expr: Box::new(varexpr("uVar22")),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("xVar10")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("xVar10 = 0;"),
+        "loop-carried accumulator initializer must be preserved; got: {code}"
+    );
+    assert!(
+        code.contains("xVar10 = uVar22;"),
+        "loop-carried accumulator update must remain explicit; got: {code}"
+    );
+    assert!(
+        code.contains("return xVar10;"),
+        "return must read the loop-carried accumulator; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
+    let mut func = HirFunction {
+        name: "test_preheader_copy_chain_loop_carried_self_update".to_string(),
+        params: vec![
+            param_binding("var_0", 32),
+            param_binding("param_1", 32),
+            param_binding("keep_going", 8),
+        ],
+        locals: vec![
+            temp_binding("uVar9", 32),
+            temp_binding("xVar10", 64),
+            temp_binding("uVar21", 32),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(64),
+        surface_return_type_name: None,
+        body: vec![
+            assign(
+                "uVar9",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(varexpr("var_0")),
+                    rhs: Box::new(varexpr("var_0")),
+                    ty: int(32),
+                },
+            ),
+            assign(
+                "xVar10",
+                HirExpr::Cast {
+                    ty: int(64),
+                    expr: Box::new(varexpr("uVar9")),
+                },
+            ),
+            HirStmt::DoWhile {
+                body: vec![
+                    assign("uVar21", varexpr("param_1")),
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                ty: int(32),
+                                expr: Box::new(varexpr("xVar10")),
+                            }),
+                            rhs: Box::new(varexpr("uVar21")),
+                            ty: int(32),
+                        },
+                    ),
+                    assign(
+                        "xVar10",
+                        HirExpr::Cast {
+                            ty: int(64),
+                            expr: Box::new(varexpr("uVar22")),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("xVar10")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("xVar10 = 0;"),
+        "preheader loop-carried accumulator initializer must be preserved; got: {code}"
+    );
+    assert!(
+        code.contains("xVar10 = uVar22;"),
+        "loop-carried accumulator update must remain explicit; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
+    let mut func = HirFunction {
+        name: "test_loop_carried_initializer_after_predicate_use".to_string(),
+        params: vec![
+            param_binding("var_0", 32),
+            param_binding("param_1", 32),
+            param_binding("keep_going", 8),
+        ],
+        locals: vec![
+            temp_binding("xVar10", 64),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(64),
+        surface_return_type_name: None,
+        body: vec![
+            assign(
+                "xVar10",
+                HirExpr::Cast {
+                    ty: int(64),
+                    expr: Box::new(varexpr("var_0")),
+                },
+            ),
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Cast {
+                        ty: int(32),
+                        expr: Box::new(varexpr("xVar10")),
+                    }),
+                    rhs: Box::new(const_expr(0, 32)),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![return_expr(const_expr(0, 64))],
+                else_body: Vec::new(),
+            },
+            HirStmt::DoWhile {
+                body: vec![
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                ty: int(32),
+                                expr: Box::new(varexpr("xVar10")),
+                            }),
+                            rhs: Box::new(varexpr("param_1")),
+                            ty: int(32),
+                        },
+                    ),
+                    assign(
+                        "xVar10",
+                        HirExpr::Cast {
+                            ty: int(64),
+                            expr: Box::new(varexpr("uVar22")),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("xVar10")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    let init_idx = code
+        .find("xVar10 =")
+        .unwrap_or_else(|| panic!("loop-carried initializer was removed; got: {code}"));
+    let loop_idx = code
+        .find("do {")
+        .unwrap_or_else(|| panic!("expected loop to remain; got: {code}"));
+    assert!(
+        init_idx < loop_idx,
+        "initializer must stay before the loop when the value is also used by a predicate; got: {code}"
+    );
+    assert!(
+        code.contains("uVar22 = (uint)xVar10 + param_1;"),
+        "loop body must still read the loop-carried accumulator; got: {code}"
+    );
+    assert!(
+        code.contains("xVar10 = uVar22;"),
+        "loop-carried accumulator update must remain explicit; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
+    let mut func = HirFunction {
+        name: "test_sccp_loop_carried_zero".to_string(),
+        params: vec![
+            param_binding("param_1", 32),
+            param_binding("param_2", 32),
+            param_binding("keep_going", 8),
+        ],
+        locals: vec![
+            temp_binding("xVar10", 64),
+            temp_binding("uVar21", 32),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(64),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(varexpr("param_2")),
+                    rhs: Box::new(const_expr(0, 32)),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![return_expr(const_expr(0, 64))],
+                else_body: Vec::new(),
+            },
+            assign("xVar10", const_expr(0, 64)),
+            HirStmt::DoWhile {
+                body: vec![
+                    assign("uVar21", varexpr("param_1")),
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                ty: int(32),
+                                expr: Box::new(varexpr("xVar10")),
+                            }),
+                            rhs: Box::new(varexpr("uVar21")),
+                            ty: int(32),
+                        },
+                    ),
+                    assign(
+                        "xVar10",
+                        HirExpr::Cast {
+                            ty: int(64),
+                            expr: Box::new(varexpr("uVar22")),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("xVar10")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("uVar22 = (uint)xVar10 + param_1;"),
+        "SCCP must not substitute the preheader constant for a loop-carried accumulator; got: {code}"
+    );
+    assert!(
+        code.contains("xVar10 = uVar22;"),
+        "loop-carried accumulator update must remain explicit; got: {code}"
+    );
+}
+
+#[test]
+fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
+    let mut func = HirFunction {
+        name: "test_preheader_loop_input_copy_chain".to_string(),
+        params: vec![
+            param_binding("var_0", 32),
+            param_binding("param_1", 32),
+            param_binding("keep_going", 8),
+        ],
+        locals: vec![
+            temp_binding("uVar9", 32),
+            temp_binding("xVar10", 64),
+            temp_binding("uVar21", 32),
+            temp_binding("uVar22", 32),
+        ],
+        return_type: int(32),
+        surface_return_type_name: None,
+        body: vec![
+            assign(
+                "uVar9",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(varexpr("var_0")),
+                    rhs: Box::new(varexpr("var_0")),
+                    ty: int(32),
+                },
+            ),
+            assign(
+                "xVar10",
+                HirExpr::Cast {
+                    ty: int(64),
+                    expr: Box::new(varexpr("uVar9")),
+                },
+            ),
+            HirStmt::DoWhile {
+                body: vec![
+                    assign("uVar21", varexpr("param_1")),
+                    assign(
+                        "uVar22",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                ty: int(32),
+                                expr: Box::new(varexpr("xVar10")),
+                            }),
+                            rhs: Box::new(varexpr("uVar21")),
+                            ty: int(32),
+                        },
+                    ),
+                ],
+                cond: varexpr("keep_going"),
+            },
+            return_expr(varexpr("uVar22")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("xVar10 ="),
+        "preheader copy chain feeding loop body must remain defined; got: {code}"
+    );
+    assert!(
+        code.contains("uVar22 =") && code.contains("xVar10"),
+        "loop body must still read the preheader chain result; got: {code}"
     );
 }
 

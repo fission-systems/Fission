@@ -40,6 +40,14 @@ fn merge_env(a: &ConstEnv, b: &ConstEnv) -> ConstEnv {
     out
 }
 
+fn env_without_vars(env: &ConstEnv, vars: &HashSet<String>) -> ConstEnv {
+    let mut out = env.clone();
+    for var in vars {
+        out.remove(var);
+    }
+    out
+}
+
 fn loop_variant_vars(body: &[HirStmt]) -> HashSet<String> {
     let mut vars = HashSet::new();
     for stmt in body {
@@ -88,33 +96,36 @@ fn loop_variant_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
     }
 }
 
-fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) {
+fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
+    let mut changed = false;
     match expr {
         HirExpr::Var(name) => {
             if let Some((v, ty)) = env.get(name) {
                 *expr = HirExpr::Const(*v, ty.clone());
+                changed = true;
             }
         }
-        HirExpr::Unary { expr: inner, .. } => sccp_subst_expr(inner, env),
+        HirExpr::Unary { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
         HirExpr::Binary { lhs, rhs, .. } => {
-            sccp_subst_expr(lhs, env);
-            sccp_subst_expr(rhs, env);
+            changed |= sccp_subst_expr(lhs, env);
+            changed |= sccp_subst_expr(rhs, env);
         }
-        HirExpr::Cast { expr: inner, .. } => sccp_subst_expr(inner, env),
-        HirExpr::Load { ptr, .. } => sccp_subst_expr(ptr, env),
-        HirExpr::PtrOffset { base, .. } => sccp_subst_expr(base, env),
+        HirExpr::Cast { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
+        HirExpr::Load { ptr, .. } => changed |= sccp_subst_expr(ptr, env),
+        HirExpr::PtrOffset { base, .. } => changed |= sccp_subst_expr(base, env),
         HirExpr::Index { base, index, .. } => {
-            sccp_subst_expr(base, env);
-            sccp_subst_expr(index, env);
+            changed |= sccp_subst_expr(base, env);
+            changed |= sccp_subst_expr(index, env);
         }
         HirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
-                sccp_subst_expr(a, env);
+                changed |= sccp_subst_expr(a, env);
             }
         }
-        HirExpr::AggregateCopy { src, .. } => sccp_subst_expr(src, env),
+        HirExpr::AggregateCopy { src, .. } => changed |= sccp_subst_expr(src, env),
         HirExpr::Const(_, _) => {}
     }
+    changed
 }
 
 fn eval_truth(expr: &HirExpr, env: &ConstEnv) -> Option<bool> {
@@ -138,8 +149,8 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
                 if let HirLValue::Var(name) = lhs {
-                    sccp_subst_expr(rhs, env);
-                    fold_expr_hir(rhs);
+                    changed |= sccp_subst_expr(rhs, env);
+                    changed |= fold_expr_hir(rhs);
                     if let Some((v, ty)) = eval_hir_expr_with_const_env(rhs, env) {
                         if !matches!(rhs, HirExpr::Const(cv, _) if *cv == v) {
                             *rhs = HirExpr::Const(v, ty.clone());
@@ -150,18 +161,18 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                         env.remove(name);
                     }
                 } else {
-                    sccp_subst_expr(rhs, env);
-                    fold_expr_hir(rhs);
+                    changed |= sccp_subst_expr(rhs, env);
+                    changed |= fold_expr_hir(rhs);
                 }
                 break;
             }
             HirStmt::VaStart { va_list, .. } => {
-                sccp_subst_expr(va_list, env);
+                changed |= sccp_subst_expr(va_list, env);
                 changed |= fold_expr_hir(va_list);
                 break;
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                sccp_subst_expr(expr, env);
+                changed |= sccp_subst_expr(expr, env);
                 changed |= fold_expr_hir(expr);
                 break;
             }
@@ -175,8 +186,8 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 else_body,
             } => {
                 let pre = env.clone();
-                sccp_subst_expr(cond, &pre);
-                fold_expr_hir(cond);
+                changed |= sccp_subst_expr(cond, &pre);
+                changed |= fold_expr_hir(cond);
                 match eval_truth(cond, &pre) {
                     Some(true) => {
                         *stmt = HirStmt::Block(std::mem::take(then_body));
@@ -200,28 +211,24 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
             }
             HirStmt::While { cond, body } => {
                 let pre = env.clone();
-                sccp_subst_expr(cond, &pre);
-                fold_expr_hir(cond);
                 let modified = loop_variant_vars(body);
-                let mut inner = pre.clone();
+                let loop_entry = env_without_vars(&pre, &modified);
+                changed |= sccp_subst_expr(cond, &loop_entry);
+                changed |= fold_expr_hir(cond);
+                let mut inner = loop_entry;
                 changed |= sccp_transform_stmts(body, &mut inner);
-                *env = pre;
-                for m in modified {
-                    env.remove(&m);
-                }
+                *env = env_without_vars(&pre, &modified);
                 break;
             }
             HirStmt::DoWhile { body, cond } => {
                 let pre = env.clone();
                 let modified = loop_variant_vars(body);
-                let mut inner = pre.clone();
+                let mut inner = env_without_vars(&pre, &modified);
                 changed |= sccp_transform_stmts(body, &mut inner);
-                sccp_subst_expr(cond, &inner);
-                fold_expr_hir(cond);
-                *env = pre;
-                for m in modified {
-                    env.remove(&m);
-                }
+                let cond_env = env_without_vars(&inner, &modified);
+                changed |= sccp_subst_expr(cond, &cond_env);
+                changed |= fold_expr_hir(cond);
+                *env = env_without_vars(&pre, &modified);
                 break;
             }
             HirStmt::For {
@@ -234,10 +241,6 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                     changed |= sccp_stmt(i, env);
                 }
                 let loop_entry = env.clone();
-                if let Some(c) = cond.as_mut() {
-                    sccp_subst_expr(c, &loop_entry);
-                    fold_expr_hir(c);
-                }
                 let mut modified = loop_variant_vars(body);
                 if let Some(u) = update {
                     if let HirStmt::Assign {
@@ -248,14 +251,17 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                         modified.insert(n.clone());
                     }
                 }
-                let mut inner = loop_entry.clone();
-                changed |= sccp_transform_stmts(body, &mut inner);
-                *env = loop_entry;
-                for m in modified {
-                    env.remove(&m);
+                let loop_body_entry = env_without_vars(&loop_entry, &modified);
+                if let Some(c) = cond.as_mut() {
+                    changed |= sccp_subst_expr(c, &loop_body_entry);
+                    changed |= fold_expr_hir(c);
                 }
+                let mut inner = loop_body_entry;
+                changed |= sccp_transform_stmts(body, &mut inner);
+                *env = env_without_vars(&loop_entry, &modified);
                 if let Some(u) = update.as_mut() {
-                    changed |= sccp_stmt(u, env);
+                    let mut update_env = env_without_vars(&inner, &modified);
+                    changed |= sccp_stmt(u, &mut update_env);
                 }
                 break;
             }
@@ -265,8 +271,8 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 default,
             } => {
                 let pre = env.clone();
-                sccp_subst_expr(expr, &pre);
-                fold_expr_hir(expr);
+                changed |= sccp_subst_expr(expr, &pre);
+                changed |= fold_expr_hir(expr);
                 if let Some((v, _)) = eval_hir_expr_with_const_env(expr, &pre) {
                     let mut taken: Option<Vec<HirStmt>> = None;
                     for case in cases.iter_mut() {

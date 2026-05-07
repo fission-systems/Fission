@@ -319,16 +319,21 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             None
         };
-        match Self::classify_no_consumer_materialization_decision(
+        let no_consumer_decision = Self::classify_no_consumer_materialization_decision(
             output,
             &rhs,
             legacy_inline_candidate,
             replacement_plan,
             no_consumer_hazard,
             no_consumer_profile,
-        ) {
-            NoConsumerMaterializationDecision::Suppress => {
-                let suppression_enabled = Self::no_consumer_suppression_enabled();
+        );
+        match no_consumer_decision {
+            NoConsumerMaterializationDecision::Suppress
+            | NoConsumerMaterializationDecision::SuppressAlways => {
+                let suppression_enabled = matches!(
+                    no_consumer_decision,
+                    NoConsumerMaterializationDecision::SuppressAlways
+                ) || Self::no_consumer_suppression_enabled();
                 self.trace_no_consumer_materialization(
                     block_addr,
                     op.seq_num,
@@ -399,10 +404,16 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs = HirLValue::Var(
+        let lhs_name = if let Some(name) =
+            self.loop_carried_output_binding_name(block, op_idx, op, output)
+        {
+            self.bind_materialized_output_to_existing_name(op, output, &name, preserve_materialization);
+            name
+        } else {
             self.ensure_temp_binding_for_output(op, output, preserve_materialization)
-                .name,
-        );
+                .name
+        };
+        let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
     }
 

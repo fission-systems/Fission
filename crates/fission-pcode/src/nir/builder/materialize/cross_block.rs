@@ -432,22 +432,29 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<(u64, usize, u32)> {
         let key = VarnodeKey::from(output);
+        let current_block_idx = self.address_to_index.get(&current_block_addr).copied()?;
         self.pcode
             .blocks
             .iter()
-            .filter(|block| block.start_address != current_block_addr)
-            .find_map(|block| {
-                block
-                    .ops
-                    .iter()
-                    .enumerate()
-                    .find(|(_, candidate)| {
-                        candidate
-                            .inputs
-                            .iter()
-                            .any(|input| VarnodeKey::from(input) == key)
-                    })
-                    .map(|(idx, op)| (block.start_address, idx, op.seq_num))
+            .enumerate()
+            .filter(|(_, block)| block.start_address != current_block_addr)
+            .filter(|(candidate_block_idx, _)| {
+                self.block_can_reach(current_block_idx, *candidate_block_idx, usize::MAX)
+            })
+            .find_map(|(_, block)| {
+                for (idx, candidate) in block.ops.iter().enumerate() {
+                    if candidate
+                        .inputs
+                        .iter()
+                        .any(|input| VarnodeKey::from(input) == key)
+                    {
+                        return Some((block.start_address, idx, candidate.seq_num));
+                    }
+                    if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                        return None;
+                    }
+                }
+                None
             })
     }
 
@@ -1701,7 +1708,7 @@ impl<'a> PreviewBuilder<'a> {
         if forward_join_predecessor_count > 2 {
             return ForwardJoinNotSelectedRejectedReason::JoinHasMultipleAmbiguousPreds;
         }
-        ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentHeuristic
+        ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentSelectionPolicy
     }
 
     pub(super) fn describe_forward_join_not_selected_proof(
@@ -3241,7 +3248,7 @@ mod tests {
     }
 
     #[test]
-    fn forward_join_not_selected_proof_marks_current_heuristic_rejection() {
+    fn forward_join_not_selected_proof_marks_current_selection_policy_rejection() {
         let output = varnode(0x10);
         let consumer_out = varnode(0x30);
         let mut blocks = vec![
@@ -3328,7 +3335,7 @@ mod tests {
         assert!(proof.event_reaches_forward_join);
         assert_eq!(
             proof.rejected_reason,
-            ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentHeuristic
+            ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentSelectionPolicy
         );
     }
 

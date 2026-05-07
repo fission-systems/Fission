@@ -848,13 +848,14 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> bool {
         let key = VarnodeKey::from(output);
-        let block_idx = self
-            .address_to_index
-            .get(&block.start_address)
-            .copied()
-            .unwrap_or(usize::MAX);
+        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+            return false;
+        };
         for (candidate_block_idx, candidate_block) in self.pcode.blocks.iter().enumerate() {
             if candidate_block_idx == block_idx {
+                continue;
+            }
+            if !self.block_can_reach(block_idx, candidate_block_idx, usize::MAX) {
                 continue;
             }
             for candidate in &candidate_block.ops {
@@ -2945,6 +2946,16 @@ impl<'a> PreviewBuilder<'a> {
                 | PcodeOpcode::Cast
                 | PcodeOpcode::PtrAdd
                 | PcodeOpcode::PtrSub
+                | PcodeOpcode::IntEqual
+                | PcodeOpcode::IntNotEqual
+                | PcodeOpcode::IntLess
+                | PcodeOpcode::IntLessEqual
+                | PcodeOpcode::IntSLess
+                | PcodeOpcode::IntSLessEqual
+                | PcodeOpcode::BoolNegate
+                | PcodeOpcode::BoolXor
+                | PcodeOpcode::BoolAnd
+                | PcodeOpcode::BoolOr
         )
     }
 
@@ -3138,9 +3149,6 @@ mod tests {
         assert!(
             !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::BranchInd)
         );
-        assert!(
-            !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::IntEqual)
-        );
     }
 
     #[test]
@@ -3156,6 +3164,12 @@ mod tests {
         ));
         assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
             PcodeOpcode::PtrAdd
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::IntEqual
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::BoolOr
         ));
     }
 
