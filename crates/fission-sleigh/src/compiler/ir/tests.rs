@@ -94,19 +94,22 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
     let entry_spec = x86_64_entry_spec_path();
     let compiled = crate::compiler::compile_frontend_for_entry_spec(&entry_spec)
         .expect("compile x86-64 frontend with packaged .sla");
+    let mut total = 0usize;
     let mut runtime_ready = 0usize;
+    let mut unsupported = Vec::new();
     for constructor in compiled
         .subtables
         .values()
         .flat_map(|subtable| subtable.constructors.iter())
     {
+        total += 1;
+        assert!(
+            constructor.sla_identity.is_some(),
+            "packaged .sla frontends must not retain non-.sla native constructors: {}",
+            constructor.source
+        );
         if constructor.runtime_ready {
             runtime_ready += 1;
-            assert!(
-                constructor.sla_identity.is_some(),
-                "runtime-ready constructor must be selected by .sla native identity: {}",
-                constructor.source
-            );
             assert_eq!(
                 constructor.constructor_template.template_source,
                 CompiledTemplateSource::SpecDerived
@@ -119,16 +122,22 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
                 "runtime-ready .sla constructor contains non-canonical template shape: {}",
                 constructor.source
             );
-        } else if constructor.sla_identity.is_none() {
-            assert!(
-                constructor.unsupported_template_kind.is_some(),
-                "non-.sla constructors cannot become canonical runtime successes"
-            );
+        } else {
+            unsupported.push((
+                constructor.source.clone(),
+                constructor.unsupported_template_kind.clone(),
+            ));
         }
     }
+    assert!(total > 0, "packaged x86-64 .sla should provide canonical constructors");
     assert!(
-        runtime_ready > 0,
-        "packaged x86-64 .sla should provide runtime-ready canonical constructors"
+        unsupported.is_empty(),
+        "packaged x86-64 .sla constructors must all be runtime-ready: {:?}",
+        unsupported
+    );
+    assert_eq!(
+        runtime_ready, total,
+        "all packaged x86-64 .sla constructors should be runtime-ready"
     );
 }
 

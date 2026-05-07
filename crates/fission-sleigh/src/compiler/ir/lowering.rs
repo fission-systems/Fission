@@ -270,6 +270,9 @@ pub fn build_frontend_from_sla_native_model(
     compiled.sla_register_space_index = library.register_space_index;
     compiled.sla_uniqbase = library.uniqbase;
     compiled.sla_uniqmask = library.uniqmask;
+    // Once a packaged .sla library is available, runtime execution must be
+    // driven by that constructor identity domain only.
+    compiled.subtables.clear();
 
     // The compiled .sla artifact is the canonical executable identity. Ghidra
     // decision leaves resolve subtable-local constructor ids; Fission must
