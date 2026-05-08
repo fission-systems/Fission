@@ -1120,7 +1120,7 @@ def render_case_call(func: SourceFunction, case: tuple[int, ...] | dict[str, Any
     if isinstance(case, dict):
         return render_explicit_case_call(func, case, index)
     args = ", ".join(str(v) for v in case)
-    return f'    printf("%lld\\n", (long long){func.name}({args}));'
+    return f'    printf("%lld\\n", (long long){func.name}({args}));\n    fflush(stdout);'
 
 
 def c_int_array(values: list[int]) -> str:
@@ -1159,6 +1159,7 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
         lines.append(f'        printf("%s%d", i ? "," : "", {array_name}[i]);')
         lines.append("    }")
     lines.append('    printf("\\n");')
+    lines.append("    fflush(stdout);")
     return "\n".join(lines)
 
 
@@ -1208,8 +1209,14 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
         )
     except subprocess.CalledProcessError as exc:
         return {"status": "run_failed", "detail": (exc.stderr or exc.stdout or str(exc))[-4000:]}
-    except subprocess.TimeoutExpired:
-        return {"status": "run_timeout"}
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return {
+            "status": "run_timeout",
+            "partial_stdout": stdout[-4000:],
+            "partial_stderr": stderr[-4000:],
+        }
 
     return {"status": "ok", "stdout": run_res.stdout, "compile_stdout": compile_res.stdout}
 
