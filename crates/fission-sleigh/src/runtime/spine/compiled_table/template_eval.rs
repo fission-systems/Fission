@@ -1266,15 +1266,15 @@ impl<'c> CompiledTableEmitter<'c> {
                 if let Some(space_ref) = self.sla_spaces.get(&space_id) {
                     return Ok(space_ref.clone());
                 }
-                // Const space (ID 0) is always the constant space regardless of
-                // architecture. Fall back to index-only for unknown spaces.
-                let name = if space_id == 0 { "const" } else { "unknown" };
-                Ok(CompiledSpaceRef {
-                    name: name.to_string(),
-                    index: space_id,
-                    word_size: 0,
-                    addr_size: 0,
-                })
+                if space_id == 0 {
+                    return Ok(CompiledSpaceRef {
+                        name: "const".to_string(),
+                        index: 0,
+                        word_size: 0,
+                        addr_size: 0,
+                    });
+                }
+                bail!("SpaceTpl references unknown SLA space id {space_id}")
             }
         }
     }
