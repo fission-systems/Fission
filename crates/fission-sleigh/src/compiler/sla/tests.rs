@@ -69,6 +69,15 @@ fn decodes_real_x86_64_sla_construct_templates() {
 }
 
 #[test]
+fn sla_template_decoder_does_not_synthesize_unknown_subtables() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("unknown_subtable_"),
+        "compiled .sla subtable decoding must fail closed instead of synthesizing subtable names"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

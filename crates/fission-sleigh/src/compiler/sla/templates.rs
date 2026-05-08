@@ -66,14 +66,7 @@ pub(super) fn decode_construct_templates(
     let mut subtables = BTreeMap::new();
     let mut subtable_names_by_id = BTreeMap::new();
     for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        let id = subtable_sym
-            .attr_unsigned(sla_format::ATTR_ID)
-            .unwrap_or(u64::MAX) as u32;
-        let name = subtable_sym
-            .attr_string(sla_format::ATTR_NAME)
-            .map(|s| s.to_string())
-            .or_else(|| symbol_names.get(&id).cloned())
-            .unwrap_or_else(|| format!("unknown_subtable_{id}"));
+        let (id, name) = decode_subtable_identity(subtable_sym, &symbol_names)?;
         subtable_names_by_id.insert(id, name);
     }
 
@@ -362,14 +355,7 @@ pub(super) fn decode_construct_templates(
 
     // 2. Pass Two: Process subtable symbols and their content
     for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        let id = subtable_sym
-            .attr_unsigned(sla_format::ATTR_ID)
-            .unwrap_or(u64::MAX) as u32;
-        let name = subtable_sym
-            .attr_string(sla_format::ATTR_NAME)
-            .map(|s| s.to_string())
-            .or_else(|| symbol_names.get(&id).cloned())
-            .unwrap_or_else(|| format!("unknown_subtable_{id}"));
+        let (id, name) = decode_subtable_identity(subtable_sym, &symbol_names)?;
 
         let mut constructors_by_index = BTreeMap::new();
         let mut decision_tree = None;
@@ -473,6 +459,21 @@ pub(super) fn decode_construct_templates(
     };
     library.native = SlaLanguage::from_compiled_library(&library);
     Ok(library)
+}
+
+fn decode_subtable_identity(
+    element: &PackedElement,
+    symbol_names: &BTreeMap<u32, String>,
+) -> Result<(u32, String)> {
+    let id = element
+        .attr_unsigned(sla_format::ATTR_ID)
+        .ok_or_else(|| anyhow!("subtable_sym missing id"))? as u32;
+    let name = element
+        .attr_string(sla_format::ATTR_NAME)
+        .map(|s| s.to_string())
+        .or_else(|| symbol_names.get(&id).cloned())
+        .ok_or_else(|| anyhow!("subtable_sym {id} missing name"))?;
+    Ok((id, name))
 }
 
 fn unsupported_sla_constructor_template(
