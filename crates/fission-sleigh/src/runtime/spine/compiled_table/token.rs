@@ -152,59 +152,6 @@ fn token_span_from_sla_field(
     })
 }
 
-pub(super) fn opcode_len_from_context(ctx: &CompiledInstructionContext<'_>) -> Result<usize> {
-    opcode_len_from_cursor(ctx, ctx.cursor)
-}
-
-pub(super) fn opcode_len_from_instruction_start(
-    ctx: &CompiledInstructionContext<'_>,
-) -> Result<usize> {
-    opcode_len_from_cursor(ctx, ctx.instruction_cursor)
-}
-
-pub(super) fn opcode_cursor_from_cursor(
-    ctx: &CompiledInstructionContext<'_>,
-    cursor: usize,
-) -> usize {
-    let mut offset = cursor;
-    while let Some(byte) = ctx.bytes.get(offset).copied() {
-        if is_instruction_prefix_byte(byte) {
-            offset += 1;
-            continue;
-        }
-        break;
-    }
-    offset
-}
-
-pub(super) fn opcode_len_from_cursor(
-    ctx: &CompiledInstructionContext<'_>,
-    cursor: usize,
-) -> Result<usize> {
-    let offset = opcode_cursor_from_cursor(ctx, cursor);
-    let opcode = *ctx
-        .bytes
-        .get(offset)
-        .ok_or_else(|| anyhow!("missing opcode byte"))?;
-    let opcode_bytes = if opcode == 0x0f {
-        match ctx.bytes.get(offset + 1).copied() {
-            Some(0x38 | 0x3a) => 3,
-            Some(_) => 2,
-            None => 1,
-        }
-    } else {
-        1
-    };
-    Ok(offset.saturating_sub(cursor) + opcode_bytes)
-}
-
-pub(super) fn is_instruction_prefix_byte(byte: u8) -> bool {
-    matches!(
-        byte,
-        0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x66 | 0x67 | 0xf0 | 0xf2 | 0xf3
-    ) || (0x40..=0x4f).contains(&byte)
-}
-
 pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
     let end = offset + size as usize;
     let slice = bytes

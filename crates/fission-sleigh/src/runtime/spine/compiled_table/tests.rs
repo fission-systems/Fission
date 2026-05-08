@@ -599,6 +599,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let arch_named_policy = ["compiled", "arch"].join(".");
     let x86_string_policy = ["eq_ignore_ascii_case", "(\"x86\")"].join("");
     let transitional_cursor_policy = ["shared", "token", "cursor"].join("_");
+    let isa_opcode_policy = ["is", "instruction", "prefix", "byte"].join("_");
+    let opcode_context_policy = ["opcode", "len", "from", "context"].join("_");
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -640,6 +642,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&transitional_cursor_policy),
             "{} still carries transitional shared-token cursor policy",
+            file.display()
+        );
+        assert!(
+            !source.contains(&isa_opcode_policy) && !source.contains(&opcode_context_policy),
+            "{} still carries ISA-specific opcode cursor policy",
             file.display()
         );
     }

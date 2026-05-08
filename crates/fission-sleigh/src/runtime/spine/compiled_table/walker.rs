@@ -62,6 +62,19 @@ impl OperandBinding {
     }
 }
 
+fn instruction_terminal_pattern_len(selection: &RuntimeSelection<'_>) -> Result<usize> {
+    let pattern = selection
+        .trace
+        .matched_leaf_pattern
+        .as_ref()
+        .ok_or_else(|| anyhow!("instruction selection missing terminal SLA pattern"))?;
+    let len = disjoint_pattern_instruction_byte_len(pattern);
+    if len == 0 {
+        bail!("instruction terminal SLA pattern has zero instruction byte length");
+    }
+    Ok(len)
+}
+
 fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
     match spec {
         CompiledOperandSpec::SlaTokenField {
@@ -168,7 +181,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             if selection.trace.root_bucket == "instruction"
                 && constructor_consumes_sequential_operand_bytes(compiled, selection.constructor)
             {
-                opcode_len_from_context(ctx)?
+                instruction_terminal_pattern_len(&selection)?
             } else if selection.trace.root_bucket == "instruction" {
                 // Some instruction-level constructors encode address bytes directly in the
                 // terminal matcher instead of through a descendant operand subtable. In that
