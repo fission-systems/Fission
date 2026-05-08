@@ -617,7 +617,7 @@ impl<'a> PreviewBuilder<'a> {
             if idx == target_idx {
                 return true;
             }
-            if idx == stop_idx {
+            if idx == stop_idx && idx != start_idx {
                 continue;
             }
             if let Some(succs) = self.successors.get(idx) {
@@ -1048,6 +1048,30 @@ mod tests {
             body.is_empty(),
             "predicate-only output was materialized: {body:?}"
         );
+    }
+
+    #[test]
+    fn loop_head_update_can_reach_backedge_tail() {
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(0, PcodeOpcode::CBranch, None, vec![constant(0x1010), constant(1)])],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(1, PcodeOpcode::Branch, None, vec![constant(0x1000)])],
+            ),
+            block_at(0x1020, 2, vec![op(2, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1, 2];
+        blocks[1].successors = vec![0];
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.block_can_reach(0, 1, 0));
     }
 
     #[test]
