@@ -977,9 +977,6 @@ fn render_const_template(template: &crate::compiler::CompiledConstTpl) -> String
         crate::compiler::CompiledConstTpl::Integer { value, size } => {
             format!("{{\"kind\": \"const\", \"value\": {value}, \"size\": {size}}}")
         }
-        crate::compiler::CompiledConstTpl::RelativeAddress => {
-            "{\"kind\": \"relative_address\"}".to_string()
-        }
         crate::compiler::CompiledConstTpl::Relative { value } => {
             format!("{{\"kind\": \"const_relative\", \"value\": {value}}}")
         }

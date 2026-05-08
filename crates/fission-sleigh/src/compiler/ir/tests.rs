@@ -207,6 +207,8 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
             "CompiledFixedRegister",
             "FixedRegister",
             "fixed_register",
+            "RelativeAddress",
+            "relative_address",
             "CompiledOperandSpec::Immediate",
             "CompiledOperandSpec::Relative",
             "CompiledConstructTplKind::Call",

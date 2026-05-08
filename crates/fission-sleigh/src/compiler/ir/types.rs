@@ -787,7 +787,6 @@ pub enum CompiledConstTpl {
         value: i64,
         size: u32,
     },
-    RelativeAddress,
     Relative {
         value: u64,
     },

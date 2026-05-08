@@ -1321,11 +1321,6 @@ impl<'c> CompiledTableEmitter<'c> {
                 // RELATIVE_LABEL_SENTINEL_THRESHOLD range (large unsigned values).
                 Ok(encode_relative_sentinel(*label_num))
             }
-            CompiledConstTpl::RelativeAddress => {
-                // RelativeAddress is a backward-compat form of Relative without an
-                // explicit label num; treat as label 0.
-                Ok(encode_relative_sentinel(0))
-            }
             CompiledConstTpl::InstNext2 => {
                 // Ghidra: inst_next2 = inst_next + delay_slot_instruction_length.
                 // `inst_next` = address of the instruction after the current one.
