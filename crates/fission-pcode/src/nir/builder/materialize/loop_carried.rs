@@ -27,6 +27,62 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    pub(super) fn loop_carried_passthrough_output_binding_name(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> Option<String> {
+        if !Self::is_loop_carried_register_update_candidate(output)
+            || !matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+        {
+            return None;
+        }
+        let input = op.inputs.first()?;
+        let input_key = VarnodeKey::from(input);
+        let output_key = VarnodeKey::from(output);
+        let block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let input_def_idx = block
+            .ops
+            .iter()
+            .take(op_idx)
+            .position(|candidate| {
+                candidate.output.as_ref().is_some_and(|candidate_output| {
+                    VarnodeKey::from(candidate_output) == input_key
+                })
+            })?;
+        let input_def = block.ops.get(input_def_idx)?;
+        if !Self::op_reads_varnode_key(input_def, &output_key) {
+            return None;
+        }
+        if !self.loop_bodies.iter().any(|loop_body| {
+            loop_body.body.contains(&block_idx)
+                && self.loop_update_reaches_backedge_tail(block_idx, loop_body)
+                && (Self::op_reads_varnode_key(input_def, &output_key)
+                    || self.loop_reads_varnode_before_update(
+                        loop_body,
+                        block_idx,
+                        input_def_idx,
+                        &output_key,
+                    ))
+        }) {
+            return None;
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+            return Some(name);
+        }
+        if self.abi_state().param_slot_for_varnode(output).is_some()
+            && !self.loop_carried_output_has_prior_definition(output)
+        {
+            return self.register_param(output);
+        }
+        None
+    }
+
     fn loop_carried_output_has_prior_definition(&self, output: &Varnode) -> bool {
         self.lookup_def_site(output).is_some()
     }
@@ -852,6 +908,77 @@ mod tests {
                 .iter()
                 .any(|stmt| lhs_var(stmt) == Some(init_name)),
             "AArch64 W-register loop update should reuse the X-register initializer binding: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn aarch64_loop_carried_register_passthrough_update_reuses_prior_binding() {
+        let x1 = reg(0x4048, 8);
+        let w1 = reg(0x4048, 4);
+        let shifted = varnode(0x50);
+        let cond = Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset: 0x60,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(x1.clone()), vec![constant(11)]),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntRight,
+                        Some(shifted.clone()),
+                        vec![w1.clone(), constant(1)],
+                    ),
+                    op(
+                        3,
+                        PcodeOpcode::IntZExt,
+                        Some(x1.clone()),
+                        vec![shifted],
+                    ),
+                    op(
+                        4,
+                        PcodeOpcode::IntNotEqual,
+                        Some(cond.clone()),
+                        vec![w1, constant(0)],
+                    ),
+                    op(5, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
+                ],
+            ),
+            block_at(0x1020, 2, vec![op(6, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![1, 2];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let preheader = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("preheader lowering");
+        let init_name = lhs_var(&preheader[0]).expect("preheader init binding");
+        let loop_body = builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .expect("loop lowering");
+
+        assert!(
+            loop_body
+                .iter()
+                .any(|stmt| lhs_var(stmt) == Some(init_name)),
+            "AArch64 passthrough loop update should assign back to the prior binding: {loop_body:?}"
         );
     }
 

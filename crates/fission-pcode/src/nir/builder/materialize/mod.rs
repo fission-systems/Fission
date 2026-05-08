@@ -284,8 +284,15 @@ impl<'a> PreviewBuilder<'a> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
-        if self.output_used_only_by_single_store(block, op_idx, output)
-            || self.output_used_only_by_passthrough_chain(block, op_idx, output)
+        if self.output_used_only_by_single_store(block, op_idx, output) {
+            return Ok(None);
+        }
+        let loop_carried_lhs_name =
+            self.loop_carried_output_binding_name(block, op_idx, op, output).or_else(|| {
+                self.loop_carried_passthrough_output_binding_name(block, op_idx, op, output)
+            });
+        if loop_carried_lhs_name.is_none()
+            && self.output_used_only_by_passthrough_chain(block, op_idx, output)
         {
             return Ok(None);
         }
@@ -296,7 +303,7 @@ impl<'a> PreviewBuilder<'a> {
             self.output_replacement_is_complete(block, op_idx, output, &rhs);
         let replacement_plan =
             self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
-        if replacement_plan.is_complete() {
+        if replacement_plan.is_complete() && loop_carried_lhs_name.is_none() {
             self.trace_materialization_plan(
                 block_addr,
                 op,
@@ -408,19 +415,18 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs_name =
-            if let Some(name) = self.loop_carried_output_binding_name(block, op_idx, op, output) {
-                self.bind_materialized_output_to_existing_name(
-                    op,
-                    output,
-                    &name,
-                    preserve_materialization,
-                );
-                name
-            } else {
-                self.ensure_temp_binding_for_output(op, output, preserve_materialization)
-                    .name
-            };
+        let lhs_name = if let Some(name) = loop_carried_lhs_name {
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
+        } else {
+            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
+                .name
+        };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
     }
