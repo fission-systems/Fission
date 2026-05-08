@@ -44,6 +44,8 @@ Generated artifacts:
 - `source_semantic_summary.json`
 - `source_semantic_summary.md`
 - `source_semantic_comparison.json` when a prior matching artifact is found
+- `behavior/<entry>/<function-address>/oracle.c`, `candidate.c`, and
+  `result.json` for non-passing dynamic behavior rows
 
 If `--output-dir` is omitted, the runner writes to a timestamped artifact
 directory under `benchmark/artifacts/source_semantic_benchmark/` instead of
@@ -95,6 +97,11 @@ structuring, or type/data owners. Rows with a mapped function also include a
 ready-to-run `debug_decomp_command` that uses `fission_cli decomp
 --debug-decomp-bundle <artifact>/debug_decomp/...json`; the Markdown summary
 lists the lowest-scoring repro commands first.
+
+For dynamic behavior failures, each non-passing row also records a
+`behavior.artifact_dir` with the exact generated oracle harness, candidate
+harness, and compile/run result JSON. These files make timeouts, compile
+failures, and mismatches reproducible without re-running the full benchmark.
 
 The static comparison uses language-neutral fingerprints for control-flow,
 operators, constants, calls, memory access shape, and signature shape. Dynamic

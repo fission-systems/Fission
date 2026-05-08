@@ -821,6 +821,39 @@ def debug_bundle_path_for_row(output_dir: Path, row: dict[str, Any]) -> Path:
     return output_dir / "debug_decomp" / entry / f"{function}-{address}.json"
 
 
+def behavior_artifact_dir_for_row(
+    output_dir: Path,
+    entry: BenchmarkEntry,
+    func: SourceFunction,
+    address: str | None,
+) -> Path:
+    entry_id = sanitize_id(entry.id)
+    function = sanitize_id(func.name)
+    address_id = sanitize_id(address or "no-address")
+    return output_dir / "behavior" / entry_id / f"{function}-{address_id}"
+
+
+def write_behavior_artifacts(
+    artifact_dir: Path,
+    oracle_code: str,
+    candidate_code: str,
+    oracle: dict[str, Any] | None,
+    candidate: dict[str, Any] | None,
+) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "oracle.c").write_text(oracle_code, encoding="utf-8")
+    (artifact_dir / "candidate.c").write_text(candidate_code, encoding="utf-8")
+    (artifact_dir / "result.json").write_text(
+        dump_json_pretty(
+            {
+                "oracle": oracle,
+                "candidate": candidate,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def decomp_debug_command_for_row(row: dict[str, Any], fission_bin: Path, output_dir: Path) -> dict[str, Any] | None:
     address = row.get("address")
     binary_path = row.get("binary_path")
@@ -867,6 +900,7 @@ def top_debug_commands(rows: list[dict[str, Any]], limit: int = 12) -> list[dict
             "address": row.get("address"),
             "semantic_score_percent": row.get("semantic_score_percent"),
             "behavior_status": row.get("behavior", {}).get("status"),
+            "behavior_artifact_dir": row.get("behavior", {}).get("artifact_dir"),
             "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
             "debug_decomp_command": row.get("debug_decomp_command"),
         }
@@ -1204,6 +1238,8 @@ def run_behavior_check(
     decomp_code: str | None,
     timeout_sec: int,
     host_execution: dict[str, Any],
+    output_dir: Path | None = None,
+    address: str | None = None,
 ) -> dict[str, Any]:
     explicit_cases = explicit_behavior_cases(entry, func)
     supported, reason = behavior_supported(entry, func, explicit_cases)
@@ -1220,24 +1256,50 @@ def run_behavior_check(
         return {"status": "decomp_failed", "score": 0.0}
 
     cases = behavior_cases_for(entry, func)
+    oracle_code = source_harness(entry.source_path, func, cases)
+    candidate_code = candidate_harness(decomp_code, func, cases)
+    artifact_dir = (
+        behavior_artifact_dir_for_row(output_dir, entry, func, address)
+        if output_dir is not None
+        else None
+    )
+
+    def maybe_attach_artifacts(result: dict[str, Any], oracle: dict[str, Any] | None, candidate: dict[str, Any] | None) -> dict[str, Any]:
+        if artifact_dir is None or result.get("status") == "pass":
+            return result
+        write_behavior_artifacts(artifact_dir, oracle_code, candidate_code, oracle, candidate)
+        result["artifact_dir"] = rel(artifact_dir)
+        result["oracle_source_path"] = rel(artifact_dir / "oracle.c")
+        result["candidate_source_path"] = rel(artifact_dir / "candidate.c")
+        result["result_path"] = rel(artifact_dir / "result.json")
+        return result
+
     with tempfile.TemporaryDirectory(prefix="source-semantic-") as tmp:
         tmp_path = Path(tmp)
-        oracle = compile_and_run_c(source_harness(entry.source_path, func, cases), tmp_path, "oracle", timeout_sec)
+        oracle = compile_and_run_c(oracle_code, tmp_path, "oracle", timeout_sec)
         if oracle.get("status") != "ok":
-            return {"status": f"oracle_{oracle.get('status')}", "score": 0.0, "detail": oracle.get("detail")}
-        candidate = compile_and_run_c(candidate_harness(decomp_code, func, cases), tmp_path, "candidate", timeout_sec)
+            return maybe_attach_artifacts(
+                {"status": f"oracle_{oracle.get('status')}", "score": 0.0, "detail": oracle.get("detail")},
+                oracle,
+                None,
+            )
+        candidate = compile_and_run_c(candidate_code, tmp_path, "candidate", timeout_sec)
         if candidate.get("status") != "ok":
-            return {"status": f"candidate_{candidate.get('status')}", "score": 0.0, "detail": candidate.get("detail")}
+            return maybe_attach_artifacts(
+                {"status": f"candidate_{candidate.get('status')}", "score": 0.0, "detail": candidate.get("detail")},
+                oracle,
+                candidate,
+            )
         oracle_lines = [line.strip() for line in oracle["stdout"].splitlines() if line.strip()]
         candidate_lines = [line.strip() for line in candidate["stdout"].splitlines() if line.strip()]
         passed = oracle_lines == candidate_lines
-        return {
+        return maybe_attach_artifacts({
             "status": "pass" if passed else "mismatch",
             "score": 1.0 if passed else 0.0,
             "cases": serialize_behavior_cases(cases),
             "oracle": oracle_lines,
             "candidate": candidate_lines,
-        }
+        }, oracle, candidate)
 
 
 def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[BenchmarkEntry]) -> dict[str, Any]:
@@ -1613,15 +1675,20 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.append("  ```bash")
             lines.append(f"  {row.get('debug_decomp_command')}")
             lines.append("  ```")
+            if row.get("behavior_artifact_dir"):
+                lines.append(f"  Behavior artifacts: `{row.get('behavior_artifact_dir')}`")
     failing = [row for row in rows if row.get("semantic_score", 0.0) < 1.0][:20]
     if failing:
         lines.extend(["", "## First Non-Perfect Rows", ""])
         for row in failing:
+            behavior = row.get("behavior", {})
             lines.append(
                 f"- `{row['entry_id']}` `{row['function_name']}`: score={row['semantic_score']:.3f}, "
                 f"similarity={row['semantic_score_percent']:.3f}%, "
-                f"map={row['mapping_status']}, behavior={row.get('behavior', {}).get('status')}"
+                f"map={row['mapping_status']}, behavior={behavior.get('status')}"
             )
+            if behavior.get("artifact_dir"):
+                lines.append(f"  behavior artifacts: `{behavior.get('artifact_dir')}`")
     lines.append("")
     return "\n".join(lines)
 
@@ -1638,6 +1705,7 @@ def row_for_function(
     decomp_cache_lock: threading.Lock,
     decomp_cache_stats: Counter[str],
     include_debug_decomp: bool,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     source_fp = code_fingerprint(func.body, func)
     mapping_status, matched, candidates = match_function(func, fission_funcs) if not fission_error else ("list_failed", None, [])
@@ -1656,7 +1724,15 @@ def row_for_function(
     decomp_code = decomp.get("code") if decomp.get("success") else None
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
     static_score = multiset_jaccard(source_fp, decomp_fp) if decomp_code else 0.0
-    behavior = run_behavior_check(entry, func, decomp_code, timeout_sec, host_execution)
+    behavior = run_behavior_check(
+        entry,
+        func,
+        decomp_code,
+        timeout_sec,
+        host_execution,
+        output_dir=output_dir,
+        address=matched.address if matched else None,
+    )
     semantic_score = round(0.65 * float(behavior.get("score", 0.0)) + 0.35 * static_score, 6)
     return {
         "entry_id": entry.id,
@@ -1730,6 +1806,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                         decomp_cache_lock,
                         decomp_cache_stats,
                         args.include_debug_decomp,
+                        output_dir,
                     )
                 )
             continue
@@ -1750,6 +1827,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     decomp_cache_lock,
                     decomp_cache_stats,
                     args.include_debug_decomp,
+                    output_dir,
                 ): index
                 for index, func in enumerate(source_functions)
             }
