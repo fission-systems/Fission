@@ -94,9 +94,10 @@ For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
 quality evidence in each row. This is observation-only and does not affect
 scoring, but it makes low-score rows easier to route back to SLEIGH, NIR,
 structuring, or type/data owners. Rows with a mapped function also include a
-ready-to-run `debug_decomp_command` that uses `fission_cli decomp
---debug-decomp-bundle <artifact>/debug_decomp/...json`; the Markdown summary
-lists the lowest-scoring repro commands first.
+ready-to-run `debug_decomp_command` and, when `--include-debug-decomp` is used,
+the runner materializes the same CLI bundle at
+`debug_decomp/<entry>/<function-address>.json`. The Markdown summary lists the
+lowest-scoring repro commands first.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate

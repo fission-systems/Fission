@@ -641,6 +641,7 @@ def run_fission_decomp(
     fission_bin: Path,
     timeout_sec: int,
     include_debug_decomp: bool = False,
+    debug_decomp_bundle_path: Path | None = None,
 ) -> dict[str, Any]:
     cmd = [
         str(fission_bin),
@@ -656,6 +657,9 @@ def run_fission_decomp(
     ]
     if include_debug_decomp:
         cmd.append("--debug-decomp")
+    if debug_decomp_bundle_path is not None:
+        debug_decomp_bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["--debug-decomp-bundle", str(debug_decomp_bundle_path)])
     start = time.perf_counter()
     try:
         res = subprocess.run(
@@ -713,6 +717,9 @@ def run_fission_decomp(
         "fallback_reason": func.get("fallback_reason"),
         "preview_build_stats": func.get("preview_build_stats"),
         "debug_decomp": debug_decomp_summary(func.get("debug_decomp")),
+        "debug_decomp_bundle_path": rel(debug_decomp_bundle_path)
+        if debug_decomp_bundle_path is not None
+        else None,
     }
 
 
@@ -784,6 +791,7 @@ def run_fission_decomp_cached(
     fission_bin: Path,
     timeout_sec: int,
     include_debug_decomp: bool,
+    debug_decomp_bundle_path: Path | None,
     cache: dict[str, dict[str, Any]],
     cache_lock: threading.Lock,
     cache_stats: Counter[str],
@@ -794,7 +802,26 @@ def run_fission_decomp_cached(
         if cached is not None:
             cache_stats["hit"] += 1
     if cached is not None:
-        return dict(cached)
+        cached_result = dict(cached)
+        if (
+            include_debug_decomp
+            and debug_decomp_bundle_path is not None
+            and not debug_decomp_bundle_path.exists()
+        ):
+            cached_result = run_fission_decomp(
+                binary_path,
+                address,
+                fission_bin,
+                timeout_sec,
+                include_debug_decomp=include_debug_decomp,
+                debug_decomp_bundle_path=debug_decomp_bundle_path,
+            )
+            with cache_lock:
+                cache[key] = cached_result
+                cache_stats["stored"] += 1
+        elif debug_decomp_bundle_path is not None:
+            cached_result["debug_decomp_bundle_path"] = rel(debug_decomp_bundle_path)
+        return cached_result
     with cache_lock:
         cache_stats["miss"] += 1
     decomp = run_fission_decomp(
@@ -803,6 +830,7 @@ def run_fission_decomp_cached(
         fission_bin,
         timeout_sec,
         include_debug_decomp=include_debug_decomp,
+        debug_decomp_bundle_path=debug_decomp_bundle_path,
     )
     with cache_lock:
         cache.setdefault(key, decomp)
@@ -814,11 +842,25 @@ def shell_command(parts: list[str | Path]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
 
-def debug_bundle_path_for_row(output_dir: Path, row: dict[str, Any]) -> Path:
-    entry = sanitize_id(str(row.get("entry_id") or "entry"))
-    function = sanitize_id(str(row.get("function_name") or "function"))
-    address = sanitize_id(str(row.get("address") or "no-address"))
+def debug_bundle_path_for_parts(
+    output_dir: Path,
+    entry_id: str | None,
+    function_name: str | None,
+    address: str | None,
+) -> Path:
+    entry = sanitize_id(str(entry_id or "entry"))
+    function = sanitize_id(str(function_name or "function"))
+    address = sanitize_id(str(address or "no-address"))
     return output_dir / "debug_decomp" / entry / f"{function}-{address}.json"
+
+
+def debug_bundle_path_for_row(output_dir: Path, row: dict[str, Any]) -> Path:
+    return debug_bundle_path_for_parts(
+        output_dir,
+        row.get("entry_id"),
+        row.get("function_name"),
+        row.get("address"),
+    )
 
 
 def behavior_artifact_dir_for_row(
@@ -1718,12 +1760,18 @@ def row_for_function(
     mapping_status, matched, candidates = match_function(func, fission_funcs) if not fission_error else ("list_failed", None, [])
     decomp: dict[str, Any] = {"success": False, "failure_kind": mapping_status}
     if matched is not None:
+        debug_decomp_bundle_path = (
+            debug_bundle_path_for_parts(output_dir, entry.id, func.name, matched.address)
+            if include_debug_decomp and output_dir is not None
+            else None
+        )
         decomp = run_fission_decomp_cached(
             entry.binary_path,
             matched.address,
             fission_bin,
             timeout_sec,
             include_debug_decomp,
+            debug_decomp_bundle_path,
             decomp_cache,
             decomp_cache_lock,
             decomp_cache_stats,
@@ -1761,6 +1809,7 @@ def row_for_function(
         "decomp_failure_kind": decomp.get("failure_kind"),
         "decomp_failure_detail": decomp.get("failure_detail"),
         "engine_used": decomp.get("engine_used"),
+        "debug_decomp_bundle_path": decomp.get("debug_decomp_bundle_path"),
         "debug_decomp": decomp.get("debug_decomp"),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
