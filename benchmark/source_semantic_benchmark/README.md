@@ -93,11 +93,12 @@ For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
 `fission_cli decomp` and stores compact stage status, owner buckets, and selected
 quality evidence in each row. This is observation-only and does not affect
 scoring, but it makes low-score rows easier to route back to SLEIGH, NIR,
-structuring, or type/data owners. Rows with a mapped function also include a
-ready-to-run `debug_decomp_command` and, when `--include-debug-decomp` is used,
-the runner materializes the same CLI bundle at
-`debug_decomp/<entry>/<function-address>.json`. The Markdown summary lists the
-lowest-scoring repro commands first.
+structuring, or type/data owners. The JSON and Markdown summaries aggregate
+debug owner buckets and quality-evidence totals when debug evidence is present.
+Rows with a mapped function also include a ready-to-run `debug_decomp_command`
+and, when `--include-debug-decomp` is used, the runner materializes the same CLI
+bundle at `debug_decomp/<entry>/<function-address>.json`. The Markdown summary
+lists the lowest-scoring repro commands first.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate

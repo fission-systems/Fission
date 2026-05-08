@@ -1365,6 +1365,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if not row.get("decomp_success")
     )
     behavior_status_counts = Counter(row.get("behavior", {}).get("status", "unknown") for row in rows)
+    debug_owner_bucket_counts: Counter[str] = Counter()
+    debug_stage_status_counts: Counter[str] = Counter()
+    debug_quality_evidence_totals: Counter[str] = Counter()
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
@@ -1389,6 +1392,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
         )
         add_bucket(entry_bucket, row)
+
+        debug_decomp = row.get("debug_decomp")
+        if isinstance(debug_decomp, dict):
+            debug_owner_bucket_counts.update(debug_decomp.get("owner_buckets") or [])
+            stage_status = debug_decomp.get("stage_status")
+            if isinstance(stage_status, dict):
+                debug_stage_status_counts.update(
+                    f"{stage}:{status}"
+                    for stage, status in stage_status.items()
+                    if status is not None
+                )
+            quality = debug_decomp.get("quality_evidence")
+            if isinstance(quality, dict):
+                for key, value in quality.items():
+                    if isinstance(value, int | float):
+                        debug_quality_evidence_totals[key] += value
 
         for tag in row.get("tags") or []:
             tag_bucket = by_tag.setdefault(
@@ -1425,6 +1444,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "mapping_status_counts": dict(sorted(mapping_status_counts.items())),
         "decomp_failure_counts": dict(sorted(decomp_failure_counts.items())),
         "behavior_status_counts": dict(sorted(behavior_status_counts.items())),
+        "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
+        "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
+        "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
         "by_language": by_language,
@@ -1683,6 +1705,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Decompile Failures", "", "| Failure | Rows |", "|---|---:|"])
         for failure, count in sorted(summary["decomp_failure_counts"].items()):
             lines.append(f"| {failure} | {count} |")
+    if summary.get("debug_owner_bucket_counts"):
+        lines.extend(["", "## Debug Owner Buckets", "", "| Bucket | Rows |", "|---|---:|"])
+        for bucket, count in sorted(summary["debug_owner_bucket_counts"].items()):
+            lines.append(f"| {bucket} | {count} |")
+    if summary.get("debug_quality_evidence_totals"):
+        lines.extend(["", "## Debug Quality Evidence", "", "| Metric | Total |", "|---|---:|"])
+        for metric, total_value in sorted(summary["debug_quality_evidence_totals"].items()):
+            lines.append(f"| {metric} | {total_value} |")
     comparison = summary.get("comparison")
     if isinstance(comparison, dict):
         weighted = comparison.get("metric_deltas", {}).get("weighted_semantic_similarity_percent", {})
