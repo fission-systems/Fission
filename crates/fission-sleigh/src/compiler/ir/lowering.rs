@@ -780,13 +780,11 @@ impl Collector {
         if !runtime_signature_is_supported(signature) {
             return None;
         }
-        let normalized_mnemonic = normalize_executable_mnemonic(mnemonic);
-        let construct_tpl_kind = classify_display_construct_kind(&normalized_mnemonic);
         let matcher = self
             .parse_opcode_matcher(signature)
             .unwrap_or_else(|| CompiledPatternMatcher::BitConstraints(vec![]));
         let opsize_variants = parse_opsize_variants(signature);
-        let operand_specs = parse_operand_specs(signature, &matcher, construct_tpl_kind).ok()?;
+        let operand_specs = parse_operand_specs(signature, &matcher).ok()?;
         let hidden_subtables = parse_hidden_subtables(signature, &self.field_info);
         let mut decode_steps = Vec::new();
         if !hidden_subtables.is_empty() && operand_specs.is_empty() {
@@ -842,13 +840,13 @@ impl Collector {
                     kind: CompiledDisplayOperandKind::Generic,
                 })
                 .collect(),
-            construct_tpl_kind,
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
             constructor_template,
             named_templates: Vec::new(),
             context_commits: Vec::new(),
             runtime_ready: false,
             unsupported_template_kind: Some(
-                unsupported_template_reason(signature, construct_tpl_kind, &operand_specs)
+                unsupported_template_reason(signature, &operand_specs)
                     .unwrap_or_else(|| "missing_sla_construct_tpl".to_string()),
             ),
         })
@@ -1387,68 +1385,13 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
     score
 }
 
-fn normalize_executable_mnemonic(mnemonic: &str) -> String {
-    let trimmed = mnemonic.trim();
-    if trimmed.eq_ignore_ascii_case("J^cc") {
-        return "J^CC".to_string();
-    }
-    if trimmed.eq_ignore_ascii_case("SET^cc") {
-        return "SET^CC".to_string();
-    }
-    trimmed
-        .split('^')
-        .next()
-        .unwrap_or(trimmed)
-        .trim()
-        .to_string()
-}
-
 fn runtime_signature_is_supported(_signature: &str) -> bool {
     true
-}
-
-fn classify_display_construct_kind(mnemonic: &str) -> CompiledConstructTplKind {
-    match mnemonic.to_ascii_uppercase().as_str() {
-        "FINIT" | "FNINIT" => CompiledConstructTplKind::Unsupported,
-        "NOP" | "PAUSE" => CompiledConstructTplKind::Nop,
-        "RET" => CompiledConstructTplKind::Ret,
-        "CALL" => CompiledConstructTplKind::Call,
-        "JMP" => CompiledConstructTplKind::Jmp,
-        "J^CC" => CompiledConstructTplKind::Jcc,
-        "MOV" => CompiledConstructTplKind::Mov,
-        "LEA" => CompiledConstructTplKind::AddressOf,
-        "PUSH" => CompiledConstructTplKind::StackStore,
-        "POP" => CompiledConstructTplKind::StackLoad,
-        "LEAVE" => CompiledConstructTplKind::FrameTeardown,
-        "ADD" => CompiledConstructTplKind::Add,
-        "SUB" => CompiledConstructTplKind::Sub,
-        "AND" => CompiledConstructTplKind::And,
-        "OR" => CompiledConstructTplKind::Or,
-        "XOR" => CompiledConstructTplKind::Xor,
-        "IMUL" => CompiledConstructTplKind::Imul,
-        "MUL" => CompiledConstructTplKind::Mul,
-        "SHL" | "SAL" => CompiledConstructTplKind::Shl,
-        "SHR" => CompiledConstructTplKind::Shr,
-        "SAR" => CompiledConstructTplKind::Sar,
-        "INC" => CompiledConstructTplKind::Inc,
-        "DEC" => CompiledConstructTplKind::Dec,
-        "CMP" => CompiledConstructTplKind::Cmp,
-        "TEST" => CompiledConstructTplKind::Test,
-        "MOVZX" => CompiledConstructTplKind::Movzx,
-        "MOVSX" => CompiledConstructTplKind::Movsx,
-        "MOVSXD" => CompiledConstructTplKind::Movsxd,
-        "SET^CC" => CompiledConstructTplKind::Setcc,
-        "CBW" => CompiledConstructTplKind::Cbw,
-        "CWDE" => CompiledConstructTplKind::Cwde,
-        "CDQE" => CompiledConstructTplKind::Cdqe,
-        _ => CompiledConstructTplKind::Generic,
-    }
 }
 
 fn parse_operand_specs(
     signature: &str,
     _matcher: &CompiledPatternMatcher,
-    construct_tpl_kind: CompiledConstructTplKind,
 ) -> Result<Vec<CompiledOperandSpec>> {
     let first_line = signature.lines().next().unwrap_or(signature);
     let head = if let Some(pos) = first_line.find(" is ") {
@@ -1514,9 +1457,6 @@ fn parse_operand_specs(
     }
     if specs.is_empty() && operand_part.is_empty() {
         return Ok(Vec::new());
-    }
-    if matches!(construct_tpl_kind, CompiledConstructTplKind::Setcc) && specs.len() != 1 {
-        return Err(anyhow!("setcc expects one operand"));
     }
     Ok(specs)
 }
@@ -1664,7 +1604,6 @@ fn parse_opsize_variants(signature: &str) -> Vec<u8> {
 
 fn unsupported_template_reason(
     signature: &str,
-    construct_tpl_kind: CompiledConstructTplKind,
     operand_specs: &[CompiledOperandSpec],
 ) -> Option<String> {
     if let Some(reason) = unsupported_check_constraint_reason(signature) {
@@ -1682,20 +1621,10 @@ fn unsupported_template_reason(
     {
         return Some("unsupported_runtime_constraint".to_string());
     }
-    match construct_tpl_kind {
-        CompiledConstructTplKind::Unsupported => Some("unsupported_template_kind".to_string()),
-        _ => {
-            if operand_specs.len() > 2
-                && !matches!(
-                    construct_tpl_kind,
-                    CompiledConstructTplKind::StackStore | CompiledConstructTplKind::StackLoad
-                )
-            {
-                Some("unsupported_operand_arity".to_string())
-            } else {
-                None
-            }
-        }
+    if operand_specs.len() > 2 {
+        Some("unsupported_operand_arity".to_string())
+    } else {
+        None
     }
 }
 

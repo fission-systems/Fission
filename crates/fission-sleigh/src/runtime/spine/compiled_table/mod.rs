@@ -1,4 +1,4 @@
-//! Transitional compiled-table executor for the common SLEIGH runtime spine.
+//! Compiled-table executor for the common SLEIGH runtime spine.
 //! The canonical owner mapping remains `DecisionNode -> RuntimeInstructionContext ->
 //! RuntimeConstructState/RuntimeParserWalker -> RuntimeTemplateEvaluator -> RuntimePcodeEmitter`.
 

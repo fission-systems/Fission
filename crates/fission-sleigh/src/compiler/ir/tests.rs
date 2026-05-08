@@ -77,6 +77,8 @@ fn sla_construct_template_cutover_has_no_source_line_or_opprint_remap_overlay() 
         "source == sla_template.source_key",
         "rsplit(':')",
         "unsupported_placeholder",
+        "classify_display_construct_kind",
+        "normalize_executable_mnemonic",
     ] {
         assert!(
             !lowering.contains(forbidden),
