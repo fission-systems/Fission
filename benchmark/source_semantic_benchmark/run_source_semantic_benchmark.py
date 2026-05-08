@@ -26,6 +26,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = Path(__file__).resolve().parent / "manifests" / "source_owned_all.json"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
+DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
 
 SANITIZE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -169,9 +170,72 @@ def dump_json_pretty(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
+def load_json_list_or_dict(path: Path) -> Any:
+    data = path.read_bytes()
+    if orjson is not None:
+        return orjson.loads(data)
+    return json.loads(data.decode("utf-8"))
+
+
 def resolve_path(path: str | Path, root_dir: Path = ROOT_DIR) -> Path:
     p = Path(path)
     return p if p.is_absolute() else root_dir / p
+
+
+def file_cache_fingerprint(path: Path) -> str:
+    try:
+        resolved = path.resolve()
+        stat = resolved.stat()
+    except OSError:
+        return f"{path}:missing"
+    return f"{resolved}:size={stat.st_size}:mtime_ns={stat.st_mtime_ns}"
+
+
+def decomp_cache_key(
+    binary_path: Path,
+    address: str,
+    fission_bin: Path,
+    include_debug_decomp: bool,
+) -> str:
+    return "|".join(
+        [
+            "source-semantic-decomp-v1",
+            f"binary={file_cache_fingerprint(binary_path)}",
+            f"fission_bin={file_cache_fingerprint(fission_bin)}",
+            f"addr={canonical_address(address)}",
+            f"debug={int(include_debug_decomp)}",
+        ]
+    )
+
+
+def load_decomp_cache(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        raw = load_json_list_or_dict(path)
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    entries = raw.get("entries", raw)
+    if not isinstance(entries, dict):
+        return {}
+    return {str(key): value for key, value in entries.items() if isinstance(value, dict)}
+
+
+def save_decomp_cache(path: Path | None, cache: dict[str, dict[str, Any]]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format": "source-semantic-decomp-cache-v1",
+        "updated_at_unix": round(time.time(), 6),
+        "entry_count": len(cache),
+        "entries": cache,
+    }
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(dump_json_pretty(payload), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def discover_source_entries(manifest: dict[str, Any]) -> list[BenchmarkEntry]:
@@ -664,14 +728,19 @@ def run_fission_decomp_cached(
     fission_bin: Path,
     timeout_sec: int,
     include_debug_decomp: bool,
-    cache: dict[tuple[str, str, str], dict[str, Any]],
+    cache: dict[str, dict[str, Any]],
     cache_lock: threading.Lock,
+    cache_stats: Counter[str],
 ) -> dict[str, Any]:
-    key = (str(binary_path.resolve()), canonical_address(address), str(include_debug_decomp))
+    key = decomp_cache_key(binary_path, address, fission_bin, include_debug_decomp)
     with cache_lock:
         cached = cache.get(key)
+        if cached is not None:
+            cache_stats["hit"] += 1
     if cached is not None:
         return dict(cached)
+    with cache_lock:
+        cache_stats["miss"] += 1
     decomp = run_fission_decomp(
         binary_path,
         address,
@@ -681,6 +750,7 @@ def run_fission_decomp_cached(
     )
     with cache_lock:
         cache.setdefault(key, decomp)
+        cache_stats["stored"] += 1
     return dict(decomp)
 
 
@@ -1316,6 +1386,12 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     ]
     if "wall_sec" in summary:
         lines.append(f"- Wall time: {summary['wall_sec']:.3f}s")
+    if summary.get("decomp_cache_file"):
+        lines.append(f"- Decomp cache: `{summary['decomp_cache_file']}`")
+        lines.append(
+            f"- Decomp cache hits/misses: {summary.get('decomp_cache_hit_count', 0)}/"
+            f"{summary.get('decomp_cache_miss_count', 0)}"
+        )
     lines.extend([
         "",
         "## By Language",
@@ -1386,8 +1462,9 @@ def row_for_function(
     fission_bin: Path,
     timeout_sec: int,
     host_execution: dict[str, Any],
-    decomp_cache: dict[tuple[str, str, str], dict[str, Any]],
+    decomp_cache: dict[str, dict[str, Any]],
     decomp_cache_lock: threading.Lock,
+    decomp_cache_stats: Counter[str],
     include_debug_decomp: bool,
 ) -> dict[str, Any]:
     source_fp = code_fingerprint(func.body, func)
@@ -1402,6 +1479,7 @@ def row_for_function(
             include_debug_decomp,
             decomp_cache,
             decomp_cache_lock,
+            decomp_cache_stats,
         )
     decomp_code = decomp.get("code") if decomp.get("success") else None
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
@@ -1452,8 +1530,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
     rows: list[dict[str, Any]] = []
     jobs = max(1, int(args.jobs or 1))
-    decomp_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+    decomp_cache_path = None if args.no_decomp_cache else resolve_path(args.decomp_cache_file)
+    decomp_cache: dict[str, dict[str, Any]] = load_decomp_cache(decomp_cache_path)
     decomp_cache_lock = threading.Lock()
+    decomp_cache_stats: Counter[str] = Counter()
+    decomp_cache_initial_entry_count = len(decomp_cache)
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
         if args.limit_functions is not None:
@@ -1472,6 +1553,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                         host_execution,
                         decomp_cache,
                         decomp_cache_lock,
+                        decomp_cache_stats,
                         args.include_debug_decomp,
                     )
                 )
@@ -1491,6 +1573,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     host_execution,
                     decomp_cache,
                     decomp_cache_lock,
+                    decomp_cache_stats,
                     args.include_debug_decomp,
                 ): index
                 for index, func in enumerate(source_functions)
@@ -1501,8 +1584,14 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
     summary = summarize(rows, manifest.get("name", manifest_path.stem), entries)
     summary["jobs"] = jobs
+    summary["decomp_cache_file"] = rel(decomp_cache_path) if decomp_cache_path is not None else None
+    summary["decomp_cache_initial_entry_count"] = decomp_cache_initial_entry_count
     summary["decomp_cache_entry_count"] = len(decomp_cache)
+    summary["decomp_cache_hit_count"] = int(decomp_cache_stats.get("hit", 0))
+    summary["decomp_cache_miss_count"] = int(decomp_cache_stats.get("miss", 0))
+    summary["decomp_cache_stored_count"] = int(decomp_cache_stats.get("stored", 0))
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
+    save_decomp_cache(decomp_cache_path, decomp_cache)
     baseline_path: Path | None = None
     if not args.no_baseline_compare:
         baseline_path = resolve_path(args.baseline_dir) if args.baseline_dir else find_latest_baseline_dir(
@@ -1583,6 +1672,16 @@ def parse_args() -> argparse.Namespace:
         "--include-debug-decomp",
         action="store_true",
         help="Pass fission_cli decomp --debug-decomp and attach compact stage/owner evidence to each row",
+    )
+    parser.add_argument(
+        "--decomp-cache-file",
+        default=str(DEFAULT_DECOMP_CACHE_FILE),
+        help="Persistent decompile-result cache file keyed by input binary and fission_cli build metadata",
+    )
+    parser.add_argument(
+        "--no-decomp-cache",
+        action="store_true",
+        help="Disable the persistent decompile-result cache; the in-run memory cache remains enabled",
     )
     parser.add_argument(
         "--jobs",

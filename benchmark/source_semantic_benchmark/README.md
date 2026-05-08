@@ -64,6 +64,15 @@ only execution scheduling; row order is restored before artifacts are written.
 If `orjson` is installed it is used as an optional JSON read/write fast path;
 otherwise the standard library `json` module is used.
 
+Fission decompile results are cached in
+`benchmark/artifacts/source_semantic_benchmark/.cache/decomp_cache.json` by
+default. Cache keys include the input binary path/stat, `fission_cli` path/stat,
+function address, and whether `--include-debug-decomp` is enabled, so rebuilding
+`fission_cli` invalidates old decompile rows automatically. Use
+`--decomp-cache-file <path>` to pin a different cache file or
+`--no-decomp-cache` to disable the persistent cache; repeated decompile requests
+inside the same process can still reuse the in-memory cache.
+
 By default, each run looks for the latest previous artifact under
 `benchmark/artifacts/source_semantic_benchmark/` with the same manifest name and
 adds a `comparison` block to the summary. Use `--baseline-dir <artifact-dir>` to
