@@ -288,7 +288,6 @@ pub(super) fn decoded_references(
     address: u64,
     length: usize,
     flow_kind: DecodedFlowKind,
-    _operands: &[BoundOperand],
     handles: &[RuntimeHandle],
 ) -> Vec<DecodedReference> {
     let mut refs = Vec::new();

@@ -428,18 +428,9 @@ fn decoded_instruction_from_state(
 ) -> Result<DecodedInstruction> {
     let length = decoded.length;
     let (mnemonic, operands_text) = render_instruction_display(&decoded)?;
-    let direct_target = decoded.operands.first().and_then(|operand| match operand {
-        BoundOperand::Relative { target } => Some(*target),
-        _ => None,
-    });
+    let direct_target = first_relative_target(&decoded);
     let flow_kind = flow_kind_for_state(&decoded);
-    let references = decoded_references(
-        address,
-        length,
-        flow_kind,
-        &decoded.operands,
-        &decoded.handles,
-    );
+    let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let pending_context_commits =
         apply_context_commits(compiled, &decoded, address, ctx.context_register);
     Ok(DecodedInstruction {
