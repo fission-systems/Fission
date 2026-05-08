@@ -1097,26 +1097,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 {
                     return Ok(fixed.offset_offset as i64);
                 }
-                let Some(debug_value) = handle.debug_value.clone() else {
-                    bail!("operand {index} has no debug numeric value for pattern expression");
-                };
-                match debug_value {
-                    BoundOperand::Immediate { value, .. } => Ok(value as i64),
-                    BoundOperand::Relative { target } => Ok(target as i64),
-                    BoundOperand::Register { index, .. } => Ok(i64::from(index)),
-                    BoundOperand::NamedVarnode {
-                        display_index: Some(index),
-                        ..
-                    } => Ok(i64::from(index)),
-                    BoundOperand::NamedVarnode { name, .. } => {
-                        bail!("operand {name} has no numeric selector value")
-                    }
-                    BoundOperand::Memory {
-                        absolute,
-                        displacement,
-                        ..
-                    } => Ok(absolute.unwrap_or(displacement as u64) as i64),
-                }
+                bail!("operand {index} is not a constant fixed handle for pattern expression")
             }
             CompiledPatternExpression::Add(lhs, rhs) => {
                 Ok(self.eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?)
