@@ -608,6 +608,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let hardcoded_register_space = ["4 => ", "\"register\""].concat();
     let silent_u32_overflow_zero = ["u32::try_from(value).ok())", ".unwrap_or(0)"].join("\n");
     let debug_pattern_value_fallback = ["debug", "_value) = handle.debug_value.clone()"].concat();
+    let callother_size_fallback = ["template_varnode_size(input, state).", "unwrap_or(8)"].concat();
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -681,6 +682,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&debug_pattern_value_fallback),
             "{} still evaluates pattern expressions from display/debug operands",
+            file.display()
+        );
+        assert!(
+            !source.contains(&callother_size_fallback),
+            "{} still guesses CALLOTHER input size after template size resolution failure",
             file.display()
         );
     }

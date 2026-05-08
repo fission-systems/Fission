@@ -691,7 +691,7 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::CallOther => {
                 let mut inputs = Vec::new();
                 for input in &op.inputs {
-                    let size = self.template_varnode_size(input, state).unwrap_or(8);
+                    let size = self.template_varnode_size(input, state)?;
                     inputs.push(self.read_template_varnode(input, state, size)?);
                 }
                 let output = if let Some(ref out_ref) = op.output {
