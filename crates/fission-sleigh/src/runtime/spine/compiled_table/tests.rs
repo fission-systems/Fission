@@ -606,6 +606,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let hardcoded_unique_space = ["2 => ", "\"unique\""].concat();
     let hardcoded_ram_space = ["3 => ", "\"ram\""].concat();
     let hardcoded_register_space = ["4 => ", "\"register\""].concat();
+    let silent_u32_overflow_zero = ["u32::try_from(value).ok())", ".unwrap_or(0)"].join("\n");
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -669,6 +670,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(&hardcoded_ram_space)
                 && !source.contains(&hardcoded_register_space),
             "{} still hardcodes SLA space ids instead of using sla_spaces",
+            file.display()
+        );
+        assert!(
+            !source.contains(&silent_u32_overflow_zero),
+            "{} still turns oversized SLA template sizes into zero",
             file.display()
         );
     }

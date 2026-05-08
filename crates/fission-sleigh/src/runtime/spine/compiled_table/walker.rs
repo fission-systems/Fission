@@ -116,6 +116,15 @@ fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
     }
 }
 
+fn optional_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
+    match value {
+        Some(value) => {
+            u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
+        }
+        None => Ok(0),
+    }
+}
+
 #[cfg(test)]
 mod construct_state_offset_tests {
     use crate::compiler::{compile_x86_64_frontend, discovery};
@@ -362,9 +371,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .size
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
-            .transpose()?
-            .and_then(|value| u32::try_from(value).ok())
-            .unwrap_or(0);
+            .transpose()
+            .and_then(|value| optional_const_tpl_u32(value, "export HandleTpl size"))?;
         let offset_space = handle_tpl
             .ptr_space
             .as_ref()
@@ -380,9 +388,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .ptr_size
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
-            .transpose()?
-            .and_then(|value| u32::try_from(value).ok())
-            .unwrap_or(0);
+            .transpose()
+            .and_then(|value| optional_const_tpl_u32(value, "export HandleTpl ptr_size"))?;
         let temp_space = handle_tpl
             .temp_space
             .as_ref()

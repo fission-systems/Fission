@@ -38,6 +38,15 @@ fn const_varnode(value: u64, size: u32) -> Varnode {
     Varnode::constant(value as i64, size)
 }
 
+fn optional_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
+    match value {
+        Some(value) => {
+            u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
+        }
+        None => Ok(0),
+    }
+}
+
 pub(super) fn emit_pcode_for_state(
     compiled: &CompiledFrontend,
     native: Option<&Arc<NativeBackend>>,
@@ -1182,9 +1191,8 @@ impl<'c> CompiledTableEmitter<'c> {
                         .ptr_size
                         .as_ref()
                         .map(|size| self.resolve_const_value(size, state))
-                        .transpose()?
-                        .and_then(|size| u32::try_from(size).ok())
-                        .unwrap_or(0);
+                        .transpose()
+                        .and_then(|size| optional_const_tpl_u32(size, "HandleTpl ptr_size"))?;
                     if ptr_space.index == 0 || ptr_space.name == "const" {
                         return Ok(const_varnode(ptr_offset, ptr_size));
                     }
