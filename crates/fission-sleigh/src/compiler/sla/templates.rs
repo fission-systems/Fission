@@ -110,21 +110,10 @@ pub(super) fn decode_construct_templates(
                 format!("{subtable_name}#ctor{local_index}")
             };
 
-            let main_tpl = constructor
-                .children
-                .iter()
-                .find(|child| {
-                    child.id == sla_format::ELEM_CONSTRUCT_TPL
-                        && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
-                })
-                .or_else(|| {
-                    // Fallback: if no section-less template exists, pick any ELEM_CONSTRUCT_TPL
-                    // that has no section attribute (only valid for truly section-less constructors).
-                    constructor
-                        .children
-                        .iter()
-                        .find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)
-                });
+            let main_tpl = constructor.children.iter().find(|child| {
+                child.id == sla_format::ELEM_CONSTRUCT_TPL
+                    && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
+            });
             let Some(main_tpl) = main_tpl else {
                 if trace_sla_parse {
                     eprintln!(

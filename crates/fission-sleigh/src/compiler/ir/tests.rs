@@ -223,6 +223,20 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
 }
 
 #[test]
+fn sla_template_parser_does_not_promote_named_sections_to_main() {
+    let templates = include_str!("../sla/templates.rs");
+    for forbidden in [
+        "constructor.children.iter().find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)",
+        "if no section-less template exists",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "SLA parser must fail closed when the main ConstructTpl is missing, not promote a named section: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_operand_minimum_lengths_are_preserved_on_handle_templates() {
     if !discovery::ghidra_packaged_sla_available() {
         eprintln!("skip: packaged Ghidra .sla not available for operand minlen check");
