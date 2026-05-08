@@ -70,6 +70,16 @@ INTEGRAL_WORDS = {
     "bool",
 }
 
+UNSIGNED_INTEGRAL_WORDS = {
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "uint",
+    "usize",
+    "unsigned",
+}
+
 
 @dataclass(frozen=True)
 class BenchmarkEntry:
@@ -268,8 +278,12 @@ def classify_param(param: str, language: str) -> str:
         return "aggregate_or_pointer"
     if language == "go" and "int" in words:
         return "int"
-    if language == "rust" and words.intersection({"i32", "u32", "usize", "isize", "i64", "u64"}):
+    if language == "rust" and words.intersection({"u32", "usize", "u64"}):
+        return "uint"
+    if language == "rust" and words.intersection({"i32", "isize", "i64"}):
         return "int"
+    if language in {"c", "cpp"} and words.intersection(UNSIGNED_INTEGRAL_WORDS):
+        return "uint"
     if words.intersection(INTEGRAL_WORDS):
         return "int"
     if not words:
@@ -626,6 +640,18 @@ def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     return []
 
 
+def default_behavior_cases_for_kinds(param_kinds: list[str]) -> list[tuple[int, ...]]:
+    unsigned_positions = {idx for idx, kind in enumerate(param_kinds) if kind == "uint"}
+    cases = default_behavior_cases(len(param_kinds))
+    if not unsigned_positions:
+        return cases
+    return [
+        case
+        for case in cases
+        if all(case[idx] >= 0 for idx in unsigned_positions)
+    ]
+
+
 def explicit_behavior_cases(entry: BenchmarkEntry, func: SourceFunction) -> list[dict[str, Any]] | None:
     if not entry.behavior_cases:
         return None
@@ -646,7 +672,7 @@ def behavior_supported(
     if explicit_cases is not None:
         if func.return_kind not in {"int", "void"}:
             return False, f"unsupported return kind: {func.return_kind}"
-        unsupported = [kind for kind in func.param_kinds if kind not in {"int", "int_ptr"}]
+        unsupported = [kind for kind in func.param_kinds if kind not in {"int", "uint", "int_ptr"}]
         if unsupported:
             return False, f"unsupported parameter kinds: {func.param_kinds}"
         valid, reason = validate_explicit_behavior_cases(func, explicit_cases)
@@ -655,9 +681,9 @@ def behavior_supported(
         return True, None
     if func.return_kind != "int":
         return False, f"unsupported return kind: {func.return_kind}"
-    if any(kind != "int" for kind in func.param_kinds):
+    if any(kind not in {"int", "uint"} for kind in func.param_kinds):
         return False, f"unsupported parameter kinds: {func.param_kinds}"
-    if not default_behavior_cases(len(func.param_kinds)):
+    if not default_behavior_cases_for_kinds(func.param_kinds):
         return False, "unsupported arity"
     return True, None
 
@@ -674,7 +700,7 @@ def validate_explicit_behavior_cases(
         if len(args) != len(func.param_kinds):
             return False, f"case {case_index} arity mismatch"
         for arg_index, (arg, kind) in enumerate(zip(args, func.param_kinds)):
-            if kind == "int" and not isinstance(arg, int):
+            if kind in {"int", "uint"} and not isinstance(arg, int):
                 return False, f"case {case_index} arg {arg_index} must be int"
             if kind == "int_ptr":
                 if not isinstance(arg, dict) or "int_array" not in arg:
@@ -691,7 +717,7 @@ def behavior_cases_for(
     explicit_cases = explicit_behavior_cases(entry, func)
     if explicit_cases is not None:
         return explicit_cases
-    return default_behavior_cases(len(func.param_kinds))
+    return default_behavior_cases_for_kinds(func.param_kinds)
 
 
 def source_harness(
@@ -767,7 +793,7 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
     call_args: list[str] = []
     pointer_arrays: list[tuple[int, str, int]] = []
     for arg_index, (arg, kind) in enumerate(zip(args, func.param_kinds)):
-        if kind == "int":
+        if kind in {"int", "uint"}:
             call_args.append(str(arg))
             continue
         if kind == "int_ptr":
