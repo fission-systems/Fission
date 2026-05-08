@@ -204,13 +204,17 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             for candidate in &block.ops {
-                if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                if candidate
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| Self::varnode_matches_key(output, &key))
+                {
                     break;
                 }
                 if candidate
                     .inputs
                     .iter()
-                    .any(|input| VarnodeKey::from(input) == key)
+                    .any(|input| Self::varnode_matches_key(input, &key))
                 {
                     consumer_count += 1;
                     has_phi_merge_use |= candidate.opcode == PcodeOpcode::MultiEqual;

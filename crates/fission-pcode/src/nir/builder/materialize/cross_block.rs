@@ -446,11 +446,15 @@ impl<'a> PreviewBuilder<'a> {
                     if candidate
                         .inputs
                         .iter()
-                        .any(|input| VarnodeKey::from(input) == key)
+                        .any(|input| Self::varnode_matches_key(input, &key))
                     {
                         return Some((block.start_address, idx, candidate.seq_num));
                     }
-                    if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                    if candidate
+                        .output
+                        .as_ref()
+                        .is_some_and(|output| Self::varnode_matches_key(output, &key))
+                    {
                         return None;
                     }
                 }
@@ -541,7 +545,7 @@ impl<'a> PreviewBuilder<'a> {
             .inputs
             .iter()
             .enumerate()
-            .filter_map(|(idx, input)| (VarnodeKey::from(input) == key).then_some(idx))
+            .filter_map(|(idx, input)| Self::varnode_matches_key(input, &key).then_some(idx))
             .collect::<Vec<_>>();
         let consumer_kind =
             Self::classify_disallowed_single_consumer_kind(consumer_op, &matched_inputs);
@@ -551,9 +555,12 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             predecessor_count.max(1)
         };
-        let has_existing_binding = merge_block.ops[..consumer_op_idx]
-            .iter()
-            .any(|candidate| candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()));
+        let has_existing_binding = merge_block.ops[..consumer_op_idx].iter().any(|candidate| {
+            candidate
+                .output
+                .as_ref()
+                .is_some_and(|output| Self::varnode_matches_key(output, &key))
+        });
         let relation = self.classify_missing_merge_binding_relation(
             def_block_idx,
             merge_block_idx,

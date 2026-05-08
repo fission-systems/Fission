@@ -232,9 +232,8 @@ impl<'a> PreviewBuilder<'a> {
             && !requested.is_constant
             && candidate.space_id != requested.space_id
             && candidate.size >= requested.size
-            && self.x64_gpr_family_index_for_key(candidate)
-                == self.x64_gpr_family_index_for_key(requested)
-            && self.x64_gpr_family_index_for_key(candidate).is_some()
+            && self.gpr_family_index_for_key(candidate) == self.gpr_family_index_for_key(requested)
+            && self.gpr_family_index_for_key(candidate).is_some()
     }
 
     fn register_key_cross_space_zero_extends(
@@ -248,18 +247,23 @@ impl<'a> PreviewBuilder<'a> {
             && candidate.space_id != requested.space_id
             && candidate.size == 4
             && requested.size == 8
-            && self.x64_gpr_family_index_for_key(candidate)
-                == self.x64_gpr_family_index_for_key(requested)
-            && self.x64_gpr_family_index_for_key(candidate).is_some()
+            && self.gpr_family_index_for_key(candidate) == self.gpr_family_index_for_key(requested)
+            && self.gpr_family_index_for_key(candidate).is_some()
     }
 
-    fn x64_gpr_family_index_for_key(&self, key: &VarnodeKey) -> Option<usize> {
+    fn gpr_family_index_for_key(&self, key: &VarnodeKey) -> Option<usize> {
         if key.is_constant {
             return None;
         }
         if is_register_space_id(key.space_id) {
-            let name = x64_ghidra_reg_name(key.offset)?;
-            return crate::arch::x86::x86_gpr_family_index(name);
+            return match self.options.calling_convention {
+                CallingConvention::AArch64 => {
+                    aarch64_ghidra_reg_name(key.offset, key.size).and_then(aarch64_gpr_family_index)
+                }
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+                    x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
+                }
+            };
         }
         if key.space_id == UNIQUE_SPACE_ID {
             let name = unique_register_name(key.offset, key.size)?;
@@ -820,12 +824,33 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let key = VarnodeKey::from(vn);
-        if let Some(site) = self.current_lowering_site
-            && let Some(name) = self
+        if let Some(site) = self.current_lowering_site {
+            if let Some(name) = self
                 .explicit_merge_bindings
                 .get(&(site.block_idx, key.clone()))
-        {
-            return Ok(HirExpr::Var(name.clone()));
+            {
+                return Ok(HirExpr::Var(name.clone()));
+            }
+            if let Some(((_, candidate_key), name)) =
+                self.explicit_merge_bindings
+                    .iter()
+                    .find(|((block_idx, candidate_key), _)| {
+                        *block_idx == site.block_idx
+                            && (Self::register_key_covers(candidate_key, &key)
+                                || self.register_key_zero_extends(candidate_key, &key)
+                                || self.register_key_cross_space_covers(candidate_key, &key)
+                                || self.register_key_cross_space_zero_extends(candidate_key, &key))
+                    })
+            {
+                let expr = HirExpr::Var(name.clone());
+                if candidate_key.size == key.size {
+                    return Ok(expr);
+                }
+                return Ok(HirExpr::Cast {
+                    ty: type_from_size(vn.size, false),
+                    expr: Box::new(expr),
+                });
+            }
         }
         let def_site = self.lookup_def_site(vn);
         if def_site.is_none() {
