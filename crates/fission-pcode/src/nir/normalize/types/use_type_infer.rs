@@ -146,21 +146,83 @@ fn collect_assignment_copy_constraints(
         return;
     };
 
-    if let Some(lhs_ty) = known_binding_types.get(lhs_name)
-        && let HirExpr::Var(rhs_name) = rhs
-    {
-        out.entry(rhs_name.clone())
-            .or_default()
-            .push(copy_constraint_from_type(lhs_ty));
+    if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
+        if let HirExpr::Var(rhs_name) = rhs {
+            out.entry(rhs_name.clone())
+                .or_default()
+                .push(copy_constraint_from_type(lhs_ty));
+        }
+    }
+    if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
+        if matches!(lhs_ty, NirType::Ptr(_)) {
+            collect_pointer_assignment_base_constraints(rhs, lhs_ty, out);
+        }
     }
 
-    if let HirExpr::Var(rhs_name) = rhs
-        && let Some(rhs_ty) = known_binding_types.get(rhs_name)
-    {
-        out.entry(lhs_name.clone())
-            .or_default()
-            .push(copy_constraint_from_type(rhs_ty));
+    if let HirExpr::Var(rhs_name) = rhs {
+        if let Some(rhs_ty) = known_binding_types.get(rhs_name) {
+            out.entry(lhs_name.clone())
+                .or_default()
+                .push(copy_constraint_from_type(rhs_ty));
+        }
     }
+}
+
+fn collect_pointer_assignment_base_constraints(
+    rhs: &HirExpr,
+    ptr_ty: &NirType,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let NirType::Ptr(pointee) = ptr_ty else {
+        return;
+    };
+    match rhs {
+        HirExpr::Var(name) => {
+            out.entry(name.clone())
+                .or_default()
+                .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+        }
+        HirExpr::Cast { expr, .. } => {
+            collect_pointer_assignment_base_constraints(expr, ptr_ty, out);
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if expr_is_pointer_offset_like(rhs.as_ref()) {
+                if let HirExpr::Var(name) = lhs.as_ref() {
+                    out.entry(name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+                }
+            }
+            if expr_is_pointer_offset_like(lhs.as_ref()) {
+                if let HirExpr::Var(name) = rhs.as_ref() {
+                    out.entry(name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+                }
+            }
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            ..
+        } => {
+            if let HirExpr::Var(name) = lhs.as_ref() {
+                out.entry(name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn expr_is_pointer_offset_like(expr: &HirExpr) -> bool {
+    !matches!(expr, HirExpr::Var(_))
 }
 
 fn copy_constraint_from_type(ty: &NirType) -> UseConstraint {
@@ -851,5 +913,59 @@ mod tests {
         let expected = NirType::Ptr(Box::new(uint_ty));
         assert_eq!(func.locals[0].ty, expected);
         assert_eq!(func.params[0].ty, func.locals[0].ty);
+    }
+
+    #[test]
+    fn propagates_pointer_use_back_through_scaled_pointer_assignment() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p".to_owned()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("param_1".to_owned())),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Mul,
+                        lhs: Box::new(HirExpr::Var("idx".to_owned())),
+                        rhs: Box::new(HirExpr::Const(4, u64_ty.clone())),
+                        ty: u64_ty.clone(),
+                    }),
+                    ty: u64_ty,
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("p".to_owned())),
+                    ty: uint_ty.clone(),
+                },
+                rhs: HirExpr::Const(7, uint_ty.clone()),
+            },
+        ];
+        let mut func = HirFunction {
+            name: "scaled_ptr".to_owned(),
+            params: vec![make_typed_binding(
+                "param_1",
+                NirType::Unknown,
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            locals: vec![make_binding("p"), make_binding("idx")],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        let expected = NirType::Ptr(Box::new(uint_ty));
+        assert_eq!(func.locals[0].ty, expected);
+        assert_eq!(func.params[0].ty, func.locals[0].ty);
+        assert_eq!(func.locals[1].ty, NirType::Unknown);
     }
 }

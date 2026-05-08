@@ -15,15 +15,73 @@ type ConstEnv = HashMap<String, (i64, NirType)>;
 
 pub(crate) fn apply_sccp_pass(func: &mut HirFunction) -> bool {
     let max_rounds = if is_large_hir_function(func) { 2 } else { 8 };
+    let goto_targets = collect_goto_targets(&func.body);
     let mut any = false;
     for _ in 0..max_rounds {
         let mut env = ConstEnv::new();
-        if !sccp_transform_stmts(&mut func.body, &mut env) {
+        if !sccp_transform_stmts(&mut func.body, &mut env, &goto_targets) {
             break;
         }
         any = true;
     }
     any
+}
+
+fn collect_goto_targets(stmts: &[HirStmt]) -> HashSet<String> {
+    let mut targets = HashSet::new();
+    for stmt in stmts {
+        collect_goto_targets_stmt(stmt, &mut targets);
+    }
+    targets
+}
+
+fn collect_goto_targets_stmt(stmt: &HirStmt, targets: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Goto(label) => {
+            targets.insert(label.clone());
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            for s in body {
+                collect_goto_targets_stmt(s, targets);
+            }
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(s) = init.as_deref() {
+                collect_goto_targets_stmt(s, targets);
+            }
+            for s in body {
+                collect_goto_targets_stmt(s, targets);
+            }
+            if let Some(s) = update.as_deref() {
+                collect_goto_targets_stmt(s, targets);
+            }
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for s in then_body {
+                collect_goto_targets_stmt(s, targets);
+            }
+            for s in else_body {
+                collect_goto_targets_stmt(s, targets);
+            }
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                for s in &case.body {
+                    collect_goto_targets_stmt(s, targets);
+                }
+            }
+            for s in default {
+                collect_goto_targets_stmt(s, targets);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn merge_env(a: &ConstEnv, b: &ConstEnv) -> ConstEnv {
@@ -128,22 +186,87 @@ fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
     changed
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    fn var(name: &str) -> HirExpr {
+        HirExpr::Var(name.to_string())
+    }
+
+    #[test]
+    fn sccp_keeps_backedge_label_values_nonconstant() {
+        let mut func = HirFunction {
+            name: "test_sccp_unstructured_backedge".to_string(),
+            return_type: int(32),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(0, int(32)),
+                },
+                HirStmt::Label("loop".to_string()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(var("x")),
+                        rhs: Box::new(HirExpr::Const(1, int(32))),
+                        ty: int(32),
+                    },
+                },
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        lhs: Box::new(var("rows")),
+                        rhs: Box::new(var("x")),
+                        ty: int(32),
+                    },
+                    then_body: vec![HirStmt::Goto("loop".to_string())],
+                    else_body: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let HirStmt::If { cond, .. } = &func.body[3] else {
+            panic!("expected loop branch to remain an if");
+        };
+        let HirExpr::Binary { rhs, .. } = cond else {
+            panic!("expected branch condition to remain binary");
+        };
+        assert_eq!(rhs.as_ref(), &var("x"));
+    }
+}
+
 fn eval_truth(expr: &HirExpr, env: &ConstEnv) -> Option<bool> {
     let (v, _) = eval_hir_expr_with_const_env(expr, env)?;
     Some(v != 0)
 }
 
-fn sccp_transform_stmts(stmts: &mut Vec<HirStmt>, env: &mut ConstEnv) -> bool {
+fn sccp_transform_stmts(
+    stmts: &mut Vec<HirStmt>,
+    env: &mut ConstEnv,
+    goto_targets: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
-        changed |= sccp_stmt(&mut stmts[i], env);
+        changed |= sccp_stmt(&mut stmts[i], env, goto_targets);
         i += 1;
     }
     changed
 }
 
-fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
+fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<String>) -> bool {
     let mut changed = false;
     loop {
         match stmt {
@@ -177,7 +300,7 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 break;
             }
             HirStmt::Block(stmts) => {
-                changed |= sccp_transform_stmts(stmts, env);
+                changed |= sccp_transform_stmts(stmts, env, goto_targets);
                 break;
             }
             HirStmt::If {
@@ -202,8 +325,8 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                     None => {
                         let mut e1 = pre.clone();
                         let mut e2 = pre.clone();
-                        changed |= sccp_transform_stmts(then_body, &mut e1);
-                        changed |= sccp_transform_stmts(else_body, &mut e2);
+                        changed |= sccp_transform_stmts(then_body, &mut e1, goto_targets);
+                        changed |= sccp_transform_stmts(else_body, &mut e2, goto_targets);
                         *env = merge_env(&e1, &e2);
                     }
                 }
@@ -216,7 +339,7 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 changed |= sccp_subst_expr(cond, &loop_entry);
                 changed |= fold_expr_hir(cond);
                 let mut inner = loop_entry;
-                changed |= sccp_transform_stmts(body, &mut inner);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
                 *env = env_without_vars(&pre, &modified);
                 break;
             }
@@ -224,7 +347,7 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 let pre = env.clone();
                 let modified = loop_variant_vars(body);
                 let mut inner = env_without_vars(&pre, &modified);
-                changed |= sccp_transform_stmts(body, &mut inner);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
                 let cond_env = env_without_vars(&inner, &modified);
                 changed |= sccp_subst_expr(cond, &cond_env);
                 changed |= fold_expr_hir(cond);
@@ -238,7 +361,7 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 body,
             } => {
                 if let Some(i) = init.as_mut() {
-                    changed |= sccp_stmt(i, env);
+                    changed |= sccp_stmt(i, env, goto_targets);
                 }
                 let loop_entry = env.clone();
                 let mut modified = loop_variant_vars(body);
@@ -257,11 +380,11 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                     changed |= fold_expr_hir(c);
                 }
                 let mut inner = loop_body_entry;
-                changed |= sccp_transform_stmts(body, &mut inner);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
                 *env = env_without_vars(&loop_entry, &modified);
                 if let Some(u) = update.as_mut() {
                     let mut update_env = env_without_vars(&inner, &modified);
-                    changed |= sccp_stmt(u, &mut update_env);
+                    changed |= sccp_stmt(u, &mut update_env, goto_targets);
                 }
                 break;
             }
@@ -289,22 +412,27 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv) -> bool {
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {
                     let mut e = pre.clone();
-                    changed |= sccp_transform_stmts(&mut case.body, &mut e);
+                    changed |= sccp_transform_stmts(&mut case.body, &mut e, goto_targets);
                     acc = Some(match acc {
                         None => e,
                         Some(a) => merge_env(&a, &e),
                     });
                 }
                 let mut ed = pre.clone();
-                changed |= sccp_transform_stmts(default, &mut ed);
+                changed |= sccp_transform_stmts(default, &mut ed, goto_targets);
                 *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
                 break;
             }
-            HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_) => break,
+            HirStmt::Label(label) => {
+                if goto_targets.contains(label) {
+                    env.clear();
+                }
+                break;
+            }
+            HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue | HirStmt::Goto(_) => {
+                env.clear();
+                break;
+            }
         }
     }
     changed
