@@ -1427,11 +1427,9 @@ fn parse_operand_specs(
         }
     }
     if specs.is_empty() && !operand_part.is_empty() {
-        return Ok(vec![CompiledOperandSpec::SubtableEvaluation {
-            table_name: "unknown".to_string(),
-            reloffset: 0,
-            offsetbase: -1,
-        }]);
+        return Err(anyhow!(
+            "unsupported operand syntax in legacy constructor signature: {operand_part}"
+        ));
     }
     if specs.is_empty() && operand_part.is_empty() {
         return Ok(Vec::new());

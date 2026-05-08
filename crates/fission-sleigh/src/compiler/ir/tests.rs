@@ -209,6 +209,15 @@ fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
 }
 
 #[test]
+fn legacy_operand_lowering_does_not_synthesize_unknown_subtable() {
+    let lowering = include_str!("lowering.rs");
+    assert!(
+        !lowering.contains("table_name: \"unknown\".to_string()"),
+        "legacy operand lowering must fail closed instead of creating an unknown subtable"
+    );
+}
+
+#[test]
 fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
     let types = include_str!("types.rs");
     let lowering = include_str!("lowering.rs");
