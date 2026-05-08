@@ -453,19 +453,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledSpaceTpl::SpaceRef(space) => Ok(space.clone()),
             CompiledSpaceTpl::Const(value) => {
                 let index = self.resolve_export_const_tpl(value, handles)?;
-                let name = match index {
-                    0 => "const",
-                    2 => "unique",
-                    3 => "ram",
-                    4 => "register",
-                    _ => "unknown",
-                };
-                Ok(CompiledSpaceRef {
-                    name: name.to_string(),
-                    index,
-                    word_size: 0,
-                    addr_size: 0,
-                })
+                if let Some(space_ref) = self.compiled.sla_spaces.get(&index) {
+                    return Ok(space_ref.clone());
+                }
+                if index == 0 {
+                    return Ok(CompiledSpaceRef {
+                        name: "const".to_string(),
+                        index: 0,
+                        word_size: 0,
+                        addr_size: 0,
+                    });
+                }
+                bail!("export SpaceTpl references unknown SLA space id {index}")
             }
         }
     }

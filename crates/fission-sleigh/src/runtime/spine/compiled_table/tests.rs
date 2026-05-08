@@ -602,6 +602,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let isa_opcode_policy = ["is", "instruction", "prefix", "byte"].join("_");
     let opcode_context_policy = ["opcode", "len", "from", "context"].join("_");
     let unknown_space_materialization = ["name: ", "\"unknown\""].concat();
+    let unknown_space_match_arm = ["_ => ", "\"unknown\""].concat();
+    let hardcoded_unique_space = ["2 => ", "\"unique\""].concat();
+    let hardcoded_ram_space = ["3 => ", "\"ram\""].concat();
+    let hardcoded_register_space = ["4 => ", "\"register\""].concat();
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -653,6 +657,18 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&unknown_space_materialization),
             "{} still materializes missing SLA spaces instead of failing closed",
+            file.display()
+        );
+        assert!(
+            !source.contains(&unknown_space_match_arm),
+            "{} still maps missing SLA spaces to an unknown placeholder",
+            file.display()
+        );
+        assert!(
+            !source.contains(&hardcoded_unique_space)
+                && !source.contains(&hardcoded_ram_space)
+                && !source.contains(&hardcoded_register_space),
+            "{} still hardcodes SLA space ids instead of using sla_spaces",
             file.display()
         );
     }
