@@ -26,7 +26,8 @@ Use `manifests/source_owned_all.json` for the full checked-in source-owned
 corpus.
 
 For faster local iteration, run independent source-function rows in parallel
-within each binary entry:
+within each binary entry. The default is half of the detected CPU count; pass
+`--jobs 1` for fully serial execution.
 
 ```bash
 python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
@@ -42,6 +43,7 @@ Generated artifacts:
 - `source_semantic_rows.json`
 - `source_semantic_summary.json`
 - `source_semantic_summary.md`
+- `source_semantic_comparison.json` when a prior matching artifact is found
 
 ## Metrics
 
@@ -59,6 +61,21 @@ Generated artifacts:
 The JSON and Markdown summaries also include mapping, decompile-failure, and
 behavior-status buckets plus language/tag/entry breakdowns. `--jobs` changes
 only execution scheduling; row order is restored before artifacts are written.
+If `orjson` is installed it is used as an optional JSON read/write fast path;
+otherwise the standard library `json` module is used.
+
+By default, each run looks for the latest previous artifact under
+`benchmark/artifacts/source_semantic_benchmark/` with the same manifest name and
+adds a `comparison` block to the summary. Use `--baseline-dir <artifact-dir>` to
+pin a specific previous run or `--no-baseline-compare` to disable this. The
+comparison reports metric deltas, improved/regressed rows, behavior status
+transitions, and top per-function score changes.
+
+For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
+`fission_cli decomp` and stores compact stage status, owner buckets, and selected
+quality evidence in each row. This is observation-only and does not affect
+scoring, but it makes low-score rows easier to route back to SLEIGH, NIR,
+structuring, or type/data owners.
 
 The static comparison uses language-neutral fingerprints for control-flow,
 operators, constants, calls, memory access shape, and signature shape. Dynamic
