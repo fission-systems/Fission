@@ -46,6 +46,7 @@ Generated artifacts:
 - `source_semantic_comparison.json` when a prior matching artifact is found
 - `behavior/<entry>/<function-address>/oracle.c`, `candidate.c`, and
   `result.json` for non-passing dynamic behavior rows
+- `debug_triage/...` captures when `--materialize-debug-triage` is used
 
 If `--output-dir` is omitted, the runner writes to a timestamped artifact
 directory under `benchmark/artifacts/source_semantic_benchmark/` instead of
@@ -54,7 +55,11 @@ overwriting a `latest` directory. Each run also appends a compact record to
 so score, behavior, compile, cache, wall-time, and baseline-delta trends survive
 across runs. The current summary includes the latest same-manifest history
 record, prefers a same-row-count record for weighted-similarity delta, and
-shows both artifact-to-artifact comparison and rolling history context.
+shows both artifact-to-artifact comparison and rolling history context. The
+runner also updates
+`benchmark/artifacts/source_semantic_benchmark/source_semantic_latest_by_manifest.json`
+with the latest artifact path, score, cache file, and comparison outcome per
+manifest.
 
 ## Metrics
 
@@ -89,7 +94,9 @@ By default, each run looks for the latest previous artifact under
 adds a `comparison` block to the summary. Use `--baseline-dir <artifact-dir>` to
 pin a specific previous run or `--no-baseline-compare` to disable this. The
 comparison reports metric deltas, improved/regressed rows, behavior status
-transitions, and top per-function score changes.
+transitions, top per-function score changes, separated top improvements/top
+regressions, and a `comparison_outcome` headline that states whether the run
+improved, regressed, stayed unchanged, or is mixed versus the baseline.
 
 For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
 `fission_cli decomp` and stores compact stage status, owner buckets, and selected
@@ -101,9 +108,18 @@ Rows with a mapped function also include a ready-to-run `debug_decomp_command`
 and, when `--include-debug-decomp` is used, the runner materializes the same CLI
 bundle at `debug_decomp/<entry>/<function-address>.json`. The Markdown summary
 lists the lowest-scoring repro commands first. Those rows also include
-`inventory preview-candidates` and `inventory function-facts` commands for the
-same binary/address so a semantic regression can be routed into the existing
-CLI debugging surfaces without rerunning the full benchmark.
+`inventory function-facts` commands for the same binary/address so a semantic
+regression can be routed into the existing CLI debugging surfaces without
+rerunning the full benchmark. The older `inventory preview-candidates` native
+decomp surface is not materialized because current `fission_cli` reports it as
+deprecated after native decomp removal.
+
+Use `--materialize-debug-triage` to execute the function-facts CLI inventory
+surface for the lowest-scoring non-perfect rows during the benchmark run. The
+runner saves the function-facts command result, function-facts JSONL, and
+function-facts summary under `debug_triage/`, and adds a `debug_triage` block to
+the JSON and Markdown summaries. Keep this off for throughput runs; enable it
+for diagnosis-focused artifact snapshots.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate

@@ -30,6 +30,7 @@ DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
 DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
 DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
+DEFAULT_LATEST_INDEX_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_latest_by_manifest.json"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
 
 SANITIZE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -839,7 +840,7 @@ def run_fission_decomp_cached(
     return dict(decomp)
 
 
-def shell_command(parts: list[str | Path]) -> str:
+def shell_command(parts: list[Any]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
 
@@ -862,6 +863,17 @@ def debug_bundle_path_for_row(output_dir: Path, row: dict[str, Any]) -> Path:
         row.get("function_name"),
         row.get("address"),
     )
+
+
+def debug_triage_path_for_row(output_dir: Path, row: dict[str, Any], kind: str, suffix: str) -> Path:
+    stem = "-".join(
+        [
+            sanitize_id(str(row.get("entry_id") or "entry")),
+            sanitize_id(str(row.get("function_name") or "function")),
+            sanitize_id(str(row.get("address") or "unknown")),
+        ]
+    )
+    return output_dir / "debug_triage" / kind / f"{stem}.{suffix}"
 
 
 def behavior_artifact_dir_for_row(
@@ -919,17 +931,8 @@ def decomp_debug_command_for_row(row: dict[str, Any], fission_bin: Path, output_
     return {
         "debug_decomp_bundle_path": rel(bundle_path),
         "debug_decomp_command": shell_command(cmd),
-        "preview_candidate_command": shell_command(
-            [
-                fission_bin,
-                "inventory",
-                "preview-candidates",
-                resolve_path(str(binary_path)),
-                "--inventory",
-                "--addr",
-                str(address),
-            ]
-        ),
+        "preview_candidate_command": None,
+        "preview_candidate_note": "inventory preview-candidates is deprecated with native_decomp removal; use debug-decomp and function-facts",
         "function_facts_command": shell_command(
             [
                 fission_bin,
@@ -972,10 +975,98 @@ def top_debug_commands(rows: list[dict[str, Any]], limit: int = 12) -> list[dict
             "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
             "debug_decomp_command": row.get("debug_decomp_command"),
             "preview_candidate_command": row.get("preview_candidate_command"),
+            "preview_candidate_note": row.get("preview_candidate_note"),
             "function_facts_command": row.get("function_facts_command"),
         }
         for row in candidates[:limit]
     ]
+
+
+def run_command_capture(cmd: list[Any], timeout_sec: int) -> dict[str, Any]:
+    started = time.perf_counter()
+    try:
+        res = subprocess.run(
+            [str(part) for part in cmd],
+            cwd=ROOT_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+        return {
+            "command": shell_command(cmd),
+            "returncode": res.returncode,
+            "timed_out": False,
+            "wall_sec": round(time.perf_counter() - started, 6),
+            "stdout": res.stdout,
+            "stderr": res.stderr,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": shell_command(cmd),
+            "returncode": None,
+            "timed_out": True,
+            "wall_sec": round(time.perf_counter() - started, 6),
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or "",
+        }
+
+
+def materialize_debug_triage(
+    rows: list[dict[str, Any]],
+    fission_bin: Path,
+    output_dir: Path,
+    timeout_sec: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    selected = [
+        row
+        for row in rows
+        if row.get("address") and float(row.get("semantic_score", 0.0) or 0.0) < 1.0
+    ]
+    selected.sort(key=lambda row: (float(row.get("semantic_score", 0.0) or 0.0), row.get("function_name") or ""))
+    triage_rows: list[dict[str, Any]] = []
+    for row in selected[: max(0, limit)]:
+        binary_path = resolve_path(str(row["binary_path"]))
+        address = str(row["address"])
+        facts_jsonl_path = debug_triage_path_for_row(output_dir, row, "function_facts", "jsonl")
+        facts_summary_path = debug_triage_path_for_row(output_dir, row, "function_facts", "summary.json")
+        facts_capture_path = debug_triage_path_for_row(output_dir, row, "function_facts", "command.json")
+        facts_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+        facts = run_command_capture(
+            [
+                fission_bin,
+                "inventory",
+                "function-facts",
+                binary_path,
+                "--addr",
+                address,
+                "--output-jsonl",
+                facts_jsonl_path,
+                "--summary-json",
+                facts_summary_path,
+            ],
+            timeout_sec,
+        )
+        facts_capture_path.write_text(dump_json_pretty(facts), encoding="utf-8")
+
+        triage = {
+            "entry_id": row.get("entry_id"),
+            "function_name": row.get("function_name"),
+            "address": address,
+            "semantic_score_percent": row.get("semantic_score_percent"),
+            "behavior_status": row.get("behavior", {}).get("status"),
+            "preview_candidate_note": row.get("preview_candidate_note"),
+            "function_facts_capture_path": rel(facts_capture_path),
+            "function_facts_jsonl_path": rel(facts_jsonl_path),
+            "function_facts_summary_path": rel(facts_summary_path),
+            "function_facts_returncode": facts.get("returncode"),
+        }
+        row["debug_triage"] = triage
+        triage_rows.append(triage)
+    return triage_rows
 
 
 def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[str]:
@@ -1674,6 +1765,15 @@ def compare_to_baseline(
             )
 
     row_deltas.sort(key=lambda row: (abs(float(row["delta"])), row["function_name"] or ""), reverse=True)
+    top_improvements = sorted(
+        (row for row in row_deltas if float(row.get("delta", 0.0) or 0.0) > 0.0),
+        key=lambda row: (float(row["delta"]), row["function_name"] or ""),
+        reverse=True,
+    )[:10]
+    top_regressions = sorted(
+        (row for row in row_deltas if float(row.get("delta", 0.0) or 0.0) < 0.0),
+        key=lambda row: (float(row["delta"]), row["function_name"] or ""),
+    )[:10]
     metric_keys = [
         "weighted_semantic_similarity",
         "weighted_semantic_similarity_percent",
@@ -1697,8 +1797,39 @@ def compare_to_baseline(
         "behavior_regressed_row_count": behavior_regressed,
         "metric_deltas": {key: metric_delta(summary, baseline_summary, key) for key in metric_keys},
         "top_row_deltas": row_deltas[:20],
+        "top_improvements": top_improvements,
+        "top_regressions": top_regressions,
         "new_rows": [current_by_key[key].get("function_name") for key in new_keys[:20]],
         "missing_rows": [baseline_by_key[key].get("function_name") for key in missing_keys[:20]],
+    }
+
+
+def comparison_outcome(comparison: dict[str, Any]) -> dict[str, Any]:
+    weighted_delta = (
+        comparison.get("metric_deltas", {})
+        .get("weighted_semantic_similarity_percent", {})
+        .get("delta")
+    )
+    behavior_improved = int(comparison.get("behavior_improved_row_count") or 0)
+    behavior_regressed = int(comparison.get("behavior_regressed_row_count") or 0)
+    improved = int(comparison.get("improved_row_count") or 0)
+    regressed = int(comparison.get("regressed_row_count") or 0)
+    if isinstance(weighted_delta, (int, float)) and weighted_delta > 0 and behavior_regressed == 0:
+        direction = "improved"
+    elif isinstance(weighted_delta, (int, float)) and weighted_delta < 0 and behavior_improved == 0:
+        direction = "regressed"
+    elif improved == 0 and regressed == 0 and behavior_improved == 0 and behavior_regressed == 0:
+        direction = "unchanged"
+    else:
+        direction = "mixed"
+    delta_text = "n/a" if not isinstance(weighted_delta, (int, float)) else f"{weighted_delta:+.3f}%"
+    return {
+        "direction": direction,
+        "weighted_semantic_similarity_percent_delta": weighted_delta,
+        "headline": (
+            f"{direction}: weighted semantic similarity {delta_text}, "
+            f"rows +{improved}/-{regressed}, behavior +{behavior_improved}/-{behavior_regressed}"
+        ),
     }
 
 
@@ -1720,6 +1851,7 @@ def append_history_record(path: Path, summary: dict[str, Any]) -> None:
         "row_count": summary.get("row_count"),
         "weighted_semantic_similarity_percent": summary.get("weighted_semantic_similarity_percent"),
         "weighted_semantic_similarity_percent_delta": weighted_delta,
+        "comparison_outcome": summary.get("comparison_outcome"),
         "behavior_pass_rate": summary.get("behavior_pass_rate"),
         "candidate_compile_rate": summary.get("candidate_compile_rate"),
         "decomp_success_rate": summary.get("decomp_success_rate"),
@@ -1730,6 +1862,29 @@ def append_history_record(path: Path, summary: dict[str, Any]) -> None:
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(dump_json_line(record))
+
+
+def update_latest_index(path: Path, summary: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        index = load_json(path) if path.exists() else {}
+    except Exception:
+        index = {}
+    if not isinstance(index, dict):
+        index = {}
+    manifest = str(summary.get("manifest") or "unknown")
+    index[manifest] = {
+        "run_id": summary.get("run_id"),
+        "created_at_utc": summary.get("created_at_utc"),
+        "artifact_dir": summary.get("artifact_dir"),
+        "summary_path": str(Path(str(summary.get("artifact_dir") or "")) / "source_semantic_summary.json"),
+        "row_count": summary.get("row_count"),
+        "weighted_semantic_similarity_percent": summary.get("weighted_semantic_similarity_percent"),
+        "comparison_outcome": summary.get("comparison_outcome"),
+        "decomp_cache_file": summary.get("decomp_cache_file"),
+        "history_file": summary.get("history_file"),
+    }
+    path.write_text(dump_json_pretty(index), encoding="utf-8")
 
 
 def load_history_records(path: Path, manifest_name: str, limit: int = 12) -> list[dict[str, Any]]:
@@ -1808,6 +1963,8 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         )
     if summary.get("history_file"):
         lines.append(f"- History: `{summary['history_file']}`")
+    if summary.get("latest_index_file"):
+        lines.append(f"- Latest index: `{summary['latest_index_file']}`")
     history = summary.get("history")
     if isinstance(history, dict):
         latest = (
@@ -1851,6 +2008,7 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.append(f"| {metric} | {total_value} |")
     comparison = summary.get("comparison")
     if isinstance(comparison, dict):
+        outcome = summary.get("comparison_outcome") if isinstance(summary.get("comparison_outcome"), dict) else {}
         weighted = comparison.get("metric_deltas", {}).get("weighted_semantic_similarity_percent", {})
         delta = weighted.get("delta")
         delta_text = "n/a" if delta is None else f"{delta:+.3f}%"
@@ -1860,6 +2018,7 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 "## Baseline Comparison",
                 "",
                 f"- Baseline: `{comparison.get('baseline_summary_path')}`",
+                f"- Outcome: {outcome.get('headline', 'n/a')}",
                 f"- Weighted semantic similarity delta: {delta_text}",
                 f"- Improved rows: {comparison.get('improved_row_count', 0)}",
                 f"- Regressed rows: {comparison.get('regressed_row_count', 0)}",
@@ -1869,6 +2028,24 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"- Missing rows: {comparison.get('missing_row_count', 0)}",
             ]
         )
+        top_improvements = comparison.get("top_improvements") or []
+        if top_improvements:
+            lines.extend(["", "### Top Improvements", "", "| Function | Delta | Baseline | Current | Behavior |", "|---|---:|---:|---:|---|"])
+            for row in top_improvements[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | {row.get('delta_percent', 0.0):+.3f}% | "
+                    f"{row.get('baseline_score_percent', 0.0):.3f}% | {row.get('current_score_percent', 0.0):.3f}% | "
+                    f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
+                )
+        top_regressions = comparison.get("top_regressions") or []
+        if top_regressions:
+            lines.extend(["", "### Top Regressions", "", "| Function | Delta | Baseline | Current | Behavior |", "|---|---:|---:|---:|---|"])
+            for row in top_regressions[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | {row.get('delta_percent', 0.0):+.3f}% | "
+                    f"{row.get('baseline_score_percent', 0.0):.3f}% | {row.get('current_score_percent', 0.0):.3f}% | "
+                    f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
+                )
         top_deltas = comparison.get("top_row_deltas") or []
         if top_deltas:
             lines.extend(["", "| Function | Delta | Baseline | Current | Behavior |", "|---|---:|---:|---:|---|"])
@@ -1878,6 +2055,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{row.get('baseline_score_percent', 0.0):.3f}% | {row.get('current_score_percent', 0.0):.3f}% | "
                     f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
                 )
+    debug_triage = summary.get("debug_triage") or []
+    if debug_triage:
+        lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Facts | Note |", "|---|---:|---|---|"])
+        for row in debug_triage[:12]:
+            lines.append(
+                f"| `{row.get('function_name')}` | {row.get('semantic_score_percent', 0.0):.3f}% | "
+                f"`{row.get('function_facts_summary_path')}` | {row.get('preview_candidate_note') or ''} |"
+            )
     debug_commands = summary.get("debug_repro_commands") or []
     if debug_commands:
         lines.extend(["", "## Debug Repro Commands", ""])
@@ -2073,6 +2258,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["jobs"] = jobs
     summary["decomp_cache_file"] = rel(decomp_cache_path) if decomp_cache_path is not None else None
     summary["history_file"] = rel(DEFAULT_HISTORY_FILE)
+    summary["latest_index_file"] = rel(DEFAULT_LATEST_INDEX_FILE)
     summary["decomp_cache_initial_entry_count"] = decomp_cache_initial_entry_count
     summary["decomp_cache_entry_count"] = len(decomp_cache)
     summary["decomp_cache_hit_count"] = int(decomp_cache_stats.get("hit", 0))
@@ -2100,11 +2286,22 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 baseline_rows,
                 baseline_summary_path,
             )
+            summary["comparison_outcome"] = comparison_outcome(summary["comparison"])
         except Exception as exc:
             summary["comparison_error"] = {
                 "baseline": str(baseline_path),
                 "error": str(exc),
             }
+    if args.materialize_debug_triage:
+        triage_rows = materialize_debug_triage(
+            rows,
+            fission_bin,
+            output_dir,
+            args.timeout_sec,
+            args.debug_triage_limit,
+        )
+        summary["debug_triage"] = triage_rows
+        summary["debug_triage_count"] = len(triage_rows)
     debug_commands = top_debug_commands(rows)
     if debug_commands:
         summary["debug_repro_commands"] = debug_commands
@@ -2120,6 +2317,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
         )
     (output_dir / "source_semantic_summary.md").write_text(render_markdown(summary, rows), encoding="utf-8")
     append_history_record(DEFAULT_HISTORY_FILE, summary)
+    update_latest_index(DEFAULT_LATEST_INDEX_FILE, summary)
     print(dump_json_pretty(summary), end="")
     return 0
 
@@ -2191,6 +2389,17 @@ def parse_args() -> argparse.Namespace:
         "--include-debug-decomp",
         action="store_true",
         help="Pass fission_cli decomp --debug-decomp and attach compact stage/owner evidence to each row",
+    )
+    parser.add_argument(
+        "--materialize-debug-triage",
+        action="store_true",
+        help="Run fission_cli inventory preview-candidates/function-facts for the lowest-scoring rows and save captures",
+    )
+    parser.add_argument(
+        "--debug-triage-limit",
+        type=int,
+        default=8,
+        help="Maximum non-perfect rows to materialize with --materialize-debug-triage",
     )
     parser.add_argument(
         "--decomp-cache-file",
