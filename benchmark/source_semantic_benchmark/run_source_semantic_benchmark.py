@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +29,7 @@ DEFAULT_MANIFEST = Path(__file__).resolve().parent / "manifests" / "source_owned
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
 DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
+DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
 
 SANITIZE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -157,6 +160,18 @@ def sanitize_id(text: str) -> str:
     return text or "entry"
 
 
+def utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC)
+
+
+def utc_timestamp_slug(now: datetime.datetime) -> str:
+    return now.strftime("%Y%m%dT%H%M%SZ")
+
+
+def utc_isoformat(now: datetime.datetime) -> str:
+    return now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def load_json(path: Path) -> dict[str, Any]:
     data = path.read_bytes()
     if orjson is not None:
@@ -168,6 +183,12 @@ def dump_json_pretty(value: Any) -> str:
     if orjson is not None:
         return orjson.dumps(value, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS).decode("utf-8") + "\n"
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
+
+
+def dump_json_line(value: Any) -> str:
+    if orjson is not None:
+        return orjson.dumps(value, option=orjson.OPT_SORT_KEYS).decode("utf-8") + "\n"
+    return json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 def load_json_list_or_dict(path: Path) -> Any:
@@ -789,6 +810,70 @@ def run_fission_decomp_cached(
     return dict(decomp)
 
 
+def shell_command(parts: list[str | Path]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def debug_bundle_path_for_row(output_dir: Path, row: dict[str, Any]) -> Path:
+    entry = sanitize_id(str(row.get("entry_id") or "entry"))
+    function = sanitize_id(str(row.get("function_name") or "function"))
+    address = sanitize_id(str(row.get("address") or "no-address"))
+    return output_dir / "debug_decomp" / entry / f"{function}-{address}.json"
+
+
+def decomp_debug_command_for_row(row: dict[str, Any], fission_bin: Path, output_dir: Path) -> dict[str, Any] | None:
+    address = row.get("address")
+    binary_path = row.get("binary_path")
+    if not address or not binary_path:
+        return None
+    bundle_path = debug_bundle_path_for_row(output_dir, row)
+    cmd = [
+        fission_bin,
+        "decomp",
+        resolve_path(str(binary_path)),
+        "--addr",
+        str(address),
+        "--json",
+        "--no-header",
+        "--no-warnings",
+        "--debug-decomp",
+        "--debug-decomp-bundle",
+        bundle_path,
+    ]
+    return {
+        "debug_decomp_bundle_path": rel(bundle_path),
+        "debug_decomp_command": shell_command(cmd),
+    }
+
+
+def attach_debug_repro_commands(rows: list[dict[str, Any]], fission_bin: Path, output_dir: Path) -> None:
+    for row in rows:
+        command = decomp_debug_command_for_row(row, fission_bin, output_dir)
+        if command is not None:
+            row.update(command)
+
+
+def top_debug_commands(rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+    candidates = [
+        row
+        for row in rows
+        if row.get("debug_decomp_command") and float(row.get("semantic_score", 0.0) or 0.0) < 1.0
+    ]
+    candidates.sort(key=lambda row: (float(row.get("semantic_score", 0.0) or 0.0), row.get("function_name") or ""))
+    return [
+        {
+            "entry_id": row.get("entry_id"),
+            "function_name": row.get("function_name"),
+            "address": row.get("address"),
+            "semantic_score_percent": row.get("semantic_score_percent"),
+            "behavior_status": row.get("behavior", {}).get("status"),
+            "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
+            "debug_decomp_command": row.get("debug_decomp_command"),
+        }
+        for row in candidates[:limit]
+    ]
+
+
 def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[str]:
     stripped = strip_comments(code)
     counter: Counter[str] = Counter()
@@ -1306,6 +1391,12 @@ def find_latest_baseline_dir(
 def metric_delta(current: dict[str, Any], baseline: dict[str, Any], key: str) -> dict[str, Any]:
     current_value = current.get(key)
     baseline_value = baseline.get(key)
+    if key.endswith("_percent"):
+        raw_key = key.removesuffix("_percent")
+        if not isinstance(current_value, (int, float)) and isinstance(current.get(raw_key), (int, float)):
+            current_value = percent(float(current[raw_key]))
+        if not isinstance(baseline_value, (int, float)) and isinstance(baseline.get(raw_key), (int, float)):
+            baseline_value = percent(float(baseline[raw_key]))
     if not isinstance(current_value, (int, float)) or not isinstance(baseline_value, (int, float)):
         return {"current": current_value, "baseline": baseline_value, "delta": None}
     return {
@@ -1404,10 +1495,42 @@ def compare_to_baseline(
     }
 
 
+def append_history_record(path: Path, summary: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    comparison = summary.get("comparison") if isinstance(summary.get("comparison"), dict) else {}
+    weighted_delta = (
+        comparison.get("metric_deltas", {})
+        .get("weighted_semantic_similarity_percent", {})
+        .get("delta")
+        if isinstance(comparison, dict)
+        else None
+    )
+    record = {
+        "run_id": summary.get("run_id"),
+        "created_at_utc": summary.get("created_at_utc"),
+        "artifact_dir": summary.get("artifact_dir"),
+        "manifest": summary.get("manifest"),
+        "row_count": summary.get("row_count"),
+        "weighted_semantic_similarity_percent": summary.get("weighted_semantic_similarity_percent"),
+        "weighted_semantic_similarity_percent_delta": weighted_delta,
+        "behavior_pass_rate": summary.get("behavior_pass_rate"),
+        "candidate_compile_rate": summary.get("candidate_compile_rate"),
+        "decomp_success_rate": summary.get("decomp_success_rate"),
+        "baseline_summary_path": comparison.get("baseline_summary_path") if isinstance(comparison, dict) else None,
+        "decomp_cache_hit_count": summary.get("decomp_cache_hit_count"),
+        "decomp_cache_miss_count": summary.get("decomp_cache_miss_count"),
+        "wall_sec": summary.get("wall_sec"),
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(dump_json_line(record))
+
+
 def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     lines = [
         f"# Source Semantic Benchmark: {summary['manifest']}",
         "",
+        f"- Run ID: `{summary.get('run_id', 'unknown')}`",
+        f"- Artifact dir: `{summary.get('artifact_dir', 'unknown')}`",
         f"- Entries: {summary['entry_count']}",
         f"- Rows: {summary['row_count']}",
         f"- Function mapping rate: {summary['function_mapping_rate']:.3f}",
@@ -1427,6 +1550,8 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"- Decomp cache hits/misses: {summary.get('decomp_cache_hit_count', 0)}/"
             f"{summary.get('decomp_cache_miss_count', 0)}"
         )
+    if summary.get("history_file"):
+        lines.append(f"- History: `{summary['history_file']}`")
     lines.extend([
         "",
         "## By Language",
@@ -1476,6 +1601,18 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{row.get('baseline_score_percent', 0.0):.3f}% | {row.get('current_score_percent', 0.0):.3f}% | "
                     f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
                 )
+    debug_commands = summary.get("debug_repro_commands") or []
+    if debug_commands:
+        lines.extend(["", "## Debug Repro Commands", ""])
+        for row in debug_commands[:8]:
+            lines.append(
+                f"- `{row.get('entry_id')}` `{row.get('function_name')}` "
+                f"({row.get('semantic_score_percent', 0.0):.3f}%, {row.get('behavior_status')}):"
+            )
+            lines.append("")
+            lines.append("  ```bash")
+            lines.append(f"  {row.get('debug_decomp_command')}")
+            lines.append("  ```")
     failing = [row for row in rows if row.get("semantic_score", 0.0) < 1.0][:20]
     if failing:
         lines.extend(["", "## First Non-Perfect Rows", ""])
@@ -1552,13 +1689,16 @@ def row_for_function(
 
 def run_benchmark(args: argparse.Namespace) -> int:
     start = time.perf_counter()
+    created_at = utc_now()
     manifest_path = resolve_path(args.manifest)
     manifest = load_json(manifest_path)
+    manifest_name = manifest.get("name", manifest_path.stem)
+    run_id = f"{sanitize_id(manifest_name)}-{utc_timestamp_slug(created_at)}"
     entries = discover_source_entries(manifest)
     if args.limit_binaries is not None:
         entries = entries[: args.limit_binaries]
 
-    output_dir = resolve_path(args.output_dir) if args.output_dir else DEFAULT_ARTIFACT_ROOT / f"{manifest.get('name', 'source-semantic')}-latest"
+    output_dir = resolve_path(args.output_dir) if args.output_dir else DEFAULT_ARTIFACT_ROOT / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     fission_bin = resolve_path(args.fission_bin)
     host_execution = c_host_execution_probe(args.timeout_sec)
@@ -1617,9 +1757,14 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 entry_rows.append((futures[future], future.result()))
         rows.extend(row for _index, row in sorted(entry_rows, key=lambda item: item[0]))
 
-    summary = summarize(rows, manifest.get("name", manifest_path.stem), entries)
+    attach_debug_repro_commands(rows, fission_bin, output_dir)
+    summary = summarize(rows, manifest_name, entries)
+    summary["run_id"] = run_id
+    summary["created_at_utc"] = utc_isoformat(created_at)
+    summary["artifact_dir"] = rel(output_dir)
     summary["jobs"] = jobs
     summary["decomp_cache_file"] = rel(decomp_cache_path) if decomp_cache_path is not None else None
+    summary["history_file"] = rel(DEFAULT_HISTORY_FILE)
     summary["decomp_cache_initial_entry_count"] = decomp_cache_initial_entry_count
     summary["decomp_cache_entry_count"] = len(decomp_cache)
     summary["decomp_cache_hit_count"] = int(decomp_cache_stats.get("hit", 0))
@@ -1649,6 +1794,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 "baseline": str(baseline_path),
                 "error": str(exc),
             }
+    debug_commands = top_debug_commands(rows)
+    if debug_commands:
+        summary["debug_repro_commands"] = debug_commands
     (output_dir / "source_semantic_rows.json").write_text(
         dump_json_pretty(rows), encoding="utf-8"
     )
@@ -1660,6 +1808,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
             dump_json_pretty(summary["comparison"]), encoding="utf-8"
         )
     (output_dir / "source_semantic_summary.md").write_text(render_markdown(summary, rows), encoding="utf-8")
+    append_history_record(DEFAULT_HISTORY_FILE, summary)
     print(dump_json_pretty(summary), end="")
     return 0
 
@@ -1690,7 +1839,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="Source semantic manifest JSON")
     parser.add_argument("--fission-bin", default=str(DEFAULT_FISSION_BIN), help="Path to fission_cli")
-    parser.add_argument("--output-dir", help="Output artifact directory")
+    parser.add_argument(
+        "--output-dir",
+        help="Output artifact directory; defaults to a timestamped directory under benchmark/artifacts/source_semantic_benchmark",
+    )
     parser.add_argument("--limit-binaries", type=int, help="Limit discovered manifest entries")
     parser.add_argument("--limit-functions", type=int, help="Limit source functions per entry")
     parser.add_argument("--timeout-sec", type=int, default=30, help="Per-command timeout")

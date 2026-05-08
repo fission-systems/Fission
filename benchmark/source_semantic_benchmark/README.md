@@ -45,6 +45,13 @@ Generated artifacts:
 - `source_semantic_summary.md`
 - `source_semantic_comparison.json` when a prior matching artifact is found
 
+If `--output-dir` is omitted, the runner writes to a timestamped artifact
+directory under `benchmark/artifacts/source_semantic_benchmark/` instead of
+overwriting a `latest` directory. Each run also appends a compact record to
+`benchmark/artifacts/source_semantic_benchmark/source_semantic_history.jsonl`
+so score, behavior, compile, cache, wall-time, and baseline-delta trends survive
+across runs.
+
 ## Metrics
 
 - `function_mapping_rate`: source functions mapped to a Fission function address.
@@ -84,7 +91,10 @@ For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
 `fission_cli decomp` and stores compact stage status, owner buckets, and selected
 quality evidence in each row. This is observation-only and does not affect
 scoring, but it makes low-score rows easier to route back to SLEIGH, NIR,
-structuring, or type/data owners.
+structuring, or type/data owners. Rows with a mapped function also include a
+ready-to-run `debug_decomp_command` that uses `fission_cli decomp
+--debug-decomp-bundle <artifact>/debug_decomp/...json`; the Markdown summary
+lists the lowest-scoring repro commands first.
 
 The static comparison uses language-neutral fingerprints for control-flow,
 operators, constants, calls, memory access shape, and signature shape. Dynamic
