@@ -63,6 +63,7 @@ fn collect_constraints_stmt(
         HirStmt::Assign { lhs, rhs } => {
             // Use-site on the lhs: Deref/Index require the base to be a pointer.
             collect_constraints_lvalue(lhs, out);
+            collect_assignment_copy_constraints(lhs, rhs, known_binding_types, out);
             // Use-site on the rhs: look for Cast(T, Var(x)) → x: T.
             collect_constraints_cast_source(rhs, out);
             // Recurse into rhs for nested uses.
@@ -132,6 +133,40 @@ fn collect_constraints_stmt(
             collect_constraints_expr(expr, return_type, known_binding_types, out);
         }
         _ => {}
+    }
+}
+
+fn collect_assignment_copy_constraints(
+    lhs: &HirLValue,
+    rhs: &HirExpr,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let HirLValue::Var(lhs_name) = lhs else {
+        return;
+    };
+
+    if let Some(lhs_ty) = known_binding_types.get(lhs_name)
+        && let HirExpr::Var(rhs_name) = rhs
+    {
+        out.entry(rhs_name.clone())
+            .or_default()
+            .push(copy_constraint_from_type(lhs_ty));
+    }
+
+    if let HirExpr::Var(rhs_name) = rhs
+        && let Some(rhs_ty) = known_binding_types.get(rhs_name)
+    {
+        out.entry(lhs_name.clone())
+            .or_default()
+            .push(copy_constraint_from_type(rhs_ty));
+    }
+}
+
+fn copy_constraint_from_type(ty: &NirType) -> UseConstraint {
+    match ty {
+        NirType::Ptr(pointee) => UseConstraint::Ptr(pointee.as_ref().clone()),
+        _ => UseConstraint::Exact(ty.clone()),
     }
 }
 
@@ -777,5 +812,44 @@ mod tests {
         let mut func = make_func(vec![make_binding("r")], body, ret_ty.clone());
         super::apply_use_driven_type_infer_pass(&mut func);
         assert_eq!(func.locals[0].ty, ret_ty);
+    }
+
+    #[test]
+    fn propagates_pointer_use_back_through_copy_edge() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p".to_owned()),
+                rhs: HirExpr::Var("param_1".to_owned()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("p".to_owned())),
+                    ty: uint_ty.clone(),
+                },
+                rhs: HirExpr::Const(7, uint_ty.clone()),
+            },
+        ];
+        let mut func = HirFunction {
+            name: "copy_ptr".to_owned(),
+            params: vec![make_typed_binding(
+                "param_1",
+                NirType::Unknown,
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            locals: vec![make_binding("p")],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        let expected = NirType::Ptr(Box::new(uint_ty));
+        assert_eq!(func.locals[0].ty, expected);
+        assert_eq!(func.params[0].ty, func.locals[0].ty);
     }
 }
