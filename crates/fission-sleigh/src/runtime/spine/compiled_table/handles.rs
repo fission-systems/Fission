@@ -50,7 +50,9 @@ pub(super) fn fixed_handle_from_resolved_varnode(
     }
 }
 
-pub(super) fn bound_operand_from_fixed_handle(handle: &RuntimeFixedHandle) -> Result<BoundOperand> {
+pub(super) fn display_operand_from_exported_fixed_handle(
+    handle: &RuntimeFixedHandle,
+) -> Result<BoundOperand> {
     let space = handle
         .space
         .as_ref()

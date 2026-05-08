@@ -170,10 +170,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             {
                 opcode_len_from_context(ctx)?
             } else if selection.trace.root_bucket == "instruction" {
-                // For instruction-level constructors whose subtables aren't yet tracked in
-                // compiled.subtables (e.g. 32-bit architectures where rel32/rel8 are native-only),
-                // fall back to the matcher length so the cursor is positioned after the opcode
-                // before binding displacement/address operands.
+                // Some instruction-level constructors encode address bytes directly in the
+                // terminal matcher instead of through a descendant operand subtable. In that
+                // case the matcher span is the SLA-derived cursor advance before binding
+                // displacement/address operands.
                 opcode_len_from_matcher(&selection.constructor.matcher)
             } else {
                 0
@@ -187,19 +187,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             vec![None; selection.constructor.constructor_template.handles.len()];
         let operand_relative_lengths =
             vec![None; selection.constructor.constructor_template.handles.len()];
-        if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
-            let matcher_len = opcode_len_from_matcher(&selection.constructor.matcher);
-            let seq_bytes =
-                constructor_consumes_sequential_operand_bytes(compiled, selection.constructor);
-            eprintln!(
-                "[bind-instr] bucket={} opcode_len={opcode_len} ctx.cursor={} sel_src={:?} \
-                 matcher_len={matcher_len} seq_bytes={seq_bytes} matcher={:?}",
-                selection.trace.root_bucket,
-                ctx.cursor,
-                selection.constructor.constructor_template.template_source,
-                selection.constructor.matcher
-            );
-        }
         let handle_reference_bitmap = constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
         );
@@ -334,7 +321,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             return Ok(None);
         };
         let fixed = self.fixed_handle_from_handle_tpl(&export_tpl, handles)?;
-        let value = bound_operand_from_fixed_handle(&fixed)?;
+        let value = display_operand_from_exported_fixed_handle(&fixed)?;
         Ok(Some(RuntimeHandle {
             operand_index: usize::MAX,
             spec: CompiledOperandSpec::SubtableEvaluation {
