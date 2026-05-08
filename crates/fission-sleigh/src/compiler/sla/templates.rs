@@ -382,9 +382,7 @@ pub(super) fn decode_construct_templates(
 
         for child in &subtable_sym.children {
             if child.id == sla_format::ELEM_DECISION {
-                decision_tree = decode_decision_tree(id, child).ok();
-            } else if child.id == sla_format::ELEM_DECISION {
-                decision_tree = decode_decision_tree(id, child).ok();
+                decision_tree = Some(decode_decision_tree(id, child)?);
             }
         }
 
@@ -590,11 +588,7 @@ fn decode_decision_node(
                 nodes[node_idx]
                     .leaf_constructor_indexes
                     .push(constructor_id as usize);
-                let pattern = child
-                    .children
-                    .iter()
-                    .find_map(|pair_child| decode_disjoint_pattern(pair_child).ok())
-                    .unwrap_or_else(always_true_instruction_pattern);
+                let pattern = decode_decision_pair_pattern(child)?;
                 nodes[node_idx]
                     .leaf_entries
                     .push(CompiledDecisionLeafEntry {
@@ -610,13 +604,21 @@ fn decode_decision_node(
     Ok(node_idx)
 }
 
-fn always_true_instruction_pattern() -> CompiledDisjointPattern {
-    CompiledDisjointPattern::Instruction(CompiledPatternBlock {
-        offset: 0,
-        nonzero_size: 0,
-        mask_words: Vec::new(),
-        value_words: Vec::new(),
-    })
+fn decode_decision_pair_pattern(element: &PackedElement) -> Result<CompiledDisjointPattern> {
+    element
+        .children
+        .iter()
+        .find(|child| {
+            matches!(
+                child.id,
+                sla_format::ELEM_INSTRUCT_PAT
+                    | sla_format::ELEM_CONTEXT_PAT
+                    | sla_format::ELEM_COMBINE_PAT
+                    | sla_format::ELEM_OR_PAT
+            )
+        })
+        .ok_or_else(|| anyhow!("decision pair missing disjoint pattern"))
+        .and_then(decode_disjoint_pattern)
 }
 
 fn decode_disjoint_pattern(element: &PackedElement) -> Result<CompiledDisjointPattern> {

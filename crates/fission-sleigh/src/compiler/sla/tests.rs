@@ -78,6 +78,19 @@ fn sla_template_decoder_does_not_synthesize_unknown_subtables() {
 }
 
 #[test]
+fn sla_decision_decode_does_not_synthesize_always_true_patterns() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("always_true_instruction_pattern"),
+        "compiled .sla decision decode must fail closed instead of synthesizing match-all leaf patterns"
+    );
+    assert!(
+        !templates.contains("decode_decision_tree(id, child).ok()"),
+        "compiled .sla decision decode errors must not be silently dropped"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
