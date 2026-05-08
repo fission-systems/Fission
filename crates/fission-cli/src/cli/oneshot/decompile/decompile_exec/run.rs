@@ -1,4 +1,6 @@
-use crate::cli::oneshot::debug_decomp::{debug_decomp_bundle_json, write_debug_decomp_bundle_file};
+use crate::cli::oneshot::debug_decomp::{
+    attach_pcode_topology, debug_decomp_bundle_json, write_debug_decomp_bundle_file,
+};
 use super::super::decompile_render::{
     DecompEntry, RenderedCode, decompile_code_with_profile, make_assembly_fallback,
     strip_inferred_structs, strip_warnings,
@@ -27,6 +29,7 @@ fn maybe_record_debug_decomp(
     func: &FunctionInfo,
     preview_build_stats: Option<&fission_decompiler::NirBuildStats>,
     preview_hint_stats: Option<&fission_decompiler::NirHintStats>,
+    rust_sleigh_evidence: Option<&fission_decompiler::RustSleighPipelineEvidence>,
     native_timing: Option<serde_json::Value>,
     failed_hard: bool,
     assembly_fallback_no_stats: bool,
@@ -43,6 +46,7 @@ fn maybe_record_debug_decomp(
         func,
         preview_build_stats,
         preview_hint_stats,
+        rust_sleigh_evidence,
         nt,
         failed_hard,
         assembly_fallback_no_stats,
@@ -80,6 +84,30 @@ fn timing_json_from_storage(raw: Option<&String>) -> Option<serde_json::Value> {
     })
 }
 
+fn attach_native_pcode_topology(
+    decomp: &mut DecompilerNative,
+    address: u64,
+    entry: Option<&mut serde_json::Value>,
+    sink: Option<&mut Vec<serde_json::Value>>,
+) {
+    let Ok(pcode_json) = decomp.get_pcode(address) else {
+        return;
+    };
+    let Ok(pcode) = PcodeFunction::from_json(&pcode_json) else {
+        return;
+    };
+    if let Some(entry) = entry
+        && let Some(debug) = entry.get_mut("debug_decomp")
+    {
+        attach_pcode_topology(debug, &pcode);
+    }
+    if let Some(sink) = sink
+        && let Some(last) = sink.last_mut()
+    {
+        attach_pcode_topology(last, &pcode);
+    }
+}
+
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
@@ -109,6 +137,7 @@ fn render_with_rust_sleigh(
         fallback_reason: result.fallback_reason,
         preview_build_stats: result.build_stats,
         preview_hint_stats: result.hint_stats,
+        rust_sleigh_evidence: Some(result.evidence),
     })
 }
 
@@ -175,6 +204,7 @@ fn run_rust_sleigh_decompilation(
                         func,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         None,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
@@ -200,6 +230,7 @@ fn run_rust_sleigh_decompilation(
                         func,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         None,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
@@ -238,6 +269,7 @@ fn run_rust_sleigh_decompilation(
                             None,
                             None,
                             None,
+                            None,
                             false,
                             true,
                             Some(&mut entry),
@@ -262,6 +294,7 @@ fn run_rust_sleigh_decompilation(
                             effective_json,
                             binary,
                             func,
+                            None,
                             None,
                             None,
                             None,
@@ -293,6 +326,7 @@ fn run_rust_sleigh_decompilation(
                         None,
                         None,
                         None,
+                        None,
                         true,
                         false,
                         Some(&mut entry),
@@ -309,6 +343,7 @@ fn run_rust_sleigh_decompilation(
                         effective_json,
                         binary,
                         func,
+                        None,
                         None,
                         None,
                         None,
@@ -463,9 +498,16 @@ fn run_sequential_decompilation<'a>(
                         func,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         native_timing,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        Some(&mut entry),
+                        debug_bundle_sink.as_mut(),
+                    );
+                    attach_native_pcode_topology(
+                        decomp,
+                        func.address,
                         Some(&mut entry),
                         debug_bundle_sink.as_mut(),
                     );
@@ -496,9 +538,16 @@ fn run_sequential_decompilation<'a>(
                         func,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         native_timing,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
+                        None,
+                        debug_bundle_sink.as_mut(),
+                    );
+                    attach_native_pcode_topology(
+                        decomp,
+                        func.address,
                         None,
                         debug_bundle_sink.as_mut(),
                     );
@@ -544,6 +593,7 @@ fn run_sequential_decompilation<'a>(
                             func,
                             None,
                             None,
+                            None,
                             native_timing,
                             false,
                             true,
@@ -577,6 +627,7 @@ fn run_sequential_decompilation<'a>(
                             effective_json,
                             binary,
                             func,
+                            None,
                             None,
                             None,
                             native_timing,
@@ -624,6 +675,7 @@ fn run_sequential_decompilation<'a>(
                         func,
                         None,
                         None,
+                        None,
                         native_timing,
                         true,
                         false,
@@ -649,6 +701,7 @@ fn run_sequential_decompilation<'a>(
                         effective_json,
                         binary,
                         func,
+                        None,
                         None,
                         None,
                         native_timing,
@@ -736,6 +789,7 @@ fn run_parallel_decompilation<'a>(
                                 )),
                                 preview_build_stats: None,
                                 preview_hint_stats: None,
+                                rust_sleigh_evidence: None,
                             }),
                             0.0,
                         )
@@ -829,6 +883,7 @@ fn run_parallel_decompilation<'a>(
                                     )),
                                     preview_build_stats: None,
                                     preview_hint_stats: None,
+                                    rust_sleigh_evidence: None,
                                 }),
                                 0.0,
                             )
@@ -927,6 +982,7 @@ fn run_parallel_decompilation<'a>(
                         &func_meta,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         native_timing,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
@@ -953,6 +1009,7 @@ fn run_parallel_decompilation<'a>(
                         &func_meta,
                         rendered.preview_build_stats.as_ref(),
                         rendered.preview_hint_stats.as_ref(),
+                        rendered.rust_sleigh_evidence.as_ref(),
                         native_timing,
                         false,
                         rendered.preview_build_stats.is_none() && rendered.fell_back,
@@ -1000,6 +1057,7 @@ fn run_parallel_decompilation<'a>(
                         &func_meta,
                         None,
                         None,
+                        None,
                         native_timing,
                         true,
                         false,
@@ -1018,6 +1076,7 @@ fn run_parallel_decompilation<'a>(
                         effective_json,
                         binary,
                         &func_meta,
+                        None,
                         None,
                         None,
                         native_timing,

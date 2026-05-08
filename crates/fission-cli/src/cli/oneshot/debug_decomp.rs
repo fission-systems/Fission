@@ -4,7 +4,9 @@
 //! coarse stage status strings, timing/size counters from [`NirBuildStats`], and
 //! [`owner_buckets`] for benchmarks.
 
-use fission_decompiler::{NirBuildStats, NirHintStats};
+#[cfg(feature = "native_decomp")]
+use fission_decompiler::PcodeFunction;
+use fission_decompiler::{NirBuildStats, NirHintStats, RustSleighPipelineEvidence};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -13,6 +15,52 @@ use std::io;
 use std::path::Path;
 
 use super::debug_bundle_extra;
+
+#[cfg(feature = "native_decomp")]
+const MAX_PCODE_TOPOLOGY_BLOCKS: usize = 256;
+
+#[cfg(feature = "native_decomp")]
+pub(crate) fn attach_pcode_topology(root: &mut serde_json::Value, pcode: &PcodeFunction) {
+    let edge_count: usize = pcode
+        .blocks
+        .iter()
+        .map(|block| block.successors.len())
+        .sum();
+    let mut terminal_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut blocks = Vec::new();
+    for block in pcode.blocks.iter().take(MAX_PCODE_TOPOLOGY_BLOCKS) {
+        let terminal = block.ops.last();
+        if let Some(op) = terminal {
+            *terminal_counts
+                .entry(format!("{:?}", op.opcode))
+                .or_insert(0) += 1;
+        }
+        blocks.push(serde_json::json!({
+            "index": block.index,
+            "start_address": format!("0x{:x}", block.start_address),
+            "successors": block.successors.clone(),
+            "op_count": block.ops.len(),
+            "terminal_seq_num": terminal.map(|op| op.seq_num),
+            "terminal_address": terminal.map(|op| format!("0x{:x}", op.address)),
+            "terminal_opcode": terminal.map(|op| format!("{:?}", op.opcode)),
+            "terminal_target": terminal.and_then(|op| {
+                op.inputs
+                    .first()
+                    .filter(|target| target.is_constant)
+                    .map(|target| format!("0x{:x}", target.constant_val as u64))
+            }),
+        }));
+    }
+    root["pcode_topology"] = serde_json::json!({
+        "block_count": pcode.blocks.len(),
+        "op_count": pcode.blocks.iter().map(|block| block.ops.len()).sum::<usize>(),
+        "edge_count": edge_count,
+        "terminal_opcode_counts": terminal_counts,
+        "block_evidence_truncated": pcode.blocks.len() > MAX_PCODE_TOPOLOGY_BLOCKS,
+        "blocks": blocks,
+    });
+}
+
 /// Serialize bundle JSON with `{ "schema_version": 1, "functions": [...] }`.
 pub(crate) fn write_debug_decomp_bundle_file(
     path: &Path,
@@ -37,6 +85,7 @@ pub(crate) fn debug_decomp_bundle_json(
     func: &FunctionInfo,
     build_stats: Option<&NirBuildStats>,
     hint_stats: Option<&NirHintStats>,
+    rust_sleigh_evidence: Option<&RustSleighPipelineEvidence>,
     native_timing: Option<&serde_json::Value>,
     failed_hard: bool,
     assembly_fallback_no_stats: bool,
@@ -102,6 +151,11 @@ pub(crate) fn debug_decomp_bundle_json(
     if let Some(h) = hint_stats {
         if let Ok(v) = serde_json::to_value(h) {
             root["preview_hint_stats"] = v;
+        }
+    }
+    if let Some(evidence) = rust_sleigh_evidence {
+        if let Ok(v) = serde_json::to_value(evidence) {
+            root["rust_sleigh_pipeline"] = v;
         }
     }
     if let Some(t) = native_timing {

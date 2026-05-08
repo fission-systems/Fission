@@ -94,6 +94,7 @@ pub(super) struct RenderedCode {
     pub(super) fallback_reason: Option<String>,
     pub(super) preview_build_stats: Option<NirBuildStats>,
     pub(super) preview_hint_stats: Option<NirHintStats>,
+    pub(super) rust_sleigh_evidence: Option<fission_decompiler::RustSleighPipelineEvidence>,
 }
 
 pub(super) fn write_output_bytes(cli: &OneShotArgs, body: &str) -> io::Result<()> {
@@ -144,6 +145,7 @@ pub(super) fn legacy_rendered_code(
         fallback_reason: None,
         preview_build_stats: None,
         preview_hint_stats: None,
+        rust_sleigh_evidence: None,
     }
 }
 
@@ -157,6 +159,25 @@ pub(super) fn decompile_code_with_profile(
     timeout_ms: Option<u64>,
     _verbose: bool,
 ) -> Result<RenderedCode, FissionError> {
+    if matches!(engine_mode, EngineMode::RustSleigh) {
+        let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+        config.nir_timeout_ms = timeout_ms;
+        let result = fission_decompiler::decompile_with_rust_sleigh(
+            binary, address, name, &config, None, None,
+        )
+        .map_err(FissionError::decompiler)?;
+        return Ok(RenderedCode {
+            code: result.code,
+            postprocess_sec: 0.0,
+            engine_used: "rust_sleigh",
+            fell_back: result.fell_back,
+            fallback_reason: result.fallback_reason,
+            preview_build_stats: result.build_stats,
+            preview_hint_stats: result.hint_stats,
+            rust_sleigh_evidence: Some(result.evidence),
+        });
+    }
+
     let mut fact_store = FactStore::from_binary(binary);
     let preview_mode = match engine_mode {
         EngineMode::Legacy => NirEngineMode::Legacy,
@@ -184,6 +205,7 @@ pub(super) fn decompile_code_with_profile(
             fallback_reason: None,
             preview_build_stats: preview.build_stats,
             preview_hint_stats: preview.hint_stats,
+            rust_sleigh_evidence: None,
         });
     }
 
@@ -225,6 +247,7 @@ pub(super) fn decompile_code_with_profile(
                             fallback_reason: selection.fallback_reason,
                             preview_build_stats: selection.build_stats,
                             preview_hint_stats: selection.hint_stats,
+                            rust_sleigh_evidence: None,
                         });
                     }
                 }
@@ -236,5 +259,6 @@ pub(super) fn decompile_code_with_profile(
     rendered.fell_back = preview.fell_back;
     rendered.fallback_reason = preview.fallback_reason;
     rendered.preview_hint_stats = preview.hint_stats;
+    rendered.rust_sleigh_evidence = None;
     Ok(rendered)
 }

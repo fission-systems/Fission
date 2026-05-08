@@ -1,4 +1,6 @@
-use crate::cli::oneshot::debug_decomp::{debug_decomp_bundle_json, write_debug_decomp_bundle_file};
+use crate::cli::oneshot::debug_decomp::{
+    attach_pcode_topology, debug_decomp_bundle_json, write_debug_decomp_bundle_file,
+};
 use super::super::decompile_render::{
     attach_native_timing, decompile_code_with_profile, make_assembly_fallback,
     strip_inferred_structs, strip_warnings,
@@ -51,16 +53,23 @@ pub(crate) fn decompile_and_output(
             });
 
             let debug_bundle = (cli.debug_decomp || cli.debug_decomp_bundle.is_some()).then(|| {
-                debug_decomp_bundle_json(
+                let mut bundle = debug_decomp_bundle_json(
                     binary,
                     cli.address,
                     &func_meta,
                     rendered.preview_build_stats.as_ref(),
                     rendered.preview_hint_stats.as_ref(),
+                    rendered.rust_sleigh_evidence.as_ref(),
                     native_timing.as_ref(),
                     false,
                     rendered.preview_build_stats.is_none() && rendered.fell_back,
-                )
+                );
+                if let Ok(pcode_json) = decomp.get_pcode(addr)
+                    && let Ok(pcode) = PcodeFunction::from_json(&pcode_json)
+                {
+                    attach_pcode_topology(&mut bundle, &pcode);
+                }
+                bundle
             });
 
             if let Some(ref path) = cli.debug_decomp_bundle {
@@ -139,6 +148,7 @@ pub(crate) fn decompile_and_output(
                         None,
                         None,
                         None,
+                        None,
                         false,
                         true,
                     );
@@ -162,6 +172,7 @@ pub(crate) fn decompile_and_output(
                     binary,
                     cli.address,
                     &func_meta,
+                    None,
                     None,
                     None,
                     None,

@@ -42,6 +42,7 @@ fn render_with_rust_sleigh(
         Option<String>,
         Option<fission_decompiler::NirBuildStats>,
         Option<fission_decompiler::NirHintStats>,
+        fission_decompiler::RustSleighPipelineEvidence,
     ),
     FissionError,
 > {
@@ -62,6 +63,7 @@ fn render_with_rust_sleigh(
         result.fallback_reason,
         result.build_stats,
         result.hint_stats,
+        result.evidence,
     ))
 }
 
@@ -111,6 +113,7 @@ pub(crate) fn make_internal_error_result(
         config,
         None,
         None,
+        None,
         !asm_fallback,
         asm_fallback,
     );
@@ -125,7 +128,7 @@ pub(crate) fn render_one_function_inner(
     let start = std::time::Instant::now();
 
     match render_with_rust_sleigh(binary, func) {
-        Ok((mut code, fell_back, fallback_reason, build_stats, hint_stats)) => {
+        Ok((mut code, fell_back, fallback_reason, build_stats, hint_stats, pipeline_evidence)) => {
             let decomp_sec = start.elapsed().as_secs_f64();
 
             if config.effective_no_warnings {
@@ -154,6 +157,7 @@ pub(crate) fn render_one_function_inner(
                 config,
                 build_stats.as_ref(),
                 hint_stats_ref,
+                Some(&pipeline_evidence),
                 false,
                 build_stats.is_none() && fell_back,
             );
@@ -180,7 +184,7 @@ pub(crate) fn render_one_function_inner(
                 };
 
                 let debug_bundle =
-                    debug_bundle_for_record(binary, func, config, None, None, false, true);
+                    debug_bundle_for_record(binary, func, config, None, None, None, false, true);
 
                 record_into_function_render_result(record, debug_bundle, config.benchmark)
             } else {
@@ -193,7 +197,7 @@ pub(crate) fn render_one_function_inner(
                 };
 
                 let debug_bundle =
-                    debug_bundle_for_record(binary, func, config, None, None, true, false);
+                    debug_bundle_for_record(binary, func, config, None, None, None, true, false);
 
                 record_into_function_render_result(record, debug_bundle, config.benchmark)
             }

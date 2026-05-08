@@ -699,10 +699,45 @@ def debug_decomp_summary(debug_decomp: Any) -> dict[str, Any] | None:
     if not isinstance(debug_decomp, dict):
         return None
     quality = debug_decomp.get("quality_evidence") if isinstance(debug_decomp.get("quality_evidence"), dict) else {}
+    pipeline = (
+        debug_decomp.get("rust_sleigh_pipeline")
+        if isinstance(debug_decomp.get("rust_sleigh_pipeline"), dict)
+        else {}
+    )
+    pcode_blocks = pipeline.get("raw_pcode_blocks") if isinstance(pipeline.get("raw_pcode_blocks"), list) else []
+    sampled_pcode_blocks = pcode_blocks[:64]
     return {
         "stage_status": debug_decomp.get("stage_status"),
         "stage_metrics": debug_decomp.get("stage_metrics"),
         "owner_buckets": debug_decomp.get("owner_buckets") or [],
+        "rust_sleigh_pipeline": {
+            key: pipeline.get(key)
+            for key in [
+                "entry_address",
+                "max_bytes",
+                "instruction_limit",
+                "decode_attempt_count",
+                "decode_stop_reason",
+                "raw_pcode_block_count",
+                "raw_pcode_op_count",
+                "raw_pcode_edge_count",
+                "raw_pcode_terminal_opcode_counts",
+                "raw_pcode_block_evidence_truncated",
+                "strict_indirect_retry_attempted",
+                "nir_fallback_kind",
+                "nir_fallback_kind_refined",
+                "nir_fallback_reason_summary",
+                "pipeline_stage_status",
+            ]
+            if key in pipeline
+        } | (
+            {
+                "raw_pcode_blocks_sampled_count": len(sampled_pcode_blocks),
+                "raw_pcode_blocks": sampled_pcode_blocks,
+            }
+            if sampled_pcode_blocks
+            else {}
+        ),
         "quality_evidence": {
             key: quality.get(key)
             for key in [

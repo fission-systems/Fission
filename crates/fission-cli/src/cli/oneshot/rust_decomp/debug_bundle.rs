@@ -8,6 +8,7 @@ pub(crate) fn debug_bundle_for_record(
     config: RenderConfig,
     build_stats: Option<&fission_decompiler::NirBuildStats>,
     hint_stats: Option<&fission_decompiler::NirHintStats>,
+    pipeline_evidence: Option<&fission_decompiler::RustSleighPipelineEvidence>,
     nir_hard_fail: bool,
     nir_fallback_without_stats: bool,
 ) -> Option<serde_json::Value> {
@@ -18,6 +19,7 @@ pub(crate) fn debug_bundle_for_record(
             func,
             build_stats,
             hint_stats,
+            pipeline_evidence,
             None,
             nir_hard_fail,
             nir_fallback_without_stats,
