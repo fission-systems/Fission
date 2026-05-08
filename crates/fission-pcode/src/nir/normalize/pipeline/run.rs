@@ -21,7 +21,7 @@ use super::super::cleanup::{
 };
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
-    apply_redundant_load_elimination, apply_sccp_pass,
+    apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
 };
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
@@ -525,6 +525,25 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         run_pass_logged(
             func,
             "defuse_dead_assignment_after_ptr_arith",
+            perf,
+            apply_wide_dead_assignment_pass,
+        );
+    }
+    if run_pass_logged(
+        func,
+        "post_assign_value_representative",
+        perf,
+        apply_post_assign_value_representative_pass,
+    ) {
+        run_pass_logged(
+            func,
+            "constant_folding_after_post_assign_value_representative",
+            perf,
+            |f| constant_folding_pass(&mut f.body),
+        );
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_post_assign_value_representative",
             perf,
             apply_wide_dead_assignment_pass,
         );

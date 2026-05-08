@@ -11,14 +11,18 @@ const MAX_PRINT_EXPR_DEPTH: usize = 512;
 
 /// Printing context: maps variable name → NirType for struct-member rendering.
 struct PrintCtx<'a> {
+    /// variable name → declared type
+    var_types: HashMap<&'a str, &'a NirType>,
     /// variable name → pointer-pointee type (Aggregate with fields)
     agg_ptr: HashMap<&'a str, &'a NirType>,
 }
 
 impl<'a> PrintCtx<'a> {
     fn build(func: &'a HirFunction) -> Self {
+        let mut var_types = HashMap::new();
         let mut agg_ptr = HashMap::new();
         for b in func.locals.iter().chain(func.params.iter()) {
+            var_types.insert(b.name.as_str(), &b.ty);
             if let NirType::Ptr(inner) = &b.ty {
                 if let NirType::Aggregate { fields, .. } = inner.as_ref() {
                     if !fields.is_empty() {
@@ -27,7 +31,7 @@ impl<'a> PrintCtx<'a> {
                 }
             }
         }
-        Self { agg_ptr }
+        Self { var_types, agg_ptr }
     }
 
     /// If `base_name` is a known Ptr(Aggregate{fields}) and `offset` matches a
@@ -42,6 +46,20 @@ impl<'a> PrintCtx<'a> {
         };
         let f = fields.iter().find(|f| f.offset as i64 == offset)?;
         Some(f.name.as_str())
+    }
+
+    fn expr_is_pointer(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(name) => self
+                .var_types
+                .get(name.as_str())
+                .is_some_and(|ty| matches!(ty, NirType::Ptr(_))),
+            HirExpr::Cast {
+                ty: NirType::Ptr(_),
+                ..
+            } => true,
+            _ => false,
+        }
     }
 }
 
@@ -312,11 +330,11 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
     let (text, prec) = match expr {
-        HirExpr::Var(name) => (name.clone(), 100),
-        HirExpr::Const(value, _) => (value.to_string(), 100),
+        HirExpr::Var(name) => (name.clone(), 120),
+        HirExpr::Const(value, _) => (value.to_string(), 120),
         HirExpr::Cast { ty, expr } => {
-            let inner = print_expr_prec(expr, 90, depth + 1);
-            (format!("({}){}", print_type(ty), inner), 90)
+            let inner = print_expr_prec(expr, 110, depth + 1);
+            (format!("({}){}", print_type(ty), inner), 110)
         }
         HirExpr::Unary { op, expr, .. } => {
             let symbol = match op {
@@ -324,8 +342,8 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            let inner = print_expr_prec(expr, 85, depth + 1);
-            (format!("{symbol}{inner}"), 85)
+            let inner = print_expr_prec(expr, 110, depth + 1);
+            (format!("{symbol}{inner}"), 110)
         }
         HirExpr::Binary { op, lhs, rhs, ty } => {
             let prec = binary_precedence(*op);
@@ -362,14 +380,14 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 .map(|arg| print_expr_prec(arg, 0, depth + 1))
                 .collect::<Vec<_>>()
                 .join(", ");
-            (format!("{target}({args})"), 100)
+            (format!("{target}({args})"), 120)
         }
         HirExpr::Load { ptr, ty } => {
             if let Some(target) = peel_simple_deref_target(ptr) {
-                (format!("*{target}"), 95)
+                (format!("*{target}"), 110)
             } else {
                 let inner = print_expr_prec(ptr, 0, depth + 1);
-                (format!("*({} *)({inner})", print_type(ty)), 95)
+                (format!("*({} *)({inner})", print_type(ty)), 110)
             }
         }
         HirExpr::PtrOffset { base, offset } => {
@@ -394,11 +412,11 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 HirExpr::Var(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             };
-            (text, 95)
+            (text, 120)
         }
         HirExpr::AggregateCopy { src, size } => {
             let inner = print_expr_prec(src, 0, depth + 1);
-            (format!("*(fission_agg{} *)({inner})", size), 95)
+            (format!("*(fission_agg{} *)({inner})", size), 110)
         }
     };
 
@@ -426,18 +444,14 @@ fn binary_precedence(op: HirBinaryOp) -> u8 {
     match op {
         HirBinaryOp::LogicalOr => 10,
         HirBinaryOp::LogicalAnd => 20,
-        HirBinaryOp::Eq
-        | HirBinaryOp::Ne
-        | HirBinaryOp::Lt
-        | HirBinaryOp::Le
-        | HirBinaryOp::SLt
-        | HirBinaryOp::SLe => 30,
-        HirBinaryOp::Or => 40,
-        HirBinaryOp::Xor => 45,
+        HirBinaryOp::Or => 30,
+        HirBinaryOp::Xor => 40,
         HirBinaryOp::And => 50,
-        HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar => 60,
-        HirBinaryOp::Add | HirBinaryOp::Sub => 70,
-        HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 80,
+        HirBinaryOp::Eq | HirBinaryOp::Ne => 60,
+        HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe => 70,
+        HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar => 80,
+        HirBinaryOp::Add | HirBinaryOp::Sub => 90,
+        HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 100,
     }
 }
 
@@ -523,11 +537,14 @@ fn print_expr_prec_ctx(
             };
             (text, 60)
         }
-        HirExpr::Var(name) => (name.clone(), 100),
-        HirExpr::Const(value, _) => (value.to_string(), 100),
+        HirExpr::Var(name) => (name.clone(), 120),
+        HirExpr::Const(value, _) => (value.to_string(), 120),
         HirExpr::Cast { ty, expr } => {
-            let inner = print_expr_prec_ctx(expr, 90, depth + 1, ctx);
-            (format!("({}){}", print_type(ty), inner), 90)
+            if let Some(pointer_diff) = print_pointer_diff_cast(ty, expr, depth, ctx) {
+                return pointer_diff;
+            }
+            let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+            (format!("({}){}", print_type(ty), inner), 110)
         }
         HirExpr::Unary { op, expr, .. } => {
             let symbol = match op {
@@ -535,8 +552,8 @@ fn print_expr_prec_ctx(
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            let inner = print_expr_prec_ctx(expr, 85, depth + 1, ctx);
-            (format!("{symbol}{inner}"), 85)
+            let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+            (format!("{symbol}{inner}"), 110)
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let prec = binary_precedence(*op);
@@ -550,7 +567,7 @@ fn print_expr_prec_ctx(
                 .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
                 .collect::<Vec<_>>()
                 .join(", ");
-            (format!("{target}({args})"), 100)
+            (format!("{target}({args})"), 120)
         }
         HirExpr::Load { ptr, ty } => {
             // Check if `ptr` is a PtrOffset with a known field.
@@ -562,10 +579,10 @@ fn print_expr_prec_ctx(
                 }
             }
             if let Some(target) = peel_simple_deref_target(ptr) {
-                (format!("*{target}"), 95)
+                (format!("*{target}"), 110)
             } else {
                 let inner = print_expr_prec_ctx(ptr, 0, depth + 1, ctx);
-                (format!("*({} *)({inner})", print_type(ty)), 95)
+                (format!("*({} *)({inner})", print_type(ty)), 110)
             }
         }
         HirExpr::Index {
@@ -579,11 +596,11 @@ fn print_expr_prec_ctx(
                 HirExpr::Var(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             };
-            (text, 95)
+            (text, 120)
         }
         HirExpr::AggregateCopy { src, size } => {
             let inner = print_expr_prec_ctx(src, 0, depth + 1, ctx);
-            (format!("*(fission_agg{} *)({inner})", size), 95)
+            (format!("*(fission_agg{} *)({inner})", size), 110)
         }
     };
     if prec < parent_prec {
@@ -591,6 +608,35 @@ fn print_expr_prec_ctx(
     } else {
         text
     }
+}
+
+fn print_pointer_diff_cast(
+    cast_ty: &NirType,
+    expr: &HirExpr,
+    depth: usize,
+    ctx: &PrintCtx<'_>,
+) -> Option<String> {
+    if !matches!(cast_ty, NirType::Int { .. } | NirType::Bool) {
+        return None;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if !ctx.expr_is_pointer(lhs) || !ctx.expr_is_pointer(rhs) {
+        return None;
+    }
+    let lhs = print_expr_prec_ctx(lhs, 0, depth + 1, ctx);
+    let rhs = print_expr_prec_ctx(rhs, 0, depth + 1, ctx);
+    Some(format!(
+        "({})((uint8_t *)({lhs}) - (uint8_t *)({rhs}))",
+        print_type(cast_ty)
+    ))
 }
 
 fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String {
