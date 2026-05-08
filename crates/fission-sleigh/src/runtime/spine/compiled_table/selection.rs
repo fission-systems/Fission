@@ -119,19 +119,14 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 let byte_offset = start_bit / 8;
                 let bit_offset = start_bit % 8;
                 let byte_cnt = (bit_offset + bit_size + 7) / 8;
-                if self.ctx.cursor + byte_offset as usize >= self.ctx.bytes.len() {
-                    bail!("instruction bit read out of range at bit {start_bit}");
-                }
                 let mut word = 0u64;
                 for i in 0..byte_cnt {
+                    let absolute = self.ctx.cursor + byte_offset as usize + i as usize;
+                    let byte = self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
+                        anyhow!("instruction bit read out of range at bit {start_bit}")
+                    })?;
                     word <<= 8;
-                    word |= u64::from(
-                        self.ctx
-                            .bytes
-                            .get(self.ctx.cursor + byte_offset as usize + i as usize)
-                            .copied()
-                            .unwrap_or(0),
-                    );
+                    word |= u64::from(byte);
                 }
                 let shift = (8 * byte_cnt) - bit_offset - bit_size;
                 vec![((word >> shift) & ((1u64 << bit_size) - 1)) as u8]
@@ -155,13 +150,14 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             .cursor
             .checked_add_signed(offset as isize)
             .ok_or_else(|| anyhow!("instruction byte read underflow at offset {offset}"))?;
-        if start == self.ctx.cursor && start >= self.ctx.bytes.len() {
-            bail!("instruction byte read out of range at offset {offset}");
-        }
         let mut word = 0u32;
         for i in 0..size as usize {
+            let byte =
+                self.ctx.bytes.get(start + i).copied().ok_or_else(|| {
+                    anyhow!("instruction byte read out of range at offset {offset}")
+                })?;
             word <<= 8;
-            word |= u32::from(self.ctx.bytes.get(start + i).copied().unwrap_or(0));
+            word |= u32::from(byte);
         }
         Ok(word)
     }
