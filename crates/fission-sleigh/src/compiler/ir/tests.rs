@@ -190,6 +190,25 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
 }
 
 #[test]
+fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
+    let lowering = include_str!("lowering.rs");
+    for forbidden in [
+        "from_str_radix(&value_str[2..], 16).unwrap_or(0)",
+        "from_str_radix(&value_str[2..], 2).unwrap_or(0)",
+        "value_str.parse::<u64>().unwrap_or(0)",
+        "start_str.trim().parse::<u32>().unwrap_or(0)",
+        "end_str.trim().parse::<u32>().unwrap_or(0)",
+        "value.checked_shl(info.bit_offset).unwrap_or(0)",
+        "value.checked_shl(end_bit).unwrap_or(0)",
+    ] {
+        assert!(
+            !lowering.contains(forbidden),
+            "legacy matcher lowering must fail closed instead of synthesizing zero: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
     let types = include_str!("types.rs");
     let lowering = include_str!("lowering.rs");

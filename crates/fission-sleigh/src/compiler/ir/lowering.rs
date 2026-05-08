@@ -873,13 +873,7 @@ impl Collector {
             if let Some((name, value_str)) = part.split_once('=') {
                 let name = name.trim();
                 let value_str = value_str.trim();
-                let value = if value_str.starts_with("0x") {
-                    u64::from_str_radix(&value_str[2..], 16).unwrap_or(0)
-                } else if value_str.starts_with("0b") {
-                    u64::from_str_radix(&value_str[2..], 2).unwrap_or(0)
-                } else {
-                    value_str.parse::<u64>().unwrap_or(0)
-                };
+                let value = parse_pattern_literal(value_str)?;
 
                 if let Some(info) = self.field_info.get(name) {
                     let field_mask = if info.bit_width >= 64 {
@@ -887,8 +881,8 @@ impl Collector {
                     } else {
                         (1u64 << info.bit_width) - 1
                     };
-                    let mask = field_mask.checked_shl(info.bit_offset).unwrap_or(0);
-                    let shifted_value = value.checked_shl(info.bit_offset).unwrap_or(0) & mask;
+                    let mask = field_mask.checked_shl(info.bit_offset)?;
+                    let shifted_value = value.checked_shl(info.bit_offset)? & mask;
                     match info.kind {
                         FieldKind::Instruction => {
                             constraints.push(PatternConstraint::Instruction {
@@ -917,8 +911,8 @@ impl Collector {
                         } else {
                             (1u64 << width) - 1
                         };
-                        let mask = field_mask.checked_shl(end_bit).unwrap_or(0);
-                        let shifted_value = value.checked_shl(end_bit).unwrap_or(0) & mask;
+                        let mask = field_mask.checked_shl(end_bit)?;
+                        let shifted_value = value.checked_shl(end_bit)? & mask;
                         constraints.push(PatternConstraint::Instruction {
                             offset: 0,
                             mask,
@@ -1001,8 +995,12 @@ impl Collector {
             if let Some(end_pos) = right.find(')') {
                 let range_part = &right[..end_pos];
                 if let Some((start_str, end_str)) = range_part.split_once(',') {
-                    let start = start_str.trim().parse::<u32>().unwrap_or(0);
-                    let end = end_str.trim().parse::<u32>().unwrap_or(0);
+                    let Ok(start) = start_str.trim().parse::<u32>() else {
+                        continue;
+                    };
+                    let Ok(end) = end_str.trim().parse::<u32>() else {
+                        continue;
+                    };
                     let (bit_offset, bit_width) = if start <= end {
                         (start, end - start + 1)
                     } else {
@@ -1524,6 +1522,25 @@ fn parse_context_literal(text: &str) -> Option<u64> {
         .or_else(|| trimmed.strip_prefix("0X"))
     {
         u64::from_str_radix(hex, 16).ok()
+    } else if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        trimmed.parse::<u64>().ok()
+    } else {
+        None
+    }
+}
+
+fn parse_pattern_literal(text: &str) -> Option<u64> {
+    let trimmed = text.trim();
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).ok()
+    } else if let Some(binary) = trimmed
+        .strip_prefix("0b")
+        .or_else(|| trimmed.strip_prefix("0B"))
+    {
+        u64::from_str_radix(binary, 2).ok()
     } else if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
         trimmed.parse::<u64>().ok()
     } else {
