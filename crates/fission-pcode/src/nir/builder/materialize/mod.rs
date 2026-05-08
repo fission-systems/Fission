@@ -287,6 +287,11 @@ impl<'a> PreviewBuilder<'a> {
         if self.output_used_only_by_single_store(block, op_idx, output) {
             return Ok(None);
         }
+        if Self::is_predicate_passthrough_to_terminator(op)
+            && self.output_used_only_by_block_terminator(block, op_idx, terminator_index, output)
+        {
+            return Ok(None);
+        }
         let loop_carried_lhs_name =
             self.loop_carried_output_binding_name(block, op_idx, op, output).or_else(|| {
                 self.loop_carried_passthrough_output_binding_name(block, op_idx, op, output)
@@ -429,6 +434,22 @@ impl<'a> PreviewBuilder<'a> {
         };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    fn is_predicate_passthrough_to_terminator(op: &PcodeOp) -> bool {
+        matches!(
+            op.opcode,
+            PcodeOpcode::BoolNegate
+                | PcodeOpcode::BoolAnd
+                | PcodeOpcode::BoolOr
+                | PcodeOpcode::BoolXor
+                | PcodeOpcode::IntEqual
+                | PcodeOpcode::IntNotEqual
+                | PcodeOpcode::IntLess
+                | PcodeOpcode::IntLessEqual
+                | PcodeOpcode::IntSLess
+                | PcodeOpcode::IntSLessEqual
+        )
     }
 
     fn try_lower_materialized_output_rhs(

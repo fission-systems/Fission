@@ -96,6 +96,7 @@ impl<'a> PreviewBuilder<'a> {
     ) {
         self.materialized_vns
             .insert(MaterializedVarnodeKey::new(output, op), name.to_string());
+        self.invalidate_materialization_dependent_caches();
         if preserve_materialization
             && let Some(binding) = self.temps.get_mut(name)
             && !binding.preserves_materialization()
@@ -979,6 +980,73 @@ mod tests {
                 .iter()
                 .any(|stmt| lhs_var(stmt) == Some(init_name)),
             "AArch64 passthrough loop update should assign back to the prior binding: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn materialized_binding_invalidates_cached_terminators() {
+        let rax = reg(0x00, 8);
+        let blocks = vec![block_at(
+            0x1000,
+            0,
+            vec![op(0, PcodeOpcode::Return, None, vec![])],
+        )];
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        builder
+            .terminator_cache
+            .insert(0, LoweredTerminator::Fallthrough(None));
+        builder.ensure_temp_binding_for_output(
+            &op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(0)]),
+            &rax,
+            false,
+        );
+
+        assert!(builder.terminator_cache.is_empty());
+    }
+
+    #[test]
+    fn predicate_output_used_only_by_cbranch_is_not_materialized() {
+        let rax = reg(0x00, 8);
+        let pred = Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset: 0x3000,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(pred.clone()),
+                    vec![rax.clone(), constant(0)],
+                ),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x2000), pred]),
+            ],
+        )];
+        blocks[0].successors = vec![1];
+        blocks.push(block_at(
+            0x2000,
+            1,
+            vec![op(2, PcodeOpcode::Return, None, vec![])],
+        ));
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let body = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("block statement lowering");
+
+        assert!(
+            body.is_empty(),
+            "predicate-only output was materialized: {body:?}"
         );
     }
 

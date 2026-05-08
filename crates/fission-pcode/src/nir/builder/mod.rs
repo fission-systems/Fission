@@ -428,6 +428,12 @@ impl<'a> PreviewBuilder<'a> {
         self.block_target_keys[self.pcode_block_idx(idx)]
     }
 
+    pub(super) fn invalidate_materialization_dependent_caches(&mut self) {
+        self.terminator_cache.clear();
+        self.selector_representatives.clear();
+        self.linear_body_cache.clear();
+    }
+
     pub(super) fn ensure_temp_binding_for_output(
         &mut self,
         op: &PcodeOp,
@@ -465,6 +471,7 @@ impl<'a> PreviewBuilder<'a> {
             self.materialization_stabilized_count += 1;
         }
         self.materialized_vns.insert(key, name.clone());
+        self.invalidate_materialization_dependent_caches();
         self.temps.insert(name, binding.clone());
         binding
     }
@@ -491,6 +498,7 @@ impl<'a> PreviewBuilder<'a> {
             initializer: None,
         };
         self.explicit_merge_bindings.insert(key, name.clone());
+        self.invalidate_materialization_dependent_caches();
         self.temps.insert(name, binding.clone());
         binding
     }
