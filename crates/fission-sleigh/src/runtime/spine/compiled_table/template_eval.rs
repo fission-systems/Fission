@@ -312,6 +312,24 @@ impl<'c> CompiledTableEmitter<'c> {
         }
     }
 
+    fn normalize_direct_control_target(&self, target: Varnode) -> Result<Varnode> {
+        if !target.is_constant || decode_relative_sentinel(target.offset).is_some() {
+            return Ok(target);
+        }
+        let size = if target.size == 0 {
+            self.compiled.sla_default_cur_space_pointer_size()?
+        } else {
+            target.size
+        };
+        Ok(Varnode {
+            space_id: self.compiled.sla_default_cur_space_index()?,
+            offset: target.offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        })
+    }
+
     fn finish(self) -> Vec<PcodeOp> {
         let label_positions = self.label_positions;
         let mut ops = self.emitter.finish();
@@ -407,6 +425,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     .ok_or_else(|| anyhow!("CALL template requires one input"))?;
                 // Use size 0: address size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
                 let target = self.read_template_varnode(target_tpl, state, 0)?;
+                let target = self.normalize_direct_control_target(target)?;
                 self.emitter.emit_call(target, mnemonic)
             }
             CompiledOpTplOpcode::CallInd => {
@@ -427,6 +446,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 // jmp with a RAM-space absolute target is still a BRANCH.
                 // Use size 0: address size is architecture-dependent.
                 let target = self.read_template_varnode(target_tpl, state, 0)?;
+                let target = self.normalize_direct_control_target(target)?;
                 self.emitter.emit_branch(target, mnemonic)
             }
             CompiledOpTplOpcode::BranchInd => {
@@ -589,6 +609,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     }
                     // Target size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
                     let target = self.read_template_varnode(&op.inputs[0], state, 0)?;
+                    let target = self.normalize_direct_control_target(target)?;
                     let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
                     self.emitter.emit_cbranch(target, cond, mnemonic)
                 } else {

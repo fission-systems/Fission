@@ -15,6 +15,62 @@
       "feature": "aarch64_llvm_baremetal_smoke",
       "owner": "raw_pcode_aarch64_lane",
       "notes": "AArch64 LLVM baremetal smoke row with movk shifted-immediate coverage."
+    },
+    {
+      "name": "control-flow-test-loops-mod3-branch",
+      "entry_id": "AARCH64",
+      "binary": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "addr": "0x1000a0",
+      "count": 5,
+      "language": "AARCH64:LE:64:v8A",
+      "compiler": "default",
+      "disassemble_missing": true,
+      "feature_group": "control_flow",
+      "feature": "aarch64_modulo_compare_branch",
+      "owner": "raw_pcode_aarch64_lane",
+      "notes": "Source-semantic canary for test_loops for-loop modulo-3 continue branch."
+    },
+    {
+      "name": "control-flow-test-loops-switch-case3",
+      "entry_id": "AARCH64",
+      "binary": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "addr": "0x1000f8",
+      "count": 3,
+      "language": "AARCH64:LE:64:v8A",
+      "compiler": "default",
+      "disassemble_missing": true,
+      "feature_group": "flags",
+      "feature": "aarch64_cmp_mov_branch_flag_lifetime",
+      "owner": "raw_pcode_aarch64_lane",
+      "notes": "Source-semantic canary for cmp flag use after mov clobbers the compared register."
+    },
+    {
+      "name": "control-flow-test-loops-while-shift",
+      "entry_id": "AARCH64",
+      "binary": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "addr": "0x100114",
+      "count": 4,
+      "language": "AARCH64:LE:64:v8A",
+      "compiler": "default",
+      "disassemble_missing": true,
+      "feature_group": "loop",
+      "feature": "aarch64_loop_carried_shift_condition",
+      "owner": "raw_pcode_aarch64_lane",
+      "notes": "Source-semantic canary for while-loop carried right-shift feeding cbnz."
+    },
+    {
+      "name": "control-flow-test-loops-do-tail",
+      "entry_id": "AARCH64",
+      "binary": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "addr": "0x100124",
+      "count": 6,
+      "language": "AARCH64:LE:64:v8A",
+      "compiler": "default",
+      "disassemble_missing": true,
+      "feature_group": "loop",
+      "feature": "aarch64_do_tail_subs_tbz",
+      "owner": "raw_pcode_aarch64_lane",
+      "notes": "Source-semantic canary for do-while count decrement, carry flag, and old accumulator bit test."
     }
   ]
 }
