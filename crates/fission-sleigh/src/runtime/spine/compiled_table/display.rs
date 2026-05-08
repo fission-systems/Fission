@@ -43,17 +43,6 @@ fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<Bound
     bail!("{role} {} has no display debug value", handle.operand_index)
 }
 
-pub(super) fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
-    match kind {
-        CompiledConstructTplKind::Unsupported => DecodedFlowKind::None,
-        CompiledConstructTplKind::Call => DecodedFlowKind::Call,
-        CompiledConstructTplKind::Jmp => DecodedFlowKind::Jump,
-        CompiledConstructTplKind::Jcc => DecodedFlowKind::ConditionalJump,
-        CompiledConstructTplKind::Ret => DecodedFlowKind::Return,
-        _ => DecodedFlowKind::None,
-    }
-}
-
 pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowKind {
     if state
         .constructor_template
@@ -79,7 +68,7 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     {
         return DecodedFlowKind::ConditionalJump;
     }
-    flow_kind_for(state.construct_tpl_kind)
+    DecodedFlowKind::None
 }
 
 pub(super) fn disasm_mnemonic(state: &RuntimeConstructState) -> String {

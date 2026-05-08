@@ -209,6 +209,10 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
             "fixed_register",
             "CompiledOperandSpec::Immediate",
             "CompiledOperandSpec::Relative",
+            "CompiledConstructTplKind::Call",
+            "CompiledConstructTplKind::Jmp",
+            "CompiledConstructTplKind::Ret",
+            "CompiledConstructTplKind::Mov",
         ] {
             assert!(
                 !source.contains(forbidden),

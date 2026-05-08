@@ -47,7 +47,7 @@ mod tests {
             constructor_id: 0,
             constructor_slot: 0,
             mnemonic: "nop".to_string(),
-            construct_tpl_kind: CompiledConstructTplKind::Nop,
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
             constructor_template: CompiledConstructorTemplate {
                 handles: Vec::new(),
                 decode_steps: Vec::new(),
