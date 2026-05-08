@@ -40,12 +40,7 @@ fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<Bound
     if let Some(value) = handle.debug_value.clone() {
         return Ok(value);
     }
-    bound_operand_from_fixed_handle(&handle.fixed).map_err(|error| {
-        anyhow!(
-            "{role} {} has no debug value and no displayable fixed handle: {error}",
-            handle.operand_index
-        )
-    })
+    bail!("{role} {} has no display debug value", handle.operand_index)
 }
 
 pub(super) fn flow_kind_for(kind: CompiledConstructTplKind) -> DecodedFlowKind {
@@ -475,6 +470,7 @@ mod tests {
         let source = include_str!("display.rs");
         let dummy_immediate_fallback = ["unwrap_or", "(BoundOperand::Immediate"].concat();
         let dummy_zero_size = ["encoded_size: ", "0"].concat();
+        let fixed_handle_fallback = ["bound_operand", "from_fixed_handle"].join("_");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -483,6 +479,10 @@ mod tests {
         assert!(
             !source.contains(&dummy_zero_size),
             "display rendering must not materialize zero-size dummy operands"
+        );
+        assert!(
+            !source.contains(&fixed_handle_fallback),
+            "display rendering must use decoded debug operands, not fixed-handle BoundOperand fallback"
         );
     }
 
