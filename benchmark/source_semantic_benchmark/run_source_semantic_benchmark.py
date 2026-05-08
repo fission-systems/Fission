@@ -934,6 +934,27 @@ def decomp_debug_command_for_row(row: dict[str, Any], fission_bin: Path, output_
     return {
         "debug_decomp_bundle_path": rel(bundle_path),
         "debug_decomp_command": shell_command(cmd),
+        "disasm_function_command": shell_command(
+            [
+                fission_bin,
+                "disasm",
+                resolve_path(str(binary_path)),
+                "--addr",
+                str(address),
+                "--function",
+                "--json",
+            ]
+        ),
+        "xrefs_function_command": shell_command(
+            [
+                fission_bin,
+                "xrefs",
+                resolve_path(str(binary_path)),
+                "--function",
+                str(address),
+                "--json",
+            ]
+        ),
         "preview_candidate_command": None,
         "preview_candidate_note": "inventory preview-candidates is deprecated with native_decomp removal; use debug-decomp and function-facts",
         "function_facts_command": shell_command(
@@ -977,6 +998,8 @@ def top_debug_commands(rows: list[dict[str, Any]], limit: int = 12) -> list[dict
             "behavior_artifact_dir": row.get("behavior", {}).get("artifact_dir"),
             "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
             "debug_decomp_command": row.get("debug_decomp_command"),
+            "disasm_function_command": row.get("disasm_function_command"),
+            "xrefs_function_command": row.get("xrefs_function_command"),
             "preview_candidate_command": row.get("preview_candidate_command"),
             "preview_candidate_note": row.get("preview_candidate_note"),
             "function_facts_command": row.get("function_facts_command"),
@@ -1035,11 +1058,15 @@ def materialize_debug_triage(
         address = str(row["address"])
         decomp_bundle_path = debug_bundle_path_for_row(output_dir, row)
         decomp_capture_path = debug_triage_path_for_row(output_dir, row, "debug_decomp", "command.json")
+        disasm_capture_path = debug_triage_path_for_row(output_dir, row, "disasm", "command.json")
+        xrefs_capture_path = debug_triage_path_for_row(output_dir, row, "xrefs", "command.json")
         facts_jsonl_path = debug_triage_path_for_row(output_dir, row, "function_facts", "jsonl")
         facts_summary_path = debug_triage_path_for_row(output_dir, row, "function_facts", "summary.json")
         facts_capture_path = debug_triage_path_for_row(output_dir, row, "function_facts", "command.json")
         decomp_bundle_path.parent.mkdir(parents=True, exist_ok=True)
         decomp_capture_path.parent.mkdir(parents=True, exist_ok=True)
+        disasm_capture_path.parent.mkdir(parents=True, exist_ok=True)
+        xrefs_capture_path.parent.mkdir(parents=True, exist_ok=True)
         facts_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
         decomp_capture = run_command_capture(
@@ -1059,6 +1086,33 @@ def materialize_debug_triage(
             timeout_sec,
         )
         decomp_capture_path.write_text(dump_json_pretty(decomp_capture), encoding="utf-8")
+
+        disasm_capture = run_command_capture(
+            [
+                fission_bin,
+                "disasm",
+                binary_path,
+                "--addr",
+                address,
+                "--function",
+                "--json",
+            ],
+            timeout_sec,
+        )
+        disasm_capture_path.write_text(dump_json_pretty(disasm_capture), encoding="utf-8")
+
+        xrefs_capture = run_command_capture(
+            [
+                fission_bin,
+                "xrefs",
+                binary_path,
+                "--function",
+                address,
+                "--json",
+            ],
+            timeout_sec,
+        )
+        xrefs_capture_path.write_text(dump_json_pretty(xrefs_capture), encoding="utf-8")
 
         facts = run_command_capture(
             [
@@ -1087,6 +1141,10 @@ def materialize_debug_triage(
             "debug_decomp_capture_path": rel(decomp_capture_path),
             "debug_decomp_bundle_path": rel(decomp_bundle_path),
             "debug_decomp_returncode": decomp_capture.get("returncode"),
+            "disasm_capture_path": rel(disasm_capture_path),
+            "disasm_returncode": disasm_capture.get("returncode"),
+            "xrefs_capture_path": rel(xrefs_capture_path),
+            "xrefs_returncode": xrefs_capture.get("returncode"),
             "function_facts_capture_path": rel(facts_capture_path),
             "function_facts_jsonl_path": rel(facts_jsonl_path),
             "function_facts_summary_path": rel(facts_summary_path),
@@ -1682,7 +1740,7 @@ def find_latest_baseline_dir(
     if not root.exists():
         return None
     output_resolved = output_dir.resolve()
-    candidates: list[tuple[int, int, float, Path]] = []
+    candidates: list[tuple[float, Path]] = []
     for summary_path in root.rglob("source_semantic_summary.json"):
         try:
             parent_resolved = summary_path.parent.resolve()
@@ -1709,12 +1767,14 @@ def find_latest_baseline_dir(
             mtime = summary_path.stat().st_mtime
         except OSError:
             continue
-        exact_key_set = int(bool(current_row_keys) and baseline_keys == current_row_keys)
-        row_count_match = int(summary.get("row_count") == len(current_row_keys))
-        candidates.append((exact_key_set, row_count_match, mtime, summary_path.parent))
+        if current_row_keys and baseline_keys != current_row_keys:
+            continue
+        if not current_row_keys and summary.get("row_count") != 0:
+            continue
+        candidates.append((mtime, summary_path.parent))
     if not candidates:
         return None
-    return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3]
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def metric_delta(current: dict[str, Any], baseline: dict[str, Any], key: str) -> dict[str, Any]:
@@ -1845,7 +1905,10 @@ def comparison_outcome(comparison: dict[str, Any]) -> dict[str, Any]:
     behavior_regressed = int(comparison.get("behavior_regressed_row_count") or 0)
     improved = int(comparison.get("improved_row_count") or 0)
     regressed = int(comparison.get("regressed_row_count") or 0)
-    if isinstance(weighted_delta, (int, float)) and weighted_delta > 0 and behavior_regressed == 0:
+    shape_changed = bool(comparison.get("new_row_count") or comparison.get("missing_row_count"))
+    if shape_changed:
+        direction = "mixed"
+    elif isinstance(weighted_delta, (int, float)) and weighted_delta > 0 and behavior_regressed == 0:
         direction = "improved"
     elif isinstance(weighted_delta, (int, float)) and weighted_delta < 0 and behavior_improved == 0:
         direction = "regressed"
@@ -1945,24 +2008,34 @@ def history_snapshot(path: Path, summary: dict[str, Any]) -> dict[str, Any] | No
         return None
     same_shape_records = [record for record in records if record.get("row_count") == summary.get("row_count")]
     comparison_record = same_shape_records[-1] if same_shape_records else records[-1]
+    latest_record = records[-1]
     current_similarity = summary.get("weighted_semantic_similarity_percent")
-    previous_similarity = comparison_record.get("weighted_semantic_similarity_percent")
+    comparison_similarity = comparison_record.get("weighted_semantic_similarity_percent")
+    latest_similarity = latest_record.get("weighted_semantic_similarity_percent")
     comparable_shape = comparison_record.get("row_count") == summary.get("row_count")
-    delta = (
-        round(float(current_similarity) - float(previous_similarity), 6)
+    comparison_delta = (
+        round(float(current_similarity) - float(comparison_similarity), 6)
         if comparable_shape
         and isinstance(current_similarity, (int, float))
-        and isinstance(previous_similarity, (int, float))
+        and isinstance(comparison_similarity, (int, float))
+        else None
+    )
+    latest_delta = (
+        round(float(current_similarity) - float(latest_similarity), 6)
+        if latest_record.get("row_count") == summary.get("row_count")
+        and isinstance(current_similarity, (int, float))
+        and isinstance(latest_similarity, (int, float))
         else None
     )
     return {
         "history_file": rel(path),
         "previous_run_count": len(records),
-        "latest_previous_run": records[-1],
+        "latest_previous_run": latest_record,
         "comparison_previous_run": comparison_record,
         "comparison_shape_matches": comparable_shape,
-        "weighted_semantic_similarity_percent_delta_vs_comparison": delta,
-        "weighted_semantic_similarity_percent_delta_vs_latest": delta,
+        "latest_shape_matches": latest_record.get("row_count") == summary.get("row_count"),
+        "weighted_semantic_similarity_percent_delta_vs_comparison": comparison_delta,
+        "weighted_semantic_similarity_percent_delta_vs_latest": latest_delta,
         "recent_runs": records,
     }
 
@@ -1998,16 +2071,27 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.append(f"- Latest index: `{summary['latest_index_file']}`")
     history = summary.get("history")
     if isinstance(history, dict):
-        latest = (
+        comparison_record = (
             history.get("comparison_previous_run")
             if isinstance(history.get("comparison_previous_run"), dict)
             else {}
         )
-        delta = history.get("weighted_semantic_similarity_percent_delta_vs_comparison")
-        delta_text = "n/a" if delta is None else f"{delta:+.3f}%"
+        latest_record = (
+            history.get("latest_previous_run")
+            if isinstance(history.get("latest_previous_run"), dict)
+            else {}
+        )
+        comparison_delta = history.get("weighted_semantic_similarity_percent_delta_vs_comparison")
+        latest_delta = history.get("weighted_semantic_similarity_percent_delta_vs_latest")
+        comparison_delta_text = "n/a" if comparison_delta is None else f"{comparison_delta:+.3f}%"
+        latest_delta_text = "n/a" if latest_delta is None else f"{latest_delta:+.3f}%"
         lines.append(
-            f"- Latest comparable history delta: {delta_text} "
-            f"(previous run `{latest.get('run_id', 'unknown')}`)"
+            f"- Latest comparable history delta: {comparison_delta_text} "
+            f"(previous run `{comparison_record.get('run_id', 'unknown')}`)"
+        )
+        lines.append(
+            f"- Latest history delta: {latest_delta_text} "
+            f"(previous run `{latest_record.get('run_id', 'unknown')}`)"
         )
     lines.extend([
         "",
@@ -2092,12 +2176,12 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 )
     debug_triage = summary.get("debug_triage") or []
     if debug_triage:
-        lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Debug Bundle | Facts | Note |", "|---|---:|---|---|---|"])
+        lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Debug Bundle | Disasm | Xrefs | Facts |", "|---|---:|---|---|---|---|"])
         for row in debug_triage[:12]:
             lines.append(
                 f"| `{row.get('function_name')}` | {row.get('semantic_score_percent', 0.0):.3f}% | "
-                f"`{row.get('debug_decomp_bundle_path')}` | `{row.get('function_facts_summary_path')}` | "
-                f"{row.get('preview_candidate_note') or ''} |"
+                f"`{row.get('debug_decomp_bundle_path')}` | `{row.get('disasm_capture_path')}` | "
+                f"`{row.get('xrefs_capture_path')}` | `{row.get('function_facts_summary_path')}` |"
             )
     debug_commands = summary.get("debug_repro_commands") or []
     if debug_commands:
@@ -2111,6 +2195,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.append("  ```bash")
             lines.append(f"  {row.get('debug_decomp_command')}")
             lines.append("  ```")
+            if row.get("disasm_function_command"):
+                lines.append("  ```bash")
+                lines.append(f"  {row.get('disasm_function_command')}")
+                lines.append("  ```")
+            if row.get("xrefs_function_command"):
+                lines.append("  ```bash")
+                lines.append(f"  {row.get('xrefs_function_command')}")
+                lines.append("  ```")
             if row.get("preview_candidate_command"):
                 lines.append("  ```bash")
                 lines.append(f"  {row.get('preview_candidate_command')}")
@@ -2432,7 +2524,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--materialize-debug-triage",
         action="store_true",
-        help="Run fission_cli inventory preview-candidates/function-facts for the lowest-scoring rows and save captures",
+        help="Run fission_cli decomp/disasm/xrefs/function-facts for the lowest-scoring rows and save captures",
     )
     parser.add_argument(
         "--debug-triage-limit",

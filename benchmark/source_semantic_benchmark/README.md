@@ -56,6 +56,9 @@ so score, behavior, compile, cache, wall-time, and baseline-delta trends survive
 across runs. The current summary includes the latest same-manifest history
 record, prefers a same-row-count record for weighted-similarity delta, and
 shows both artifact-to-artifact comparison and rolling history context. The
+rolling history block reports both the latest same-shape run and the latest run
+overall, so a small smoke run does not overwrite the comparable trend for a
+larger corpus.
 runner also updates
 `benchmark/artifacts/source_semantic_benchmark/source_semantic_latest_by_manifest.json`
 with the latest artifact path, score, cache file, and comparison outcome per
@@ -94,12 +97,15 @@ throughput changes are visible separately from semantic-quality changes.
 
 By default, each run looks for the latest previous artifact under
 `benchmark/artifacts/source_semantic_benchmark/` with the same manifest name and
-adds a `comparison` block to the summary. Use `--baseline-dir <artifact-dir>` to
-pin a specific previous run or `--no-baseline-compare` to disable this. The
-comparison reports metric deltas, improved/regressed rows, behavior status
-transitions, top per-function score changes, separated top improvements/top
-regressions, and a `comparison_outcome` headline that states whether the run
-improved, regressed, stayed unchanged, or is mixed versus the baseline.
+the same row-key set, then adds a `comparison` block to the summary. This avoids
+calling a smaller smoke run an improvement over a larger corpus run. Use
+`--baseline-dir <artifact-dir>` to pin a specific previous run or
+`--no-baseline-compare` to disable this. The comparison reports metric deltas,
+improved/regressed rows, behavior status transitions, top per-function score
+changes, separated top improvements/top regressions, and a `comparison_outcome`
+headline that states whether the run improved, regressed, stayed unchanged, or
+is mixed versus the baseline. Explicit baseline comparisons with new or missing
+rows are marked `mixed`.
 
 For failure triage, `--include-debug-decomp` forwards `--debug-decomp` to
 `fission_cli decomp` and stores compact stage status, owner buckets, and selected
@@ -111,19 +117,20 @@ Rows with a mapped function also include a ready-to-run `debug_decomp_command`
 and, when `--include-debug-decomp` is used, the runner materializes the same CLI
 bundle at `debug_decomp/<entry>/<function-address>.json`. The Markdown summary
 lists the lowest-scoring repro commands first. Those rows also include
-`inventory function-facts` commands for the same binary/address so a semantic
-regression can be routed into the existing CLI debugging surfaces without
-rerunning the full benchmark. The older `inventory preview-candidates` native
-decomp surface is not materialized because current `fission_cli` reports it as
-deprecated after native decomp removal.
+`disasm --function`, `xrefs --function`, and `inventory function-facts`
+commands for the same binary/address so a semantic regression can be routed into
+the existing CLI debugging surfaces without rerunning the full benchmark. The
+older `inventory preview-candidates` native decomp surface is not materialized
+because current `fission_cli` reports it as deprecated after native decomp
+removal.
 
 Use `--materialize-debug-triage` to execute the existing CLI debugging surfaces
 for the lowest-scoring non-perfect rows during the benchmark run. The runner
-saves `fission_cli decomp --debug-decomp-bundle` captures plus
-`inventory function-facts` command results, JSONL, and summary files under
-`debug_triage/`, and adds a `debug_triage` block to the JSON and Markdown
-summaries. Keep this off for throughput runs; enable it for diagnosis-focused
-artifact snapshots.
+saves `fission_cli decomp --debug-decomp-bundle`, `disasm --function`, `xrefs
+--function`, and `inventory function-facts` command results under
+`debug_triage/`; function facts also get JSONL and summary files. The runner
+adds a `debug_triage` block to the JSON and Markdown summaries. Keep this off
+for throughput runs; enable it for diagnosis-focused artifact snapshots.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate
