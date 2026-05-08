@@ -1,9 +1,10 @@
 use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    extract_cstring, DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
 };
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
+use std::collections::HashMap;
 
 pub mod schema;
 use schema::*;
@@ -16,12 +17,15 @@ const PF_X: u32 = 0x1;
 const PF_W: u32 = 0x2;
 const PF_R: u32 = 0x4;
 const SHT_SYMTAB: u32 = 2;
+const SHT_RELA: u32 = 4;
+const SHT_REL: u32 = 9;
 const SHT_DYNSYM: u32 = 11;
 const SHF_WRITE: u64 = 0x1;
 const SHF_ALLOC: u64 = 0x2;
 const SHF_EXECINSTR: u64 = 0x4;
 const SHN_UNDEF: u16 = 0;
 const STT_NOTYPE: u8 = 0;
+const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
@@ -72,6 +76,8 @@ impl ElfLoader {
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
+        let mut global_symbols = HashMap::new();
+        let mut relocation_symbols = HashMap::new();
         let phdrs = read_program_headers_64(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_64(&phdrs).unwrap_or(u64::MAX)
@@ -158,10 +164,19 @@ impl ElfLoader {
                         is_relocatable,
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
+                        &mut global_symbols,
                         endian,
                     );
                 }
             }
+
+            parse_relocation_symbols_64(
+                bytes,
+                &shdrs,
+                &section_addresses,
+                &mut relocation_symbols,
+                endian,
+            );
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
         }
@@ -204,6 +219,8 @@ impl ElfLoader {
             .is_64bit(is_64bit)
             .add_sections(sections_info)
             .add_functions(functions_info)
+            .add_global_symbols(global_symbols)
+            .add_relocation_symbols(relocation_symbols)
             .build()
     }
 
@@ -219,6 +236,8 @@ impl ElfLoader {
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
+        let mut global_symbols = HashMap::new();
+        let mut relocation_symbols = HashMap::new();
         let phdrs = read_program_headers_32(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_32(&phdrs).unwrap_or(u64::MAX)
@@ -304,10 +323,19 @@ impl ElfLoader {
                         is_relocatable,
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
+                        &mut global_symbols,
                         endian,
                     );
                 }
             }
+
+            parse_relocation_symbols_32(
+                bytes,
+                &shdrs,
+                &section_addresses,
+                &mut relocation_symbols,
+                endian,
+            );
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_32(&phdrs));
         }
@@ -350,6 +378,8 @@ impl ElfLoader {
             .is_64bit(is_64bit)
             .add_sections(sections_info)
             .add_functions(functions_info)
+            .add_global_symbols(global_symbols)
+            .add_relocation_symbols(relocation_symbols)
             .build()
     }
 
@@ -365,6 +395,7 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
+        out_globals: &mut HashMap<u64, String>,
         endian: Endian,
     ) {
         // Resolve the symbol string table from the linked section header
@@ -444,9 +475,6 @@ impl ElfLoader {
                 .get(section_index)
                 .map(|shdr| (shdr.sh_flags & SHF_EXECINSTR) != 0)
                 .unwrap_or(false);
-            if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
-                continue;
-            }
 
             let address = if is_relocatable {
                 section_addresses
@@ -457,6 +485,15 @@ impl ElfLoader {
             } else {
                 sym.st_value
             };
+
+            if sym_type == STT_OBJECT {
+                out_globals.entry(address).or_insert(name);
+                continue;
+            }
+
+            if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
+                continue;
+            }
 
             push_unique_function(
                 out_funcs,
@@ -496,6 +533,7 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
+        out_globals: &mut HashMap<u64, String>,
         endian: Endian,
     ) {
         let strtab = if strtab_shndx < shdrs.len() {
@@ -575,9 +613,6 @@ impl ElfLoader {
                 .get(section_index)
                 .map(|shdr| (shdr.sh_flags as u64 & SHF_EXECINSTR) != 0)
                 .unwrap_or(false);
-            if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
-                continue;
-            }
 
             let address = if is_relocatable {
                 section_addresses
@@ -588,6 +623,15 @@ impl ElfLoader {
             } else {
                 sym.st_value as u64
             };
+
+            if sym_type == STT_OBJECT {
+                out_globals.entry(address).or_insert(name);
+                continue;
+            }
+
+            if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
+                continue;
+            }
 
             push_unique_function(
                 out_funcs,
@@ -614,6 +658,174 @@ impl ElfLoader {
             );
         }
     }
+}
+
+fn parse_relocation_symbols_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    out: &mut HashMap<u64, String>,
+    endian: Endian,
+) {
+    let reader = ByteReader::new(full_data, endian);
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let Some(strtab) = symbol_string_table_64(full_data, shdrs, symtab) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            24
+        } else {
+            16
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let sym_index = (r_info >> 32) as usize;
+            let Some(name) = symbol_name_64(full_data, symtab, strtab, sym_index, endian) else {
+                continue;
+            };
+            out.entry(target_base.saturating_add(r_offset))
+                .or_insert(name);
+        }
+    }
+}
+
+fn parse_relocation_symbols_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    section_addresses: &[u64],
+    out: &mut HashMap<u64, String>,
+    endian: Endian,
+) {
+    let reader = ByteReader::new(full_data, endian);
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let Some(strtab) = symbol_string_table_32(full_data, shdrs, symtab) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            12
+        } else {
+            8
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u32(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                break;
+            };
+            let sym_index = (r_info >> 8) as usize;
+            let Some(name) = symbol_name_32(full_data, symtab, strtab, sym_index, endian) else {
+                continue;
+            };
+            out.entry(target_base.saturating_add(r_offset as u64))
+                .or_insert(name);
+        }
+    }
+}
+
+fn symbol_string_table_64<'a>(
+    full_data: &'a [u8],
+    shdrs: &[Elf64Shdr],
+    symtab: &Elf64Shdr,
+) -> Option<&'a [u8]> {
+    let strtab = shdrs.get(symtab.sh_link as usize)?;
+    let start = strtab.sh_offset as usize;
+    let end = start.checked_add(strtab.sh_size as usize)?;
+    (end <= full_data.len()).then_some(&full_data[start..end])
+}
+
+fn symbol_string_table_32<'a>(
+    full_data: &'a [u8],
+    shdrs: &[Elf32Shdr],
+    symtab: &Elf32Shdr,
+) -> Option<&'a [u8]> {
+    let strtab = shdrs.get(symtab.sh_link as usize)?;
+    let start = strtab.sh_offset as usize;
+    let end = start.checked_add(strtab.sh_size as usize)?;
+    (end <= full_data.len()).then_some(&full_data[start..end])
+}
+
+fn symbol_name_64(
+    full_data: &[u8],
+    symtab: &Elf64Shdr,
+    strtab: &[u8],
+    sym_index: usize,
+    endian: Endian,
+) -> Option<String> {
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        Elf64Sym::SIZE
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(sym_index.checked_mul(entry_size)?)?;
+    if offset + entry_size > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let sym = Elf64Sym::parse(&reader, offset).ok()?;
+    let name = extract_cstring(strtab, sym.st_name as usize);
+    (!name.is_empty() && !is_elf_mapping_symbol(&name)).then_some(name)
+}
+
+fn symbol_name_32(
+    full_data: &[u8],
+    symtab: &Elf32Shdr,
+    strtab: &[u8],
+    sym_index: usize,
+    endian: Endian,
+) -> Option<String> {
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        Elf32Sym::SIZE
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(sym_index.checked_mul(entry_size)?)?;
+    if offset + entry_size > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let sym = Elf32Sym::parse(&reader, offset).ok()?;
+    let name = extract_cstring(strtab, sym.st_name as usize);
+    (!name.is_empty() && !is_elf_mapping_symbol(&name)).then_some(name)
 }
 
 fn push_unique_function(out: &mut Vec<FunctionInfo>, function: FunctionInfo) {

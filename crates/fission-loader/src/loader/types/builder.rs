@@ -24,6 +24,7 @@ impl LoadedBinaryBuilder {
             format: "unknown".to_string(),
             iat_symbols: std::collections::HashMap::new(),
             global_symbols: std::collections::HashMap::new(),
+            relocation_symbols: std::collections::HashMap::new(),
             pdb_debug_info: None,
         }
     }
@@ -117,6 +118,14 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn add_relocation_symbols(
+        mut self,
+        symbols: std::collections::HashMap<u64, String>,
+    ) -> Self {
+        self.relocation_symbols.extend(symbols);
+        self
+    }
+
     pub fn pdb_debug_info(mut self, pdb_debug_info: Option<PdbDebugInfo>) -> Self {
         self.pdb_debug_info = pdb_debug_info;
         self
@@ -161,6 +170,12 @@ impl LoadedBinaryBuilder {
             global_symbols.insert(addr, demangled);
         }
 
+        let mut relocation_symbols = std::collections::HashMap::new();
+        for (addr, name) in self.relocation_symbols {
+            let demangled = crate::loader::demangle::demangle(&name);
+            relocation_symbols.insert(addr, demangled);
+        }
+
         let string_map = scan_ascii_strings_from_sections(self.data.as_slice(), &sections);
 
         let inner = LoadedBinaryInner {
@@ -178,6 +193,7 @@ impl LoadedBinaryBuilder {
             format: self.format,
             iat_symbols,
             global_symbols,
+            relocation_symbols,
             function_addr_index,
             function_name_index,
             functions_sorted: true,

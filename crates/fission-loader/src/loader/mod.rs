@@ -576,6 +576,36 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_preserves_relocation_symbols() {
+        let mut relocation_symbols = std::collections::HashMap::new();
+        relocation_symbols.insert(0x10003a8, "control_sink".to_string());
+
+        let binary = LoadedBinaryBuilder::new("reloc.o".to_string(), DataBuffer::Heap(vec![0; 64]))
+            .format("ELF64")
+            .entry_point(0x100000)
+            .image_base(0x100000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x100000,
+                virtual_size: 64,
+                file_offset: 0,
+                file_size: 64,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_relocation_symbols(relocation_symbols)
+            .build()
+            .expect("build binary with relocation symbols");
+
+        assert_eq!(
+            binary.inner().relocation_symbols.get(&0x10003a8),
+            Some(&"control_sink".to_string())
+        );
+    }
+
+    #[test]
     fn test_function_lookup_o1() {
         // Test that O(1) function lookups work correctly
         let builder =

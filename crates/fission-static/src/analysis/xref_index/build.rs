@@ -98,6 +98,7 @@ fn xref_kind_snake(kind: XrefKind) -> &'static str {
         XrefKind::ImportRef => "import_ref",
         XrefKind::ExportRef => "export_ref",
         XrefKind::GlobalSymbol => "global_symbol",
+        XrefKind::Relocation => "relocation",
         XrefKind::Unknown => "unknown",
     }
 }
@@ -144,10 +145,7 @@ impl XrefIndex {
     pub fn summary(&self) -> XrefIndexSummary {
         let mut s = XrefIndexSummary {
             total: self.refs.len(),
-            relocation_note: Some(
-                "PE/ELF relocation entries are not yet exposed on LoadedBinary; count is 0."
-                    .to_string(),
-            ),
+            relocation_note: None,
             ..Default::default()
         };
 
@@ -161,6 +159,7 @@ impl XrefIndex {
             match r.kind {
                 XrefKind::ImportRef => s.imports += 1,
                 XrefKind::ExportRef => s.exports += 1,
+                XrefKind::Relocation => s.relocations += 1,
                 XrefKind::StringRef => s.strings += 1,
                 XrefKind::GlobalSymbol => s.globals += 1,
                 XrefKind::Call => {
@@ -171,7 +170,6 @@ impl XrefIndex {
                 XrefKind::Unknown => {}
             }
         }
-        s.relocations = 0;
         s
     }
 
@@ -417,6 +415,31 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
             },
         );
     }
+
+    for (&addr, name) in binary.inner().relocation_symbols.iter() {
+        builder.push_record(
+            XrefSource {
+                address: addr,
+                category: XrefSourceCategory::Instruction {
+                    enclosing_function: resolve_enclosing_function(&sorted_funcs, addr, 0x40),
+                },
+            },
+            XrefTarget {
+                address: None,
+                symbol: Some(name.clone()),
+            },
+            XrefKind::Relocation,
+            fission_loader::Confidence::High,
+            XrefEvidence {
+                layer: XrefSourceLayer::Relocation,
+                instruction_mnemonic: None,
+                pcode_op: None,
+                relocation_kind: None,
+                symbol_name: Some(name.clone()),
+                note: Some("relocation symbol use-site".into()),
+            },
+        );
+    }
 }
 
 /// Maps [`XrefDatabase`] rows into canonical records (`XrefSourceLayer::Disassembly`).
@@ -533,6 +556,50 @@ mod tests {
         assert!(sum.exports >= 1);
         assert!(idx.refs.iter().any(|r| {
             r.kind == XrefKind::ImportRef && r.confidence == fission_loader::Confidence::High
+        }));
+    }
+
+    #[test]
+    fn loader_seeds_relocation_symbols() {
+        let mut relocation_symbols = std::collections::HashMap::new();
+        relocation_symbols.insert(0x10003a8, "control_sink".to_string());
+
+        let bin = LoadedBinaryBuilder::new("reloc.o".to_string(), DataBuffer::Heap(vec![0u8; 256]))
+            .format("ELF64")
+            .entry_point(0x100000)
+            .image_base(0x100000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x100000,
+                virtual_size: 0x400,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_function(FunctionInfo {
+                name: "run_control_flow".into(),
+                address: 0x100140,
+                size: 0x300,
+                is_export: true,
+                is_import: false,
+                ..Default::default()
+            })
+            .add_relocation_symbols(relocation_symbols)
+            .build()
+            .expect("build");
+
+        let idx = build_xref_index(&bin, false);
+        let sum = idx.summary();
+        assert_eq!(sum.relocations, 1);
+        assert_eq!(sum.by_kind.get("relocation"), Some(&1));
+        assert!(idx.refs.iter().any(|r| {
+            r.kind == XrefKind::Relocation
+                && r.source.address == 0x10003a8
+                && r.target.symbol.as_deref() == Some("control_sink")
+                && r.evidence.layer == XrefSourceLayer::Relocation
         }));
     }
 }

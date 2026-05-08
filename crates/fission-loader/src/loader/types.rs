@@ -275,6 +275,8 @@ pub struct LoadedBinaryInner {
     pub iat_symbols: std::collections::HashMap<u64, String>,
     /// Global data symbol mapping (address -> name) for decompiler output
     pub global_symbols: std::collections::HashMap<u64, String>,
+    /// Relocation use-site mapping (instruction/data address -> referenced symbol name).
+    pub relocation_symbols: std::collections::HashMap<u64, String>,
     /// Index of functions by address for O(1) lookup
     pub function_addr_index: std::collections::HashMap<u64, usize>,
     /// Index of functions by name for O(1) lookup
@@ -409,5 +411,6 @@ pub struct LoadedBinaryBuilder {
     format: String,
     iat_symbols: std::collections::HashMap<u64, String>,
     global_symbols: std::collections::HashMap<u64, String>,
+    relocation_symbols: std::collections::HashMap<u64, String>,
     pdb_debug_info: Option<PdbDebugInfo>,
 }

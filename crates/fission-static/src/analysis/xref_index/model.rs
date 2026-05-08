@@ -49,6 +49,7 @@ pub enum XrefKind {
     ImportRef,
     ExportRef,
     GlobalSymbol,
+    Relocation,
     Unknown,
 }
 

@@ -242,6 +242,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
+            relocation_names: Default::default(),
             calling_convention: Default::default(),
         }
     }

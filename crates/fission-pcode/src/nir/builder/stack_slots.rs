@@ -64,6 +64,65 @@ impl<'a> PreviewBuilder<'a> {
         self.try_stack_slot_lvalue(ptr, ty)
     }
 
+    pub(super) fn try_global_lvalue(&self, op: &PcodeOp, ptr: &Varnode) -> Option<String> {
+        if let Some(name) = self.options.relocation_names.get(&op.address) {
+            return Some(name.clone());
+        }
+        let addr = self.resolve_global_address(ptr, 16)?;
+        self.options.global_names.get(&addr).cloned()
+    }
+
+    fn resolve_global_address(&self, ptr: &Varnode, budget: usize) -> Option<u64> {
+        if ptr.is_constant {
+            return if ptr.offset != 0 {
+                Some(ptr.offset)
+            } else if ptr.constant_val >= 0 {
+                Some(ptr.constant_val as u64)
+            } else {
+                None
+            };
+        }
+        if budget == 0 {
+            return None;
+        }
+        let (_, op) = self.lookup_def_site(ptr)?;
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.resolve_global_address(op.inputs.first()?, budget - 1)
+            }
+            PcodeOpcode::IntAdd | PcodeOpcode::PtrSub => {
+                let base = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let delta = const_offset(op.inputs.get(1)?)?;
+                if delta >= 0 {
+                    base.checked_add(delta as u64)
+                } else {
+                    base.checked_sub(delta.unsigned_abs())
+                }
+            }
+            PcodeOpcode::IntSub => {
+                let base = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let delta = const_offset(op.inputs.get(1)?)?;
+                if delta >= 0 {
+                    base.checked_sub(delta as u64)
+                } else {
+                    base.checked_add(delta.unsigned_abs())
+                }
+            }
+            PcodeOpcode::PtrAdd => {
+                let base = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let index = const_offset(op.inputs.get(1)?)?;
+                let scale = const_offset(op.inputs.get(2)?)?;
+                let delta = index.checked_mul(scale)?;
+                if delta >= 0 {
+                    base.checked_add(delta as u64)
+                } else {
+                    base.checked_sub(delta.unsigned_abs())
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn try_stack_slot_lvalue(
         &mut self,
         ptr: &Varnode,

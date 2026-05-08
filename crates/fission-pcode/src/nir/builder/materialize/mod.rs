@@ -176,6 +176,10 @@ impl<'a> PreviewBuilder<'a> {
                                     type_from_size(op.inputs[2].size, false),
                                 ) {
                                 HirLValue::Var(slot_name)
+                            } else if let Some(global_name) =
+                                this.try_global_lvalue(op, &op.inputs[1])
+                            {
+                                HirLValue::Var(global_name)
                             } else {
                                 HirLValue::Deref {
                                     ptr: Box::new(

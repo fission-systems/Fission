@@ -872,6 +872,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         conservative_irreducible_fallback: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
         global_names: Default::default(),
+        relocation_names: Default::default(),
         calling_convention: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
@@ -898,6 +899,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         conservative_irreducible_fallback: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
         global_names: Default::default(),
+        relocation_names: Default::default(),
         calling_convention: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
@@ -973,6 +975,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: engine,
             global_names: Default::default(),
+            relocation_names: Default::default(),
             calling_convention: Default::default(),
         }));
         PreviewBuilder::new(dummy, options, None)

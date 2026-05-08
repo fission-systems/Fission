@@ -1826,6 +1826,9 @@ pub struct NirRenderOptions {
     /// Used to replace `DAT_<addr>` with the actual symbol name in decompiled output.
     #[serde(default)]
     pub global_names: HashMap<u64, String>,
+    /// Relocation use-site address → referenced symbol name.
+    #[serde(default)]
+    pub relocation_names: HashMap<u64, String>,
     /// Calling convention used to identify parameter registers.
     /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
     #[serde(default)]
@@ -2055,6 +2058,7 @@ impl NirRenderOptions {
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             conservative_irreducible_fallback: false,
             global_names,
+            relocation_names: inner.relocation_symbols.clone(),
             calling_convention,
         }
     }
