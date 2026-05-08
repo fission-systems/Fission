@@ -203,6 +203,18 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
             !source.contains("TokenFieldExtraction") && !source.contains("token_field_extraction"),
             "{name} still exposes compatibility token-field extraction"
         );
+        for forbidden in [
+            "CompiledFixedRegister",
+            "FixedRegister",
+            "fixed_register",
+            "CompiledOperandSpec::Immediate",
+            "CompiledOperandSpec::Relative",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} still exposes legacy non-SLA operand spec: {forbidden}"
+            );
+        }
     }
 }
 

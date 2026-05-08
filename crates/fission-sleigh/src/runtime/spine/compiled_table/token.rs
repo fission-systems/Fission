@@ -283,9 +283,7 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         {
             true
         }
-        CompiledOperandSpec::SlaValueMap { .. }
-        | CompiledOperandSpec::Immediate { .. }
-        | CompiledOperandSpec::Relative { .. } => true,
+        CompiledOperandSpec::SlaValueMap { .. } => true,
         CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
             subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
         }

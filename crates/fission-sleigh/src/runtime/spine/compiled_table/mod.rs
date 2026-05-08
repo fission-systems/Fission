@@ -7,7 +7,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
     CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe, CompiledDisjointPattern,
-    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
+    CompiledExecutableConstructor, CompiledFrontend, CompiledHandleSelector,
     CompiledHandleTemplate, CompiledHandleTpl, CompiledOpTpl, CompiledOpTplOpcode,
     CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternBlock,
     CompiledPatternExpression, CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl,

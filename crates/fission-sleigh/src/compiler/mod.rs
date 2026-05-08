@@ -38,7 +38,7 @@ pub use ir::{
     CompiledDecisionEdge, CompiledDecisionLeafEntry, CompiledDecisionNode, CompiledDecisionProbe,
     CompiledDecisionTree, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
-    CompiledExecutableConstructor, CompiledFixedRegister, CompiledFrontend, CompiledHandleSelector,
+    CompiledExecutableConstructor, CompiledFrontend, CompiledHandleSelector,
     CompiledHandleTemplate, CompiledHandleTpl, CompiledLabelRef, CompiledLanguageLayout,
     CompiledMacro, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandDecodeStep,
     CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression, CompiledPatternMatcher,

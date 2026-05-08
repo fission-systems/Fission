@@ -9,14 +9,6 @@ pub(super) fn compiled_space(name: &str, index: u64) -> CompiledSpaceRef {
     }
 }
 
-pub(super) fn register_offset(index: u8) -> u64 {
-    if index < 8 {
-        (index as u64) * 8
-    } else {
-        128 + ((index as u64) - 8) * 8
-    }
-}
-
 pub(super) fn fixed_handle_for_const_value(value: u64, size: u32) -> RuntimeFixedHandle {
     RuntimeFixedHandle {
         space: Some(compiled_space("const", 0)),
@@ -36,19 +28,6 @@ pub(super) fn fixed_handle_for_ram_target(target: u64, size: u32) -> RuntimeFixe
         size,
         offset_space: None,
         offset_offset: target,
-        offset_size: size,
-        temp_space: None,
-        temp_offset: 0,
-        fixable: true,
-    }
-}
-
-pub(super) fn fixed_handle_for_register_index(index: u8, size: u32) -> RuntimeFixedHandle {
-    RuntimeFixedHandle {
-        space: Some(compiled_space("register", 4)),
-        size,
-        offset_space: None,
-        offset_offset: register_offset(index),
         offset_size: size,
         temp_space: None,
         temp_offset: 0,

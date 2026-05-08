@@ -1416,21 +1416,6 @@ fn parse_operand_specs(
         if token.is_empty() {
             continue;
         }
-        if let Some(size) = relative_size(token) {
-            specs.push(CompiledOperandSpec::Relative { size });
-            continue;
-        }
-        if let Some((size, signed)) = immediate_size(token) {
-            specs.push(CompiledOperandSpec::Immediate { size, signed });
-            continue;
-        }
-        if let Some(size) = fixed_accumulator_size(token) {
-            specs.push(CompiledOperandSpec::FixedRegister {
-                reg: CompiledFixedRegister::Accumulator,
-                size,
-            });
-            continue;
-        }
         let token = token.trim();
         if !token.is_empty()
             && token.len() <= 64
@@ -1440,11 +1425,6 @@ fn parse_operand_specs(
                 table_name: token.to_string(),
                 reloffset: 0,
                 offsetbase: -1,
-            });
-        } else {
-            specs.push(CompiledOperandSpec::Immediate {
-                size: 0,
-                signed: false,
             });
         }
     }
@@ -1643,55 +1623,4 @@ fn unsupported_check_constraint_reason(signature: &str) -> Option<String> {
         return Some("unsupported_runtime_constraint".to_string());
     }
     None
-}
-
-fn relative_size(token: &str) -> Option<u32> {
-    if !token.starts_with("rel") {
-        return None;
-    }
-    register_size_token(token)
-}
-fn immediate_size(token: &str) -> Option<(u32, bool)> {
-    if !(token.starts_with("imm") || token.starts_with("simm")) {
-        return None;
-    }
-    let signed = token.starts_with("simm");
-    let digits = token
-        .chars()
-        .skip_while(|ch| !ch.is_ascii_digit())
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    let bits = digits.parse::<u32>().ok()?;
-    Some(((bits / 8).max(1), signed))
-}
-fn fixed_accumulator_size(token: &str) -> Option<u32> {
-    match token {
-        "AL" => Some(1),
-        "AX" => Some(2),
-        "EAX" => Some(4),
-        "RAX" => Some(8),
-        _ => None,
-    }
-}
-fn register_size_token(token: &str) -> Option<u32> {
-    let digits = token
-        .chars()
-        .rev()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
-    if digits.is_empty() {
-        match token {
-            "AL" => Some(1),
-            "AX" => Some(2),
-            "EAX" => Some(4),
-            "RAX" => Some(8),
-            "FS" | "GS" | "CS" | "SS" | "DS" | "ES" => Some(2),
-            _ => None,
-        }
-    } else {
-        digits.parse::<u32>().ok().map(|bits| (bits / 8).max(1))
-    }
 }

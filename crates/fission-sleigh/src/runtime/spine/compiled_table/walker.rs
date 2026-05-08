@@ -934,40 +934,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     requires_fixed: true,
                 })
             }
-            CompiledOperandSpec::Immediate { size, signed } => {
-                let value = read_uint(self.ctx.bytes, self.cursor, *size)?;
-                self.cursor += *size as usize;
-                Ok(OperandBinding::with_fixed(
-                    BoundOperand::Immediate {
-                        value,
-                        encoded_size: *size,
-                        signed: *signed,
-                    },
-                    fixed_handle_for_const_value(value, *size),
-                ))
-            }
-            CompiledOperandSpec::Relative { size } => {
-                let signed = read_sint(self.ctx.bytes, self.cursor, *size)?;
-                self.cursor += *size as usize;
-                let next_ip = self.ctx.address.wrapping_add(self.cursor as u64);
-                let target = next_ip.wrapping_add_signed(signed);
-                let addr_size = self.compiled.sla_ram_address_size().max(*size);
-                Ok(OperandBinding::with_fixed(
-                    BoundOperand::Relative { target },
-                    fixed_handle_for_ram_target(target, addr_size),
-                ))
-            }
-            CompiledOperandSpec::FixedRegister { reg, size } => {
-                let index = match reg {
-                    CompiledFixedRegister::Accumulator => 0,
-                    CompiledFixedRegister::StackPointer => 4,
-                    CompiledFixedRegister::FramePointer => 5,
-                };
-                Ok(OperandBinding::with_fixed(
-                    BoundOperand::Register { index, size: *size },
-                    fixed_handle_for_register_index(index, *size),
-                ))
-            }
         }
     }
 

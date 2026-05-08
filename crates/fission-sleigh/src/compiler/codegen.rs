@@ -786,20 +786,6 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                     json_string(table_name),
                 )
             }
-            crate::compiler::CompiledOperandSpec::Immediate { size, signed } => {
-                format!("{{\"kind\": \"immediate\", \"size\": {size}, \"signed\": {signed}}}")
-            }
-            crate::compiler::CompiledOperandSpec::Relative { size } => {
-                format!("{{\"kind\": \"relative\", \"size\": {size}}}")
-            }
-            crate::compiler::CompiledOperandSpec::FixedRegister { reg, size } => format!(
-                "{{\"kind\": \"fixed_register\", \"reg\": {}, \"size\": {size}}}",
-                json_string(match reg {
-                    crate::compiler::CompiledFixedRegister::Accumulator => "accumulator",
-                    crate::compiler::CompiledFixedRegister::StackPointer => "stack_pointer",
-                    crate::compiler::CompiledFixedRegister::FramePointer => "frame_pointer",
-                })
-            ),
             crate::compiler::CompiledOperandSpec::SlaPatternExpression { expr, reloffset, offsetbase } => {
                 format!(
                     "{{\"kind\": \"sla_pattern_expression\", \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"expr\": {}}}",

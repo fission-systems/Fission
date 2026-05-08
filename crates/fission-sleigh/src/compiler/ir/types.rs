@@ -537,17 +537,6 @@ pub enum CompiledOperandSpec {
         #[serde(default = "default_offsetbase")]
         offsetbase: i32,
     },
-    Immediate {
-        size: u32,
-        signed: bool,
-    },
-    Relative {
-        size: u32,
-    },
-    FixedRegister {
-        reg: CompiledFixedRegister,
-        size: u32,
-    },
     SlaPatternExpression {
         expr: CompiledPatternExpression,
         /// See `SlaTokenField::reloffset`. Used for non-shared-cursor architectures when
@@ -911,13 +900,6 @@ pub enum CompiledArithmeticOpcode {
     Sar,
     Inc,
     Dec,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompiledFixedRegister {
-    Accumulator,
-    StackPointer,
-    FramePointer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
