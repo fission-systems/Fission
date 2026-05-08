@@ -259,7 +259,11 @@ impl<'a> PreviewBuilder<'a> {
                     && let Some(LinearExit::Join(join_idx)) = self.linear_exit(body_idx)?
                     && join_idx > idx
                     && (false_entry_idx == join_idx
-                        || self.is_trivial_forwarding_block(false_entry_idx, join_idx))
+                        || (self.is_trivial_forwarding_block(false_entry_idx, join_idx)
+                            && !self.forwarding_block_defines_return_tail_live_in(
+                                false_entry_idx,
+                                join_idx,
+                            )))
                 {
                     self.log_short_circuit_cache(
                         diag,

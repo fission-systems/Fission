@@ -189,15 +189,15 @@ impl<'a> PreviewBuilder<'a> {
                     true_target,
                     false_target,
                 } => {
-                    let then_body =
-                        if let Some(true_idx) = self.find_block_index_by_address(true_target)
-                            && let Some(expr) =
-                                self.lower_return_join_expr_for_predecessor(idx, true_idx)?
-                        {
-                            vec![HirStmt::Return(Some(expr))]
-                        } else {
-                            vec![HirStmt::Goto(block_label(true_target))]
-                        };
+                    let then_body = if let Some(true_idx) =
+                        self.find_block_index_by_address(true_target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, true_idx)?
+                    {
+                        vec![HirStmt::Return(Some(expr))]
+                    } else {
+                        vec![HirStmt::Goto(block_label(true_target))]
+                    };
                     let else_body = if let Some(false_target) = false_target {
                         if let Some(false_idx) = self.find_block_index_by_address(false_target)
                             && let Some(expr) =
@@ -921,6 +921,73 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.is_linear_tail_terminator(idx, last.opcode)
             || self.is_trivial_forwarding_op(last.opcode)
+    }
+
+    pub(super) fn forwarding_block_defines_return_tail_live_in(
+        &self,
+        idx: usize,
+        join_idx: usize,
+    ) -> bool {
+        if self.successors.get(idx).map(Vec::as_slice) != Some(&[join_idx][..]) {
+            return false;
+        }
+        let block = self.pcode_block(idx);
+        let join_block = self.pcode_block(join_idx);
+        let Some(join_term_idx) = join_block.ops.iter().position(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Branch
+                    | PcodeOpcode::CBranch
+                    | PcodeOpcode::BranchInd
+                    | PcodeOpcode::Return
+            )
+        }) else {
+            return false;
+        };
+        if join_block.ops[join_term_idx].opcode != PcodeOpcode::Return {
+            return false;
+        }
+        let Some(block_term_idx) = block.ops.iter().position(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Branch
+                    | PcodeOpcode::CBranch
+                    | PcodeOpcode::BranchInd
+                    | PcodeOpcode::Return
+            )
+        }) else {
+            return false;
+        };
+        let defs = block
+            .ops
+            .iter()
+            .take(block_term_idx)
+            .filter_map(|op| op.output.as_ref())
+            .collect::<Vec<_>>();
+        if defs.is_empty() {
+            return false;
+        }
+        join_block
+            .ops
+            .iter()
+            .take(join_term_idx)
+            .flat_map(|op| op.inputs.iter())
+            .any(|input| defs.iter().any(|def| Self::varnodes_overlap(def, input)))
+    }
+
+    fn varnodes_overlap(lhs: &Varnode, rhs: &Varnode) -> bool {
+        if lhs.is_constant || rhs.is_constant || lhs.space_id != rhs.space_id {
+            return false;
+        }
+        if lhs.offset == rhs.offset && lhs.size == rhs.size {
+            return true;
+        }
+        if !is_register_space_id(lhs.space_id) {
+            return false;
+        }
+        let lhs_end = lhs.offset.saturating_add(u64::from(lhs.size));
+        let rhs_end = rhs.offset.saturating_add(u64::from(rhs.size));
+        lhs.offset < rhs_end && rhs.offset < lhs_end
     }
 
     fn is_trivial_linear_tail(&self, idx: usize) -> bool {
@@ -1809,5 +1876,111 @@ mod tests {
         assert!(targets.contains(&0x1100), "{targets:?}");
         assert!(targets.contains(&0x1200), "{targets:?}");
         assert!(targets.contains(&0x1300), "{targets:?}");
+    }
+
+    #[test]
+    fn forwarding_block_live_in_guard_detects_return_tail_register_use() {
+        let w0 = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let w20 = Varnode {
+            space_id: REGISTER_SPACE_ID,
+            offset: 0x100,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let x0 = Varnode {
+            size: 8,
+            ..w0.clone()
+        };
+        let sum = Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset: 0x2000,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let ret_addr = Varnode::constant(0, 8);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![2],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1000,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1020, 8)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![2],
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x1010,
+                            output: Some(w20.clone()),
+                            inputs: vec![Varnode::constant(7, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x1014,
+                            output: None,
+                            inputs: vec![Varnode::constant(0x1020, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![],
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 3,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: 0x1020,
+                            output: Some(sum.clone()),
+                            inputs: vec![w0, w20],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 4,
+                            opcode: PcodeOpcode::IntZExt,
+                            address: 0x1020,
+                            output: Some(x0),
+                            inputs: vec![sum],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 5,
+                            opcode: PcodeOpcode::Return,
+                            address: 0x1020,
+                            output: None,
+                            inputs: vec![ret_addr],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+            ],
+        };
+        let options = test_options();
+        let builder = PreviewBuilder::new(&func, &options, None);
+
+        assert!(builder.forwarding_block_defines_return_tail_live_in(1, 2));
+        assert!(!builder.forwarding_block_defines_return_tail_live_in(0, 2));
     }
 }
