@@ -19,7 +19,6 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     context_register: u64,
     context_known_mask: u64,
     cursor: usize,
-    shared_token_operand_end: usize,
     handles: Vec<Option<RuntimeHandle>>,
     operand_absolute_offsets: Vec<Option<usize>>,
     operand_relative_lengths: Vec<Option<usize>>,
@@ -160,10 +159,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
-        let shared_token_cursor =
-            constructor_uses_shared_token_cursor(compiled, selection.constructor);
-        let replace_current_wrapper =
-            shared_token_cursor && constructor_replaces_current(selection.constructor);
+        let replace_current_wrapper = constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
             0
         } else if selection.constructor.constructor_template.template_source
@@ -216,7 +212,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             context_register: ctx.context_register,
             context_known_mask: ctx.context_known_mask,
             cursor: ctx.cursor + opcode_len,
-            shared_token_operand_end: 0,
             handles,
             operand_absolute_offsets,
             operand_relative_lengths,
@@ -601,6 +596,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .unwrap_or(self.ctx.cursor)
     }
 
+    fn subtable_offset_from_sla_operands(
+        &self,
+        reloffset: Option<i32>,
+        offsetbase: Option<i32>,
+    ) -> Option<usize> {
+        let rel = reloffset?;
+        let base = self.offset_for_operand_base(offsetbase.unwrap_or(-1))?;
+        let offset = base as i64 + i64::from(rel);
+        usize::try_from(offset.max(0)).ok()
+    }
+
     fn bind_operand(
         &mut self,
         template: &CompiledHandleTemplate,
@@ -892,8 +898,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .minimum_length
                         .max(sub_state.length.saturating_sub(self.ctx.cursor));
                     self.cursor = cursor_start;
-                    self.shared_token_operand_end =
-                        self.shared_token_operand_end.max(sub_state.length);
                 } else if !subtable_consumes_sequential_bytes(self.compiled, table_name, 0) {
                     self.minimum_length = self
                         .minimum_length
@@ -1187,72 +1191,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let mut sub_ctx = (*self.ctx).clone();
-        let shared_token_cursor =
-            constructor_uses_shared_token_cursor(self.compiled, self.selection.constructor);
-        let consumed_instruction_bytes = if shared_token_cursor {
-            0
-        } else {
-            self.selection
-                .trace
-                .matched_leaf_pattern
-                .as_ref()
-                .map(disjoint_pattern_instruction_byte_len)
-                .unwrap_or(0)
-        };
+        let consumed_instruction_bytes = self
+            .selection
+            .trace
+            .matched_leaf_pattern
+            .as_ref()
+            .map(disjoint_pattern_instruction_byte_len)
+            .unwrap_or(0);
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
-        } else if shared_token_cursor
-            && constructor_replaces_current(self.selection.constructor)
-            && table_name == "instruction"
-        {
-            self.ctx.cursor
-                + opcode_len_from_matcher(&self.selection.constructor.matcher)
-                    .max(self.selection.constructor.minimum_length as usize)
-                    .max(1)
-        } else if shared_token_cursor
-            && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
-            && self.selection.trace.root_bucket == "instruction"
-        {
-            self.shared_token_operand_end
-                .max(self.cursor)
-                .max(self.ctx.cursor + opcode_len_from_context(self.ctx).unwrap_or(0))
-        } else if shared_token_cursor
-            && subtable_consumes_sequential_bytes(self.compiled, table_name, 0)
-            && subtable_consumes_sequential_bytes(
-                self.compiled,
-                self.selection.trace.root_bucket.as_str(),
-                0,
-            )
-        {
-            let matched_pattern_len = self
-                .selection
-                .trace
-                .matched_leaf_pattern
-                .as_ref()
-                .map(disjoint_pattern_instruction_byte_len)
-                .unwrap_or(0);
-            if matched_pattern_len > 0 {
-                self.ctx.cursor.saturating_add(matched_pattern_len)
-            } else {
-                self.cursor
-            }
-        } else if !shared_token_cursor
-            && reloffset.is_some_and(|rel| rel >= 0)
-            && offsetbase.unwrap_or(-1) < 0
-        {
-            // Non-shared-cursor architecture (e.g. 32-bit x86, ARM): position the
-            // sub-walker using the operand's relative offset within the parent constructor.
-            // Mirrors Ghidra's ParserWalker.pushOperand() / OperandSymbol.reloffset logic.
-            if std::env::var("FISSION_REL_FALLBACK_DEBUG").is_ok() {
-                eprintln!(
-                    "[non-shared-cursor] table={table_name} ctx.cursor={} reloffset={:?} offsetbase={:?} → sub_ctx.cursor={}",
-                    self.ctx.cursor,
-                    reloffset,
-                    offsetbase,
-                    self.ctx.cursor + reloffset.unwrap() as usize,
-                );
-            }
-            self.ctx.cursor + reloffset.unwrap() as usize
+        } else if let Some(offset) = self.subtable_offset_from_sla_operands(reloffset, offsetbase) {
+            offset
         } else if self.selection.constructor.context_changes.is_empty()
             || consumed_instruction_bytes == 0
         {

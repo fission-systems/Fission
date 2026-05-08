@@ -1,37 +1,5 @@
 use super::*;
 
-// Transitional shared-token cursor policy.
-//
-// MIGRATION DEBT: variable-length specs may need shared token cursor handling
-// until the walker mirrors Ghidra's ConstructState offset/length tree directly.
-//
-// Ghidra does not enable this by architecture name. ParserWalker computes each
-// operand offset from OperandSymbol.reloffset/offsetbase and each token field
-// read uses the current ConstructState offset. Until Fission stores that full
-// tree, this policy is enabled only when the compiled `.sla` metadata proves
-// that sibling subtable operands read the same one-byte token selector.
-//
-// Do NOT add new subtable name entries to the detection lists below. Fix the
-// underlying SLA-native byte-range accumulation instead.
-#[cfg(test)]
-#[derive(Debug, Clone, Copy)]
-pub(super) struct CompiledTokenCursorPolicy {
-    shared_token_cursor: bool,
-}
-
-#[cfg(test)]
-impl CompiledTokenCursorPolicy {
-    pub(super) fn for_frontend(compiled: &CompiledFrontend) -> Self {
-        Self {
-            shared_token_cursor: frontend_has_shared_one_byte_subtable_token_operands(compiled),
-        }
-    }
-
-    pub(super) fn uses_shared_token_cursor(self) -> bool {
-        self.shared_token_cursor
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SlaTokenByteSpan {
     start: i32,
@@ -39,10 +7,6 @@ struct SlaTokenByteSpan {
 }
 
 impl SlaTokenByteSpan {
-    fn width(self) -> i32 {
-        self.end.saturating_sub(self.start)
-    }
-
     fn shifted(self, delta: i32) -> Option<Self> {
         Some(Self {
             start: self.start.checked_add(delta)?,
@@ -56,69 +20,6 @@ impl SlaTokenByteSpan {
             end: self.end.max(other.end),
         }
     }
-
-    fn overlaps(self, other: Self) -> bool {
-        self.start < other.end && other.start < self.end
-    }
-}
-
-#[cfg(test)]
-fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFrontend) -> bool {
-    if compiled.sla_ram_address_size() <= 4 {
-        return false;
-    }
-
-    if !frontend_has_instruction_forms_longer_than_four_bytes(compiled) {
-        return false;
-    }
-
-    compiled.subtables.values().any(|subtable| {
-        subtable
-            .constructors
-            .iter()
-            .any(|constructor| constructor_uses_shared_token_cursor(compiled, constructor))
-    })
-}
-
-#[cfg(test)]
-fn frontend_has_instruction_forms_longer_than_four_bytes(compiled: &CompiledFrontend) -> bool {
-    compiled.subtables.values().any(|subtable| {
-        subtable
-            .constructors
-            .iter()
-            .any(|constructor| constructor.minimum_length > 4)
-    })
-}
-
-pub(super) fn constructor_uses_shared_token_cursor(
-    compiled: &CompiledFrontend,
-    constructor: &CompiledExecutableConstructor,
-) -> bool {
-    if compiled.sla_ram_address_size() <= 4 {
-        return false;
-    }
-
-    if constructor.minimum_length > 2 {
-        return false;
-    }
-
-    let mut spans = Vec::new();
-    for handle in &constructor.constructor_template.handles {
-        if !matches!(handle.spec, CompiledOperandSpec::SubtableEvaluation { .. }) {
-            continue;
-        }
-        let Some(span) = operand_spec_primary_sla_token_span(compiled, &handle.spec, 0) else {
-            continue;
-        };
-        if span.width() == 1 {
-            spans.push(span);
-        }
-    }
-
-    spans
-        .iter()
-        .enumerate()
-        .any(|(index, lhs)| spans[index + 1..].iter().any(|rhs| lhs.overlaps(*rhs)))
 }
 
 fn operand_spec_primary_sla_token_span(

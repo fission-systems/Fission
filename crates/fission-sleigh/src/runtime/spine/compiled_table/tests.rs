@@ -598,6 +598,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let guard_no_export_assignment = ["no_export_subtable_fallback", "= true"].join(" ");
     let arch_named_policy = ["compiled", "arch"].join(".");
     let x86_string_policy = ["eq_ignore_ascii_case", "(\"x86\")"].join("");
+    let transitional_cursor_policy = ["shared", "token", "cursor"].join("_");
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -636,24 +637,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             "{} still counts guard-only no-export subtables as fallback debt",
             file.display()
         );
+        assert!(
+            !source.contains(&transitional_cursor_policy),
+            "{} still carries transitional shared-token cursor policy",
+            file.display()
+        );
     }
-}
-
-#[test]
-fn shared_token_cursor_policy_follows_sla_layout_not_processor_name() {
-    require_packaged_ghidra_sla!();
-    let x86_spec = spec_root_for_arch("x86").join("x86.slaspec");
-    let x86 = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
-    let x86_64 = compile_x86_64_frontend().expect("compile x86-64 frontend");
-
-    assert!(
-        !CompiledTokenCursorPolicy::for_frontend(&x86).uses_shared_token_cursor(),
-        "32-bit SLA should keep Ghidra-style reloffset cursoring for direct token fields"
-    );
-    assert!(
-        CompiledTokenCursorPolicy::for_frontend(&x86_64).uses_shared_token_cursor(),
-        "64-bit SLA should enable transitional shared-token cursoring from token layout metadata"
-    );
 }
 
 #[test]

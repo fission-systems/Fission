@@ -82,10 +82,9 @@ fn native_backend_allowed(
         // all current architectures.
         return false;
     }
-    // Note: the previous `shared_token_cursor` short-circuit that allowed native
-    // for x86 has been removed. For SLA-migrated frontends the check above already
-    // returns false for all subtables that have SLA identity, which keeps native
-    // backend selection architecture-neutral.
+    // For SLA-migrated frontends the check above already returns false for all
+    // subtables that have SLA identity, which keeps native backend selection
+    // architecture-neutral.
     !subtable
         .decision_tree
         .nodes
