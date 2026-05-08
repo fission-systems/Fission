@@ -919,6 +919,31 @@ def decomp_debug_command_for_row(row: dict[str, Any], fission_bin: Path, output_
     return {
         "debug_decomp_bundle_path": rel(bundle_path),
         "debug_decomp_command": shell_command(cmd),
+        "preview_candidate_command": shell_command(
+            [
+                fission_bin,
+                "inventory",
+                "preview-candidates",
+                resolve_path(str(binary_path)),
+                "--inventory",
+                "--addr",
+                str(address),
+            ]
+        ),
+        "function_facts_command": shell_command(
+            [
+                fission_bin,
+                "inventory",
+                "function-facts",
+                resolve_path(str(binary_path)),
+                "--addr",
+                str(address),
+                "--output-jsonl",
+                output_dir / "function_facts" / f"{sanitize_id(str(row.get('entry_id') or 'entry'))}-{sanitize_id(str(row.get('function_name') or 'function'))}-{sanitize_id(str(address))}.jsonl",
+                "--summary-json",
+                output_dir / "function_facts" / f"{sanitize_id(str(row.get('entry_id') or 'entry'))}-{sanitize_id(str(row.get('function_name') or 'function'))}-{sanitize_id(str(address))}.json",
+            ]
+        ),
     }
 
 
@@ -946,6 +971,8 @@ def top_debug_commands(rows: list[dict[str, Any]], limit: int = 12) -> list[dict
             "behavior_artifact_dir": row.get("behavior", {}).get("artifact_dir"),
             "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
             "debug_decomp_command": row.get("debug_decomp_command"),
+            "preview_candidate_command": row.get("preview_candidate_command"),
+            "function_facts_command": row.get("function_facts_command"),
         }
         for row in candidates[:limit]
     ]
@@ -1705,6 +1732,55 @@ def append_history_record(path: Path, summary: dict[str, Any]) -> None:
         handle.write(dump_json_line(record))
 
 
+def load_history_records(path: Path, manifest_name: str, limit: int = 12) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and record.get("manifest") == manifest_name:
+                    records.append(record)
+    except OSError:
+        return []
+    return records[-limit:]
+
+
+def history_snapshot(path: Path, summary: dict[str, Any]) -> dict[str, Any] | None:
+    records = load_history_records(path, str(summary.get("manifest") or ""))
+    if not records:
+        return None
+    same_shape_records = [record for record in records if record.get("row_count") == summary.get("row_count")]
+    comparison_record = same_shape_records[-1] if same_shape_records else records[-1]
+    current_similarity = summary.get("weighted_semantic_similarity_percent")
+    previous_similarity = comparison_record.get("weighted_semantic_similarity_percent")
+    comparable_shape = comparison_record.get("row_count") == summary.get("row_count")
+    delta = (
+        round(float(current_similarity) - float(previous_similarity), 6)
+        if comparable_shape
+        and isinstance(current_similarity, (int, float))
+        and isinstance(previous_similarity, (int, float))
+        else None
+    )
+    return {
+        "history_file": rel(path),
+        "previous_run_count": len(records),
+        "latest_previous_run": records[-1],
+        "comparison_previous_run": comparison_record,
+        "comparison_shape_matches": comparable_shape,
+        "weighted_semantic_similarity_percent_delta_vs_comparison": delta,
+        "weighted_semantic_similarity_percent_delta_vs_latest": delta,
+        "recent_runs": records,
+    }
+
+
 def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     lines = [
         f"# Source Semantic Benchmark: {summary['manifest']}",
@@ -1732,6 +1808,19 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         )
     if summary.get("history_file"):
         lines.append(f"- History: `{summary['history_file']}`")
+    history = summary.get("history")
+    if isinstance(history, dict):
+        latest = (
+            history.get("comparison_previous_run")
+            if isinstance(history.get("comparison_previous_run"), dict)
+            else {}
+        )
+        delta = history.get("weighted_semantic_similarity_percent_delta_vs_comparison")
+        delta_text = "n/a" if delta is None else f"{delta:+.3f}%"
+        lines.append(
+            f"- Latest comparable history delta: {delta_text} "
+            f"(previous run `{latest.get('run_id', 'unknown')}`)"
+        )
     lines.extend([
         "",
         "## By Language",
@@ -1801,6 +1890,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.append("  ```bash")
             lines.append(f"  {row.get('debug_decomp_command')}")
             lines.append("  ```")
+            if row.get("preview_candidate_command"):
+                lines.append("  ```bash")
+                lines.append(f"  {row.get('preview_candidate_command')}")
+                lines.append("  ```")
+            if row.get("function_facts_command"):
+                lines.append("  ```bash")
+                lines.append(f"  {row.get('function_facts_command')}")
+                lines.append("  ```")
             if row.get("behavior_artifact_dir"):
                 lines.append(f"  Behavior artifacts: `{row.get('behavior_artifact_dir')}`")
     failing = [row for row in rows if row.get("semantic_score", 0.0) < 1.0][:20]
@@ -1982,6 +2079,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["decomp_cache_miss_count"] = int(decomp_cache_stats.get("miss", 0))
     summary["decomp_cache_stored_count"] = int(decomp_cache_stats.get("stored", 0))
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
+    history = history_snapshot(DEFAULT_HISTORY_FILE, summary)
+    if history is not None:
+        summary["history"] = history
     save_decomp_cache(decomp_cache_path, decomp_cache)
     baseline_path: Path | None = None
     if not args.no_baseline_compare:

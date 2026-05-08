@@ -52,7 +52,9 @@ directory under `benchmark/artifacts/source_semantic_benchmark/` instead of
 overwriting a `latest` directory. Each run also appends a compact record to
 `benchmark/artifacts/source_semantic_benchmark/source_semantic_history.jsonl`
 so score, behavior, compile, cache, wall-time, and baseline-delta trends survive
-across runs.
+across runs. The current summary includes the latest same-manifest history
+record, prefers a same-row-count record for weighted-similarity delta, and
+shows both artifact-to-artifact comparison and rolling history context.
 
 ## Metrics
 
@@ -98,7 +100,10 @@ debug owner buckets and quality-evidence totals when debug evidence is present.
 Rows with a mapped function also include a ready-to-run `debug_decomp_command`
 and, when `--include-debug-decomp` is used, the runner materializes the same CLI
 bundle at `debug_decomp/<entry>/<function-address>.json`. The Markdown summary
-lists the lowest-scoring repro commands first.
+lists the lowest-scoring repro commands first. Those rows also include
+`inventory preview-candidates` and `inventory function-facts` commands for the
+same binary/address so a semantic regression can be routed into the existing
+CLI debugging surfaces without rerunning the full benchmark.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate
