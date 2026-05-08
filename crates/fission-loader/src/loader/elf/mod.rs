@@ -407,6 +407,9 @@ impl ElfLoader {
             if name.is_empty() {
                 continue;
             }
+            if is_elf_mapping_symbol(&name) {
+                continue;
+            }
             let binding = sym.st_info >> 4;
             let externally_visible = binding == STB_GLOBAL || binding == STB_WEAK;
 
@@ -534,6 +537,9 @@ impl ElfLoader {
             if name.is_empty() {
                 continue;
             }
+            if is_elf_mapping_symbol(&name) {
+                continue;
+            }
 
             let binding = sym.st_info >> 4;
             let externally_visible = binding == STB_GLOBAL || binding == STB_WEAK;
@@ -618,6 +624,16 @@ fn push_unique_function(out: &mut Vec<FunctionInfo>, function: FunctionInfo) {
         return;
     }
     out.push(function);
+}
+
+fn is_elf_mapping_symbol(name: &str) -> bool {
+    matches!(name, "$a" | "$d" | "$t" | "$x")
+        || name
+            .strip_prefix("$a.")
+            .or_else(|| name.strip_prefix("$d."))
+            .or_else(|| name.strip_prefix("$t."))
+            .or_else(|| name.strip_prefix("$x."))
+            .is_some()
 }
 
 fn read_program_headers_64(bytes: &[u8], header: &Elf64Header, endian: Endian) -> Vec<Elf64Phdr> {
