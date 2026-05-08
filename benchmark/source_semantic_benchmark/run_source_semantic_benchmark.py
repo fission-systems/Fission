@@ -805,6 +805,7 @@ def run_fission_decomp_cached(
             cache_stats["hit"] += 1
     if cached is not None:
         cached_result = dict(cached)
+        cached_result["decomp_cache_status"] = "hit"
         if (
             include_debug_decomp
             and debug_decomp_bundle_path is not None
@@ -818,6 +819,7 @@ def run_fission_decomp_cached(
                 include_debug_decomp=include_debug_decomp,
                 debug_decomp_bundle_path=debug_decomp_bundle_path,
             )
+            cached_result["decomp_cache_status"] = "refreshed_debug_bundle"
             with cache_lock:
                 cache[key] = cached_result
                 cache_stats["stored"] += 1
@@ -834,6 +836,7 @@ def run_fission_decomp_cached(
         include_debug_decomp=include_debug_decomp,
         debug_decomp_bundle_path=debug_decomp_bundle_path,
     )
+    decomp["decomp_cache_status"] = "miss"
     with cache_lock:
         cache.setdefault(key, decomp)
         cache_stats["stored"] += 1
@@ -1030,10 +1033,32 @@ def materialize_debug_triage(
     for row in selected[: max(0, limit)]:
         binary_path = resolve_path(str(row["binary_path"]))
         address = str(row["address"])
+        decomp_bundle_path = debug_bundle_path_for_row(output_dir, row)
+        decomp_capture_path = debug_triage_path_for_row(output_dir, row, "debug_decomp", "command.json")
         facts_jsonl_path = debug_triage_path_for_row(output_dir, row, "function_facts", "jsonl")
         facts_summary_path = debug_triage_path_for_row(output_dir, row, "function_facts", "summary.json")
         facts_capture_path = debug_triage_path_for_row(output_dir, row, "function_facts", "command.json")
+        decomp_bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        decomp_capture_path.parent.mkdir(parents=True, exist_ok=True)
         facts_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+        decomp_capture = run_command_capture(
+            [
+                fission_bin,
+                "decomp",
+                binary_path,
+                "--addr",
+                address,
+                "--json",
+                "--no-header",
+                "--no-warnings",
+                "--debug-decomp",
+                "--debug-decomp-bundle",
+                decomp_bundle_path,
+            ],
+            timeout_sec,
+        )
+        decomp_capture_path.write_text(dump_json_pretty(decomp_capture), encoding="utf-8")
 
         facts = run_command_capture(
             [
@@ -1059,11 +1084,15 @@ def materialize_debug_triage(
             "semantic_score_percent": row.get("semantic_score_percent"),
             "behavior_status": row.get("behavior", {}).get("status"),
             "preview_candidate_note": row.get("preview_candidate_note"),
+            "debug_decomp_capture_path": rel(decomp_capture_path),
+            "debug_decomp_bundle_path": rel(decomp_bundle_path),
+            "debug_decomp_returncode": decomp_capture.get("returncode"),
             "function_facts_capture_path": rel(facts_capture_path),
             "function_facts_jsonl_path": rel(facts_jsonl_path),
             "function_facts_summary_path": rel(facts_summary_path),
             "function_facts_returncode": facts.get("returncode"),
         }
+        row["debug_decomp_bundle_path"] = rel(decomp_bundle_path)
         row["debug_triage"] = triage
         triage_rows.append(triage)
     return triage_rows
@@ -1530,6 +1559,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if not row.get("decomp_success")
     )
     behavior_status_counts = Counter(row.get("behavior", {}).get("status", "unknown") for row in rows)
+    decomp_cache_status_counts = Counter(row.get("decomp_cache_status", "not_requested") for row in rows)
     debug_owner_bucket_counts: Counter[str] = Counter()
     debug_stage_status_counts: Counter[str] = Counter()
     debug_quality_evidence_totals: Counter[str] = Counter()
@@ -1609,6 +1639,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "mapping_status_counts": dict(sorted(mapping_status_counts.items())),
         "decomp_failure_counts": dict(sorted(decomp_failure_counts.items())),
         "behavior_status_counts": dict(sorted(behavior_status_counts.items())),
+        "decomp_cache_status_counts": dict(sorted(decomp_cache_status_counts.items())),
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
         "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
@@ -1994,6 +2025,10 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Behavior Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["behavior_status_counts"].items()):
             lines.append(f"| {status} | {count} |")
+    if summary.get("decomp_cache_status_counts"):
+        lines.extend(["", "## Decompile Cache Status", "", "| Status | Rows |", "|---|---:|"])
+        for status, count in sorted(summary["decomp_cache_status_counts"].items()):
+            lines.append(f"| {status} | {count} |")
     if summary.get("decomp_failure_counts"):
         lines.extend(["", "## Decompile Failures", "", "| Failure | Rows |", "|---|---:|"])
         for failure, count in sorted(summary["decomp_failure_counts"].items()):
@@ -2057,11 +2092,12 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 )
     debug_triage = summary.get("debug_triage") or []
     if debug_triage:
-        lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Facts | Note |", "|---|---:|---|---|"])
+        lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Debug Bundle | Facts | Note |", "|---|---:|---|---|---|"])
         for row in debug_triage[:12]:
             lines.append(
                 f"| `{row.get('function_name')}` | {row.get('semantic_score_percent', 0.0):.3f}% | "
-                f"`{row.get('function_facts_summary_path')}` | {row.get('preview_candidate_note') or ''} |"
+                f"`{row.get('debug_decomp_bundle_path')}` | `{row.get('function_facts_summary_path')}` | "
+                f"{row.get('preview_candidate_note') or ''} |"
             )
     debug_commands = summary.get("debug_repro_commands") or []
     if debug_commands:
@@ -2135,6 +2171,8 @@ def row_for_function(
             decomp_cache_lock,
             decomp_cache_stats,
         )
+    else:
+        decomp["decomp_cache_status"] = "not_requested"
     decomp_code = decomp.get("code") if decomp.get("success") else None
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
     static_score = multiset_jaccard(source_fp, decomp_fp) if decomp_code else 0.0
@@ -2170,6 +2208,7 @@ def row_for_function(
         "engine_used": decomp.get("engine_used"),
         "debug_decomp_bundle_path": decomp.get("debug_decomp_bundle_path"),
         "debug_decomp": decomp.get("debug_decomp"),
+        "decomp_cache_status": decomp.get("decomp_cache_status", "not_requested"),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
         "behavior": behavior,

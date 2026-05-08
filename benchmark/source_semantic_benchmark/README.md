@@ -87,7 +87,10 @@ function address, and whether `--include-debug-decomp` is enabled, so rebuilding
 `fission_cli` invalidates old decompile rows automatically. Use
 `--decomp-cache-file <path>` to pin a different cache file or
 `--no-decomp-cache` to disable the persistent cache; repeated decompile requests
-inside the same process can still reuse the in-memory cache.
+inside the same process can still reuse the in-memory cache. Each row includes
+`decomp_cache_status` (`hit`, `miss`, `refreshed_debug_bundle`, or
+`not_requested`) and the summary/Markdown report aggregates those statuses, so
+throughput changes are visible separately from semantic-quality changes.
 
 By default, each run looks for the latest previous artifact under
 `benchmark/artifacts/source_semantic_benchmark/` with the same manifest name and
@@ -114,12 +117,13 @@ rerunning the full benchmark. The older `inventory preview-candidates` native
 decomp surface is not materialized because current `fission_cli` reports it as
 deprecated after native decomp removal.
 
-Use `--materialize-debug-triage` to execute the function-facts CLI inventory
-surface for the lowest-scoring non-perfect rows during the benchmark run. The
-runner saves the function-facts command result, function-facts JSONL, and
-function-facts summary under `debug_triage/`, and adds a `debug_triage` block to
-the JSON and Markdown summaries. Keep this off for throughput runs; enable it
-for diagnosis-focused artifact snapshots.
+Use `--materialize-debug-triage` to execute the existing CLI debugging surfaces
+for the lowest-scoring non-perfect rows during the benchmark run. The runner
+saves `fission_cli decomp --debug-decomp-bundle` captures plus
+`inventory function-facts` command results, JSONL, and summary files under
+`debug_triage/`, and adds a `debug_triage` block to the JSON and Markdown
+summaries. Keep this off for throughput runs; enable it for diagnosis-focused
+artifact snapshots.
 
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate
