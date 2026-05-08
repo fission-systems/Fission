@@ -11,5 +11,30 @@
       "tags": ["source-owned"]
     }
   ],
-  "entries": []
+  "entries": [
+    {
+      "id": "aarch64-baremetal-small-c-control-flow",
+      "binary_path": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "source_path": "benchmark/binary/AARCH64/baremetal/small/source/c/control_flow.c",
+      "language": "c",
+      "tags": ["source-owned", "aarch64", "baremetal", "c", "control-flow"],
+      "weight": 1.0,
+      "behavior_cases": {
+        "run_control_flow": [
+          {
+            "args": [0],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [11],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [100],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          }
+        ]
+      }
+    }
+  ]
 }

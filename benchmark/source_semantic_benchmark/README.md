@@ -110,6 +110,8 @@ operators, constants, calls, memory access shape, and signature shape. Dynamic
 behavior currently compiles C-like decompiler output with a compatibility
 header and runs deterministic cases for supported scalar integral signatures,
 plus manifest-owned `behavior_cases` for C `int *` arguments and `void`
-side-effect functions. If the local host cannot execute a freshly compiled C
+side-effect functions. Explicit cases can list observed globals so a function
+that communicates through a checked-in global sink is compared by effect, not
+only by return value. If the local host cannot execute a freshly compiled C
 probe, supported dynamic rows fail closed as `host_execution_unavailable`
 instead of being silently skipped.

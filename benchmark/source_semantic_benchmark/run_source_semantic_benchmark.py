@@ -37,6 +37,7 @@ BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 LINE_COMMENT_RE = re.compile(r"//.*")
 WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 WORD_BOUNDARY_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+CTYPE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_\s*]*")
 CONST_RE = re.compile(r"\b(?:0x[0-9A-Fa-f]+|\d+)\b")
 CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_:]*)\s*\(")
 ARRAY_SUFFIX_RE = re.compile(r"\[[^\]]*\]")
@@ -1069,6 +1070,23 @@ def validate_explicit_behavior_cases(
                 values = arg["int_array"]
                 if not isinstance(values, list) or not all(isinstance(v, int) for v in values):
                     return False, f"case {case_index} arg {arg_index} has invalid int_array"
+        globals_to_observe = case.get("globals", [])
+        if globals_to_observe is None:
+            globals_to_observe = []
+        if not isinstance(globals_to_observe, list):
+            return False, f"case {case_index} globals must be a list"
+        for global_index, global_spec in enumerate(globals_to_observe):
+            if not isinstance(global_spec, dict):
+                return False, f"case {case_index} global {global_index} must be an object"
+            name = global_spec.get("name")
+            if not isinstance(name, str) or not WORD_BOUNDARY_RE.fullmatch(name):
+                return False, f"case {case_index} global {global_index} has invalid name"
+            ctype = global_spec.get("ctype", "unsigned int")
+            if not isinstance(ctype, str) or not CTYPE_RE.fullmatch(ctype.strip()):
+                return False, f"case {case_index} global {global_index} has invalid ctype"
+            reset = global_spec.get("reset", 0)
+            if not isinstance(reset, int):
+                return False, f"case {case_index} global {global_index} reset must be int"
     return True, None
 
 
@@ -1101,6 +1119,7 @@ def candidate_harness(
     candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
 ) -> str:
     calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
+    globals_decl = "\n".join(render_candidate_global_decl(spec) for spec in collect_observed_globals(cases))
     return f"""
 #include <stdint.h>
 #include <stdbool.h>
@@ -1150,6 +1169,7 @@ static inline bool __fission_sborrow64(uint64 a, uint64 b) {{
 #define __carry(a, b) (sizeof(a) <= 4 ? __fission_carry32((uint32)(a), (uint32)(b)) : __fission_carry64((uint64)(a), (uint64)(b)))
 #define __scarry(a, b) (sizeof(a) <= 4 ? __fission_scarry32((uint32)(a), (uint32)(b)) : __fission_scarry64((uint64)(a), (uint64)(b)))
 #define __sborrow(a, b) (sizeof(a) <= 4 ? __fission_sborrow32((uint32)(a), (uint32)(b)) : __fission_sborrow64((uint64)(a), (uint64)(b)))
+{globals_decl}
 {candidate_code}
 int main(void) {{
 {calls}
@@ -1167,6 +1187,28 @@ def render_case_call(func: SourceFunction, case: tuple[int, ...] | dict[str, Any
 
 def c_int_array(values: list[int]) -> str:
     return ", ".join(str(v) for v in values) or "0"
+
+
+def collect_observed_globals(cases: list[tuple[int, ...]] | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    observed: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        for spec in case.get("globals") or []:
+            name = spec["name"]
+            observed.setdefault(
+                name,
+                {
+                    "name": name,
+                    "ctype": spec.get("ctype", "unsigned int"),
+                    "reset": spec.get("reset", 0),
+                },
+            )
+    return [observed[name] for name in sorted(observed)]
+
+
+def render_candidate_global_decl(spec: dict[str, Any]) -> str:
+    return f"volatile {spec.get('ctype', 'unsigned int')} {spec['name']} = {int(spec.get('reset', 0))};"
 
 
 def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index: int) -> str:
@@ -1188,7 +1230,10 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
         raise AssertionError(f"unsupported explicit behavior kind: {kind}")
 
     joined_args = ", ".join(call_args)
+    globals_to_observe = case.get("globals") or []
     lines = setup
+    for spec in globals_to_observe:
+        lines.append(f"    {spec['name']} = {int(spec.get('reset', 0))};")
     if func.return_kind == "void":
         lines.append(f"    {func.name}({joined_args});")
         lines.append('    printf("ret=void");')
@@ -1200,6 +1245,8 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
         lines.append(f"    for (int i = 0; i < {length}; ++i) {{")
         lines.append(f'        printf("%s%d", i ? "," : "", {array_name}[i]);')
         lines.append("    }")
+    for spec in globals_to_observe:
+        lines.append(f'    printf(" {spec["name"]}=%lld", (long long){spec["name"]});')
     lines.append('    printf("\\n");')
     lines.append("    fflush(stdout);")
     return "\n".join(lines)
@@ -1993,6 +2040,27 @@ int max(int a, int b) { if (a > b) return a; return b; }
         status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
+        void_func = SourceFunction(
+            name="touch",
+            signature="void touch(unsigned int seed)",
+            body="control_sink = seed;",
+            return_kind="void",
+            param_kinds=["uint"],
+            param_names=["seed"],
+            line=1,
+        )
+        global_cases = [
+            {
+                "args": [7],
+                "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}],
+            }
+        ]
+        valid, reason = validate_explicit_behavior_cases(void_func, global_cases)
+        assert valid, reason
+        rendered = render_explicit_case_call(void_func, global_cases[0], 0)
+        assert "control_sink = 0;" in rendered
+        assert "control_sink=%lld" in rendered
+        assert "touch(7);" in rendered
     print("self-test ok")
     return 0
 
