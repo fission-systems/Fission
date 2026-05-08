@@ -593,6 +593,57 @@ mod tests {
         assert!(prune_unused_temp_bindings(&mut func));
         assert!(func.locals.is_empty());
     }
+
+    #[test]
+    fn inline_single_use_temps_does_not_cross_label_boundary() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar0".to_string()),
+                rhs: HirExpr::Const(0, int(32)),
+            },
+            HirStmt::Label("loop_head".to_string()),
+            HirStmt::If {
+                cond: HirExpr::Var("xVar0".to_string()),
+                then_body: vec![HirStmt::Goto("loop_head".to_string())],
+                else_body: Vec::new(),
+            },
+        ];
+
+        assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+        assert!(matches!(
+            &stmts[2],
+            HirStmt::If {
+                cond: HirExpr::Var(name),
+                ..
+            } if name == "xVar0"
+        ));
+    }
+
+    #[test]
+    fn inline_single_use_temps_keeps_same_linear_segment_inline() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar0".to_string()),
+                rhs: HirExpr::Const(1, int(32)),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar1".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("xVar0".to_string())),
+                    rhs: Box::new(HirExpr::Const(2, int(32))),
+                    ty: int(32),
+                },
+            },
+        ];
+
+        assert!(inline_single_use_temps(&mut stmts, &HashSet::new()));
+        assert_eq!(stmts.len(), 1);
+        let HirStmt::Assign { rhs, .. } = &stmts[0] else {
+            panic!("expected assignment");
+        };
+        assert!(!expr_contains_var(rhs, "xVar0"));
+    }
 }
 
 fn next_adjacent_label_name(stmts: &[HirStmt], start_idx: usize) -> Option<String> {
@@ -919,6 +970,9 @@ fn find_inline_forward_target(
         // read nor redefined), we can skip past it — even if it is a loop,
         // switch, or block that would otherwise stop the scan.
         if uses == 0 {
+            if stmt_blocks_linear_inline_scan(stmt) {
+                return None;
+            }
             if stable_materialization && stmt_blocks_stable_inline_scan(stmt) {
                 return None;
             }
@@ -932,6 +986,27 @@ fn find_inline_forward_target(
         return None;
     }
     None
+}
+
+fn stmt_blocks_linear_inline_scan(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            !matches!(lhs, HirLValue::Var(_)) || expr_has_side_effects(rhs)
+        }
+        HirStmt::Expr(expr) => expr_has_side_effects(expr),
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Block(_)
+        | HirStmt::Switch { .. }
+        | HirStmt::If { .. }
+        | HirStmt::While { .. }
+        | HirStmt::DoWhile { .. }
+        | HirStmt::For { .. }
+        | HirStmt::Break
+        | HirStmt::Continue => true,
+    }
 }
 
 fn stmt_blocks_stable_inline_scan(stmt: &HirStmt) -> bool {
