@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use super::path_config::{PathConfig, PATHS};
+use super::path_config::{PATHS, PathConfig};
 
 /// Process-global resource paths (FID, DIE, patterns, Win32 typeinfo).
 #[derive(Clone, Debug)]

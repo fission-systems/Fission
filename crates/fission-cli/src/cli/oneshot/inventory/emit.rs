@@ -321,10 +321,7 @@ fn build_quality_tags_and_score(
     {
         tags.push("low_cfg_risk".to_string());
     }
-    if preview_code.is_some_and(|code| code.contains("slot_")) {
-        score += 2;
-        tags.push("slot_alias_candidate".to_string());
-    }
+    let _ = preview_code;
     if preview_surface_kind == Some(NirSurfaceKind::Unstructured) {
         score -= 1;
         tags.push("unstructured_heavy".to_string());
@@ -689,7 +686,6 @@ fn build_inventory_fallback_entry(
         nir_output_class: None,
         nir_build_stats: None,
         reason_tags,
-        preview_hint_stats: None,
     }
 }
 
@@ -935,7 +931,6 @@ fn build_inventory_candidate_entry_rust(
         nir_output_class,
         nir_build_stats,
         reason_tags,
-        preview_hint_stats,
     }
 }
 

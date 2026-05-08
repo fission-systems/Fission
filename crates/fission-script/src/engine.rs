@@ -4,7 +4,7 @@ use crate::error::ScriptError;
 use crate::host::{self, BinaryHost};
 use crate::limits::ScriptLimits;
 use crate::result::{
-    LimitsEcho, ScriptDiagnostic, ScriptRunResult, ScriptRunStatus, SCHEMA_VERSION,
+    LimitsEcho, SCHEMA_VERSION, ScriptDiagnostic, ScriptRunResult, ScriptRunStatus,
 };
 use crate::sandbox;
 use fission_loader::loader::LoadedBinary;
@@ -49,9 +49,12 @@ pub fn run_script(
         };
     }
 
-    if let Err(e) =
-        host::register_emit(&mut engine, findings.clone(), limits.clone(), halted.clone())
-    {
+    if let Err(e) = host::register_emit(
+        &mut engine,
+        findings.clone(),
+        limits.clone(),
+        halted.clone(),
+    ) {
         return ScriptRunResult {
             schema_version: SCHEMA_VERSION,
             tool: "fission-script",
@@ -138,10 +141,7 @@ pub fn run_script(
         }
     }
 
-    let findings_vec = findings
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_default();
+    let findings_vec = findings.lock().map(|g| g.clone()).unwrap_or_default();
 
     let status = if diagnostics.is_empty() {
         ScriptRunStatus::Ok

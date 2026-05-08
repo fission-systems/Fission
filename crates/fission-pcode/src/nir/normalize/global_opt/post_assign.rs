@@ -14,7 +14,7 @@
 //! expression representatives inside a single straight-line statement list and
 //! rewrites control expressions to use the latest representative.
 
-use super::super::analysis::expr_key::{invalidate_pure_map, pure_expr_key, PureExprMap};
+use super::super::analysis::expr_key::{PureExprMap, invalidate_pure_map, pure_expr_key};
 use super::super::*;
 
 pub(crate) fn apply_post_assign_value_representative_pass(func: &mut HirFunction) -> bool {

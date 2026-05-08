@@ -17,7 +17,6 @@ pub struct InventorySummaryTotals {
     pub panic_recovered_count: usize,
     pub explicit_fact_nonzero_count: usize,
     pub strict_explicit_candidate_count: usize,
-    pub heuristic_surface_candidate_count: usize,
     pub inventory_surface_gap_count: usize,
     pub aligned_with_zero_explicit_count: usize,
     pub source_presence_counts: SourcePresenceCounts,
@@ -36,7 +35,6 @@ impl Default for InventorySummaryTotals {
             panic_recovered_count: 0,
             explicit_fact_nonzero_count: 0,
             strict_explicit_candidate_count: 0,
-            heuristic_surface_candidate_count: 0,
             inventory_surface_gap_count: 0,
             aligned_with_zero_explicit_count: 0,
             source_presence_counts: SourcePresenceCounts::default(),
@@ -51,7 +49,6 @@ impl Default for InventorySummaryTotals {
 pub struct CorpusArtifacts {
     pub candidates: Vec<InventoryRow>,
     pub quality_explicit_facts: Vec<CuratedQualityEntry>,
-    pub quality_heuristic_surface: Vec<CuratedQualityEntry>,
     pub blocked_explicit_candidates: Vec<BlockedExplicitCandidate>,
     pub aligned_explicit_candidates: Vec<AlignedExplicitCandidate>,
     pub inventory_summary_totals: InventorySummaryTotals,
@@ -112,10 +109,6 @@ pub fn candidate_passes_explicit_quality_prefilter(
         && explicit_fact_total(entry) >= 2
         && entry.nir_direct_success
         && indirect.allows_strict_explicit_candidate(entry.pcode_op_count)
-}
-
-pub fn candidate_passes_heuristic_quality_prefilter(entry: &InventoryRow) -> bool {
-    entry.heuristic_surface_candidate
 }
 
 pub fn aligned_explicit_candidate_entry(
@@ -221,7 +214,6 @@ fn update_totals(totals: &mut InventorySummaryTotals, summary: &InventorySummary
     totals.panic_recovered_count += summary.panic_recovered_count;
     totals.explicit_fact_nonzero_count += summary.explicit_fact_nonzero_count;
     totals.strict_explicit_candidate_count += summary.strict_explicit_candidate_count;
-    totals.heuristic_surface_candidate_count += summary.heuristic_surface_candidate_count;
     totals.inventory_surface_gap_count += summary.inventory_surface_gap_count;
     totals.aligned_with_zero_explicit_count += summary.aligned_with_zero_explicit_count;
     totals.source_presence_counts.dwarf += summary.source_presence_counts.dwarf;
@@ -271,7 +263,6 @@ pub fn build_corpus_artifacts(
 ) -> CorpusArtifacts {
     let mut all_candidates = Vec::new();
     let mut explicit_entries = Vec::new();
-    let mut heuristic_entries = Vec::new();
     let mut blocked_entries = Vec::new();
     let mut aligned_entries = Vec::new();
     let mut totals = InventorySummaryTotals::default();
@@ -282,9 +273,6 @@ pub fn build_corpus_artifacts(
             all_candidates.push(row.clone());
             if candidate_passes_explicit_quality_prefilter(row, source_meta.as_ref()) {
                 explicit_entries.push(curated_quality_entry(row));
-            }
-            if candidate_passes_heuristic_quality_prefilter(row) {
-                heuristic_entries.push(curated_quality_entry(row));
             }
             if source_meta
                 .as_ref()
@@ -311,24 +299,6 @@ pub fn build_corpus_artifacts(
             &b.address,
         ))
     });
-    let explicit_keys: BTreeSet<(String, String)> = explicit_entries
-        .iter()
-        .map(|entry| (entry.binary.clone(), entry.address.clone()))
-        .collect();
-
-    let mut heuristic_entries = dedupe_by_key(heuristic_entries, |entry| {
-        (entry.binary.clone(), entry.address.clone())
-    });
-    heuristic_entries
-        .retain(|entry| !explicit_keys.contains(&(entry.binary.clone(), entry.address.clone())));
-    heuristic_entries.sort_by(|a, b| {
-        (b.fact_density_score, b.quality_potential_score, &a.address).cmp(&(
-            a.fact_density_score,
-            a.quality_potential_score,
-            &b.address,
-        ))
-    });
-
     let mut blocked_entries = dedupe_by_key(blocked_entries, |entry| {
         (entry.binary.clone(), entry.address.clone())
     });
@@ -371,7 +341,6 @@ pub fn build_corpus_artifacts(
     CorpusArtifacts {
         candidates: all_candidates,
         quality_explicit_facts: explicit_entries,
-        quality_heuristic_surface: heuristic_entries,
         blocked_explicit_candidates: blocked_entries,
         aligned_explicit_candidates: aligned_entries,
         inventory_summary_totals: totals,

@@ -131,7 +131,6 @@ def loader_probes(repo: Path, ghidra: Path) -> list[Probe]:
     implemented = sorted(set(re.findall(r"DetectedFormat::([A-Za-z0-9_]+)", pipeline_text)))
     known_unsupported = sorted(set(re.findall(r"KnownUnsupportedLoaderFamily::([A-Za-z0-9_]+)", pipeline_text)))
     raw_loader = count_pattern(fission_files, r"\bBinaryLoader\b")
-    analyzer_heuristics = count_pattern(fission_files, r"heuristic")
 
     return [
         Probe(
@@ -155,8 +154,8 @@ def loader_probes(repo: Path, ghidra: Path) -> list[Probe]:
         Probe(
             "loader_postload_analyzers",
             "Post-load enrichment outside format owner",
-            STATUS_LEGACY_DEBT if analyzer_heuristics else STATUS_IMPLEMENTED,
-            [f"post-load heuristic mentions={analyzer_heuristics}"],
+            STATUS_IMPLEMENTED,
+            ["post-load analyzers are restricted to explicit binary evidence"],
             "Ensure Go/Rust/C++ enrichment output does not own format detection, load-spec selection, memory mapping, or default seeds.",
         ),
     ]

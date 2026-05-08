@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler::{
-    CompiledTemplateSource, compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery,
-    spec_root_for_arch,
+    compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery, spec_root_for_arch,
+    CompiledTemplateSource,
 };
 use std::path::PathBuf;
 
@@ -333,9 +333,8 @@ fn generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x89, 0x5c, 0x24, 0x08];
-    let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x1800_85d0)
-            .expect("lift mov [rsp + disp8], rbx");
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1800_85d0)
+        .expect("lift mov [rsp + disp8], rbx");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -352,11 +351,7 @@ fn generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent() {
     );
     assert_eq!(
         ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
-        vec![
-            PcodeOpcode::IntAdd,
-            PcodeOpcode::Copy,
-            PcodeOpcode::Store,
-        ],
+        vec![PcodeOpcode::IntAdd, PcodeOpcode::Copy, PcodeOpcode::Store,],
         "dynamic memory COPY must materialize through the Ghidra temp before STORE"
     );
 }
@@ -520,6 +515,58 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
                 .get(1)
                 .is_some_and(|input| input.is_constant && input.constant_val == 0x5060_0000)),
         "expected movk INT_OR to use exported shifted immediate; ops={ops:?}"
+    );
+}
+
+#[test]
+fn generated_runtime_lifts_aarch64_cneg_from_sla_int_2comp_template() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+    let bytes = [0x00, 0x85, 0x88, 0x5a]; // cneg w0, w8, ls
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x100058).expect("decode cneg");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "cneg");
+
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x100058).expect("lift cneg");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Int2Comp),
+        "expected cneg template to emit INT_2COMP; ops={ops:?}"
+    );
+}
+
+#[test]
+fn generated_runtime_lifts_aarch64_subs_shifted_from_sla_compare_template() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+    let bytes = [0x08, 0x00, 0x01, 0x6b]; // subs w8, w0, w1
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x100054).expect("decode subs");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "subs");
+
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x100054).expect("lift subs");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntLessEqual),
+        "expected subs flag template to emit INT_LESSEQUAL; ops={ops:?}"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub),
+        "expected subs to emit INT_SUB; ops={ops:?}"
     );
 }
 

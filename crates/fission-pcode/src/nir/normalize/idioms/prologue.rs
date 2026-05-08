@@ -23,8 +23,8 @@
 /// pass detects and removes them using the following invariant:
 ///
 /// A save/restore pair `(*p = reg, reg = *p)` can be eliminated when:
-/// 1. `reg` is in the known callee-saved set for x86-64 (rbx, rbp, rdi, rsi,
-///    r12-r15).
+/// 1. `reg` is in the known callee-saved set for the active native ABI
+///    family currently represented in HIR names.
 /// 2. The spill pointer variable `p` is used **only** in those two operations:
 ///    the Deref-lhs assignment and the Load-rhs assignment.
 /// 3. The register `reg` itself may be freely modified by the function body —
@@ -36,16 +36,21 @@
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 
-/// x86-64 callee-saved register names (covers both Windows x64 and
-/// System V AMD64 conventions).
-const CALLEE_SAVED_REGS: &[&str] = &["rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15"];
+/// Callee-saved register names that can appear after register naming. This
+/// covers x86-64 plus AArch64's preserved GPR set. AArch64 frame/link registers
+/// are included here because compiler prologues save and restore them as part
+/// of the same ABI-preserving stack scaffold.
+const CALLEE_SAVED_REGS: &[&str] = &[
+    "rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15", "x19", "x20", "x21", "x22",
+    "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30",
+];
 
 fn is_callee_saved(name: &str) -> bool {
     CALLEE_SAVED_REGS.contains(&name)
 }
 
 fn looks_like_stack_scaffold_name(name: &str) -> bool {
-    name.starts_with("var_") || name.starts_with("xVar")
+    name == "sp" || name.starts_with("var_") || name.starts_with("xVar")
 }
 
 fn stack_scaffold_ptr_expr(expr: &HirExpr) -> bool {
@@ -70,6 +75,20 @@ fn is_entry_stack_scaffold_store(stmt: &HirStmt) -> bool {
         return false;
     };
     stack_scaffold_ptr_expr(ptr)
+}
+
+fn is_entry_stack_scaffold_alias_binding(stmt: &HirStmt) -> Option<&str> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(lhs),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    if looks_like_stack_scaffold_name(lhs) && stack_scaffold_ptr_expr(rhs) {
+        return Some(lhs.as_str());
+    }
+    None
 }
 
 fn looks_like_stack_slot_name(name: &str) -> bool {
@@ -118,14 +137,24 @@ fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool
     let remove_count = body
         .iter()
         .take_while(|stmt| {
-            is_entry_stack_scaffold_store(stmt) || is_entry_stack_slot_scaffold_store(stmt)
+            is_entry_stack_scaffold_store(stmt)
+                || is_entry_stack_slot_scaffold_store(stmt)
+                || is_entry_stack_scaffold_alias_binding(stmt).is_some()
         })
         .count();
     if remove_count > 0 {
         let prefix = &body[..remove_count];
+        let suffix = &body[remove_count..];
         let has_scaffold_evidence = prefix.iter().any(is_entry_stack_scaffold_store)
             || prefix.iter().any(is_entry_stack_slot_callee_saved_store);
         if !has_scaffold_evidence {
+            return false;
+        }
+        let alias_escapes_prefix = prefix
+            .iter()
+            .filter_map(is_entry_stack_scaffold_alias_binding)
+            .any(|alias| count_ptr_var_rvalue_uses(suffix, alias) > 0);
+        if alias_escapes_prefix {
             return false;
         }
         body.drain(0..remove_count);
@@ -540,6 +569,103 @@ mod tests {
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    }
+
+    #[test]
+    fn removes_aarch64_sp_based_entry_callee_saved_scaffold() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                scaffold_store("sp", "x29"),
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("sp".to_owned())),
+                            offset: 8,
+                        }),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Var("x30".to_owned()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("sp".to_owned())),
+                            offset: 16,
+                        }),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Var("x20".to_owned()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(
+            func.body,
+            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+        );
+    }
+
+    #[test]
+    fn removes_aarch64_entry_stack_alias_callee_saved_scaffold() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar2".to_owned()),
+                    rhs: HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("sp".to_owned())),
+                        offset: 16,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("xVar2".to_owned())),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Var("x20".to_owned()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(
+            func.body,
+            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+        );
+    }
+
+    #[test]
+    fn keeps_entry_stack_alias_when_used_after_prefix() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar2".to_owned()),
+                    rhs: HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("sp".to_owned())),
+                        offset: 16,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("xVar2".to_owned())),
+                        ty: u64_ty(),
+                    },
+                    rhs: HirExpr::Var("x20".to_owned()),
+                },
+                HirStmt::Expr(HirExpr::Var("xVar2".to_owned())),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), 3);
     }
 
     #[test]

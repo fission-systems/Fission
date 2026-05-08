@@ -64,7 +64,7 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit {
             return Vec::new();
         }
-        primary_return_registers(self.options.pointer_size).to_vec()
+        primary_return_registers(self.options.pointer_size, self.options.calling_convention)
     }
 
     fn call_result_is_observed(
@@ -404,15 +404,19 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs_name = if let Some(name) =
-            self.loop_carried_output_binding_name(block, op_idx, op, output)
-        {
-            self.bind_materialized_output_to_existing_name(op, output, &name, preserve_materialization);
-            name
-        } else {
-            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
-                .name
-        };
+        let lhs_name =
+            if let Some(name) = self.loop_carried_output_binding_name(block, op_idx, op, output) {
+                self.bind_materialized_output_to_existing_name(
+                    op,
+                    output,
+                    &name,
+                    preserve_materialization,
+                );
+                name
+            } else {
+                self.ensure_temp_binding_for_output(op, output, preserve_materialization)
+                    .name
+            };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
     }

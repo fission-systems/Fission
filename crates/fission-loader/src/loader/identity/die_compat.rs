@@ -127,14 +127,19 @@ fn collect_die_raw_matches(
             .filter(|r| !die_rule_identity_phase2_supported(r))
             .count();
 
-        let total_primitive_slots = orig.rules.len().saturating_add(orig.unsupported_rule_count).max(1);
+        let total_primitive_slots = orig
+            .rules
+            .len()
+            .saturating_add(orig.unsupported_rule_count)
+            .max(1);
 
         raw.push(DieRawMatch {
             rule_id: format!("die:{}::{}", sig.sig_type, sig.name),
             rule_name: sig.name.clone(),
             category: sig.sig_type.clone(),
             matched_primitives: matched_primitive_labels,
-            unsupported_primitives_ignored: unsupported_body.saturating_add(orig.unsupported_rule_count),
+            unsupported_primitives_ignored: unsupported_body
+                .saturating_add(orig.unsupported_rule_count),
             matched_primitive_count: matched_supported,
             total_primitive_slots,
             raw_score_bonus: 0,

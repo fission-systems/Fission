@@ -13,8 +13,8 @@ pub mod patch;
 pub mod prototype_hint;
 pub mod string_xrefs;
 pub mod strings;
-pub mod xrefs;
 pub mod xref_index;
+pub mod xrefs;
 
 // Re-export types from separate crates
 pub use fission_loader::{
@@ -23,23 +23,23 @@ pub use fission_loader::{
 };
 
 pub use callgraph::{CallEdge, CallGraph};
+pub use external_symbol::{
+    ExternalSymbolIdentity, ExternalSymbolIndex, build_external_symbol_index,
+    normalize_library_key, parse_external_identity_from_loader_string,
+};
 pub use function_discovery::{
     FunctionDiscoveryProfile, FunctionDiscoveryReport, discover_functions_with_runtime,
 };
+pub use function_provenance::{
+    FunctionProvenanceIndex, FunctionProvenanceKind, FunctionProvenanceRecord,
+    build_function_provenance_index,
+};
 pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
-pub use xrefs::{Xref, XrefDatabase, XrefType, OPERAND_INDEX_MNEMONIC};
-pub use xref_index::{
-    build_xref_index, resolve_enclosing_function, FunctionXrefsSummary, XrefEvidence, XrefId,
-    XrefIndex, XrefIndexBuilder, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
-    XrefSourceCategory, XrefSourceLayer, XrefTarget,
-};
-pub use external_symbol::{
-    build_external_symbol_index, normalize_library_key,
-    parse_external_identity_from_loader_string, ExternalSymbolIdentity, ExternalSymbolIndex,
-};
-pub use function_provenance::{
-    build_function_provenance_index, FunctionProvenanceIndex, FunctionProvenanceKind,
-    FunctionProvenanceRecord,
-};
 pub use prototype_hint::win_api_prototype_hint_json;
+pub use xref_index::{
+    FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndex, XrefIndexBuilder, XrefIndexSummary,
+    XrefKind, XrefRecord, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
+    build_xref_index, resolve_enclosing_function,
+};
+pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};

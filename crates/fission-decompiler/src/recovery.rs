@@ -3,11 +3,11 @@ use crate::render::{
 };
 use crate::taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
 use crate::types::{NirRoutingResolver, NirSelection};
-use fission_loader::loader::LoadedBinary;
 use crate::{
     NirBuildStats, NirRenderOptions, NirTypeContext, PcodeFunction, RecoveryMode,
     structuring_outcome_for_signature, take_last_nir_build_stats,
 };
+use fission_loader::loader::LoadedBinary;
 
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
 

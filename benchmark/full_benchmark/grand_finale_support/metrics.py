@@ -425,7 +425,7 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
         # re.MULTILINE already handled inside count_regex
     )
 
-    # ── Heuristic readability / surface proxies (whole function text) ───────
+    # ── text readability / surface proxies (whole function text) ───────
     metrics["avg_line_length_chars"] = avg_non_empty_line_length(code)
     metrics["max_brace_nesting_depth"] = approx_max_brace_nesting(code)
     n_local = len(re.findall(r"\blocal_\d+\b", code))

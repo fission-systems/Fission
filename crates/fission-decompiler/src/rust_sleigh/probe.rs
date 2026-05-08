@@ -1,8 +1,11 @@
 use crate::rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
 };
+use crate::{
+    NirBuildStats, WrapperClass, render_contracted_wrapper_summary,
+    summarize_direct_tail_wrapper_from_ops,
+};
 use fission_loader::loader::LoadedBinary;
-use crate::{NirBuildStats, WrapperClass, render_contracted_wrapper_summary, summarize_direct_tail_wrapper_from_ops};
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::time::Instant;
 

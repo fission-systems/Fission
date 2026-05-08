@@ -1,6 +1,6 @@
 use super::support::{
-    StackBase, is_register_varnode, register_name_with_param, unique_register_name,
-    x64_ghidra_reg_name,
+    StackBase, aarch64_ghidra_reg_name, aarch64_gpr_family_index, is_register_varnode,
+    register_name_with_param, unique_register_name, x64_ghidra_reg_name,
 };
 use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
@@ -9,6 +9,15 @@ fn x64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<
     abi.param_offsets().iter().position(|&off| {
         x64_ghidra_reg_name(off)
             .and_then(crate::arch::x86::x86_gpr_family_index)
+            .is_some_and(|family| family == name_family)
+    })
+}
+
+fn aarch64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
+    let name_family = aarch64_gpr_family_index(name)?;
+    abi.param_offsets().iter().position(|&off| {
+        aarch64_ghidra_reg_name(off, 8)
+            .and_then(aarch64_gpr_family_index)
             .is_some_and(|family| family == name_family)
     })
 }
@@ -143,12 +152,11 @@ impl AbiState {
             let duplication_penalty = usize::from(!seen_slots.insert(slot));
             let hole_penalty = slot.saturating_sub(expected_next);
             expected_next = expected_next.max(slot.saturating_add(1));
-            let class =
-                if is_register_varnode(carrier) || carrier.space_id == UNIQUE_SPACE_ID {
-                    super::CarrierClass::Gpr
-                } else {
-                    super::CarrierClass::LocalSlot
-                };
+            let class = if is_register_varnode(carrier) || carrier.space_id == UNIQUE_SPACE_ID {
+                super::CarrierClass::Gpr
+            } else {
+                super::CarrierClass::LocalSlot
+            };
             assignments.push(CarrierAssignment {
                 resource: CarrierResource { class, slot },
                 coverage_penalty: 0,
@@ -311,15 +319,22 @@ impl AbiProvider for GenericAbiProvider {
     }
 
     fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        x64_param_slot_for_name_family(name, self.abi)
+        match self.abi {
+            CallingConvention::AArch64 => aarch64_param_slot_for_name_family(name, self.abi),
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+                x64_param_slot_for_name_family(name, self.abi)
+            }
+        }
     }
 
     fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        self.abi
-            .param_offsets()
-            .get(slot)
-            .copied()
-            .and_then(x64_ghidra_reg_name)
+        let offset = self.abi.param_offsets().get(slot).copied()?;
+        match self.abi {
+            CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, 8),
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+                x64_ghidra_reg_name(offset)
+            }
+        }
     }
 
     fn stack_argument_index(&self, _pointer_size: u32, _offset: i64) -> Option<usize> {

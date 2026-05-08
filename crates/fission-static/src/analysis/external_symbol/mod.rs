@@ -100,10 +100,7 @@ pub fn parse_external_identity_from_loader_string(
     let (library_key, sym_fragment) = if let Some((lib, sym)) = full.split_once('!') {
         (normalize_library_key(lib), sym.trim())
     } else {
-        (
-            external_library_hint.and_then(normalize_library_key),
-            full,
-        )
+        (external_library_hint.and_then(normalize_library_key), full)
     };
 
     let sym_fragment = sym_fragment.trim();
@@ -132,11 +129,7 @@ pub fn parse_external_identity_from_loader_string(
     })
 }
 
-fn register_va(
-    idx: &mut ExternalSymbolIndex,
-    va: u64,
-    identity: ExternalSymbolIdentity,
-) {
+fn register_va(idx: &mut ExternalSymbolIndex, va: u64, identity: ExternalSymbolIdentity) {
     let ck = identity.canonical_key();
     idx.canonical_to_identity
         .entry(ck.clone())
@@ -219,10 +212,7 @@ mod tests {
         assert_eq!(idx.len_identities(), 1);
         let id = idx.identity_for_va(0x140002000).expect("iat");
         assert_eq!(id.symbol_key, "ExitProcess");
-        assert_eq!(
-            id.library_key.as_deref(),
-            Some("kernel32.dll")
-        );
+        assert_eq!(id.library_key.as_deref(), Some("kernel32.dll"));
     }
 
     #[test]

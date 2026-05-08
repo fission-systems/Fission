@@ -93,6 +93,8 @@ fn apply_function_name_hints(
         return stats;
     };
 
+    ensure_missing_hinted_params(func, hints, &mut stats);
+
     let mut renames = Vec::new();
     let mut reserved_names = func
         .params
@@ -191,9 +193,131 @@ fn apply_function_name_hints(
     {
         func.surface_return_type_name = Some(return_type_name.to_string());
         stats.explicit_return_type_hit += 1;
+        if let Some(bits) = surface_integer_return_bits(return_type_name) {
+            elide_surface_return_casts(&mut func.body, bits);
+        }
     }
 
     stats
+}
+
+fn surface_integer_return_bits(type_name: &str) -> Option<u32> {
+    let normalized = type_name
+        .trim()
+        .trim_start_matches("const ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if normalized.contains('*') {
+        return None;
+    }
+    match normalized.as_str() {
+        "int" | "signed int" | "unsigned int" | "uint" | "dword" | "undefined4" => Some(32),
+        "short" | "signed short" | "unsigned short" | "word" | "undefined2" => Some(16),
+        "char" | "signed char" | "unsigned char" | "byte" | "undefined1" => Some(8),
+        _ => None,
+    }
+}
+
+fn elide_surface_return_casts(stmts: &mut [HirStmt], return_bits: u32) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Return(Some(expr)) => {
+                if return_cast_is_surface_implied(expr, return_bits) {
+                    let HirExpr::Cast { expr: inner, .. } = expr else {
+                        continue;
+                    };
+                    *expr = (**inner).clone();
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                elide_surface_return_casts(body, return_bits);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                elide_surface_return_casts(then_body, return_bits);
+                elide_surface_return_casts(else_body, return_bits);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    elide_surface_return_casts(std::slice::from_mut(init.as_mut()), return_bits);
+                }
+                if let Some(update) = update {
+                    elide_surface_return_casts(std::slice::from_mut(update.as_mut()), return_bits);
+                }
+                elide_surface_return_casts(body, return_bits);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    elide_surface_return_casts(&mut case.body, return_bits);
+                }
+                elide_surface_return_casts(default, return_bits);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn return_cast_is_surface_implied(expr: &HirExpr, return_bits: u32) -> bool {
+    let HirExpr::Cast { ty, .. } = expr else {
+        return false;
+    };
+    matches!(ty, NirType::Int { bits, .. } if *bits == return_bits)
+}
+
+fn ensure_missing_hinted_params(
+    func: &mut HirFunction,
+    hints: &PreviewFunctionHints,
+    stats: &mut PreviewHintStats,
+) {
+    if !func.params.is_empty() {
+        return;
+    }
+    let max_param = hints.param_names.len().max(
+        hints
+            .param_type_names
+            .keys()
+            .map(|index| index + 1)
+            .max()
+            .unwrap_or(0),
+    );
+    for index in 0..max_param {
+        let default_name = format!("param_{}", index + 1);
+        let name = hints
+            .param_names
+            .get(index)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(default_name.as_str())
+            .to_string();
+        let surface_type_name = hints
+            .param_type_names
+            .get(&index)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned);
+        if name != default_name {
+            stats.explicit_param_name_hits += 1;
+        }
+        if surface_type_name.is_some() {
+            stats.explicit_param_type_hits += 1;
+        }
+        func.params.push(NirBinding {
+            name,
+            ty: NirType::Unknown,
+            surface_type_name,
+            origin: Some(NirBindingOrigin::ParamIndex(index)),
+            initializer: None,
+        });
+    }
 }
 
 fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<(i64, bool)> {

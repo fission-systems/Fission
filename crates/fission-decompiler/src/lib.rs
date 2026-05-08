@@ -37,11 +37,11 @@ pub use engine::{
 };
 pub use request::{DecompileRequest, DecompileResult, decompile_prebuilt_pcode};
 
+pub(crate) use rust_sleigh::decode_rust_sleigh_pcode;
 pub use rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
     decompile_with_rust_sleigh, select_nir_output_from_prebuilt_pcode,
 };
-pub(crate) use rust_sleigh::decode_rust_sleigh_pcode;
 
 pub type DecompileEngineMode = NirEngineMode;
 pub type DecompileSelection = NirSelection;

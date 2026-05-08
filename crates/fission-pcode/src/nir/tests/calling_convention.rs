@@ -115,6 +115,421 @@ fn sysv_subregister_aliases_map_to_param_slots() {
     assert_eq!(abi.param_slot_for_name("r9d"), Some(5));
 }
 
+// ── AArch64 PCS ───────────────────────────────────────────────────────────────
+
+#[test]
+fn aarch64_x0_to_x7_are_params() {
+    for slot in 0..8usize {
+        let offset = 0x4000 + (slot as u64 * 8);
+        let (name, idx) = register_name_with_param(offset, 8, CallingConvention::AArch64).unwrap();
+        assert_eq!(name, format!("param_{}", slot + 1));
+        assert_eq!(idx, Some(slot));
+    }
+}
+
+#[test]
+fn aarch64_subregister_aliases_map_to_param_slots() {
+    let abi = AbiState::new(CallingConvention::AArch64, true, 8, 0);
+    assert_eq!(abi.param_slot_for_name("x0"), Some(0));
+    assert_eq!(abi.param_slot_for_name("w0"), Some(0));
+    assert_eq!(abi.param_slot_for_name("x7"), Some(7));
+    assert_eq!(abi.param_slot_for_name("w7"), Some(7));
+    assert_eq!(abi.param_slot_for_name("x8"), None);
+}
+
+#[test]
+fn aarch64_return_register_is_named_and_recognized() {
+    assert_eq!(register_name(0x4000, 8), "x0");
+    assert_eq!(register_name(0x4000, 4), "w0");
+    let x0 = Varnode {
+        space_id: REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    assert!(is_primary_return_register_for_abi(
+        &x0,
+        CallingConvention::AArch64
+    ));
+    assert!(!is_primary_return_register(&x0));
+}
+
+#[test]
+fn aarch64_ret_link_register_copy_is_not_return_value() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let x0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let w0 = Varnode {
+        size: 4,
+        ..x0.clone()
+    };
+    let w1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4008,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = uniq(0x1000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x10004c,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x10004c,
+                    output: Some(tmp.clone()),
+                    inputs: vec![w1, w0],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x10004c,
+                    output: Some(x0),
+                    inputs: vec![tmp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100050,
+                    output: Some(ret_target),
+                    inputs: vec![x30.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100050,
+                    output: None,
+                    inputs: vec![cst(0, 8), x30],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "op_add", 0x10004c, &options).expect("preview render");
+    assert!(code.contains("return param_2 + param_1;"), "{code}");
+    assert!(!code.contains("return x30;"), "{code}");
+}
+
+#[test]
+fn aarch64_return_only_join_inlines_predecessor_return_values() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let x0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let w0 = Varnode {
+        size: 4,
+        ..x0.clone()
+    };
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = uniq(0x2000, 1);
+    let add_tmp = uniq(0x2100, 4);
+    let xor_tmp = uniq(0x2200, 4);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1000,
+                    output: None,
+                    inputs: vec![cst(0x1020, 8), cond],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1010,
+                        output: Some(add_tmp.clone()),
+                        inputs: vec![w0.clone(), cst(10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1010,
+                        output: Some(x0.clone()),
+                        inputs: vec![add_tmp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1014,
+                        output: None,
+                        inputs: vec![cst(0x1030, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::IntXor,
+                        address: 0x1020,
+                        output: Some(xor_tmp.clone()),
+                        inputs: vec![w0, cst(0xaaaa, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1020,
+                        output: Some(x0),
+                        inputs: vec![xor_tmp],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x1030,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1030,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1030,
+                        output: None,
+                        inputs: vec![cst(0, 8), x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "return_join", 0x1000, &options)
+        .expect("preview render");
+    assert!(code.contains("param_1 + 10"), "{code}");
+    assert!(code.contains("param_1 ^ 43690"), "{code}");
+    assert!(code.contains("return xVar"), "{code}");
+    assert!(!code.contains("block_1030:"), "{code}");
+    assert!(!code.contains("goto block_1030"), "{code}");
+}
+
+#[test]
+fn aarch64_instruction_local_conditional_merge_returns_both_values() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let w0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let x0 = Varnode {
+        size: 8,
+        ..w0.clone()
+    };
+    let w1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4008,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let x8 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4040,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let w8 = Varnode {
+        size: 4,
+        ..x8.clone()
+    };
+    let cond = uniq(0x5200, 1);
+    let diff = uniq(0x7b600, 4);
+    let selected = uniq(0x39c00, 4);
+    let negated = uniq(0x39c00, 4);
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x100054,
+                successors: vec![2, 1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntSub,
+                        address: 0x100054,
+                        output: Some(diff.clone()),
+                        inputs: vec![w0, w1],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x100054,
+                        output: Some(x8.clone()),
+                        inputs: vec![diff.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Int2Comp,
+                        address: 0x100058,
+                        output: Some(negated),
+                        inputs: vec![w8.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x100058,
+                        output: None,
+                        inputs: vec![cst(2, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x100058,
+                successors: vec![2],
+                ops: vec![PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100058,
+                    output: Some(selected.clone()),
+                    inputs: vec![w8],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x100058,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x100058,
+                        output: Some(x0),
+                        inputs: vec![selected],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x10005c,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x10005c,
+                        output: None,
+                        inputs: vec![cst(0, 8), x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "op_sub", 0x100054, &options).expect("preview render");
+    assert!(!code.contains("__fission_branchind"), "{code}");
+    assert!(!code.contains("var_39c00"), "{code}");
+    assert!(code.contains("return -(param_1 - param_2);"), "{code}");
+    assert!(code.contains("return param_1 - param_2;"), "{code}");
+}
+
 // ── Non-param registers must always use hardware names ─────────────────────────
 
 #[test]
@@ -122,10 +537,15 @@ fn rax_is_never_a_param() {
     for abi in [
         CallingConvention::WindowsX64,
         CallingConvention::SystemVAmd64,
+        CallingConvention::AArch64,
     ] {
-        let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
-        assert_eq!(name, "rax", "rax should stay 'rax' in {abi:?}");
-        assert_eq!(idx, None, "rax must not be a param in {abi:?}");
+        if abi == CallingConvention::AArch64 {
+            assert!(register_name_with_param(0x00, 8, abi).is_none());
+        } else {
+            let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
+            assert_eq!(name, "rax", "rax should stay 'rax' in {abi:?}");
+            assert_eq!(idx, None, "rax must not be a param in {abi:?}");
+        }
     }
 }
 
@@ -134,10 +554,15 @@ fn rsp_is_never_a_param() {
     for abi in [
         CallingConvention::WindowsX64,
         CallingConvention::SystemVAmd64,
+        CallingConvention::AArch64,
     ] {
-        let (name, idx) = register_name_with_param(0x20, 8, abi).unwrap();
-        assert_eq!(name, "rsp");
-        assert_eq!(idx, None);
+        if abi == CallingConvention::AArch64 {
+            assert!(register_name_with_param(0x20, 8, abi).is_none());
+        } else {
+            let (name, idx) = register_name_with_param(0x20, 8, abi).unwrap();
+            assert_eq!(name, "rsp");
+            assert_eq!(idx, None);
+        }
     }
 }
 
@@ -146,6 +571,7 @@ fn unknown_offset_returns_none() {
     for abi in [
         CallingConvention::WindowsX64,
         CallingConvention::SystemVAmd64,
+        CallingConvention::AArch64,
     ] {
         assert!(register_name_with_param(0xDEAD, 8, abi).is_none());
     }

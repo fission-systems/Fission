@@ -2,7 +2,7 @@
 source: crates/fission-pcode/src/nir/tests/snapshot_printer.rs
 expression: print_hir_function(&func)
 ---
-int f_snapshot()
+int f_snapshot(void)
 {
     return 0;
 }

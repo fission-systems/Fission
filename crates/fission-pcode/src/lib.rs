@@ -13,9 +13,9 @@
 #![allow(unused_assignments)]
 
 pub mod arch;
+pub mod cfg;
 pub(crate) mod fast_hash;
 pub mod nir;
-pub mod cfg;
 mod pcode;
 pub mod prelude;
 

@@ -17,14 +17,16 @@ fn enclosing_function_display_name(
     renamed: &HashMap<u64, String>,
     insn_addr: u64,
 ) -> Option<String> {
-    binary.functions.iter().find(|f| {
-        insn_addr >= f.address && insn_addr < f.address.saturating_add(f.size.max(1))
-    }).map(|f| {
-        renamed
-            .get(&f.address)
-            .cloned()
-            .unwrap_or_else(|| f.name.clone())
-    })
+    binary
+        .functions
+        .iter()
+        .find(|f| insn_addr >= f.address && insn_addr < f.address.saturating_add(f.size.max(1)))
+        .map(|f| {
+            renamed
+                .get(&f.address)
+                .cloned()
+                .unwrap_or_else(|| f.name.clone())
+        })
 }
 
 fn entry_function_display_name(
@@ -32,19 +34,19 @@ fn entry_function_display_name(
     renamed: &HashMap<u64, String>,
     entry_addr: u64,
 ) -> Option<String> {
-    binary.functions.iter().find(|f| f.address == entry_addr).map(|f| {
-        renamed
-            .get(&f.address)
-            .cloned()
-            .unwrap_or_else(|| f.name.clone())
-    })
+    binary
+        .functions
+        .iter()
+        .find(|f| f.address == entry_addr)
+        .map(|f| {
+            renamed
+                .get(&f.address)
+                .cloned()
+                .unwrap_or_else(|| f.name.clone())
+        })
 }
 
-fn xref_to_dto(
-    binary: &LoadedBinary,
-    renamed: &HashMap<u64, String>,
-    xref: &Xref,
-) -> XrefDto {
+fn xref_to_dto(binary: &LoadedBinary, renamed: &HashMap<u64, String>, xref: &Xref) -> XrefDto {
     XrefDto {
         from_address: format!("0x{:x}", xref.from_addr),
         to_address: format!("0x{:x}", xref.to_addr),

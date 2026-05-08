@@ -19,11 +19,8 @@ pub(super) fn summarize_identity_resources() -> IdentityResourceSummary {
 pub(super) fn summarize_identity_resources_for(paths: &PathConfig) -> IdentityResourceSummary {
     let die_pe_json_present = paths.get_die_signatures_path().is_some();
 
-    let die_corpus_present = paths
-        .die_dir
-        .as_ref()
-        .is_some_and(|p| p.exists())
-        || die_pe_json_present;
+    let die_corpus_present =
+        paths.die_dir.as_ref().is_some_and(|p| p.exists()) || die_pe_json_present;
 
     let die_corpus_root = paths
         .die_dir
@@ -47,7 +44,10 @@ pub(super) fn summarize_identity_resources_for(paths: &PathConfig) -> IdentityRe
     let win_typeinfo_present = win_api_signatures_path(paths).is_some();
 
     let fid_present = paths.fid_dir.as_ref().is_some_and(|p| p.exists());
-    let fid_bf_count = paths.fid_dir.as_ref().map(|dir| fid_bf_count_bounded(dir.as_path()));
+    let fid_bf_count = paths
+        .fid_dir
+        .as_ref()
+        .map(|dir| fid_bf_count_bounded(dir.as_path()));
 
     IdentityResourceSummary {
         die_corpus_present,

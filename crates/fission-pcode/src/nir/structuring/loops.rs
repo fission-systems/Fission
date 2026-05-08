@@ -521,7 +521,7 @@ impl<'a> PreviewBuilder<'a> {
 
     /// Attempt to recognise and lower a for-loop pattern starting at `idx`.
     ///
-    /// CFG invariants that must ALL hold (no heuristics):
+    /// CFG invariants that must ALL hold:
     ///
     /// 1. `idx` is a valid while-loop head: CBranch with one arm pointing to `exit_idx`.
     /// 2. **Latch invariant**: the LoopBody has exactly one tail, and the tail is dominated

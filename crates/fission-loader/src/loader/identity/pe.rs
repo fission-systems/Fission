@@ -16,17 +16,12 @@ pub fn is_pe_format(fmt: &str) -> bool {
 
 #[must_use]
 fn section_name_hints_upx(name: &str) -> bool {
-    name.contains("UPX")
-        || matches!(
-            name,
-            "UPX0" | "UPX1" | ".UPX0" | ".UPX1" | "UPX2" | ".UPX2"
-        )
+    name.contains("UPX") || matches!(name, "UPX0" | "UPX1" | ".UPX0" | ".UPX1" | "UPX2" | ".UPX2")
 }
 
 fn prefix_contains_upx_mark(data: &[u8], scan_cap: usize) -> bool {
     let end = data.len().min(scan_cap);
-    data[..end].windows(5).any(|w| w == b"UPX!\x01")
-        || data[..end].windows(4).any(|w| w == b"UPX!")
+    data[..end].windows(5).any(|w| w == b"UPX!\x01") || data[..end].windows(4).any(|w| w == b"UPX!")
 }
 
 pub fn collect_pe_identity(
@@ -290,7 +285,11 @@ fn import_signals(
     }
     if !rust_evidence.is_empty() {
         let distinct = distinct_evidence_sources(&rust_evidence);
-        let score = if rust_evidence.len() >= 2 { 4_u32 } else { 3_u32 };
+        let score = if rust_evidence.len() >= 2 {
+            4_u32
+        } else {
+            3_u32
+        };
         let confidence = gate_high_for_kind(IdentityKind::Language, score, distinct);
         detections.push(IdentityDetection {
             kind: IdentityKind::Language,

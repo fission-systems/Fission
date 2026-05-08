@@ -1,7 +1,7 @@
 //! Negative evidence, DIE promotion gates, summary thresholds, compiler conflicts.
 
-use fission_core::evidence_policy::EvidencePolicy;
 use fission_core::PAGE_SIZE;
+use fission_core::evidence_policy::EvidencePolicy;
 
 use crate::detector::Confidence;
 use crate::loader::LoadedBinary;
@@ -27,9 +27,7 @@ pub(super) fn entry_section_name(binary: &LoadedBinary) -> Option<String> {
     binary
         .sections
         .iter()
-        .find(|s| {
-            ep >= s.virtual_address && ep < s.virtual_address.saturating_add(s.virtual_size)
-        })
+        .find(|s| ep >= s.virtual_address && ep < s.virtual_address.saturating_add(s.virtual_size))
         .map(|s| s.name.clone())
 }
 
@@ -43,11 +41,7 @@ fn entry_in_named_text(binary: &LoadedBinary) -> bool {
 
 #[must_use]
 fn section_name_hints_upx(name: &str) -> bool {
-    name.contains("UPX")
-        || matches!(
-            name,
-            "UPX0" | "UPX1" | ".UPX0" | ".UPX1" | "UPX2" | ".UPX2"
-        )
+    name.contains("UPX") || matches!(name, "UPX0" | "UPX1" | ".UPX0" | ".UPX1" | "UPX2" | ".UPX2")
 }
 
 #[must_use]
@@ -105,7 +99,7 @@ pub(super) fn attach_negative_evidence_for_binary(
         {
             neg.push(NegativeIdentityEvidence {
                 source: IdentitySource::Entropy,
-                description: "No executable sections crossed entropy heuristic".to_string(),
+                description: "No executable sections crossed entropy threshold".to_string(),
             });
         }
         det.negative_evidence = neg;
@@ -115,9 +109,7 @@ pub(super) fn attach_negative_evidence_for_binary(
 pub(super) fn merge_crt_into_msvc(detections: &mut Vec<IdentityDetection>) {
     let crt_hits: Vec<String> = detections
         .iter()
-        .filter(|d| {
-            d.kind == IdentityKind::Runtime && d.source == IdentitySource::SignaturePattern
-        })
+        .filter(|d| d.kind == IdentityKind::Runtime && d.source == IdentitySource::SignaturePattern)
         .map(|d| d.name.clone())
         .collect();
     if crt_hits.is_empty() {
@@ -139,7 +131,11 @@ pub(super) fn merge_crt_into_msvc(detections: &mut Vec<IdentityDetection>) {
     }
 }
 
-pub(super) fn refresh_msvc_detection(binary: &LoadedBinary, pdb_present: bool, det: &mut IdentityDetection) {
+pub(super) fn refresh_msvc_detection(
+    binary: &LoadedBinary,
+    pdb_present: bool,
+    det: &mut IdentityDetection,
+) {
     if det.kind != IdentityKind::Compiler || det.name != "MSVC" {
         return;
     }
@@ -157,9 +153,10 @@ pub(super) fn refresh_msvc_detection(binary: &LoadedBinary, pdb_present: bool, d
         });
     }
     if pdb_present
-        && !det.evidence.iter().any(|e| {
-            e.source == IdentitySource::DebugInfo && e.matched == "PDB"
-        })
+        && !det
+            .evidence
+            .iter()
+            .any(|e| e.source == IdentitySource::DebugInfo && e.matched == "PDB")
     {
         det.evidence.push(IdentityEvidence {
             source: IdentitySource::DebugInfo,
@@ -184,10 +181,18 @@ fn compute_msvc_score(det: &IdentityDetection) -> u32 {
     if imports >= 2 {
         s = s.saturating_add(2);
     }
-    if det.evidence.iter().any(|e| e.source == IdentitySource::RichHeader) {
+    if det
+        .evidence
+        .iter()
+        .any(|e| e.source == IdentitySource::RichHeader)
+    {
         s = s.saturating_add(2);
     }
-    if det.evidence.iter().any(|e| e.source == IdentitySource::DebugInfo) {
+    if det
+        .evidence
+        .iter()
+        .any(|e| e.source == IdentitySource::DebugInfo)
+    {
         s = s.saturating_add(2);
     }
     if det
@@ -207,7 +212,10 @@ pub(super) fn promote_die_raw_matches(
     let mut out = Vec::new();
     let mut suppressed = Vec::new();
 
-    let non_die_sources = existing_before_die.iter().filter(|d| d.source != IdentitySource::DieRule).count();
+    let non_die_sources = existing_before_die
+        .iter()
+        .filter(|d| d.source != IdentitySource::DieRule)
+        .count();
 
     for raw in raw_matches {
         let total = raw.total_primitive_slots.max(1);
@@ -222,8 +230,9 @@ pub(super) fn promote_die_raw_matches(
             suppressed.push(SuppressedDetection {
                 name: raw.rule_name.clone(),
                 kind: die_category_to_kind(&raw.category),
-                reason: "Single Phase-2-evaluated primitive on a rule body that is mostly unsupported"
-                    .into(),
+                reason:
+                    "Single Phase-2-evaluated primitive on a rule body that is mostly unsupported"
+                        .into(),
                 raw_score: raw.matched_primitive_count as u32,
             });
             continue;
@@ -373,7 +382,8 @@ pub(super) fn build_summary_policy(
         best_promoted_compiler(detections, Confidence::Medium).map(|d| d.name.clone());
     let likely_language =
         best_promoted_language(detections, Confidence::Medium).map(|d| d.name.clone());
-    let likely_linker = best_promoted_linker(detections, Confidence::Medium).map(|d| d.name.clone());
+    let likely_linker =
+        best_promoted_linker(detections, Confidence::Medium).map(|d| d.name.clone());
     let likely_packer = best_promoted_packer(detections, Confidence::High).map(|d| d.name.clone());
 
     let summary_confidence = detections

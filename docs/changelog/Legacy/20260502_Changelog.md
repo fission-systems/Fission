@@ -141,7 +141,7 @@
 
 - Connected decompiler call target identity to exact loader import metadata and existing `NirTypeContext.call_target_refs`.
 - Kept `UnknownKiller.sys` as external qualitative evidence only; it is not present locally and is not a benchmark fixture.
-- Preserved the no-repair boundary: no printer-only API name substitution, no benchmark semantic repair, no binary-specific rule, and no heuristic argument deletion.
+- Preserved the no-repair boundary: no printer-only API name substitution, no benchmark semantic repair, no binary-specific rule, and no shortcut argument deletion.
 
 ### Implementation
 

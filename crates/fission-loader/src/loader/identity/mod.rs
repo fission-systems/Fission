@@ -28,9 +28,7 @@ use crate::loader::LoadedBinary;
 
 use entropy::{classify_executable_entropy, shannon_entropy};
 use evidence::EvidenceBudget;
-use model::{
-    BinaryIdentityReport as Report, IdentityDetection as Det, SectionEntropy as SecEnt,
-};
+use model::{BinaryIdentityReport as Report, IdentityDetection as Det, SectionEntropy as SecEnt};
 use scoring::{distinct_evidence_sources, gate_high_for_kind};
 
 const IDENTITY_POLICY: EvidencePolicy = EvidencePolicy::DEFAULT;
@@ -128,7 +126,7 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
                 &mut ev,
                 IdentitySource::Entropy,
                 EvidenceLocation::Section(sec.section.clone()),
-                "Executable section Shannon entropy above heuristic packing threshold",
+                "Executable section Shannon entropy above packing threshold",
                 format!("entropy={:.2}", sec.entropy),
             );
         }
@@ -407,12 +405,17 @@ mod tests {
         fs::write(sig.join("fid").join("x.fidbf"), []).expect("write");
         fs::create_dir_all(sig.join("typeinfo").join("win32")).expect("mkdir");
         fs::write(
-            sig.join("typeinfo").join("win32").join("win_api_signatures.txt"),
+            sig.join("typeinfo")
+                .join("win32")
+                .join("win_api_signatures.txt"),
             b"a|void|void\n",
         )
         .expect("write");
         fs::write(
-            sig.join("die").join("detect-it-easy").join("db").join("z.sg"),
+            sig.join("die")
+                .join("detect-it-easy")
+                .join("db")
+                .join("z.sg"),
             b"x",
         )
         .expect("sg");

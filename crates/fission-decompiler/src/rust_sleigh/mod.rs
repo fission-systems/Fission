@@ -19,9 +19,9 @@ pub struct RustSleighDecompileResult {
     pub evidence: RustSleighPipelineEvidence,
 }
 
-mod render_finish;
-mod probe;
 mod pipeline;
+mod probe;
+mod render_finish;
 
 pub use pipeline::decompile_with_rust_sleigh;
 pub use render_finish::select_nir_output_from_prebuilt_pcode;

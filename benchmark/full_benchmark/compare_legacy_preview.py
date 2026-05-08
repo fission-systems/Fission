@@ -131,7 +131,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--corpus-kind",
         default="ad_hoc",
-        help="Corpus classification label to embed into artifacts (for example: timeout_rescue, quality_explicit_facts, quality_heuristic_surface)",
+        help="Corpus classification label to embed into artifacts (for example: timeout_rescue, quality_explicit_facts)",
     )
     parser.add_argument(
         "--corpus-file",
@@ -661,8 +661,8 @@ def summarize_engine_collection(
             "explicit_param_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_param_type_hits", 0)) for row in success_rows),
             "explicit_local_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_local_type_hits", 0)) for row in success_rows),
             "explicit_return_type_hit": sum(int((row.get("preview_hint_stats") or {}).get("explicit_return_type_hit", 0)) for row in success_rows),
-            "heuristic_pointer_alias_hits": sum(int((row.get("preview_hint_stats") or {}).get("heuristic_pointer_alias_hits", 0)) for row in success_rows),
-            "heuristic_local_surface_hits": sum(int((row.get("preview_hint_stats") or {}).get("heuristic_local_surface_hits", 0)) for row in success_rows),
+            "pointer_alias_hits": sum(int((row.get("preview_hint_stats") or {}).get("pointer_alias_hits", 0)) for row in success_rows),
+            "local_surface_hits": sum(int((row.get("preview_hint_stats") or {}).get("local_surface_hits", 0)) for row in success_rows),
             "derived_origin_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("derived_origin_type_hits", 0)) for row in success_rows),
         } if label == "preview" else None),
     }
@@ -780,13 +780,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         quality_heading = "## Explicit-Facts Quality Summary"
         quality_focus_lines = [
             "- Focus: explicit function-scoped facts from DWARF/loader-derived hints",
-            "- Expectation: explicit name/type hits should dominate; heuristic-only seeds should not appear here",
-        ]
-    elif corpus_kind == "quality_heuristic_surface":
-        quality_heading = "## Heuristic-Surface Quality Summary"
-        quality_focus_lines = [
-            "- Focus: heuristic pointer/local surface wins and slot-alias-driven type carry-through",
-            "- Expectation: non-zero preview hint stats can come from heuristic and derived-origin paths even when explicit facts are sparse",
+            "- Expectation: explicit name/type hits should dominate",
         ]
     lines = [
         title,
@@ -871,8 +865,8 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"- Explicit param type hits: {preview_hint_stats.get('explicit_param_type_hits', 0)}",
             f"- Explicit local type hits: {preview_hint_stats.get('explicit_local_type_hits', 0)}",
             f"- Explicit return type hits: {preview_hint_stats.get('explicit_return_type_hit', 0)}",
-            f"- Heuristic pointer alias hits: {preview_hint_stats.get('heuristic_pointer_alias_hits', 0)}",
-            f"- Heuristic local surface hits: {preview_hint_stats.get('heuristic_local_surface_hits', 0)}",
+            f"- Pointer alias hits: {preview_hint_stats.get('pointer_alias_hits', 0)}",
+            f"- Local surface hits: {preview_hint_stats.get('local_surface_hits', 0)}",
             f"- Derived-origin type hits: {preview_hint_stats.get('derived_origin_type_hits', 0)}",
         ])
     lines.extend([

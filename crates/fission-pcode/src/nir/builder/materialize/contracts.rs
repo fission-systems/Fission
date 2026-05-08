@@ -634,7 +634,7 @@ pub(super) enum ForwardJoinNotSelectedRejectedReason {
     JoinCrossesSwitchBoundary,
     JoinNotReachableFromEvent,
     JoinDominanceUnknown,
-    JoinRejectedByCurrentHeuristic,
+    JoinRejectedByCurrentSelectionPolicy,
     Unknown,
 }
 
@@ -1255,6 +1255,7 @@ pub(super) struct NoConsumerMaterializationProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NoConsumerMaterializationDecision {
     Suppress,
+    SuppressAlways,
     Keep(NoConsumerMaterializationKeepReason),
 }
 

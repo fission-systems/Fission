@@ -2,18 +2,14 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
-use crate::services::cross_image::{apply_propagated_renames, collect_folder_propagated_renames};
 use crate::state::AppState;
 use fission_core::format_addr;
 use fission_loader::detector::Detection;
 use fission_loader::loader::function_view::{canonical_functions_sorted, canonical_view_counts};
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use tauri::State;
-use tracing::warn;
 
 // ============================================================================
 // Commands
@@ -36,32 +32,6 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
 
     let info = binary_to_info(&binary);
     let binary_arc = Arc::new(binary);
-    let propagation_folder = Path::new(&binary_arc.path)
-        .parent()
-        .map(|path| path.to_path_buf());
-    let propagated_renames = if let Some(folder) = propagation_folder {
-        let binary_for_propagation = binary_arc.clone();
-        match tokio::time::timeout(
-            Duration::from_secs(2),
-            tokio::task::spawn_blocking(move || {
-                collect_folder_propagated_renames(binary_for_propagation.as_ref(), &folder)
-            }),
-        )
-        .await
-        {
-            Ok(joined) => {
-                joined.map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?
-            }
-            Err(_) => {
-                warn!(
-                    "cross-image propagation timed out during open_file; skipping for responsiveness"
-                );
-                Default::default()
-            }
-        }
-    } else {
-        Default::default()
-    };
 
     // Store the binary and reset user state
     let mut inner = state.inner.lock().await;
@@ -72,21 +42,6 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     inner.manual_renamed_functions.clear();
     inner.auto_renamed_functions.clear();
     inner.bookmarks.clear();
-    let loaded_binary = inner.loaded_binary.clone();
-    if let Some(binary) = loaded_binary.as_ref() {
-        let manual = inner.manual_renamed_functions.clone();
-        let mut renamed_functions = std::mem::take(&mut inner.renamed_functions);
-        let mut auto_renamed_functions = std::mem::take(&mut inner.auto_renamed_functions);
-        let _ = apply_propagated_renames(
-            binary,
-            &mut renamed_functions,
-            &manual,
-            &mut auto_renamed_functions,
-            propagated_renames,
-        );
-        inner.renamed_functions = renamed_functions;
-        inner.auto_renamed_functions = auto_renamed_functions;
-    }
     inner.rebuild_fact_store();
 
     // Enable binary-dependent menu items

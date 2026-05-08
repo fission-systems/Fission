@@ -167,10 +167,7 @@ pub(super) fn template_emit_error(
     err: anyhow::Error,
 ) -> anyhow::Error {
     let msg = err.to_string();
-    if msg.contains("HandleTpl")
-        || msg.contains("ConstTpl")
-        || msg.contains("unsupported")
-    {
+    if msg.contains("HandleTpl") || msg.contains("ConstTpl") || msg.contains("unsupported") {
         RuntimeSleighError::UnsupportedPcodeTemplate {
             language: compiled.entry_id.clone(),
             reason: format!("emission_time_template_resolution_failed: {msg}"),
@@ -491,6 +488,8 @@ impl<'c> CompiledTableEmitter<'c> {
             }
             CompiledOpTplOpcode::IntZExt
             | CompiledOpTplOpcode::IntSExt
+            | CompiledOpTplOpcode::Int2Comp
+            | CompiledOpTplOpcode::IntNegate
             | CompiledOpTplOpcode::BoolNegate
             | CompiledOpTplOpcode::PopCount => {
                 let out_tpl = op
@@ -523,7 +522,9 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::IntEqual
             | CompiledOpTplOpcode::IntNotEqual
             | CompiledOpTplOpcode::IntLess
+            | CompiledOpTplOpcode::IntLessEqual
             | CompiledOpTplOpcode::IntSLess
+            | CompiledOpTplOpcode::IntSLessEqual
             | CompiledOpTplOpcode::BoolAnd
             | CompiledOpTplOpcode::BoolOr => {
                 let out_tpl = op
@@ -1400,6 +1401,8 @@ impl<'c> CompiledTableEmitter<'c> {
         Ok(match opcode {
             CompiledOpTplOpcode::IntZExt => PcodeOpcode::IntZExt,
             CompiledOpTplOpcode::IntSExt => PcodeOpcode::IntSExt,
+            CompiledOpTplOpcode::Int2Comp => PcodeOpcode::Int2Comp,
+            CompiledOpTplOpcode::IntNegate => PcodeOpcode::IntNegate,
             CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
             CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
             _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
@@ -1423,7 +1426,9 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::IntEqual => PcodeOpcode::IntEqual,
             CompiledOpTplOpcode::IntNotEqual => PcodeOpcode::IntNotEqual,
             CompiledOpTplOpcode::IntLess => PcodeOpcode::IntLess,
+            CompiledOpTplOpcode::IntLessEqual => PcodeOpcode::IntLessEqual,
             CompiledOpTplOpcode::IntSLess => PcodeOpcode::IntSLess,
+            CompiledOpTplOpcode::IntSLessEqual => PcodeOpcode::IntSLessEqual,
             CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
             CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
             CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,

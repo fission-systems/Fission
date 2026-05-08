@@ -230,23 +230,24 @@ mod tests {
     fn executable_sections_skip_non_executable_for_build() {
         use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
-        let binary = LoadedBinaryBuilder::new("x.bin".to_string(), DataBuffer::Heap(vec![0x90; 64]))
-            .format("RAW")
-            .entry_point(0)
-            .image_base(0)
-            .is_64bit(false)
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0,
-                virtual_size: 64,
-                file_offset: 0,
-                file_size: 64,
-                is_executable: false,
-                is_readable: true,
-                is_writable: false,
-            })
-            .build()
-            .expect("build");
+        let binary =
+            LoadedBinaryBuilder::new("x.bin".to_string(), DataBuffer::Heap(vec![0x90; 64]))
+                .format("RAW")
+                .entry_point(0)
+                .image_base(0)
+                .is_64bit(false)
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0,
+                    virtual_size: 64,
+                    file_offset: 0,
+                    file_size: 64,
+                    is_executable: false,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("build");
 
         let db = XrefDatabase::build_from_binary(&binary);
         assert_eq!(db.total_refs(), 0);

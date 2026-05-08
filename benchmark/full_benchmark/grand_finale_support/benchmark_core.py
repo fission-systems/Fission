@@ -316,8 +316,8 @@ SHAPE_DRIFT_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("unknown_type_var_total", "unknown_type_var_total"),
     ("ptr_offset_total", "ptr_offset_total"),
     ("index_expr_total", "index_expr_total"),
-    ("heuristic_avg_line_length_mean", "heuristic_avg_line_length_mean"),
-    ("heuristic_max_brace_nesting_mean", "heuristic_max_brace_nesting_mean"),
+    ("text_avg_line_length_mean", "text_avg_line_length_mean"),
+    ("text_max_brace_nesting_mean", "text_max_brace_nesting_mean"),
     ("synthetic_helper_call_total", "synthetic_helper_call_total"),
 )
 
@@ -325,7 +325,7 @@ BASELINE_GATE_SHAPE_KEYS = frozenset(
     {
         "generic_local_name_sum",
         "generic_param_name_sum",
-        "heuristic_max_brace_nesting_mean",
+        "text_max_brace_nesting_mean",
         "synthetic_helper_call_total",
     }
 )
@@ -2312,7 +2312,7 @@ def _build_baseline_regression_report(
                 )
                 continue
             if (
-                shape_key == "heuristic_max_brace_nesting_mean"
+                shape_key == "text_max_brace_nesting_mean"
                 and row_fidelity_gate.get("status") == "passed"
                 and sim_delta >= -1e-9
                 and _brace_nesting_increase_is_structured_quality_tradeoff(
@@ -3745,23 +3745,23 @@ def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, fission: boo
             int((entry.get("metrics") or {}).get("named_param_count", 0) or 0)
             for entry in success_entries
         ),
-        "heuristic_avg_line_length_mean": round(statistics.fmean(avg_line_values), 3)
+        "text_avg_line_length_mean": round(statistics.fmean(avg_line_values), 3)
         if avg_line_values
         else 0.0,
-        "heuristic_max_brace_nesting_mean": round(statistics.fmean(nesting_values), 3)
+        "text_max_brace_nesting_mean": round(statistics.fmean(nesting_values), 3)
         if nesting_values
         else 0.0,
-        "heuristic_max_brace_nesting_median": round(statistics.median(nesting_values), 3)
+        "text_max_brace_nesting_median": round(statistics.median(nesting_values), 3)
         if nesting_values
         else 0.0,
-        "heuristic_comment_char_ratio_mean": round(statistics.fmean(comment_ratio_values), 6)
+        "text_comment_char_ratio_mean": round(statistics.fmean(comment_ratio_values), 6)
         if comment_ratio_values
         else 0.0,
-        "heuristic_local_identifier_share_mean": round(statistics.fmean(local_share_values), 4)
+        "text_local_identifier_share_mean": round(statistics.fmean(local_share_values), 4)
         if local_share_values
         else 0.0,
-        "heuristic_local_mention_total": sum(local_mention_values),
-        "heuristic_anti_pattern_totals": anti_pattern_totals,
+        "text_local_mention_total": sum(local_mention_values),
+        "text_anti_pattern_totals": anti_pattern_totals,
         "readability_control_flow_penalty": sum(goto_values) + sum(label_values),
         "readability_name_generic_total": sum(generic_local_values) + sum(generic_param_values),
     }

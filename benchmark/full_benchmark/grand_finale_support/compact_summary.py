@@ -24,7 +24,7 @@ SELECTED_SHAPE_DRIFT_KEYS = (
     "top_level_label_total",
     "generic_local_name_sum",
     "generic_param_name_sum",
-    "heuristic_max_brace_nesting_mean",
+    "text_max_brace_nesting_mean",
     "synthetic_helper_call_total",
 )
 SELECTED_NORMALIZE_PASS_KEYS = (

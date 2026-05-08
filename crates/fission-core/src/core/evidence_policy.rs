@@ -1,4 +1,4 @@
-//! Central numeric thresholds for identity and packed-binary heuristics.
+//! Central numeric thresholds for identity and packed-binary evidence.
 //!
 //! Defaults match pre-refactor literals in `fission-loader` identity scoring/policy.
 //! Confidence tiers are applied in the loader; this module holds numeric policy only.

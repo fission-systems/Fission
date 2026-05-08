@@ -587,11 +587,6 @@ impl IndirectControlClassification {
     }
 
     #[must_use]
-    pub fn allows_heuristic_surface_candidate(&self) -> bool {
-        !self.has_unresolved_unsupported_indirect
-    }
-
-    #[must_use]
     pub fn allows_strict_explicit_candidate(&self, pcode_op_count: usize) -> bool {
         !self.has_unresolved_unsupported_indirect && pcode_op_count <= 800
     }
@@ -2034,10 +2029,15 @@ impl NirRenderOptions {
             global_names.entry(*addr).or_insert_with(|| name.clone());
         }
 
-        // Detect calling convention from binary format.
-        // PE (Windows) uses Windows x64 fastcall; ELF and Mach-O use System V AMD64.
+        // Detect calling convention from the selected SLEIGH language first, then format.
         let fmt_upper = binary.format.to_ascii_uppercase();
-        let calling_convention = if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
+        let lang_upper = binary
+            .sleigh_language_id()
+            .unwrap_or(&binary.arch_spec)
+            .to_ascii_uppercase();
+        let calling_convention = if lang_upper.starts_with("AARCH64:") {
+            CallingConvention::AArch64
+        } else if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
             CallingConvention::SystemVAmd64
         } else {
             CallingConvention::WindowsX64

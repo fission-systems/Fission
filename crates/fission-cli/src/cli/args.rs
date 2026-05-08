@@ -27,7 +27,7 @@ pub struct OneShotArgs {
     pub sections: bool,
     pub imports: bool,
     pub exports: bool,
-    /// Run packer/compiler/language detection (heuristics + DiE signatures) for `info`.
+    /// Run packer/compiler/language detection for `info`.
     pub info_detections: bool,
     /// Emit structured loader identity report (entropy, overlay, import/section hints with evidence).
     pub info_identity: bool,
@@ -157,10 +157,7 @@ pub struct ParsedOneShotArgs {
 pub enum ParsedInvocation {
     OneShot(ParsedOneShotArgs),
     Script(ScriptInvocation),
-    ResourcesStatus {
-        json: bool,
-        verbose: bool,
-    },
+    ResourcesStatus { json: bool, verbose: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -241,7 +238,7 @@ struct InfoArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
-    /// Run integrated detection (section/import/string heuristics plus Detect It Easy signatures)
+    /// Run integrated detection (section/import/string rules plus Detect It Easy signatures)
     #[arg(long)]
     detections: bool,
 
@@ -1198,13 +1195,8 @@ mod tests {
     #[test]
     fn global_resource_root_sets_override() {
         let tmp = "/tmp/fission-res-root-test";
-        let inv = parse_oneshot_args_from([
-            "fission_cli",
-            "--resource-root",
-            tmp,
-            "resources",
-            "status",
-        ]);
+        let inv =
+            parse_oneshot_args_from(["fission_cli", "--resource-root", tmp, "resources", "status"]);
         match &inv {
             ParsedInvocation::ResourcesStatus { json, verbose } => {
                 assert!(!*json);
@@ -1218,7 +1210,10 @@ mod tests {
         );
 
         let _cleanup = parse_oneshot_args_from(["fission_cli", "info", "app.exe"]);
-        assert_eq!(fission_core::resource_roots::cli_resource_bundle_root(), None);
+        assert_eq!(
+            fission_core::resource_roots::cli_resource_bundle_root(),
+            None
+        );
     }
 
     #[test]

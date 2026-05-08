@@ -135,7 +135,7 @@ fn find_function_addr(functions: &[FunctionInfo], addr: u64, fallback_range: u64
 mod tests {
     use super::*;
     use crate::analysis::FunctionInfo;
-    use crate::analysis::xrefs::{Xref, XrefDatabase, XrefType, OPERAND_INDEX_MNEMONIC};
+    use crate::analysis::xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};
     use fission_sleigh::runtime::DecodedFlowKind;
 
     fn sample_functions() -> Vec<FunctionInfo> {

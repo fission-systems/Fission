@@ -2,7 +2,7 @@
 
 ## SLEIGH Raw P-code Constant Varnode Parity Restore
 
-- Reverted the broad heuristic-purge regression and restored the canonical x86-64 raw P-code lane to perfect structural parity.
+- Reverted the broad shortcut-purge regression and restored the canonical x86-64 raw P-code lane to perfect structural parity.
 - Fixed the remaining `feature-fibonacci-lea-dec` failure at `0x14000148e` without instruction-family or architecture-specific fallback.
 - Root cause: `.sla` `ConstTpl` produced a const-space value of `0xffffffffffffffff`; Fission rejected it as exceeding `i64`, while Ghidra emits the same bit pattern as constant `-1`.
 - Change: const-space `VarnodeTpl` / `HandleTpl` offsets are now converted through the existing `Varnode::constant(i64)` representation by preserving the 64-bit bit pattern.
@@ -266,7 +266,7 @@
   - `FISSION_SLEIGH_SPEC_DIR`
   - repo-relative `utils/sleigh-specs`
 - Updated the `fission-sleigh` README so it no longer documents `crates/fission-sleigh/specs` as a fallback.
-- This is a data ownership cleanup only; no SLEIGH semantic fallback, heuristic, or generated P-code path was added.
+- This is a data ownership cleanup only; no SLEIGH semantic fallback, shortcut, or generated P-code path was added.
 - Added `benchmark/config/benchmark_corpus/github_release_sources.example.json` as a non-binary example source config.
 - Updated `.gitignore` so `benchmark/binary/realworld/**` stays out of git while `benchmark/binary/realworld/.gitkeep` can keep the local corpus root.
 - Updated `benchmark/BENCHMARK_GUIDE.md` with the GitHub release collection command and the no-binary-staging policy.
@@ -313,7 +313,7 @@
 
 ## Loader Accuracy Notes
 
-- No heuristic MSI/container string detection was added.
+- No shortcut MSI/container string detection was added.
 - No approximate loader metadata or raw executable fallback was added.
 - No downloaded binaries, benchmark output artifacts, or Ghidra project DB files are staged with this change.
 
@@ -477,7 +477,7 @@
 ## ELF Relocatable Loader Notes
 
 - This change does not alter SLEIGH semantics or raw P-code generation.
-- No heuristic load-spec selection, symbol-name repair, source-line remap, or architecture-specific fallback was added.
+- No shortcut load-spec selection, symbol-name repair, source-line remap, or architecture-specific fallback was added.
 - Remaining `full_benchmark` divergence is now NIR/materialization quality work, not ELF byte-read failure.
 - Benchmark output artifacts and Ghidra project DB state remain uncommitted.
 

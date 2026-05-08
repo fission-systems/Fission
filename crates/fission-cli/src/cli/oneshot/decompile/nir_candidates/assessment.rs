@@ -2,10 +2,6 @@ use super::super::*;
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
 use fission_decompiler::NirBuildStats;
 
-fn slot_alias_candidate(code: &str) -> bool {
-    code.contains("slot_")
-}
-
 pub(crate) fn preview_goto_count(code: &str) -> usize {
     code.matches("goto ").count()
 }
@@ -109,10 +105,7 @@ pub(crate) fn build_quality_tags_and_score(
     if !has_indirect_control_flow && pcode_block_count <= 12 && pcode_op_count <= 600 {
         tags.push("low_cfg_risk".to_string());
     }
-    if preview_code.is_some_and(slot_alias_candidate) {
-        score += 2;
-        tags.push("slot_alias_candidate".to_string());
-    }
+    let _ = preview_code;
     if preview_surface_kind == Some(NirSurfaceKind::Unstructured) {
         score -= 1;
         tags.push("unstructured_heavy".to_string());

@@ -190,8 +190,6 @@ pub struct InventoryRow {
     #[serde(default)]
     pub strict_explicit_candidate: bool,
     #[serde(default)]
-    pub heuristic_surface_candidate: bool,
-    #[serde(default)]
     pub reason_tags: Vec<String>,
 }
 
@@ -237,8 +235,6 @@ pub struct InventorySummary {
     pub aligned_with_zero_explicit_count: usize,
     #[serde(default)]
     pub strict_explicit_candidate_count: usize,
-    #[serde(default)]
-    pub heuristic_surface_candidate_count: usize,
     #[serde(default)]
     pub failure_kind_counts: BTreeMap<String, usize>,
     #[serde(default)]

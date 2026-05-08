@@ -17,7 +17,7 @@
 ///    inferred result.  Also re-derives `HirFunction.return_type` for the common
 ///    `return <var>;` pattern that previously always produced `undefined`.
 ///
-/// This pass is binary-independent and heuristic-free: it only propagates types
+/// This pass is binary-independent: it only propagates types
 /// that are already embedded in typed sub-expressions (Const, Cast, Binary, …).
 use super::super::*;
 use std::collections::{HashMap, HashSet};

@@ -15,6 +15,7 @@ struct PrintCtx<'a> {
     var_types: HashMap<&'a str, &'a NirType>,
     /// variable name → pointer-pointee type (Aggregate with fields)
     agg_ptr: HashMap<&'a str, &'a NirType>,
+    inline_guard_goto: bool,
 }
 
 impl<'a> PrintCtx<'a> {
@@ -31,7 +32,11 @@ impl<'a> PrintCtx<'a> {
                 }
             }
         }
-        Self { var_types, agg_ptr }
+        Self {
+            var_types,
+            agg_ptr,
+            inline_guard_goto: func.body.len() <= 6,
+        }
     }
 
     /// If `base_name` is a known Ptr(Aggregate{fields}) and `offset` matches a
@@ -71,11 +76,15 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
         .clone()
         .unwrap_or_else(|| print_type(&func.return_type));
     out.push_str(&format!("{return_type} {}(", func.name));
-    for (idx, param) in func.params.iter().enumerate() {
-        if idx > 0 {
-            out.push_str(", ");
+    if func.params.is_empty() {
+        out.push_str("void");
+    } else {
+        for (idx, param) in func.params.iter().enumerate() {
+            if idx > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{} {}", print_binding_type(param), param.name));
         }
-        out.push_str(&format!("{} {}", print_binding_type(param), param.name));
     }
     out.push_str(")\n{\n");
     for local in &func.locals {
@@ -791,6 +800,16 @@ fn print_stmt_with_indent_ctx(
             then_body,
             else_body,
         } => {
+            if ctx.inline_guard_goto && else_body.is_empty() {
+                if let [HirStmt::Goto(label)] = then_body.as_slice() {
+                    out.push_str(&pad);
+                    out.push_str(&format!(
+                        "if ({}) goto {label};\n",
+                        print_expr_prec_ctx(cond, 0, 0, ctx)
+                    ));
+                    return;
+                }
+            }
             out.push_str(&pad);
             out.push_str(&format!(
                 "if ({}) {{\n",

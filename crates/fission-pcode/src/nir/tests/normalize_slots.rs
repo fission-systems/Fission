@@ -143,6 +143,44 @@ fn normalize_inlines_non_adjacent_single_use_trivial_temp() {
 }
 
 #[test]
+fn normalize_does_not_inline_load_temp_across_store() {
+    let uint_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let mut body = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("uVar1".to_string()),
+            rhs: HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("a".to_string())),
+                ty: uint_ty.clone(),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::Var("a".to_string())),
+                ty: uint_ty.clone(),
+            },
+            rhs: HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("b".to_string())),
+                ty: uint_ty.clone(),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::Var("b".to_string())),
+                ty: uint_ty,
+            },
+            rhs: HirExpr::Var("uVar1".to_string()),
+        },
+    ];
+    normalize_function_body(&mut body);
+    assert_eq!(body.len(), 3);
+    assert_eq!(print_stmt(&body[0]), "uVar1 = *a;");
+    assert_eq!(print_stmt(&body[2]), "*b = uVar1;");
+}
+
+#[test]
 fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
     let uint_ty = NirType::Int {
         bits: 32,

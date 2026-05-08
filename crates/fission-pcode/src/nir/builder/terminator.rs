@@ -24,6 +24,89 @@ fn merge_inferred_branchind_targets(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn recover_tail_call_expr_from_target_expr(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        target_expr: &HirExpr,
+    ) -> Option<HirExpr> {
+        let HirExpr::Var(target_name) = target_expr else {
+            return None;
+        };
+        let resolved_target = self.resolve_address_like_call_target_name(target_name)?;
+        let args = if self.pcode.blocks.len() <= 2 {
+            self.recover_tail_call_args(block_idx, block, term_idx)
+        } else {
+            Vec::new()
+        };
+        Some(HirExpr::Call {
+            target: resolved_target,
+            args,
+            ty: NirType::Unknown,
+        })
+    }
+
+    fn recover_known_external_tail_call_expr(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        target_vn: &Varnode,
+    ) -> Option<HirExpr> {
+        let target_addr = branch_target_address(target_vn)?;
+        if self.address_to_index.contains_key(&target_addr) {
+            return None;
+        }
+        let resolved_target = self
+            .type_context
+            .and_then(|ctx| ctx.call_target_refs.get(&target_addr))
+            .map(|target_ref| target_ref.symbol.clone())?;
+        let args = if self.pcode.blocks.len() <= 2 {
+            self.recover_tail_call_args(block_idx, block, term_idx)
+        } else {
+            Vec::new()
+        };
+        Some(HirExpr::Call {
+            target: resolved_target,
+            args,
+            ty: NirType::Unknown,
+        })
+    }
+
+    fn recover_tail_call_args(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Vec<HirExpr> {
+        if let Ok(Some(args)) = self.recover_tail_call_args_from_block(block, term_idx)
+            && !args.is_empty()
+        {
+            return args;
+        }
+        let Some(preds) = self.predecessors.get(block_idx) else {
+            return Vec::new();
+        };
+        let [pred_idx] = preds.as_slice() else {
+            return Vec::new();
+        };
+        if !self
+            .successors
+            .get(*pred_idx)
+            .is_some_and(|succs| succs.as_slice() == [block_idx])
+        {
+            return Vec::new();
+        }
+        let Some(pred_block) = self.pcode.blocks.get(*pred_idx).cloned() else {
+            return Vec::new();
+        };
+        self.recover_tail_call_args_from_block(&pred_block, pred_block.ops.len())
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
     fn last_primary_return_def_after_barrier(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -36,7 +119,10 @@ impl<'a> PreviewBuilder<'a> {
             .rposition(|op| {
                 matches!(
                     op.opcode,
-                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther | PcodeOpcode::Store
+                    PcodeOpcode::Call
+                        | PcodeOpcode::CallInd
+                        | PcodeOpcode::CallOther
+                        | PcodeOpcode::Store
                 )
             })
             .map_or(0, |idx| idx + 1);
@@ -50,13 +136,236 @@ impl<'a> PreviewBuilder<'a> {
             .find_map(|(op_idx, op)| {
                 op.output
                     .as_ref()
-                    .filter(|output| is_primary_return_register(output))
+                    .filter(|output| {
+                        is_primary_return_register_for_abi(output, self.options.calling_convention)
+                            && !self.is_aarch64_return_target_copy(op, output)
+                    })
                     .map(|output| (op_idx, output.clone()))
             })
     }
 
+    fn is_aarch64_return_target_copy(&self, op: &PcodeOp, output: &Varnode) -> bool {
+        self.options.calling_convention == CallingConvention::AArch64
+            && op.opcode == PcodeOpcode::Copy
+            && output.space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+            && output.offset == 0
+            && op
+                .inputs
+                .first()
+                .is_some_and(|input| is_register_space_id(input.space_id) && input.offset == 0x40f0)
+    }
+
+    fn lower_primary_return_expr_from_block(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        let Some((_ret_op_idx, ret_vn)) =
+            self.last_primary_return_def_after_barrier(block, term_idx)
+        else {
+            return Ok(None);
+        };
+        self.with_lowering_site(
+            LoweringSite {
+                block_idx,
+                op_idx: term_idx,
+            },
+            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+        )
+        .map(Some)
+    }
+
+    fn block_has_primary_return_def_before_terminator(
+        &self,
+        idx: usize,
+    ) -> bool {
+        let pcode_idx = self.pcode_block_idx(idx);
+        let Some(block) = self.pcode.blocks.get(pcode_idx) else {
+            return false;
+        };
+        let term_idx = self
+            .block_terminator_index(block)
+            .unwrap_or(block.ops.len());
+        self.last_primary_return_def_after_barrier(block, term_idx)
+            .is_some()
+    }
+
+    fn is_pure_return_join_block(&self, idx: usize) -> bool {
+        let pcode_idx = self.pcode_block_idx(idx);
+        let Some(block) = self.pcode.blocks.get(pcode_idx) else {
+            return false;
+        };
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        if block.ops[term_idx].opcode != PcodeOpcode::Return {
+            return false;
+        }
+        block.ops.iter().take(term_idx).all(|op| {
+            op.output
+                .as_ref()
+                .is_some_and(|output| self.is_aarch64_return_target_copy(op, output))
+        })
+    }
+
+    fn return_join_has_primary_return_evidence(&self, return_idx: usize) -> bool {
+        self.predecessors
+            .get(return_idx)
+            .is_some_and(|preds| preds.iter().any(|pred| {
+                *pred != return_idx && self.block_has_primary_return_def_before_terminator(*pred)
+            }))
+    }
+
+    pub(in crate::nir) fn lower_return_join_expr_for_predecessor(
+        &mut self,
+        pred_idx: usize,
+        return_idx: usize,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if !self.options.is_64bit
+            || !self.is_pure_return_join_block(return_idx)
+            || !self.return_join_has_primary_return_evidence(return_idx)
+        {
+            return Ok(None);
+        }
+        let pred_pcode_idx = self.pcode_block_idx(pred_idx);
+        let Some(pred_block) = self.pcode.blocks.get(pred_pcode_idx).cloned() else {
+            return Ok(None);
+        };
+        let pred_term_idx = self
+            .block_terminator_index(&pred_block)
+            .unwrap_or(pred_block.ops.len());
+        if let Some(expr) =
+            self.lower_primary_return_expr_from_block(pred_pcode_idx, &pred_block, pred_term_idx)?
+        {
+            return Ok(Some(expr));
+        }
+        let Some(ret_vn) = primary_return_registers(
+            self.options.pointer_size,
+            self.options.calling_convention,
+        )
+        .into_iter()
+        .next()
+        else {
+            return Ok(None);
+        };
+        self.with_lowering_site(
+            LoweringSite {
+                block_idx: pred_pcode_idx,
+                op_idx: pred_term_idx,
+            },
+            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+        )
+        .map(Some)
+    }
+
+    fn last_def_of_varnode_before(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        target: &Varnode,
+    ) -> Option<(usize, Varnode)> {
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .rev()
+            .find_map(|(op_idx, op)| {
+                op.output
+                    .as_ref()
+                    .filter(|output| *output == target)
+                    .map(|output| (op_idx, output.clone()))
+            })
+    }
+
+    fn conditional_return_value_source(
+        &self,
+        return_block: &crate::pcode::PcodeBasicBlock,
+        return_term_idx: usize,
+        merge_vn: &Varnode,
+    ) -> Option<(usize, Varnode)> {
+        if is_primary_return_register_for_abi(merge_vn, self.options.calling_convention) {
+            return Some((return_term_idx, merge_vn.clone()));
+        }
+
+        let start = return_block
+            .ops
+            .iter()
+            .take(return_term_idx)
+            .rposition(|op| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call
+                        | PcodeOpcode::CallInd
+                        | PcodeOpcode::CallOther
+                        | PcodeOpcode::Store
+                )
+            })
+            .map_or(0, |idx| idx + 1);
+
+        return_block
+            .ops
+            .iter()
+            .enumerate()
+            .take(return_term_idx)
+            .skip(start)
+            .rev()
+            .find_map(|(op_idx, op)| {
+                let output = op.output.as_ref()?;
+                if !is_primary_return_register_for_abi(output, self.options.calling_convention) {
+                    return None;
+                }
+                op.inputs
+                    .iter()
+                    .any(|input| input == merge_vn)
+                    .then(|| (op_idx, merge_vn.clone()))
+            })
+    }
+
+    fn predecessor_primary_return_expr(
+        &mut self,
+        return_idx: usize,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        let Some(preds) = self.predecessors.get(return_idx) else {
+            return Ok(None);
+        };
+        let mut recovered: Vec<HirExpr> = Vec::new();
+        for pred_idx in preds.clone() {
+            if pred_idx == return_idx {
+                continue;
+            }
+            let pred_pcode_idx = self.pcode_block_idx(pred_idx);
+            let Some(pred_block) = self.pcode.blocks.get(pred_pcode_idx).cloned() else {
+                continue;
+            };
+            let pred_term_idx = self
+                .block_terminator_index(&pred_block)
+                .unwrap_or(pred_block.ops.len());
+            let Some(expr) = self.lower_primary_return_expr_from_block(
+                pred_pcode_idx,
+                &pred_block,
+                pred_term_idx,
+            )?
+            else {
+                return Ok(None);
+            };
+            recovered.push(expr);
+        }
+        let Some(first) = recovered.first().cloned() else {
+            return Ok(None);
+        };
+        let canonical = strip_casts(&first);
+        if recovered.iter().all(|expr| strip_casts(expr) == canonical) {
+            Ok(Some(first))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn lower_return_terminator(
         &mut self,
+        idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
@@ -64,39 +373,24 @@ impl<'a> PreviewBuilder<'a> {
             && let Some((_ret_op_idx, ret_vn)) =
                 self.last_primary_return_def_after_barrier(block, term_idx)
         {
-            return self.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()).map(Some);
+            return self
+                .lower_wrapped_varnode(&ret_vn, &mut HashSet::new())
+                .map(Some);
         }
-
-        let op = &block.ops[term_idx];
         if self.options.is_64bit
-            && let Some(input) = op.inputs.last()
-            && self.is_return_control_target_stack_load(input)
+            && let Some(expr) = self.predecessor_primary_return_expr(idx)?
         {
+            return Ok(Some(expr));
+        }
+        if self.options.is_64bit && self.unsupported_indirect_control_count == 0 {
             return Ok(None);
         }
 
+        let op = &block.ops[term_idx];
         op.inputs
             .last()
             .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
             .transpose()
-    }
-
-    fn is_return_control_target_stack_load(&self, input: &Varnode) -> bool {
-        if input.is_constant || input.size != self.options.pointer_size {
-            return false;
-        }
-        let Some((_site, op)) = self.lookup_def_site(input) else {
-            return false;
-        };
-        if op.opcode != PcodeOpcode::Load
-            || op.output.as_ref() != Some(input)
-            || op.inputs.len() < 2
-        {
-            return false;
-        }
-        self.resolve_stack_address_from_memory_op(op)
-            .or_else(|| self.resolve_stack_address(&op.inputs[1]))
-            .is_some()
     }
 
     pub(in crate::nir) fn try_lower_intra_instruction_conditional_return(
@@ -114,14 +408,21 @@ impl<'a> PreviewBuilder<'a> {
         if branch_op.opcode != PcodeOpcode::CBranch || branch_op.inputs.len() < 2 {
             return Ok(None);
         }
-        let successors = self.successors.get(branch_block_idx).cloned().unwrap_or_default();
+        let successors = self
+            .successors
+            .get(branch_block_idx)
+            .cloned()
+            .unwrap_or_default();
         if successors.len() != 2 {
             return Ok(None);
         }
-        let Some(target_addr) = branch_target_address(&branch_op.inputs[0]) else {
-            return Ok(None);
-        };
-        let Some(target_idx) = self.address_to_index.get(&target_addr).copied() else {
+        let Some(target_idx) = resolve_branch_target_index(
+            self.pcode,
+            &self.address_to_index,
+            branch_block_idx,
+            branch_op,
+            &branch_op.inputs[0],
+        ) else {
             return Ok(None);
         };
         let Some(copy_idx) = successors.iter().copied().find(|idx| *idx != target_idx) else {
@@ -138,18 +439,23 @@ impl<'a> PreviewBuilder<'a> {
         if copy_block.ops.len() != 1 || copy_block.ops[0].opcode != PcodeOpcode::Copy {
             return Ok(None);
         }
-        let copy_output = copy_block.ops[0].output.as_ref();
-        if !copy_output.is_some_and(is_primary_return_register) {
+        let Some(copy_output) = copy_block.ops[0].output.as_ref() else {
             return Ok(None);
-        }
+        };
         let Some(return_term_idx) = self.block_terminator_index(return_block) else {
             return Ok(None);
         };
         if return_block.ops[return_term_idx].opcode != PcodeOpcode::Return {
             return Ok(None);
         }
+        if self
+            .conditional_return_value_source(return_block, return_term_idx, copy_output)
+            .is_none()
+        {
+            return Ok(None);
+        }
         let Some((default_op_idx, default_vn)) =
-            self.last_primary_return_def_after_barrier(branch_block, branch_term_idx)
+            self.last_def_of_varnode_before(branch_block, branch_term_idx, copy_output)
         else {
             return Ok(None);
         };
@@ -166,14 +472,14 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx: branch_block_idx,
                 op_idx: default_op_idx,
             },
-            |this| this.lower_wrapped_varnode(&default_vn, &mut HashSet::new()),
+            |this| this.lower_def_op(&branch_block.ops[default_op_idx], &mut HashSet::new()),
         )?;
         let alt_expr = self.with_lowering_site(
             LoweringSite {
                 block_idx: copy_idx,
                 op_idx: 0,
             },
-            |this| this.lower_wrapped_varnode(&copy_block.ops[0].inputs[0], &mut HashSet::new()),
+            |this| this.lower_def_op(&copy_block.ops[0], &mut HashSet::new()),
         )?;
 
         Ok(Some(vec![
@@ -183,6 +489,92 @@ impl<'a> PreviewBuilder<'a> {
                 else_body: Vec::new(),
             },
             HirStmt::Return(Some(alt_expr)),
+        ]))
+    }
+
+    pub(in crate::nir) fn try_lower_conditional_tailcall_after_return(
+        &mut self,
+    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+        if !self.options.is_64bit || self.pcode.blocks.len() > 4 {
+            return Ok(None);
+        }
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target: Some(false_target),
+        } = self.lower_block_terminator(0)?
+        else {
+            return Ok(None);
+        };
+
+        let true_idx = self.address_to_index.get(&true_target).copied();
+        let false_idx = self.address_to_index.get(&false_target).copied();
+        let (return_on_true, return_idx, tail_idx) = match (true_idx, false_idx) {
+            (Some(true_idx), Some(false_idx))
+                if matches!(
+                    self.lower_block_terminator(true_idx)?,
+                    LoweredTerminator::Return(None)
+                ) =>
+            {
+                (true, true_idx, false_idx)
+            }
+            (Some(true_idx), Some(false_idx))
+                if matches!(
+                    self.lower_block_terminator(false_idx)?,
+                    LoweredTerminator::Return(None)
+                ) =>
+            {
+                (false, false_idx, true_idx)
+            }
+            _ => return Ok(None),
+        };
+        if !self
+            .lower_block_stmts(&self.pcode.blocks[return_idx].clone())?
+            .is_empty()
+        {
+            return Ok(None);
+        }
+
+        let tail_block = self.pcode.blocks[tail_idx].clone();
+        let mut tail_body = self.lower_block_stmts(&tail_block)?;
+        if tail_body.len() > 3 {
+            return Ok(None);
+        }
+        match self.lower_block_terminator(tail_idx)? {
+            LoweredTerminator::Unsupported {
+                evidence,
+                target_expr,
+            } if matches!(
+                evidence.failure_family,
+                UnsupportedControlFamily::ExternalTarget
+            ) =>
+            {
+                tail_body.push(self.emit_unsupported_control_surface(evidence, target_expr));
+            }
+            LoweredTerminator::Goto(target) if self.address_to_index.get(&target).is_none() => {
+                tail_body.push(HirStmt::Goto(block_label(target)));
+            }
+            LoweredTerminator::Fallthrough(None) | LoweredTerminator::Return(None) => {}
+            _ => return Ok(None),
+        }
+        tail_body.push(HirStmt::Return(None));
+
+        let return_cond = if return_on_true {
+            cond
+        } else {
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(cond),
+                ty: NirType::Bool,
+            }
+        };
+        Ok(Some(vec![
+            HirStmt::If {
+                cond: return_cond,
+                then_body: vec![HirStmt::Return(None)],
+                else_body: Vec::new(),
+            },
+            HirStmt::Block(tail_body),
         ]))
     }
 
@@ -207,9 +599,29 @@ impl<'a> PreviewBuilder<'a> {
                     let mut visiting = HashSet::new();
                     match op.opcode {
                         PcodeOpcode::Return => Ok(LoweredTerminator::Return(
-                            this.lower_return_terminator(block, term_idx)?,
+                            this.lower_return_terminator(idx, block, term_idx)?,
                         )),
                         PcodeOpcode::Branch if op.inputs.len() == 1 => {
+                            if let Some(target_vn) = op.inputs.first()
+                                && let Some(tail_call_expr) = this
+                                    .recover_known_external_tail_call_expr(
+                                        idx, block, term_idx, target_vn,
+                                    )
+                            {
+                                let evidence = UnsupportedControlEvidence {
+                                    opcode: format!("{:?}", op.opcode),
+                                    source_block: Some(block.start_address),
+                                    target_expr: Some(print_expr(&tail_call_expr)),
+                                    successor_targets: Vec::new(),
+                                    failure_family: UnsupportedControlFamily::ExternalTarget,
+                                    surface: IndirectControlSurface::BranchInd,
+                                    confidence: 72,
+                                };
+                                return Ok(LoweredTerminator::Unsupported {
+                                    evidence,
+                                    target_expr: Some(tail_call_expr),
+                                });
+                            }
                             let target_idx = op.inputs.first().and_then(|input| {
                                 this.resolve_branch_target_index_with_recovery(idx, op, input)
                             });
@@ -250,18 +662,39 @@ impl<'a> PreviewBuilder<'a> {
                                 // If the branch target points outside the current p-code slice,
                                 // degrade to explicit unsupported marker instead of aborting render.
                                 if branch_target_address(target_vn).is_some() {
-                                    let evidence = this.build_unsupported_control_evidence(
-                                        op.opcode,
-                                        Some(block.start_address),
-                                        target_expr.as_ref(),
-                                        succ_addrs,
-                                        UnsupportedControlFamily::ExternalTarget,
-                                        IndirectControlSurface::BranchInd,
-                                        48,
-                                    );
+                                    let tail_call_expr = target_expr.as_ref().and_then(|expr| {
+                                        this.recover_tail_call_expr_from_target_expr(
+                                            idx, block, term_idx, expr,
+                                        )
+                                    });
+                                    let evidence = if tail_call_expr.is_some() {
+                                        UnsupportedControlEvidence {
+                                            opcode: format!("{:?}", op.opcode),
+                                            source_block: Some(block.start_address),
+                                            target_expr: tail_call_expr
+                                                .as_ref()
+                                                .or(target_expr.as_ref())
+                                                .map(print_expr),
+                                            successor_targets: succ_addrs,
+                                            failure_family:
+                                                UnsupportedControlFamily::ExternalTarget,
+                                            surface: IndirectControlSurface::BranchInd,
+                                            confidence: 48,
+                                        }
+                                    } else {
+                                        this.build_unsupported_control_evidence(
+                                            op.opcode,
+                                            Some(block.start_address),
+                                            target_expr.as_ref(),
+                                            succ_addrs,
+                                            UnsupportedControlFamily::ExternalTarget,
+                                            IndirectControlSurface::BranchInd,
+                                            48,
+                                        )
+                                    };
                                     return Ok(LoweredTerminator::Unsupported {
                                         evidence,
-                                        target_expr,
+                                        target_expr: tail_call_expr.or(target_expr),
                                     });
                                 }
                             }
@@ -396,6 +829,12 @@ impl<'a> PreviewBuilder<'a> {
                                 targets.push(inferred_target);
                             }
                             if targets.is_empty() {
+                                let tail_call_expr = this.recover_tail_call_expr_from_target_expr(
+                                    idx,
+                                    block,
+                                    term_idx,
+                                    &switch_expr,
+                                );
                                 this.record_unsupported_inventory_event(
                                     "terminator_branchind_no_targets",
                                     Some(switch_var),
@@ -409,7 +848,7 @@ impl<'a> PreviewBuilder<'a> {
                                 let evidence = this.build_unsupported_control_evidence(
                                     op.opcode,
                                     Some(block.start_address),
-                                    Some(&switch_expr),
+                                    tail_call_expr.as_ref().or(Some(&switch_expr)),
                                     Vec::new(),
                                     UnsupportedControlFamily::MissingTargets,
                                     IndirectControlSurface::BranchInd,
@@ -417,7 +856,7 @@ impl<'a> PreviewBuilder<'a> {
                                 );
                                 Ok(LoweredTerminator::Unsupported {
                                     evidence,
-                                    target_expr: Some(switch_expr),
+                                    target_expr: tail_call_expr.or(Some(switch_expr)),
                                 })
                             } else {
                                 if inferred_single_input_target

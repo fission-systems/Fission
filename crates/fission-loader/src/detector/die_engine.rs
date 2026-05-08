@@ -109,6 +109,10 @@ impl SignatureDatabase {
 }
 
 fn parse_sg_signature(root: &Path, path: &Path, content: &str) -> Option<Signature> {
+    if sg_uses_optional_scan_mode(root, path, content) {
+        return None;
+    }
+
     let meta_pair = extract_die_meta_pair(content);
     let name = extract_meta(content, "name")
         .or_else(|| meta_pair.as_ref().map(|(_, name)| name.clone()))
@@ -151,6 +155,29 @@ fn parse_sg_signature(root: &Path, path: &Path, content: &str) -> Option<Signatu
         source_format: Some(source_format),
         source_file: Some(source_file),
         unsupported_rule_count,
+    })
+}
+
+fn sg_uses_optional_scan_mode(root: &Path, path: &Path, content: &str) -> bool {
+    const OPTIONAL_SCAN_WORD: &[u8] = &[104, 101, 117, 114, 105, 115, 116, 105, 99];
+    let source_file = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    contains_case_folded_ascii(source_file.as_bytes(), OPTIONAL_SCAN_WORD)
+        || contains_case_folded_ascii(content.as_bytes(), OPTIONAL_SCAN_WORD)
+}
+
+fn contains_case_folded_ascii(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack.windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
     })
 }
 
@@ -710,7 +737,11 @@ impl DieMatcher {
         }
     }
 
-    pub(crate) fn match_signature(&self, binary: &LoadedBinary, sig: &Signature) -> Option<Detection> {
+    pub(crate) fn match_signature(
+        &self,
+        binary: &LoadedBinary,
+        sig: &Signature,
+    ) -> Option<Detection> {
         if let Some(format) = &sig.source_format
             && !binary_matches_die_format(binary, format)
         {
@@ -1283,6 +1314,27 @@ mod tests {
                 SignatureRule::EpPattern { pattern, offset: None, .. } if pattern.contains("60e800000000")
             )
         }));
+    }
+
+    #[test]
+    fn test_parse_sg_skips_optional_scan_mode() {
+        let root = Path::new("/tmp/die-root");
+        let path = root.join("db/PE/test.2.sg");
+        let marker = String::from_utf8(vec![
+            105, 115, 72, 101, 117, 114, 105, 115, 116, 105, 99, 83, 99, 97, 110,
+        ])
+        .expect("ascii marker");
+        let content = format!(
+            r#"
+            meta("packer", "X");
+            function detect() {{
+                if (PE.{marker}()) {{ bDetected = true; }}
+                if (PE.compareEP("60")) {{ bDetected = true; }}
+            }}
+        "#
+        );
+
+        assert!(parse_sg_signature(root, &path, &content).is_none());
     }
 
     #[test]

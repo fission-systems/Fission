@@ -29,9 +29,8 @@ fn decide_structuring_admission(input: StructuringAdmissionInput) -> Structuring
     }
 
     // Keep an escape hatch for truly pathological CFGs, but stop forcing
-    // linear lowering for merely "large" reducible functions. That old
-    // blanket heuristic was degrading sample user-code quality on functions
-    // like `fibonacci`, which are complex but still structurally recoverable.
+    // linear lowering for merely "large" reducible functions like `fibonacci`,
+    // which are complex but still structurally recoverable.
     let extreme_budget = input.block_count > 192
         || input.total_ops > 3_000
         || (input.edge_count > input.block_count.saturating_mul(4)
@@ -209,6 +208,9 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         if let Some(body) = self.try_lower_intra_instruction_conditional_return()? {
+            return Ok(body);
+        }
+        if let Some(body) = self.try_lower_conditional_tailcall_after_return()? {
             return Ok(body);
         }
 
@@ -527,6 +529,11 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             if let Some(mut best) = self.select_structured_candidate(structured_candidates) {
+                if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
+                    best.node
+                        .statements
+                        .insert(0, HirStmt::Label(block_label(block_key)));
+                }
                 if diag {
                     eprintln!(
                         "[DIAG] structuring idx={} selected_rule={} skip_to={}",
@@ -593,11 +600,26 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            match self.lower_block_terminator(pcode_idx_fallback)? {
+            match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => node_body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
-                    if self.next_block_address(idx) != Some(target) {
+                    if let Some(target_idx) = self.find_block_index_by_address(target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        node_body.push(HirStmt::Return(Some(expr)));
+                        explicit_edge_surface = true;
+                    } else if self.next_block_address(idx) != Some(target) {
                         node_body.push(HirStmt::Goto(block_label(target)));
+                        explicit_edge_surface = true;
+                    }
+                }
+                LoweredTerminator::Fallthrough(Some(target)) => {
+                    if let Some(target_idx) = self.find_block_index_by_address(target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        node_body.push(HirStmt::Return(Some(expr)));
                         explicit_edge_surface = true;
                     }
                 }
@@ -607,12 +629,26 @@ impl<'a> PreviewBuilder<'a> {
                     false_target,
                 } => {
                     let next_addr = self.next_block_address(idx);
-                    let then_body = if next_addr == Some(true_target) {
+                    let then_body = if let Some(true_idx) =
+                        self.find_block_index_by_address(true_target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, true_idx)?
+                    {
+                        vec![HirStmt::Return(Some(expr))]
+                    } else if next_addr == Some(true_target) {
                         Vec::new()
                     } else {
                         vec![HirStmt::Goto(block_label(true_target))]
                     };
                     let else_body = match false_target {
+                        Some(false_target)
+                            if let Some(false_idx) =
+                                self.find_block_index_by_address(false_target)
+                                && let Some(expr) = self
+                                    .lower_return_join_expr_for_predecessor(idx, false_idx)? =>
+                        {
+                            vec![HirStmt::Return(Some(expr))]
+                        }
                         Some(false_target) if Some(false_target) != next_addr => {
                             vec![HirStmt::Goto(block_label(false_target))]
                         }
@@ -625,7 +661,7 @@ impl<'a> PreviewBuilder<'a> {
                     });
                     explicit_edge_surface = true;
                 }
-                LoweredTerminator::Fallthrough(_) => {}
+                LoweredTerminator::Fallthrough(None) => {}
                 LoweredTerminator::Unsupported {
                     evidence,
                     target_expr,

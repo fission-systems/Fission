@@ -6,8 +6,8 @@ use fission_sleigh::runtime::DecodedFlowKind;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::model::{
-    FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndexSummary, XrefKind, XrefRecord,
-    XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
+    FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndexSummary, XrefKind, XrefRecord, XrefSource,
+    XrefSourceCategory, XrefSourceLayer, XrefTarget,
 };
 use crate::analysis::xrefs::{XrefDatabase, XrefType};
 
@@ -120,7 +120,11 @@ impl XrefIndex {
     pub fn refs_to_address(&self, va: u64) -> Vec<&XrefRecord> {
         self.by_target
             .get(&va)
-            .map(|ids| ids.iter().filter_map(|id| self.refs.get(*id as usize)).collect())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.refs.get(*id as usize))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -128,7 +132,11 @@ impl XrefIndex {
     pub fn refs_from_address(&self, va: u64) -> Vec<&XrefRecord> {
         self.by_source
             .get(&va)
-            .map(|ids| ids.iter().filter_map(|id| self.refs.get(*id as usize)).collect())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.refs.get(*id as usize))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -314,11 +322,7 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
             XrefSource {
                 address: slot_va,
                 category: XrefSourceCategory::Instruction {
-                    enclosing_function: resolve_enclosing_function(
-                        &sorted_funcs,
-                        slot_va,
-                        0x40,
-                    ),
+                    enclosing_function: resolve_enclosing_function(&sorted_funcs, slot_va, 0x40),
                 },
             },
             XrefTarget {
@@ -416,7 +420,11 @@ pub fn push_loader_seeds(builder: &mut XrefIndexBuilder, binary: &LoadedBinary) 
 }
 
 /// Maps [`XrefDatabase`] rows into canonical records (`XrefSourceLayer::Disassembly`).
-pub fn push_disassembly_layer(builder: &mut XrefIndexBuilder, binary: &LoadedBinary, db: &XrefDatabase) {
+pub fn push_disassembly_layer(
+    builder: &mut XrefIndexBuilder,
+    binary: &LoadedBinary,
+    db: &XrefDatabase,
+) {
     let mut sorted: Vec<FunctionInfo> = binary.functions.clone();
     sorted.sort_by_key(|f| f.address);
 

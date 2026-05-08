@@ -18,7 +18,7 @@
         "6502.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "6502",
@@ -36,7 +36,7 @@
         "6502.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "68000",
@@ -50,6 +50,7 @@
       "variant_class": "MC68020",
       "imported_aux_files": [
         "68000.cspec",
+        "68000.dwarf",
         "68000.ldefs",
         "68000.opinion",
         "68000.pspec",
@@ -57,7 +58,7 @@
         "68000_register.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "68000",
@@ -71,6 +72,7 @@
       "variant_class": "MC68030",
       "imported_aux_files": [
         "68000.cspec",
+        "68000.dwarf",
         "68000.ldefs",
         "68000.opinion",
         "68000.pspec",
@@ -78,7 +80,7 @@
         "68000_register.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "68000",
@@ -92,6 +94,7 @@
       "variant_class": "default",
       "imported_aux_files": [
         "68000.cspec",
+        "68000.dwarf",
         "68000.ldefs",
         "68000.opinion",
         "68000.pspec",
@@ -99,7 +102,7 @@
         "68000_register.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "68000",
@@ -113,6 +116,7 @@
       "variant_class": "Coldfire",
       "imported_aux_files": [
         "68000.cspec",
+        "68000.dwarf",
         "68000.ldefs",
         "68000.opinion",
         "68000.pspec",
@@ -120,7 +124,7 @@
         "68000_register.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8048",
@@ -138,7 +142,7 @@
         "8048.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8051",
@@ -163,10 +167,12 @@
         "8051_main.sinc",
         "mx51.cspec",
         "mx51.pspec",
-        "mx51.sinc"
+        "mx51.sinc",
+        "old/8051v1.lang",
+        "old/8051v1.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8051",
@@ -191,10 +197,12 @@
         "8051_main.sinc",
         "mx51.cspec",
         "mx51.pspec",
-        "mx51.sinc"
+        "mx51.sinc",
+        "old/8051v1.lang",
+        "old/8051v1.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8051",
@@ -219,10 +227,12 @@
         "8051_main.sinc",
         "mx51.cspec",
         "mx51.pspec",
-        "mx51.sinc"
+        "mx51.sinc",
+        "old/8051v1.lang",
+        "old/8051v1.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8051",
@@ -247,10 +257,12 @@
         "8051_main.sinc",
         "mx51.cspec",
         "mx51.pspec",
-        "mx51.sinc"
+        "mx51.sinc",
+        "old/8051v1.lang",
+        "old/8051v1.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "8085",
@@ -268,7 +280,7 @@
         "8085.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "AARCH64",
@@ -283,6 +295,7 @@
       "variant_class": "default",
       "imported_aux_files": [
         "AARCH64.cspec",
+        "AARCH64.dwarf",
         "AARCH64.ldefs",
         "AARCH64.opinion",
         "AARCH64.pspec",
@@ -290,6 +303,7 @@
         "AARCH64_apple.cspec",
         "AARCH64_base_PACoptions.sinc",
         "AARCH64_golang.cspec",
+        "AARCH64_golang.register.info",
         "AARCH64_ilp32.cspec",
         "AARCH64_swift.cspec",
         "AARCH64_win.cspec",
@@ -301,7 +315,7 @@
         "AppleSilicon.ldefs"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "aarch64"
       ]
     },
@@ -318,6 +332,7 @@
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "AARCH64.cspec",
+        "AARCH64.dwarf",
         "AARCH64.ldefs",
         "AARCH64.opinion",
         "AARCH64.pspec",
@@ -325,6 +340,7 @@
         "AARCH64_apple.cspec",
         "AARCH64_base_PACoptions.sinc",
         "AARCH64_golang.cspec",
+        "AARCH64_golang.register.info",
         "AARCH64_ilp32.cspec",
         "AARCH64_swift.cspec",
         "AARCH64_win.cspec",
@@ -336,7 +352,7 @@
         "AppleSilicon.ldefs"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "aarch64"
       ]
     },
@@ -352,6 +368,7 @@
       "variant_class": "AppleSilicon",
       "imported_aux_files": [
         "AARCH64.cspec",
+        "AARCH64.dwarf",
         "AARCH64.ldefs",
         "AARCH64.opinion",
         "AARCH64.pspec",
@@ -359,6 +376,7 @@
         "AARCH64_apple.cspec",
         "AARCH64_base_PACoptions.sinc",
         "AARCH64_golang.cspec",
+        "AARCH64_golang.register.info",
         "AARCH64_ilp32.cspec",
         "AARCH64_swift.cspec",
         "AARCH64_win.cspec",
@@ -370,7 +388,7 @@
         "AppleSilicon.ldefs"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "aarch64"
       ]
     },
@@ -386,6 +404,7 @@
       "variant_class": "v4",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -398,15 +417,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -422,6 +446,7 @@
       "variant_class": "v4",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -434,15 +459,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -458,6 +488,7 @@
       "variant_class": "v4t",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -470,15 +501,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -494,6 +530,7 @@
       "variant_class": "v4t",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -506,15 +543,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -530,6 +572,7 @@
       "variant_class": "v5",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -542,15 +585,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -566,6 +614,7 @@
       "variant_class": "v5",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -578,15 +627,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -602,6 +656,7 @@
       "variant_class": "v5t",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -614,15 +669,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -638,6 +698,7 @@
       "variant_class": "v5t",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -650,15 +711,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -674,6 +740,7 @@
       "variant_class": "v6",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -686,15 +753,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -710,6 +782,7 @@
       "variant_class": "v6",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -722,15 +795,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -747,6 +825,7 @@
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -759,15 +838,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -785,6 +869,7 @@
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -797,15 +882,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -822,6 +912,7 @@
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -834,15 +925,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -860,6 +956,7 @@
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -872,15 +969,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -896,6 +998,7 @@
       "variant_class": "v8-m",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -908,15 +1011,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -932,6 +1040,7 @@
       "variant_class": "v8-m",
       "imported_aux_files": [
         "ARM.cspec",
+        "ARM.dwarf",
         "ARM.gdis",
         "ARM.ldefs",
         "ARM.opinion",
@@ -944,15 +1053,20 @@
         "ARM_v45.pspec",
         "ARM_win.cspec",
         "ARMinstructions.sinc",
+        "ARMneon.dwarf",
         "ARMneon.sinc",
         "ARMt.pspec",
         "ARMtTHUMB.pspec",
         "ARMt_v45.pspec",
         "ARMt_v6.pspec",
-        "ARMv8.sinc"
+        "ARMv8.sinc",
+        "old/ARMv5.lang",
+        "old/ARMv5.trans",
+        "old/THUMBv2.lang",
+        "old/THUMBv2.trans"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "arm32"
       ]
     },
@@ -996,7 +1110,7 @@
         "avr8xmega.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Atmel",
@@ -1038,7 +1152,7 @@
         "avr8xmega.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Atmel",
@@ -1078,7 +1192,7 @@
         "avr8xmega.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Atmel",
@@ -1121,7 +1235,7 @@
         "avr8xmega.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Atmel",
@@ -1163,7 +1277,7 @@
         "avr8xmega.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "BPF",
@@ -1182,7 +1296,7 @@
         "BPF.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "CP1600",
@@ -1201,7 +1315,7 @@
         "CP1600.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "CR16",
@@ -1222,7 +1336,7 @@
         "CR16C.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "CR16",
@@ -1243,7 +1357,7 @@
         "CR16C.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "DATA",
@@ -1264,7 +1378,7 @@
         "data.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "DATA",
@@ -1285,7 +1399,7 @@
         "data.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1331,7 +1445,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1376,7 +1490,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1421,7 +1535,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1467,7 +1581,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1512,7 +1626,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1557,7 +1671,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1602,7 +1716,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1647,7 +1761,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1692,7 +1806,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1737,7 +1851,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Dalvik",
@@ -1782,7 +1896,7 @@
         "Dalvik_OpCode_FF_unused.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS08",
@@ -1811,7 +1925,7 @@
         "HCS_HC.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS08",
@@ -1840,7 +1954,7 @@
         "HCS_HC.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS08",
@@ -1869,7 +1983,7 @@
         "HCS_HC.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS12",
@@ -1894,7 +2008,7 @@
         "XGATE.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS12",
@@ -1919,7 +2033,7 @@
         "XGATE.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "HCS12",
@@ -1945,7 +2059,7 @@
         "XGATE.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "JVM",
@@ -1964,7 +2078,7 @@
         "JVM.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Loongarch",
@@ -1996,7 +2110,7 @@
         "lvz.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Loongarch",
@@ -2028,7 +2142,7 @@
         "lvz.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Loongarch",
@@ -2060,7 +2174,7 @@
         "lvz.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Loongarch",
@@ -2092,7 +2206,7 @@
         "lvz.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "M16C",
@@ -2113,7 +2227,7 @@
         "M16C_80.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "M16C",
@@ -2134,7 +2248,7 @@
         "M16C_80.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "M8C",
@@ -2153,7 +2267,7 @@
         "m8c.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "MC6800",
@@ -2178,7 +2292,7 @@
         "6x09_push.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "MC6800",
@@ -2203,7 +2317,7 @@
         "6x09_push.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "MC6800",
@@ -2228,7 +2342,7 @@
         "6x09_push.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "MCS96",
@@ -2247,7 +2361,7 @@
         "MCS96.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "MIPS",
@@ -2261,6 +2375,7 @@
       "variant_class": "R6",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2287,7 +2402,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2303,6 +2418,7 @@
       "variant_class": "R6",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2329,7 +2445,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2346,6 +2462,7 @@
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2372,7 +2489,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2389,6 +2506,7 @@
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2415,7 +2533,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2436,6 +2554,7 @@
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2462,7 +2581,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2483,6 +2602,7 @@
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
+        "mips.dwarf",
         "mips.ldefs",
         "mips.sinc",
         "mips16.sinc",
@@ -2509,7 +2629,7 @@
         "mipsmicro.sinc"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "mips"
       ]
     },
@@ -2526,13 +2646,14 @@
       "imported_aux_files": [
         "lsmw.sinc",
         "nds32.cspec",
+        "nds32.dwarf",
         "nds32.ldefs",
         "nds32.opinion",
         "nds32.pspec",
         "nds32.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "NDS32",
@@ -2547,13 +2668,14 @@
       "imported_aux_files": [
         "lsmw.sinc",
         "nds32.cspec",
+        "nds32.dwarf",
         "nds32.ldefs",
         "nds32.opinion",
         "nds32.pspec",
         "nds32.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PA-RISC",
@@ -2574,7 +2696,7 @@
         "pa-riscInstructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2592,6 +2714,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2619,7 +2743,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2637,6 +2761,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2664,7 +2790,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2682,6 +2808,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2709,7 +2837,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2727,6 +2855,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2754,7 +2884,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2772,6 +2902,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2799,7 +2931,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2817,6 +2949,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2844,7 +2978,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2862,6 +2996,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2889,7 +3025,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2907,6 +3043,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2934,7 +3072,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2952,6 +3090,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -2979,7 +3119,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -2997,6 +3137,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -3024,7 +3166,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -3042,6 +3184,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -3069,7 +3213,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -3087,6 +3231,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -3114,7 +3260,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PIC",
@@ -3132,6 +3278,8 @@
         "PIC24.opinion",
         "PIC24.pspec",
         "PIC24.sinc",
+        "PIC30.dwarf",
+        "PIC33.dwarf",
         "pic12.sinc",
         "pic12_instructions.sinc",
         "pic12c5xx.cspec",
@@ -3159,7 +3307,7 @@
         "pic18_instructions.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "PowerPC",
@@ -3187,6 +3335,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3213,7 +3364,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3243,6 +3394,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3269,7 +3423,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3299,6 +3453,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3325,7 +3482,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3355,6 +3512,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3381,7 +3541,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3411,6 +3571,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3437,7 +3600,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3467,6 +3630,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3493,7 +3659,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3523,6 +3689,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3549,7 +3718,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3579,6 +3748,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3605,7 +3777,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3636,6 +3808,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3662,7 +3837,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3692,6 +3867,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3718,7 +3896,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3749,6 +3927,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3775,7 +3956,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3806,6 +3987,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3832,7 +4016,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3863,6 +4047,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3889,7 +4076,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3919,6 +4106,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -3945,7 +4135,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -3975,6 +4165,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -4001,7 +4194,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -4031,6 +4224,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -4057,7 +4253,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -4087,6 +4283,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -4113,7 +4312,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -4144,6 +4343,9 @@
         "lmwInstructions.sinc",
         "lswInstructions.sinc",
         "mulhwInstructions.sinc",
+        "old/oldPPC.lang",
+        "old/oldPPC.trans",
+        "ppc.dwarf",
         "ppc.ldefs",
         "ppc_32.cspec",
         "ppc_32.pspec",
@@ -4170,7 +4372,7 @@
         "vsx.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "powerpc"
       ]
     },
@@ -4221,11 +4423,13 @@
         "riscv.zi.sinc",
         "riscv32-fp.cspec",
         "riscv32.cspec",
+        "riscv32.dwarf",
         "riscv64-fp.cspec",
-        "riscv64.cspec"
+        "riscv64.cspec",
+        "riscv64.dwarf"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": [
+      "language_aliases": [
         "riscv"
       ]
     },
@@ -4276,11 +4480,13 @@
         "riscv.zi.sinc",
         "riscv32-fp.cspec",
         "riscv32.cspec",
+        "riscv32.dwarf",
         "riscv64-fp.cspec",
-        "riscv64.cspec"
+        "riscv64.cspec",
+        "riscv64.dwarf"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "riscv"
       ]
     },
@@ -4331,11 +4537,13 @@
         "riscv.zi.sinc",
         "riscv32-fp.cspec",
         "riscv32.cspec",
+        "riscv32.dwarf",
         "riscv64-fp.cspec",
-        "riscv64.cspec"
+        "riscv64.cspec",
+        "riscv64.dwarf"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "riscv"
       ]
     },
@@ -4350,6 +4558,7 @@
       "endian": "big",
       "variant_class": "default",
       "imported_aux_files": [
+        "Sparc.dwarf",
         "Sparc.opinion",
         "SparcV9.ldefs",
         "SparcV9.pspec",
@@ -4359,7 +4568,7 @@
         "SparcVIS.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Sparc",
@@ -4372,6 +4581,7 @@
       "endian": "big",
       "variant_class": "default",
       "imported_aux_files": [
+        "Sparc.dwarf",
         "Sparc.opinion",
         "SparcV9.ldefs",
         "SparcV9.pspec",
@@ -4381,7 +4591,7 @@
         "SparcVIS.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "SuperH",
@@ -4401,7 +4611,7 @@
         "superh2a.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "SuperH",
@@ -4421,7 +4631,7 @@
         "superh2a.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "SuperH",
@@ -4441,7 +4651,7 @@
         "superh2a.cspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "SuperH4",
@@ -4459,10 +4669,14 @@
         "SuperH4.pspec",
         "SuperH4.sinc",
         "SuperH4_be.cspec",
-        "SuperH4_le.cspec"
+        "SuperH4_le.cspec",
+        "old/SuperH4-BE-16.lang",
+        "old/SuperH4-BE-16.trans",
+        "old/SuperH4-LE-16.lang",
+        "old/SuperH4-LE-16.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "SuperH4",
@@ -4480,10 +4694,14 @@
         "SuperH4.pspec",
         "SuperH4.sinc",
         "SuperH4_be.cspec",
-        "SuperH4_le.cspec"
+        "SuperH4_le.cspec",
+        "old/SuperH4-BE-16.lang",
+        "old/SuperH4-BE-16.trans",
+        "old/SuperH4-LE-16.lang",
+        "old/SuperH4-LE-16.trans"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "TI_MSP430",
@@ -4499,13 +4717,15 @@
         "TI430Common.sinc",
         "TI430X.sinc",
         "TI_MSP430.cspec",
+        "TI_MSP430.dwarf",
         "TI_MSP430.ldefs",
         "TI_MSP430.pspec",
         "TI_MSP430X.cspec",
+        "TI_MSP430X.dwarf",
         "ti_msp430.opinion"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "TI_MSP430",
@@ -4521,13 +4741,15 @@
         "TI430Common.sinc",
         "TI430X.sinc",
         "TI_MSP430.cspec",
+        "TI_MSP430.dwarf",
         "TI_MSP430.ldefs",
         "TI_MSP430.pspec",
         "TI_MSP430X.cspec",
+        "TI_MSP430X.dwarf",
         "ti_msp430.opinion"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4540,7 +4762,12 @@
       "endian": "big",
       "variant_class": "default",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4557,7 +4784,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4570,7 +4797,12 @@
       "endian": "big",
       "variant_class": "harvard",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4587,7 +4819,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4600,7 +4832,12 @@
       "endian": "big",
       "variant_class": "harvard_rev",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4617,7 +4854,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4630,7 +4867,12 @@
       "endian": "little",
       "variant_class": "default",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4647,7 +4889,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4660,7 +4902,12 @@
       "endian": "big",
       "variant_class": "default",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4677,7 +4924,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4690,7 +4937,12 @@
       "endian": "big",
       "variant_class": "posStack",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4707,7 +4959,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4720,7 +4972,12 @@
       "endian": "big",
       "variant_class": "builder",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4737,7 +4994,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4750,7 +5007,12 @@
       "endian": "big",
       "variant_class": "builder.align2",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4767,7 +5029,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4780,7 +5042,12 @@
       "endian": "little",
       "variant_class": "builder",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4797,7 +5064,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4810,7 +5077,12 @@
       "endian": "little",
       "variant_class": "builder.align2",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4827,7 +5099,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4840,7 +5112,12 @@
       "endian": "little",
       "variant_class": "default",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4857,7 +5134,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4870,7 +5147,12 @@
       "endian": "big",
       "variant_class": "wordSize2",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4887,7 +5169,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Toy",
@@ -4900,7 +5182,12 @@
       "endian": "little",
       "variant_class": "wordSize2",
       "imported_aux_files": [
+        "old/ToyV00BE64.lang",
+        "old/ToyV0BE64.trans",
+        "old/ToyV0LE64.lang",
+        "old/ToyV0LE64.trans",
         "old/v01stuff/toy.cspec",
+        "old/v01stuff/toy.ldefs_v01",
         "old/v01stuff/toy.sinc",
         "old/v01stuff/toy64.cspec",
         "old/v01stuff/toyInstructions.sinc",
@@ -4917,7 +5204,7 @@
         "toy_harvard.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "V850",
@@ -4947,7 +5234,7 @@
         "V850.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Xtensa",
@@ -4963,6 +5250,7 @@
         "cust.sinc",
         "flix.sinc",
         "xtensa.cspec",
+        "xtensa.dwarf",
         "xtensa.ldefs",
         "xtensa.opinion",
         "xtensa.pspec",
@@ -4972,7 +5260,7 @@
         "xtensa_depbits.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Xtensa",
@@ -4988,6 +5276,7 @@
         "cust.sinc",
         "flix.sinc",
         "xtensa.cspec",
+        "xtensa.dwarf",
         "xtensa.ldefs",
         "xtensa.opinion",
         "xtensa.pspec",
@@ -4997,7 +5286,7 @@
         "xtensa_depbits.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Z80",
@@ -5019,7 +5308,7 @@
         "z8401x.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "Z80",
@@ -5041,7 +5330,7 @@
         "z8401x.pspec"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "eBPF",
@@ -5055,13 +5344,14 @@
       "variant_class": "default",
       "imported_aux_files": [
         "eBPF.cspec",
+        "eBPF.dwarf",
         "eBPF.ldefs",
         "eBPF.opinion",
         "eBPF.pspec",
         "eBPF.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "eBPF",
@@ -5075,13 +5365,14 @@
       "variant_class": "default",
       "imported_aux_files": [
         "eBPF.cspec",
+        "eBPF.dwarf",
         "eBPF.ldefs",
         "eBPF.opinion",
         "eBPF.pspec",
         "eBPF.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "tricore",
@@ -5101,6 +5392,7 @@
         "tc176x.pspec",
         "tc29x.pspec",
         "tricore.cspec",
+        "tricore.dwarf",
         "tricore.ldefs",
         "tricore.opinion",
         "tricore.pcp.sinc",
@@ -5108,7 +5400,7 @@
         "tricore.sinc"
       ],
       "runtime_status": "registered_compile_only",
-      "compatibility_aliases": []
+      "language_aliases": []
     },
     {
       "processor": "x86",
@@ -5139,6 +5431,38 @@
         "lzcnt.sinc",
         "macros.sinc",
         "mpx.sinc",
+        "old/x86RealV1.lang",
+        "old/x86RealV1.trans",
+        "old/x86RealV2.lang",
+        "old/x86RealV2.trans",
+        "old/x86RealV3.lang",
+        "old/x86RealV3.trans",
+        "old/x86V1.lang",
+        "old/x86V1.trans",
+        "old/x86V2.lang",
+        "old/x86V2.trans",
+        "old/x86V3.lang",
+        "old/x86V3.trans",
+        "old/x86_64bit_compat32_v2.lang",
+        "old/x86_64bit_compat32_v2.trans",
+        "old/x86_64bit_compat32_v3.lang",
+        "old/x86_64bit_compat32_v3.trans",
+        "old/x86_64bit_v1.lang",
+        "old/x86_64bit_v1.trans",
+        "old/x86_64bit_v2.lang",
+        "old/x86_64bit_v2.trans",
+        "old/x86_64bit_v3.lang",
+        "old/x86_64bit_v3.trans",
+        "old/x86_ProtV2.lang",
+        "old/x86_ProtV2.trans",
+        "old/x86_ProtV3.lang",
+        "old/x86_ProtV3.trans",
+        "old/x86smmV1.lang",
+        "old/x86smmV1.trans",
+        "old/x86smmV2.lang",
+        "old/x86smmV2.trans",
+        "old/x86smmV3.lang",
+        "old/x86smmV3.trans",
         "pclmulqdq.sinc",
         "rdrand.sinc",
         "sgx.sinc",
@@ -5149,12 +5473,16 @@
         "x86-16.gdis",
         "x86-16.pspec",
         "x86-32-golang.cspec",
+        "x86-32-golang.register.info",
         "x86-64-compat32.pspec",
         "x86-64-gcc.cspec",
         "x86-64-golang.cspec",
+        "x86-64-golang.register.info",
         "x86-64-swift.cspec",
         "x86-64-win.cspec",
+        "x86-64.dwarf",
         "x86-64.pspec",
+        "x86.dwarf",
         "x86.ldefs",
         "x86.opinion",
         "x86.pspec",
@@ -5164,7 +5492,7 @@
         "x86win.cspec"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "x86"
       ]
     },
@@ -5199,6 +5527,38 @@
         "lzcnt.sinc",
         "macros.sinc",
         "mpx.sinc",
+        "old/x86RealV1.lang",
+        "old/x86RealV1.trans",
+        "old/x86RealV2.lang",
+        "old/x86RealV2.trans",
+        "old/x86RealV3.lang",
+        "old/x86RealV3.trans",
+        "old/x86V1.lang",
+        "old/x86V1.trans",
+        "old/x86V2.lang",
+        "old/x86V2.trans",
+        "old/x86V3.lang",
+        "old/x86V3.trans",
+        "old/x86_64bit_compat32_v2.lang",
+        "old/x86_64bit_compat32_v2.trans",
+        "old/x86_64bit_compat32_v3.lang",
+        "old/x86_64bit_compat32_v3.trans",
+        "old/x86_64bit_v1.lang",
+        "old/x86_64bit_v1.trans",
+        "old/x86_64bit_v2.lang",
+        "old/x86_64bit_v2.trans",
+        "old/x86_64bit_v3.lang",
+        "old/x86_64bit_v3.trans",
+        "old/x86_ProtV2.lang",
+        "old/x86_ProtV2.trans",
+        "old/x86_ProtV3.lang",
+        "old/x86_ProtV3.trans",
+        "old/x86smmV1.lang",
+        "old/x86smmV1.trans",
+        "old/x86smmV2.lang",
+        "old/x86smmV2.trans",
+        "old/x86smmV3.lang",
+        "old/x86smmV3.trans",
         "pclmulqdq.sinc",
         "rdrand.sinc",
         "sgx.sinc",
@@ -5209,12 +5569,16 @@
         "x86-16.gdis",
         "x86-16.pspec",
         "x86-32-golang.cspec",
+        "x86-32-golang.register.info",
         "x86-64-compat32.pspec",
         "x86-64-gcc.cspec",
         "x86-64-golang.cspec",
+        "x86-64-golang.register.info",
         "x86-64-swift.cspec",
         "x86-64-win.cspec",
+        "x86-64.dwarf",
         "x86-64.pspec",
+        "x86.dwarf",
         "x86.ldefs",
         "x86.opinion",
         "x86.pspec",
@@ -5224,7 +5588,7 @@
         "x86win.cspec"
       ],
       "runtime_status": "executable_candidate",
-      "compatibility_aliases": [
+      "language_aliases": [
         "x86"
       ]
     }

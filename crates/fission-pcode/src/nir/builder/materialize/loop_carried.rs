@@ -78,7 +78,8 @@ impl<'a> PreviewBuilder<'a> {
             && prior.offset == current.offset
             && prior.size == 8
             && current.size == 4
-            && x64_ghidra_reg_name(prior.offset).is_some()
+            && (x64_ghidra_reg_name(prior.offset).is_some()
+                || aarch64_ghidra_reg_name(prior.offset, prior.size).is_some())
     }
 
     fn output_is_loop_carried_register_update(
@@ -801,6 +802,56 @@ mod tests {
                 .iter()
                 .any(|stmt| lhs_var(stmt) == Some(init_name)),
             "32-bit loop update should reuse the 64-bit zero initializer binding: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn aarch64_loop_carried_register_update_reuses_wide_prior_for_w_gpr_update() {
+        let x20 = reg(0x40a0, 8);
+        let w20 = reg(0x40a0, 4);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(x20), vec![constant(0)]),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(w20.clone()),
+                        vec![w20, constant(1)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![1];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let preheader = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("preheader lowering");
+        let init_name = lhs_var(&preheader[0]).expect("preheader init binding");
+        let loop_body = builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .expect("loop lowering");
+
+        assert!(
+            loop_body
+                .iter()
+                .any(|stmt| lhs_var(stmt) == Some(init_name)),
+            "AArch64 W-register loop update should reuse the X-register initializer binding: {loop_body:?}"
         );
     }
 

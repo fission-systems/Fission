@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
+    // Pre-allocate with a small data-size-based estimate.
     let estimated_strings = data.len() / 1024;
     let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
 

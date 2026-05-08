@@ -672,7 +672,7 @@ The next owner is to migrate those remaining analysis surfaces to the same gener
   2. richer template execution for startup/control-heavy rows
   3. cycle-free FID hash reintroduction
 
-## 10. Loader Heuristic Removal and Ghidra-Style Analyzer Split
+## 10. Loader Shortcut Removal and Ghidra-Style Analyzer Split
 
 ### Scope
 
@@ -688,7 +688,7 @@ The next owner is to migrate those remaining analysis surfaces to the same gener
 
 ### What changed
 
-- removed loader-owned function discovery heuristics:
+- removed loader-owned function discovery shortcuts:
   - rel32 `CALL` / `JMP` byte scans
   - x86/x64 prologue pattern tables
   - `discover_internal_functions*`
@@ -733,7 +733,7 @@ The next owner is to migrate those remaining analysis surfaces to the same gener
   - result: `0` matches
 - static audit:
   - `rg -n "E8|E9|PROLOGUE|prologue|collect_rel_call_targets|collect_rel_jmp_targets|scan_prologue_functions" crates/fission-loader`
-  - result: no function-discovery heuristic matches remain; residual `E8` hits are detector signature bytes under `crates/fission-loader/src/detector/signatures.rs`
+  - result: no function-discovery shortcut matches remain; residual `E8` hits are detector signature bytes under `crates/fission-loader/src/detector/signatures.rs`
 - dependency audit:
   - `rg -n "fission-sleigh|fission_static" crates/fission-loader/Cargo.toml crates/fission-loader/src`
   - result: `0` matches
@@ -1528,7 +1528,7 @@ Invalid P-code shape is now a correctness failure, not a quality degradation buc
 
 ### Result
 
-Loader-selected Ghidra language ids are now the canonical architecture-routing boundary. Wrong-runtime selection from bitness-only heuristics is blocked, and unsupported machine tuples fail closed instead of silently decoding as x86.
+Loader-selected Ghidra language ids are now the canonical architecture-routing boundary. Wrong-runtime selection from bitness-only shortcuts is blocked, and unsupported machine tuples fail closed instead of silently decoding as x86.
 
 ### Remaining risk / next owner
 

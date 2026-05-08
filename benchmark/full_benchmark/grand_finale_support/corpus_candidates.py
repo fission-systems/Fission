@@ -75,11 +75,6 @@ def explicit_fact_total(entry: dict[str, Any]) -> int:
     )
 
 
-def preview_hint_total(entry: dict[str, Any]) -> int:
-    stats = entry.get("preview_hint_stats") or {}
-    return sum(int(value or 0) for value in stats.values())
-
-
 def source_is_preview_aligned(source_meta: dict[str, Any] | None) -> bool:
     if not source_meta:
         return True
@@ -105,22 +100,6 @@ def candidate_passes_explicit_quality_prefilter(
         and bool(entry.get("preview_direct_success"))
         and not bool(entry.get("has_indirect_control_flow"))
         and int(entry.get("pcode_op_count", 0) or 0) <= 800
-    )
-
-
-def candidate_passes_heuristic_quality_prefilter(entry: dict[str, Any]) -> bool:
-    reason_tags = set(entry.get("reason_tags") or [])
-    return (
-        bool(entry.get("preview_direct_success"))
-        and not bool(entry.get("has_indirect_control_flow"))
-        and (
-            preview_hint_total(entry) > 0
-            or bool(
-                reason_tags.intersection(
-                    {"heuristic_pointer_alias", "heuristic_local_surface", "slot_alias_candidate"}
-                )
-            )
-        )
     )
 
 

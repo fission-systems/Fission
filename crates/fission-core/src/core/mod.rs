@@ -4,7 +4,7 @@
 //! - config: Centralized configuration management
 //! - path_config: Resource path resolution (FID, GDT, signatures)
 //! - resources: `ResourceProvider` — single entry for runtime resource paths
-//! - evidence_policy: Central numeric thresholds for identity / packed-score heuristics
+//! - evidence_policy: Central numeric thresholds for identity / packed-score evidence
 //! - constants: Magic bytes, offsets, and other constants
 //! - errors: Unified error types and Result alias
 //! - logging: Level-based logging with file output
@@ -18,9 +18,9 @@ pub mod evidence_policy;
 pub mod logging;
 pub mod models;
 pub mod path_config;
+pub mod prelude;
 pub mod resource_roots;
 pub mod resources;
-pub mod prelude;
 pub mod settings;
 pub mod toml_config;
 pub mod utils;

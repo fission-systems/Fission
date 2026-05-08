@@ -158,7 +158,7 @@ pub(super) fn print_binary_info(
                 stdout,
                 "\x1b[1;36m──────────────────────────────────────────────────────────\x1b[0m"
             )?;
-            writeln!(stdout, "\x1b[1;35mDetections\x1b[0m (heuristics + DiE)")?;
+            writeln!(stdout, "\x1b[1;35mDetections\x1b[0m (rules + DiE)")?;
             if dr.detections.is_empty() {
                 writeln!(stdout, "  (none)")?;
             } else {
@@ -211,18 +211,14 @@ pub(super) fn print_binary_info(
                     writeln!(
                         stdout,
                         "  identity.die_compat: rules {}/{} supported, sigs matched {}",
-                        dc.rules_supported,
-                        dc.rules_seen,
-                        dc.signatures_matched
+                        dc.rules_supported, dc.rules_seen, dc.signatures_matched
                     )?;
                 }
                 if let Some(ref wc) = rep.winapi_catalog {
                     writeln!(
                         stdout,
                         "  identity.winapi_catalog: IAT symbols {} catalog hits {} misses {}",
-                        wc.symbols_considered,
-                        wc.symbols_in_catalog,
-                        wc.symbols_not_in_catalog
+                        wc.symbols_considered, wc.symbols_in_catalog, wc.symbols_not_in_catalog
                     )?;
                 }
                 writeln!(

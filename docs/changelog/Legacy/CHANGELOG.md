@@ -327,7 +327,7 @@ This wave stayed diagnostic-only. It does not synthesize merge bindings, alter r
     - `JoinCrossesSwitchBoundary`
     - `JoinNotReachableFromEvent`
     - `JoinDominanceUnknown`
-    - `JoinRejectedByCurrentHeuristic`
+    - `JoinRejectedByCurrentShortcut`
     - `Unknown`
   - `ForwardJoinNotSelectedProof`
   - `MaterializeOwnerRepartition` now also tracks:
@@ -336,7 +336,7 @@ This wave stayed diagnostic-only. It does not synthesize merge bindings, alter r
   - shortest forward path recovery for event-to-join inspection
   - switch-boundary detection on the chosen path
   - `describe_forward_join_not_selected_proof(...)`
-  - rejection classification using reachability, postdom evidence, loop-back reachability, ambiguous predecessor count, and heuristic fallback
+  - rejection classification using reachability, postdom evidence, loop-back reachability, ambiguous predecessor count, and shortcut fallback
 - [`trace.rs`](../../crates/fission-pcode/src/nir/builder/materialize/trace.rs) now emits:
   - `forward-join-not-selected-proof output=... block=... op_seq=... event_block=... selected_merge_block=... forward_join_block=... forward_join_distance=... forward_join_predecessor_count=... forward_join_successor_count=... event_reaches_forward_join=... forward_join_postdominates_event=... consumer_kind=... rhs_kind=... rejected_reason=...`
   - repartition summary family:
@@ -1914,7 +1914,7 @@ Observed state:
 - however, the new proof layer shows that all currently observed cross-block cases remain non-accepting:
   - `narrow_candidate=false = 192`
   - no live `narrow_candidate=true` sites were observed in the targeted trace
-- the blocking proof fields are concrete, not heuristic:
+- the blocking proof fields are concrete, not shortcut:
   - `def_successor_count=2` on the live `SuccessorBlock` cases
   - `no_redefinition_before_consumer=false` on both `SuccessorBlock` and `PostDominatorBlock`
   - representative examples:
@@ -3848,7 +3848,7 @@ The redirect target is now resolved to the terminal join label in the forward ch
 - nested-after-label cases (like `0x140008090`) remain rejected
 - pre-segment nested/nonlocal refs remain rejected
 - `payload_crosses_join` remains forbidden
-- `nested_tail_escape` heuristics unchanged
+- `nested_tail_escape` shortcuts unchanged
 
 **Implementation**:
 
@@ -3867,7 +3867,7 @@ The redirect target is now resolved to the terminal join label in the forward ch
 **Key design decisions**:
 
 1. **Priority**: Forward-chain over immediate-next when external top-level-goto is present, ensuring we don't leave legal redirection opportunities on the table for the target use case.
-2. **Reuse**: No new state machines or heuristics; borrowing promotion_graph's proven cycle-safe chain traversal and segment classification.
+2. **Reuse**: No new state machines or shortcuts; borrowing promotion_graph's proven cycle-safe chain traversal and segment classification.
 3. **Safety**: Nested refs or pre-segment refs still trigger `AliasHasNonlocalRef` rejection; this patch only widens the **top-level-to-top-level** path.
 
 ### Guarded-tail nested-tail terminal-safe subcase (3rd wave)
@@ -4190,7 +4190,7 @@ This wave moved the row-fidelity fix back to the canonical owner. Instead of try
 
 - [`types.rs`](crates/fission-pcode/src/nir/types.rs) adds `NirBindingOrigin::TempPreserved` plus helper predicates so preserved materialization is a first-class canonical contract rather than a name-only convention.
 - [`mod.rs`](crates/fission-pcode/src/nir/builder/mod.rs), [`materialize.rs`](crates/fission-pcode/src/nir/builder/materialize.rs), [`state.rs`](crates/fission-pcode/src/nir/builder/state.rs), [`init.rs`](crates/fission-pcode/src/nir/builder/init.rs), and [`stats.rs`](crates/fission-pcode/src/nir/builder/stats.rs) now mark nontrivial builder-owned representatives as preserved and report `materialization_stabilized_count` from the producer owner.
-- [`passes.rs`](crates/fission-pcode/src/nir/normalize/cleanup/passes.rs) and [`run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now honor preserved materialization during cleanup instead of re-inlining nontrivial predicate-carried temps on a pure single-use heuristic.
+- [`passes.rs`](crates/fission-pcode/src/nir/normalize/cleanup/passes.rs) and [`run.rs`](crates/fission-pcode/src/nir/normalize/pipeline/run.rs) now honor preserved materialization during cleanup instead of re-inlining nontrivial predicate-carried temps on a pure single-use shortcut.
 - [`defuse.rs`](crates/fission-pcode/src/nir/normalize/analysis/defuse.rs), [`phi_recovery.rs`](crates/fission-pcode/src/nir/normalize/recovery/phi_recovery.rs), [`call_artifact.rs`](crates/fission-pcode/src/nir/normalize/idioms/call_artifact.rs), [`slots.rs`](crates/fission-pcode/src/nir/normalize/memory/slots.rs), and [`typed_facts.rs`](crates/fission-pcode/src/nir/normalize/memory/typed_facts.rs) now treat `TempPreserved` as temp-like where required, keeping the analysis contract aligned with builder ownership.
 - [`terminator.rs`](crates/fission-pcode/src/nir/builder/terminator.rs) now preserves duplicate ordinal successors in `BranchInd` lowering so many-to-one dispatcher surfaces no longer collapse away ordinal case information before structuring.
 - [`build.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/build.rs), [`summary.rs`](crates/fission-cli/src/cli/oneshot/decompile/nir_candidates/summary.rs), [`routing.rs`](crates/fission-static/src/analysis/decomp/nir/routing.rs), and [`render.rs`](crates/fission-static/src/analysis/decomp/nir/render.rs) now stay on canonical `NirBuildStats` / `IndirectControlClassification` instead of rebuilding active-path indirect semantics from raw observations.
@@ -5098,7 +5098,7 @@ This wave moves three pieces of semantic ownership back into the Rust-only canon
   - `LoopExit`
   - `SwitchShape`
   - `Budget`
-- [`quality.rs`](crates/fission-automation/src/report/quality.rs) and [`insights.rs`](crates/fission-automation/src/report/insights.rs) now consume those family counters directly, instead of recomputing structuring policy from downstream subtype-specific heuristics.
+- [`quality.rs`](crates/fission-automation/src/report/quality.rs) and [`insights.rs`](crates/fission-automation/src/report/insights.rs) now consume those family counters directly, instead of recomputing structuring policy from downstream subtype-specific shortcuts.
 
 #### Duplicate-logic audit
 
@@ -5698,7 +5698,7 @@ This update completes the "HIR 품질 강화 5단계" plan.  All three passes ar
 
 ### HIR Quality Phase 4 — Use-Driven Type Propagation, Pointer Arithmetic Recovery, Return Type Inference, Goto Reduction
 
-This update completes the "HIR 품질 강화 4단계" plan.  All passes are algorithm-based, binary-agnostic, and heuristic-free.
+This update completes the "HIR 품질 강화 4단계" plan.  All passes are algorithm-based, binary-agnostic, and shortcut-free.
 
 #### fission-pcode — NIR/HIR Normalization
 
@@ -5776,7 +5776,7 @@ This update completes the "HIR Expressiveness Enhancement Phase 3" plan.  All im
   - 4 unit tests: diamond, linear chain, nested diamond, single-node edge cases.
 
 - **Postdominance-Guided if-then-else Structuring** (`structuring/conditionals/if_else.rs`, `structuring/driver.rs`)
-  - `try_reduce_if_else_with_follow`: new reducer that uses the precomputed `follow_blocks[idx]` (nearest common postdominator of the branch successors) as the authoritative join point, bypassing the heuristic `shared_forward_linear_exit` probe.
+  - `try_reduce_if_else_with_follow`: new reducer that uses the precomputed `follow_blocks[idx]` (nearest common postdominator of the branch successors) as the authoritative join point, bypassing the shortcut `shared_forward_linear_exit` probe.
   - Wired into `build_multiblock_body` as a higher-priority attempt before the existing `try_lower_if_else`, converting previously unstructured if-else regions into clean `HirStmt::If { then_body, else_body }`.
   - `follow_blocks` now uses `ImmPostDomTree::nearest_common_postdominator` (Cooper) instead of `PostDomTree::nearest_common_postdominator` (set intersection).
 
@@ -5795,7 +5795,7 @@ All 310 `fission-pcode` unit tests pass.
 
 ### HIR Dataflow Quality Pass — Type Inference, Switch Discriminant Recovery, Cast Elision, DefUse, Phi Coalescing, SubPiece Rules, FID Signatures, Decode Retry
 
-This update is a broad quality sweep across the NIR/HIR normalization pipeline, the x86 lifter decoder, and the signature matching subsystem.  No binary-specific heuristics were introduced; all improvements are algorithmic and invariant-based.
+This update is a broad quality sweep across the NIR/HIR normalization pipeline, the x86 lifter decoder, and the signature matching subsystem.  No binary-specific shortcuts were introduced; all improvements are algorithmic and invariant-based.
 
 #### fission-pcode — NIR/HIR Normalization
 
@@ -5833,7 +5833,7 @@ This update is a broad quality sweep across the NIR/HIR normalization pipeline, 
   - `BranchInd` handling in `terminator.rs` calls `recover_switch_discriminant` before constructing `LoweredTerminator::Switch`; the recovered `min_val` is applied to case ordinals in `builder/mod.rs`, `structuring/driver.rs`, `structuring/linear.rs`, and `structuring/loops.rs`.
 
 - **ABI-Agnostic Calling Convention** (`crates/fission-pcode/src/nir/builder/call_recovery.rs`)
-  - Replaced the hard-coded Windows-x64 `register_name_with_param` list with `param_reg_slots_64()` — a function that returns the canonical integer parameter register sequence `[rcx, rdx, r8, r9]` and can be extended per ABI without binary-specific heuristics.
+  - Replaced the hard-coded Windows-x64 `register_name_with_param` list with `param_reg_slots_64()` — a function that returns the canonical integer parameter register sequence `[rcx, rdx, r8, r9]` and can be extended per ABI without binary-specific shortcuts.
 
 - **Loop Analysis** (`crates/fission-pcode/src/nir/structuring/loop_analysis.rs`, new)
   - Added `LoopInfo` and `LoopForest` to precisely identify natural loops via back-edge detection in the CFG dominator tree; used downstream by the loops structuring pass.
@@ -6276,7 +6276,7 @@ Refactored `fission-sleigh` into a folder-tree module layout for easier long-ter
 
 ### Algorithmic Loop Structuring and Unbounded Region Recovery
 
-Replaced lexical, position-based heuristics with algorithmic validations for `For` loop synthesis, and lifted artificial search bounds during irreducible CFG region recovery.
+Replaced lexical, position-based shortcuts with algorithmic validations for `For` loop synthesis, and lifted artificial search bounds during irreducible CFG region recovery.
 
 #### Changed
 
@@ -6919,7 +6919,7 @@ This refactor wave makes the NIR layer materially easier to navigate by moving t
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
 
-This step advances structuring from local heuristic-style approximations toward graph-theoretic analysis primitives, while preserving conservative fallback behavior.
+This step advances structuring from local shortcut-style approximations toward graph-theoretic analysis primitives, while preserving conservative fallback behavior.
 
 #### Changed
 
@@ -7102,12 +7102,12 @@ This patch removes block-index monotonicity assumptions from localized follow di
 #### Added
 
 - regression test: `region_follow_discovery_accepts_non_monotonic_acyclic_window`
-- regression test: `region_follow_discovery_rejects_local_cycle_without_index_heuristic`
+- regression test: `region_follow_discovery_rejects_local_cycle_without_index_shortcut`
 
 #### Validation
 
 - `cargo test -p fission-pcode region_follow_discovery_accepts_non_monotonic_acyclic_window -- --nocapture` (pass)
-- `cargo test -p fission-pcode region_follow_discovery_rejects_local_cycle_without_index_heuristic -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_follow_discovery_rejects_local_cycle_without_index_shortcut -- --nocapture` (pass)
 - `cargo test -p fission-pcode region_follow_discovery_orders_multiple_candidates_closest_to_join_first -- --nocapture` (pass)
 - `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
 - `cargo test -p fission-automation` (pass)
@@ -7158,7 +7158,7 @@ This patch focused on removing opaque/generic arm-body failure reporting from co
 
 ### P5H3H - Algorithmic Arm-Body Failure Refinement and Deterministic Follow Retry
 
-This patch continues the heuristic-to-algorithm transition by refining conditional-tail arm-body failure handling and making shared-follow retries deterministic over validated local postdom candidates.
+This patch continues the shortcut-to-algorithm transition by refining conditional-tail arm-body failure handling and making shared-follow retries deterministic over validated local postdom candidates.
 
 #### Changed
 
@@ -7512,7 +7512,7 @@ It also extended the localized structuring recovery path with reject-reason inst
 - new `NirBuildStats` counters for localized recovery diagnosis:
   - `forced_linear_structuring_count`
   - `region_linearize_structuring_count`
-  - `region_linearize_heuristic_exit_count`
+  - `region_linearize_shortcut_exit_count`
   - `region_linearize_rejected_non_structuring_failure_count`
   - `region_linearize_rejected_no_exit_count`
   - `region_linearize_rejected_body_lowering_failed_count`
@@ -7527,7 +7527,7 @@ It also extended the localized structuring recovery path with reject-reason inst
   - top `NirBuildStats` counters
 - Fission NIR build stats are now preserved even when `build_hir` exits through a structuring error path
 - failed `region_linearized` attempts now surface partial build stats into the later forced-linear recovery result, so localized recovery rejection is visible in corpus summaries
-- localized recovery now tries a narrow nearby-join exit heuristic instead of relying only on a single `linear_exit(start_idx)` result
+- localized recovery now tries a narrow nearby-join exit shortcut instead of relying only on a single `linear_exit(start_idx)` result
 
 #### Validation
 
@@ -7858,7 +7858,7 @@ This patch promoted the recovery-eligible structuring failures into typed previe
   - coarse kind: `preview_structuring_failure`
   - exact signature: typed structuring-origin signature
 - `UnsupportedCfgBranchTarget` remains on the separate branch-target / unsupported-CFG line and is not mixed into the structuring-recovery lane
-- `linearized_structuring_retry` is now fed from explicit structuring-origin surfacing rather than heuristic string matching alone
+- `linearized_structuring_retry` is now fed from explicit structuring-origin surfacing rather than shortcut string matching alone
 
 #### Validation
 
@@ -8272,7 +8272,7 @@ This moves the project past “why are explicit facts missing?” into a narrowe
 
 This round changed the benchmark/corpus workflow from probe-first scanning to inventory-first filtering.
 
-The key architectural shift is that benchmark scripts no longer need to treat address-targeted preview scans as the canonical source of truth. Instead, the CLI can now export whole-binary function facts as a structured inventory, and corpus generation can filter that inventory into strict explicit, heuristic, aligned, and blocked views.
+The key architectural shift is that benchmark scripts no longer need to treat address-targeted preview scans as the canonical source of truth. Instead, the CLI can now export whole-binary function facts as a structured inventory, and corpus generation can filter that inventory into strict explicit, shortcut, aligned, and blocked views.
 
 #### Added
 
@@ -8336,7 +8336,7 @@ The key architectural shift is that benchmark scripts no longer need to treat ad
 #### Current State
 
 - address-targeted scans remain useful, but they are now probe/debug tooling rather than the preferred canonical data source
-- strict explicit / heuristic / blocked / aligned analysis can now be driven from one whole-binary inventory export
+- strict explicit / shortcut / blocked / aligned analysis can now be driven from one whole-binary inventory export
 - inventory rows now expose whether explicit-fact scarcity appears to come from missing source facts, inventory surface gaps, or preview-stage rejection
 
 ## 2026-03-18

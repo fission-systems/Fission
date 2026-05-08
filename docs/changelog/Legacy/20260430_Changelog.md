@@ -9,7 +9,7 @@ Rolling notes for work landed on this date. Sections are independent topics.
 
 ### Summary
 
-Closed five remaining runtime/compiler gaps against Ghidra Sleigh semantics using SLA-driven rules only: no architecture-specific hardcoding, no decode heuristics, and no numeric approximations where Ghidra uses exact definitions (notably `CurSpaceSize` and `InstNext2`).
+Closed five remaining runtime/compiler gaps against Ghidra Sleigh semantics using SLA-driven rules only: no architecture-specific hardcoding, no decode shortcuts, and no numeric approximations where Ghidra uses exact definitions (notably `CurSpaceSize` and `InstNext2`).
 
 ### Gaps
 
@@ -230,7 +230,7 @@ Follow-up: run the raw P-code lane on an actual extracted or downloaded PuTTY PE
 ## Exact Container Classification
 
 Added the implementation plan for container-aware loader routing without string
-or name heuristics. Fission now treats container inputs as a distinct pre-loader
+or name shortcuts. Fission now treats container inputs as a distinct pre-loader
 classification owner rather than falling through to generic unknown executable
 loading.
 
@@ -469,7 +469,7 @@ the 32-bit x86 EverPlanet rows. No approximate P-code path was added.
 
 ### Summary
 
-Overhauled `fission-sleigh` to align its compiler and runtime architecture 1:1 with Ghidra's Sleigh implementation. All architecture hardcodings and heuristics removed; `.sla` is now the sole source of truth for all space indices, unique base offsets, register space identification, and P-code template evaluation.
+Overhauled `fission-sleigh` to align its compiler and runtime architecture 1:1 with Ghidra's Sleigh implementation. All architecture hardcodings and shortcuts removed; `.sla` is now the sole source of truth for all space indices, unique base offsets, register space identification, and P-code template evaluation.
 
 ### Phase 1 — SLA Metadata-Driven Hardcoding Removal
 
@@ -495,7 +495,7 @@ Modified files:
 
 - `crates/fission-sleigh/src/runtime/spine/compiled_table/strategy.rs`: Removed dead `shared_token_cursor` check for SLA-migrated frontends
 - `crates/fission-sleigh/src/runtime/spine/walker.rs`: Added `instruction_bits(bytes, start_bit, bit_size)` matching Ghidra's `ParserWalker::getInstructionBits()` for unified SLA-native bit extraction
-- `crates/fission-sleigh/src/runtime/spine/compiled_table/token.rs`: Documented `CompiledTokenCursorPolicy` as x86-specific migration debt; prohibits adding new architecture-specific heuristics
+- `crates/fission-sleigh/src/runtime/spine/compiled_table/token.rs`: Documented `CompiledTokenCursorPolicy` as x86-specific migration debt; prohibits adding new architecture-specific shortcuts
 
 ### Phase 3 — ConstructTpl Complete Execution
 
@@ -559,13 +559,13 @@ python3 benchmark/raw_p_code_benchmark/run_architecture_parallel.py \
 ### Summary
 
 Fixed the final parity gap (94.1% → 100%) in the canonical 17-row x86-64 benchmark.
-The root cause was a heuristic in `template_eval.rs` that incorrectly classified any non-unique-space RAM branch target as `BRANCHIND`, while Ghidra determines BRANCH vs BRANCHIND **solely from the SLA template opcode**, not from the target's address space.
+The root cause was a shortcut in `template_eval.rs` that incorrectly classified any non-unique-space RAM branch target as `BRANCHIND`, while Ghidra determines BRANCH vs BRANCHIND **solely from the SLA template opcode**, not from the target's address space.
 
 ### Root Cause
 
 | Issue | Before | After |
 |---|---|---|
-| `jmp rel32` emitted `BRANCHIND` | `is_indirect` heuristic: `target.space_id != unique_space_index` → `BRANCHIND` | SLA opcode `Branch` always emits `BRANCH` |
+| `jmp rel32` emitted `BRANCHIND` | `is_indirect` shortcut: `target.space_id != unique_space_index` → `BRANCHIND` | SLA opcode `Branch` always emits `BRANCH` |
 | `BRANCHIND` / `CALLIND` SLA opcodes fell through to `Unsupported` | `map_pcode_opcode` had no mapping | Mapped to `BranchInd` / `CallInd` |
 | No `CALLIND` emitter method | `emit_call_ind` missing | Added to `RuntimePcodeEmitter` |
 
@@ -576,7 +576,7 @@ The root cause was a heuristic in `template_eval.rs` that incorrectly classified
 | `compiler/ir/types.rs` | Added `BranchInd`, `CallInd` variants to `CompiledOpTplOpcode`; `as_str()` extended |
 | `compiler/sla/templates.rs` | `map_pcode_opcode` maps `PcodeOpcode::BranchInd` → `BranchInd`, `PcodeOpcode::CallInd` → `CallInd` |
 | `runtime/spine/emitter.rs` | Added `emit_call_ind` |
-| `runtime/spine/compiled_table/template_eval.rs` | `Branch` handler: removed `is_indirect` heuristic; added `BranchInd` and `CallInd` handlers |
+| `runtime/spine/compiled_table/template_eval.rs` | `Branch` handler: removed `is_indirect` shortcut; added `BranchInd` and `CallInd` handlers |
 
 ### Ghidra Alignment Principle
 

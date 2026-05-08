@@ -7,10 +7,7 @@
 #[must_use]
 pub fn symbol_for_win_api_database_lookup(name: &str) -> Option<&str> {
     let name = name.trim();
-    let after_bang = name
-        .rsplit_once('!')
-        .map(|(_, s)| s.trim())
-        .unwrap_or(name);
+    let after_bang = name.rsplit_once('!').map(|(_, s)| s.trim()).unwrap_or(name);
 
     let sym = after_bang
         .strip_prefix("__imp__")
@@ -41,7 +38,10 @@ mod tests {
 
     #[test]
     fn imp_prefix() {
-        assert_eq!(symbol_for_win_api_database_lookup("__imp_CloseHandle"), Some("CloseHandle"));
+        assert_eq!(
+            symbol_for_win_api_database_lookup("__imp_CloseHandle"),
+            Some("CloseHandle")
+        );
     }
 
     #[test]

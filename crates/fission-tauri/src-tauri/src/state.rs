@@ -3,7 +3,7 @@
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
-use crate::services::cross_image::{AutoRenameKind, PropagationReason};
+use crate::services::cross_image::AutoRenameKind;
 use fission_loader::loader::LoadedBinary;
 use fission_plugin::plugin::PluginManager;
 use fission_static::analysis::decomp::{FactProvenance, FactStore};
@@ -49,10 +49,6 @@ pub struct InnerState {
 fn fact_provenance_from_auto(reason: AutoRenameKind) -> FactProvenance {
     match reason {
         AutoRenameKind::StrongFid => FactProvenance::StrongFid,
-        AutoRenameKind::CrossImage(PropagationReason::ImportExport) => {
-            FactProvenance::CrossImageImportExport
-        }
-        AutoRenameKind::CrossImage(PropagationReason::Thunk) => FactProvenance::CrossImageThunk,
     }
 }
 

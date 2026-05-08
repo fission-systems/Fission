@@ -70,8 +70,6 @@ def _provenance_metrics(entry: dict[str, Any]) -> dict[str, int]:
         "function_provenance_startup_or_entry_count",
         "function_provenance_import_thunk_count",
         "function_provenance_forwarder_thunk_count",
-        "function_provenance_compiler_runtime_count",
-        "function_provenance_user_heuristic_count",
         "function_provenance_unknown_count",
         "external_symbol_identity_total",
         "external_symbol_va_mapping_total",

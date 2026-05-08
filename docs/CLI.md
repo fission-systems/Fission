@@ -347,7 +347,7 @@ If none of those flags are provided, `info` falls back to the base metadata view
 
 ### Detection (`--detections`)
 
-Add `--detections` on the base metadata path (without `--sections`, `--imports`, or `--exports`) to run integrated binary identification: loader heuristics plus Detect It Easy-style signatures mirrored under `utils/signatures`. Human output appends a **Detections** block; with `--json`, the payload gains a `detections` array (`detection_type`, `name`, `version`, `details`, `confidence`).
+Add `--detections` on the base metadata path (without `--sections`, `--imports`, or `--exports`) to run integrated binary identification: loader rules plus Detect It Easy-style signatures mirrored under `utils/signatures`. Human output appends a **Detections** block; with `--json`, the payload gains a `detections` array (`detection_type`, `name`, `version`, `details`, `confidence`).
 
 ```bash
 fission_cli info app.exe --detections

@@ -1,5 +1,5 @@
-use fission_loader::loader::LoadedBinary;
 use crate::{NirRenderOptions, PcodeFunction};
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 
 pub use crate::recovery::{PreviewRoutingDecision, PreviewSelection};
@@ -107,15 +107,15 @@ mod tests {
     use crate::facts::sanitize_nir_symbol_name;
     use crate::render::{build_nir_type_context_from_facts, make_nir_request};
     use crate::worker::nir_worker_timeout_ms;
+    use crate::{
+        CallEdgeKind, CallTargetProvenance, NirRenderOptions, NirTypeContext, PcodeFunction,
+        PreviewCallParamRule, StructuringEngineKind,
+    };
     use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::types::{
         DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
     };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
-    use crate::{
-        CallEdgeKind, CallTargetProvenance, NirRenderOptions, NirTypeContext, PcodeFunction,
-        PreviewCallParamRule, StructuringEngineKind,
-    };
     use std::collections::HashMap;
 
     struct MockNirSource;

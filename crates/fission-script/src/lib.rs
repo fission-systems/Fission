@@ -12,12 +12,12 @@ pub use engine::{check_script, run_script};
 pub use error::ScriptError;
 pub use limits::ScriptLimits;
 pub use result::{
-    LimitsEcho, ScriptDiagnostic, ScriptFinding, ScriptMeta, ScriptRunResult, ScriptRunStatus,
-    SCHEMA_VERSION,
+    LimitsEcho, SCHEMA_VERSION, ScriptDiagnostic, ScriptFinding, ScriptMeta, ScriptRunResult,
+    ScriptRunStatus,
 };
 
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
+use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 
 /// Run SLEIGH-backed function discovery (`Balanced`) so script `binary.functions()` aligns with automated CLI workflows.
 pub fn prepare_binary_for_script(mut binary: LoadedBinary) -> LoadedBinary {
@@ -32,33 +32,30 @@ mod tests {
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn test_binary() -> LoadedBinary {
-        LoadedBinaryBuilder::new(
-            "fixture.bin".into(),
-            DataBuffer::Heap(vec![0_u8; 8]),
-        )
-        .format("TEST")
-        .image_base(0x1000)
-        .is_64bit(false)
-        .add_function(FunctionInfo {
-            name: "main".into(),
-            address: 0x1000,
-            size: 32,
-            is_export: true,
-            is_import: false,
-            external_library: None,
-            ..Default::default()
-        })
-        .add_function(FunctionInfo {
-            name: "puts".into(),
-            address: 0x2000,
-            size: 8,
-            is_export: false,
-            is_import: true,
-            external_library: Some("libc.so".into()),
-            ..Default::default()
-        })
-        .build()
-        .expect("fixture binary")
+        LoadedBinaryBuilder::new("fixture.bin".into(), DataBuffer::Heap(vec![0_u8; 8]))
+            .format("TEST")
+            .image_base(0x1000)
+            .is_64bit(false)
+            .add_function(FunctionInfo {
+                name: "main".into(),
+                address: 0x1000,
+                size: 32,
+                is_export: true,
+                is_import: false,
+                external_library: None,
+                ..Default::default()
+            })
+            .add_function(FunctionInfo {
+                name: "puts".into(),
+                address: 0x2000,
+                size: 8,
+                is_export: false,
+                is_import: true,
+                external_library: Some("libc.so".into()),
+                ..Default::default()
+            })
+            .build()
+            .expect("fixture binary")
     }
 
     #[test]

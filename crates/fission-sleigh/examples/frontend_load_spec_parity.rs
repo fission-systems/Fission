@@ -44,7 +44,10 @@ fn main() -> Result<()> {
     let bytes = binary
         .view_bytes(entry_address, 16)
         .with_context(|| format!("no bytes at 0x{entry_address:x}"))?;
-    let load_spec = binary.load_spec().context("missing BinaryLoadSpec")?.clone();
+    let load_spec = binary
+        .load_spec()
+        .context("missing BinaryLoadSpec")?
+        .clone();
 
     let from_load_spec = RuntimeSleighFrontend::new_for_load_spec(&load_spec)?;
     let from_entry_id = RuntimeSleighFrontend::new_for_language("x86-64")?;

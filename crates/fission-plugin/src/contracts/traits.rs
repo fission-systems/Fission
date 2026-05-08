@@ -1,6 +1,6 @@
 use anyhow::Result;
-use fission_core::common::types::{BinaryInfo, FunctionInfo};
 use fission_core::FISSION_VERSION;
+use fission_core::common::types::{BinaryInfo, FunctionInfo};
 use std::any::Any;
 use std::sync::Arc;
 

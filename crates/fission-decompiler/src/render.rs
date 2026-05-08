@@ -2,12 +2,12 @@ use crate::facts::{build_nir_type_context, refine_nir_type_context_with_callee_e
 use crate::routing::auto_nir_admission_eligible;
 use crate::types::NirWorkerRequest;
 use crate::worker::{execute_nir_worker_request, nir_worker_timeout_ms};
-use fission_loader::loader::LoadedBinary;
 use crate::{
     NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOptimizer,
     PcodeOptimizerConfig, render_nir_with_binary_and_context, render_nir_with_context,
     take_last_nir_build_stats, take_last_nir_hint_stats,
 };
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;

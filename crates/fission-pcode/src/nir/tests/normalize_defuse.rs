@@ -547,10 +547,7 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
             param_binding("param_1", 32),
             param_binding("keep_going", 8),
         ],
-        locals: vec![
-            temp_binding("xVar10", 64),
-            temp_binding("uVar22", 32),
-        ],
+        locals: vec![temp_binding("xVar10", 64), temp_binding("uVar22", 32)],
         return_type: int(64),
         surface_return_type_name: None,
         body: vec![

@@ -476,12 +476,13 @@ fn mask_to_bits(value: i64, bits: u32) -> i64 {
 /// read, because the write itself may be observable through aliased pointers.
 pub(crate) fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
     // Collect pure-temp variable names (including builder-preserved temps).
-    let temp_names: std::collections::HashSet<String> = func
+    let mut temp_names: std::collections::HashSet<String> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like())
         .map(|b| b.name.clone())
         .collect();
+    collect_temp_like_assignment_names(&func.body, &mut temp_names);
     if temp_names.is_empty() {
         return false;
     }
@@ -636,6 +637,67 @@ fn remove_dead_in_stmt_nested(
         }
         _ => {}
     }
+}
+
+fn collect_temp_like_assignment_names(
+    stmts: &[HirStmt],
+    names: &mut std::collections::HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } => {
+                if is_temp_like_assignment_name(name) {
+                    names.insert(name.clone());
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_temp_like_assignment_names(body, names);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_temp_like_assignment_names(std::slice::from_ref(init.as_ref()), names);
+                }
+                if let Some(update) = update {
+                    collect_temp_like_assignment_names(
+                        std::slice::from_ref(update.as_ref()),
+                        names,
+                    );
+                }
+                collect_temp_like_assignment_names(body, names);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_temp_like_assignment_names(then_body, names);
+                collect_temp_like_assignment_names(else_body, names);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_temp_like_assignment_names(&case.body, names);
+                }
+                collect_temp_like_assignment_names(default, names);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn is_temp_like_assignment_name(name: &str) -> bool {
+    name == "result" || name == "retval" || temp_name_suffix(name).is_some()
 }
 
 // ── Forward-scan fix helper (used by cleanup.rs callers) ─────────────────────

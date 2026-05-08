@@ -1,4 +1,4 @@
-//! Heuristic classification: user image vs import/runtime/thunk.
+//! Evidence-backed classification: entry point, imports, and explicit thunks.
 
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use rustc_hash::FxHashMap;
@@ -18,12 +18,6 @@ pub enum FunctionProvenanceKind {
     ImportThunkOrStub,
     /// Loader-resolved thunk with a known forward target.
     ForwarderThunk,
-    /// Known compiler/security runtime helper inside the image.
-    CompilerRuntimeHelper,
-    /// Typical recovered body (`FUN_`/`sub_`) — weak evidence.
-    UserCodeHeuristic,
-    /// Reserved for static archive linkage hints (unset in v1).
-    StaticLibraryHeuristic,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,9 +34,7 @@ impl FunctionProvenanceRecord {
     pub fn exclude_from_default_batch_decompile(&self) -> bool {
         matches!(
             self.kind,
-            FunctionProvenanceKind::ImportThunkOrStub
-                | FunctionProvenanceKind::ForwarderThunk
-                | FunctionProvenanceKind::CompilerRuntimeHelper
+            FunctionProvenanceKind::ImportThunkOrStub | FunctionProvenanceKind::ForwarderThunk
         )
     }
 }
@@ -52,19 +44,10 @@ pub struct FunctionProvenanceIndex {
     pub records: FxHashMap<u64, FunctionProvenanceRecord>,
 }
 
-fn is_compiler_runtime_helper_name(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    n.contains("register_frame_ctor")
-        || n.contains("crtstartup")
-        || n.contains("__dyn_tls_")
-        || n.contains("__security_check_cookie")
-        || n.contains("__chkstk")
-        || n.contains("__cpu_features_init")
-        || n.contains("_guard_check_icall")
-        || n.contains("__local_stdio_printf_options")
-}
-
-fn merge_record(existing: FunctionProvenanceRecord, incoming: FunctionProvenanceRecord) -> FunctionProvenanceRecord {
+fn merge_record(
+    existing: FunctionProvenanceRecord,
+    incoming: FunctionProvenanceRecord,
+) -> FunctionProvenanceRecord {
     match incoming.confidence.cmp(&existing.confidence) {
         std::cmp::Ordering::Greater => incoming,
         std::cmp::Ordering::Less => existing,
@@ -131,27 +114,6 @@ fn classify_function(
         };
     }
 
-    if is_compiler_runtime_helper_name(&f.name) {
-        evidence.push(format!("name_runtime_heuristic={}", f.name));
-        return FunctionProvenanceRecord {
-            address: f.address,
-            kind: FunctionProvenanceKind::CompilerRuntimeHelper,
-            confidence: Confidence::High,
-            evidence,
-        };
-    }
-
-    let is_userish = f.name.starts_with("FUN_") || f.name.starts_with("sub_");
-    if is_userish && !f.is_export {
-        evidence.push("synthetic_sub_or_fun_name".into());
-        return FunctionProvenanceRecord {
-            address: f.address,
-            kind: FunctionProvenanceKind::UserCodeHeuristic,
-            confidence: Confidence::Low,
-            evidence,
-        };
-    }
-
     evidence.push("no_strong_classifier".into());
     FunctionProvenanceRecord {
         address: f.address,
@@ -209,71 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn security_cookie_is_compiler_runtime() {
-        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
-            .format("PE64")
-            .entry_point(0x140001000)
-            .image_base(0x140000000)
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x140001020,
-                virtual_size: 64,
-                file_offset: 0,
-                file_size: 64,
-                is_executable: true,
-                is_readable: true,
-                is_writable: false,
-            })
-            .add_function(FunctionInfo {
-                name: "__security_check_cookie".into(),
-                address: 0x140001020,
-                size: 32,
-                is_export: false,
-                is_import: false,
-                ..Default::default()
-            })
-            .build()
-            .expect("build");
-        let idx = build_function_provenance_index(&bin, None);
-        let r = idx.records.get(&0x140001020).unwrap();
-        assert_eq!(r.kind, FunctionProvenanceKind::CompilerRuntimeHelper);
-        assert!(r.exclude_from_default_batch_decompile());
-    }
-
-    #[test]
-    fn crt_startup_is_compiler_runtime() {
-        let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
-            .format("PE64")
-            .entry_point(0x140001000)
-            .image_base(0x140000000)
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x140001020,
-                virtual_size: 64,
-                file_offset: 0,
-                file_size: 64,
-                is_executable: true,
-                is_readable: true,
-                is_writable: false,
-            })
-            .add_function(FunctionInfo {
-                name: "__tmainCRTStartup".into(),
-                address: 0x140001020,
-                size: 32,
-                is_export: false,
-                is_import: false,
-                ..Default::default()
-            })
-            .build()
-            .expect("build");
-        let idx = build_function_provenance_index(&bin, None);
-        let r = idx.records.get(&0x140001020).unwrap();
-        assert_eq!(r.kind, FunctionProvenanceKind::CompilerRuntimeHelper);
-        assert!(r.exclude_from_default_batch_decompile());
-    }
-
-    #[test]
-    fn dyn_tls_helper_is_compiler_runtime() {
+    fn runtime_name_without_explicit_evidence_is_unknown() {
         let bin = LoadedBinaryBuilder::new("t.exe".to_string(), DataBuffer::Heap(vec![0u8; 32]))
             .format("PE64")
             .entry_point(0x140001000)
@@ -300,7 +198,7 @@ mod tests {
             .expect("build");
         let idx = build_function_provenance_index(&bin, None);
         let r = idx.records.get(&0x140001020).unwrap();
-        assert_eq!(r.kind, FunctionProvenanceKind::CompilerRuntimeHelper);
-        assert!(r.exclude_from_default_batch_decompile());
+        assert_eq!(r.kind, FunctionProvenanceKind::Unknown);
+        assert!(!r.exclude_from_default_batch_decompile());
     }
 }

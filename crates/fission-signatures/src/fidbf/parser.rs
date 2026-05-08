@@ -74,7 +74,9 @@ mod tests {
 
     #[test]
     fn detects_raw_ghidra_fidbf() {
-        let Some(path) = ResourceProvider::global().paths().get_fid_path(true, Some("vs2019"))
+        let Some(path) = ResourceProvider::global()
+            .paths()
+            .get_fid_path(true, Some("vs2019"))
         else {
             return;
         };

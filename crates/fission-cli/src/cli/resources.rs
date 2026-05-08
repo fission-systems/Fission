@@ -24,10 +24,7 @@ pub fn print_resources_status(json: bool) -> Result<()> {
         "  win32_typeinfo: {:?} (present={})",
         res.win32_typeinfo_dir, res.win32_typeinfo_present
     );
-    println!(
-        "  fid_dir: {:?} (present={})",
-        res.fid_dir, res.fid_present
-    );
+    println!("  fid_dir: {:?} (present={})", res.fid_dir, res.fid_present);
     println!(
         "  die_dir: {:?} (die_corpus_present={})",
         res.die_dir, res.die_corpus_present

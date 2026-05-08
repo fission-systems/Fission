@@ -47,7 +47,7 @@ def _minimal_single_binary_summary(
     owner_alias_unsafe: int = 0,
     generic_local_name_sum: int = 0,
     generic_param_name_sum: int = 0,
-    heuristic_max_brace_nesting_mean: float = 0.0,
+    text_max_brace_nesting_mean: float = 0.0,
     synthetic_helper_call_total: int = 0,
 ) -> dict[str, object]:
     return {
@@ -104,8 +104,8 @@ def _minimal_single_binary_summary(
                     "unknown_type_var_total": 0,
                     "ptr_offset_total": 0,
                     "index_expr_total": 0,
-                    "heuristic_avg_line_length_mean": 0.0,
-                    "heuristic_max_brace_nesting_mean": heuristic_max_brace_nesting_mean,
+                    "text_avg_line_length_mean": 0.0,
+                    "text_max_brace_nesting_mean": text_max_brace_nesting_mean,
                     "synthetic_helper_call_total": synthetic_helper_call_total,
                     "preview_build_stats": {
                         "ghidra_action_stage_count": 6,
@@ -163,8 +163,8 @@ def _minimal_single_binary_summary(
                 "fission": {
                     "generic_local_name_sum": float(generic_local_name_sum),
                     "generic_param_name_sum": float(generic_param_name_sum),
-                    "heuristic_max_brace_nesting_mean": float(
-                        heuristic_max_brace_nesting_mean
+                    "text_max_brace_nesting_mean": float(
+                        text_max_brace_nesting_mean
                     ),
                     "synthetic_helper_call_total": float(synthetic_helper_call_total),
                 }
@@ -407,12 +407,12 @@ class CorpusBenchmarkTests(unittest.TestCase):
         baseline = _minimal_single_binary_summary(
             avg_similarity=40.0,
             generic_local_name_sum=4,
-            heuristic_max_brace_nesting_mean=1.0,
+            text_max_brace_nesting_mean=1.0,
         )
         current = _minimal_single_binary_summary(
             avg_similarity=41.0,
             generic_local_name_sum=2,
-            heuristic_max_brace_nesting_mean=1.2,
+            text_max_brace_nesting_mean=1.2,
         )
         baseline["pairwise"]["pyghidra_vs_fission"]["comparisons"] = [
             {
@@ -438,18 +438,18 @@ class CorpusBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["regressions"], [])
-        self.assertIn("shape_heuristic_max_brace_nesting_mean", report["waived_regressions"][0])
+        self.assertIn("shape_text_max_brace_nesting_mean", report["waived_regressions"][0])
 
     def test_baseline_gate_keeps_brace_nesting_regression_with_goto_increase(self) -> None:
         baseline = _minimal_single_binary_summary(
             avg_similarity=40.0,
             generic_local_name_sum=4,
-            heuristic_max_brace_nesting_mean=1.0,
+            text_max_brace_nesting_mean=1.0,
         )
         current = _minimal_single_binary_summary(
             avg_similarity=41.0,
             generic_local_name_sum=2,
-            heuristic_max_brace_nesting_mean=1.2,
+            text_max_brace_nesting_mean=1.2,
         )
         current["summary"]["engines"]["fission"]["goto_total"] = 1
         current["summary"]["shape_drift_metrics"]["fission"]["goto_total"] = 1.0
@@ -477,7 +477,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "failed")
         self.assertIn(
-            "shape_heuristic_max_brace_nesting_mean: 1.000 -> 1.200",
+            "shape_text_max_brace_nesting_mean: 1.000 -> 1.200",
             report["regressions"],
         )
 
@@ -1307,13 +1307,13 @@ class CorpusBenchmarkTests(unittest.TestCase):
         previous = _minimal_single_binary_summary(
             owner_alias_unsafe=1,
             generic_local_name_sum=1,
-            heuristic_max_brace_nesting_mean=1.0,
+            text_max_brace_nesting_mean=1.0,
             synthetic_helper_call_total=0,
         )
         current = _minimal_single_binary_summary(
             owner_alias_unsafe=2,
             generic_local_name_sum=2,
-            heuristic_max_brace_nesting_mean=2.0,
+            text_max_brace_nesting_mean=2.0,
             synthetic_helper_call_total=1,
         )
 
@@ -1328,7 +1328,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(metrics["shape_generic_local_name_sum"]["status"], "degraded")
         self.assertEqual(
-            metrics["shape_heuristic_max_brace_nesting_mean"]["status"],
+            metrics["shape_text_max_brace_nesting_mean"]["status"],
             "degraded",
         )
         self.assertEqual(

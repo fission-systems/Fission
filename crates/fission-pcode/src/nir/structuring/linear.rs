@@ -167,24 +167,56 @@ impl<'a> PreviewBuilder<'a> {
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
-                    if self.next_block_address(idx) != Some(target) {
+                    if let Some(target_idx) = self.find_block_index_by_address(target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        body.push(HirStmt::Return(Some(expr)));
+                    } else if self.next_block_address(idx) != Some(target) {
                         body.push(HirStmt::Goto(block_label(target)));
+                    }
+                }
+                LoweredTerminator::Fallthrough(Some(target)) => {
+                    if let Some(target_idx) = self.find_block_index_by_address(target)
+                        && let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
+                    {
+                        body.push(HirStmt::Return(Some(expr)));
                     }
                 }
                 LoweredTerminator::Cond {
                     cond,
                     true_target,
                     false_target,
-                } => body.push(HirStmt::If {
-                    cond,
-                    then_body: vec![HirStmt::Goto(block_label(true_target))],
-                    else_body: false_target
-                        .map(block_label)
-                        .map(HirStmt::Goto)
-                        .into_iter()
-                        .collect(),
-                }),
-                LoweredTerminator::Fallthrough(_) => {}
+                } => {
+                    let then_body =
+                        if let Some(true_idx) = self.find_block_index_by_address(true_target)
+                            && let Some(expr) =
+                                self.lower_return_join_expr_for_predecessor(idx, true_idx)?
+                        {
+                            vec![HirStmt::Return(Some(expr))]
+                        } else {
+                            vec![HirStmt::Goto(block_label(true_target))]
+                        };
+                    let else_body = if let Some(false_target) = false_target {
+                        if let Some(false_idx) = self.find_block_index_by_address(false_target)
+                            && let Some(expr) =
+                                self.lower_return_join_expr_for_predecessor(idx, false_idx)?
+                        {
+                            vec![HirStmt::Return(Some(expr))]
+                        } else {
+                            vec![HirStmt::Goto(block_label(false_target))]
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    body.push(HirStmt::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    });
+                }
+                LoweredTerminator::Fallthrough(None) => {}
                 LoweredTerminator::Unsupported {
                     evidence,
                     target_expr,
@@ -564,6 +596,11 @@ impl<'a> PreviewBuilder<'a> {
                         ));
                     };
                     if exit == LinearExit::Join(next_idx) {
+                        if let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, next_idx)?
+                        {
+                            body.push(HirStmt::Return(Some(expr)));
+                        }
                         return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
                     }
                     if body.is_empty()

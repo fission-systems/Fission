@@ -129,7 +129,10 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
             ));
         }
     }
-    assert!(total > 0, "packaged x86-64 .sla should provide canonical constructors");
+    assert!(
+        total > 0,
+        "packaged x86-64 .sla should provide canonical constructors"
+    );
     assert!(
         unsupported.is_empty(),
         "packaged x86-64 .sla constructors must all be runtime-ready: {:?}",
@@ -195,8 +198,7 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
         ("codegen.rs", codegen),
     ] {
         assert!(
-            !source.contains("TokenFieldExtraction")
-                && !source.contains("token_field_extraction"),
+            !source.contains("TokenFieldExtraction") && !source.contains("token_field_extraction"),
             "{name} still exposes compatibility token-field extraction"
         );
     }

@@ -82,16 +82,13 @@ fn decodes_x86_varnode_list_selector_expressions() {
         .get("avx.sinc:6")
         .expect("AVX constructor using a varnode-list selector expression");
     assert!(
-        constructors
-            .iter()
-            .any(|ctor| ctor.decode_status == CompiledSlaDecodeStatus::Decoded
-                && ctor
-                    .operand_specs
-                    .iter()
-                    .any(|spec| matches!(
-                        spec,
-                        CompiledOperandSpec::SlaVarnodeListExpression { .. }
-                    ))),
+        constructors.iter().any(
+            |ctor| ctor.decode_status == CompiledSlaDecodeStatus::Decoded
+                && ctor.operand_specs.iter().any(|spec| matches!(
+                    spec,
+                    CompiledOperandSpec::SlaVarnodeListExpression { .. }
+                ))
+        ),
         "avx.sinc:6 should decode through a spec-derived varnode-list selector expression"
     );
 }

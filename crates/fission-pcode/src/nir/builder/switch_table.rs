@@ -15,7 +15,7 @@
 /// - the actual discriminant expression (`sel` or `sel - min_val` adjusted)
 /// - the `min_val` base offset for ordinal case values
 ///
-/// This is entirely algorithmic: no binary-specific heuristics, no hard-coded
+/// This is entirely algorithmic: no binary-specific shortcuts, no hard-coded
 /// table sizes.  We accept only structurally clear patterns and fall back to
 /// ordinal indices when the match fails.
 ///

@@ -1,5 +1,5 @@
-use fission_loader::loader::LoadedBinary;
 use crate::{PcodeFunction, Varnode};
+use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 
 #[derive(Debug, Clone)]
@@ -40,17 +40,15 @@ pub(crate) fn decode_rust_sleigh_pcode(
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
 ) -> Result<(PcodeFunction, DecodeDiag), DecodeFailure> {
-    let bytes = binary.view_bytes(entry_address, max_bytes).ok_or_else(|| {
-        DecodeFailure {
-            message: format!(
-                "rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}"
-            ),
+    let bytes = binary
+        .view_bytes(entry_address, max_bytes)
+        .ok_or_else(|| DecodeFailure {
+            message: format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}"),
             diag: DecodeDiag {
                 attempts: 0,
                 stop_reason: "view_bytes_unavailable".into(),
             },
-        }
-    })?;
+        })?;
 
     let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
         message: format!(
@@ -63,15 +61,14 @@ pub(crate) fn decode_rust_sleigh_pcode(
         },
     })?;
 
-    let lifter = RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(|e| {
-        DecodeFailure {
+    let lifter =
+        RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(|e| DecodeFailure {
             message: format!("rust_sleigh: {e:#}"),
             diag: DecodeDiag {
                 attempts: 0,
                 stop_reason: "lifter_init_failed".into(),
             },
-        }
-    })?;
+        })?;
 
     let lift_contract = if continue_past_indirect_branch {
         DecodeContract::decomp_function(instruction_limit)

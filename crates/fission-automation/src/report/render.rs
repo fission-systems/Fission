@@ -178,9 +178,8 @@ pub fn render_markdown(
         diagnosis.aggregate.dominant_diagnosis, diagnosis.aggregate.recommended_next_patch
     ));
     out.push_str(&format!(
-        "- corpus outputs now include `{}` explicit seeds, `{}` heuristic seeds, and `{}` blocked explicit candidates.\n",
+        "- corpus outputs now include `{}` explicit seeds and `{}` blocked explicit candidates.\n",
         corpus.quality_explicit_facts.len(),
-        corpus.quality_heuristic_surface.len(),
         corpus.blocked_explicit_candidates.len()
     ));
     out

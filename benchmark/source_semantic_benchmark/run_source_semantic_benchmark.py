@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -628,6 +629,10 @@ def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
     return round(inter / union, 6) if union else 1.0
 
 
+def percent(value: float) -> float:
+    return round(value * 100.0, 3)
+
+
 def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
@@ -768,6 +773,27 @@ typedef signed char int8;
 typedef short int16;
 typedef int int32;
 typedef long long int64;
+static inline bool __fission_carry32(uint32 a, uint32 b) {{ return (uint32)(a + b) < a; }}
+static inline bool __fission_carry64(uint64 a, uint64 b) {{ return (uint64)(a + b) < a; }}
+static inline bool __fission_scarry32(uint32 a, uint32 b) {{
+    int32 sa = (int32)a, sb = (int32)b, sr = (int32)(a + b);
+    return ((sa ^ sr) & (sb ^ sr)) < 0;
+}}
+static inline bool __fission_scarry64(uint64 a, uint64 b) {{
+    int64 sa = (int64)a, sb = (int64)b, sr = (int64)(a + b);
+    return ((sa ^ sr) & (sb ^ sr)) < 0;
+}}
+static inline bool __fission_sborrow32(uint32 a, uint32 b) {{
+    int32 sa = (int32)a, sb = (int32)b, sr = (int32)(a - b);
+    return ((sa ^ sb) & (sa ^ sr)) < 0;
+}}
+static inline bool __fission_sborrow64(uint64 a, uint64 b) {{
+    int64 sa = (int64)a, sb = (int64)b, sr = (int64)(a - b);
+    return ((sa ^ sb) & (sa ^ sr)) < 0;
+}}
+#define __carry(a, b) (sizeof(a) <= 4 ? __fission_carry32((uint32)(a), (uint32)(b)) : __fission_carry64((uint64)(a), (uint64)(b)))
+#define __scarry(a, b) (sizeof(a) <= 4 ? __fission_scarry32((uint32)(a), (uint32)(b)) : __fission_scarry64((uint64)(a), (uint64)(b)))
+#define __sborrow(a, b) (sizeof(a) <= 4 ? __fission_sborrow32((uint32)(a), (uint32)(b)) : __fission_sborrow64((uint64)(a), (uint64)(b)))
 {candidate_code}
 int main(void) {{
 {calls}
@@ -941,26 +967,56 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     compile_ok = sum(1 for row in rows if row.get("behavior", {}).get("status") in {"pass", "mismatch"})
     behavior_pass = sum(1 for row in rows if row.get("behavior", {}).get("status") == "pass")
     score_values = [float(row.get("semantic_score", 0.0) or 0.0) for row in rows]
+    mapping_status_counts = Counter(row.get("mapping_status", "unknown") for row in rows)
+    decomp_failure_counts = Counter(
+        row.get("decomp_failure_kind", "unknown")
+        for row in rows
+        if not row.get("decomp_success")
+    )
+    behavior_status_counts = Counter(row.get("behavior", {}).get("status", "unknown") for row in rows)
     by_language: dict[str, dict[str, Any]] = {}
+    by_tag: dict[str, dict[str, Any]] = {}
+    by_entry: dict[str, dict[str, Any]] = {}
+
+    def add_bucket(bucket: dict[str, Any], row: dict[str, Any]) -> None:
+        bucket["row_count"] += 1
+        bucket["mapped"] += int(row["mapping_status"] == "matched")
+        bucket["decomp_success"] += int(bool(row.get("decomp_success")))
+        bucket["behavior_pass"] += int(row.get("behavior", {}).get("status") == "pass")
+        bucket["score_sum"] += float(row.get("semantic_score", 0.0) or 0.0)
+
     for row in rows:
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
             {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
         )
-        bucket["row_count"] += 1
-        bucket["mapped"] += int(row["mapping_status"] == "matched")
-        bucket["decomp_success"] += int(bool(row.get("decomp_success")))
-        bucket["behavior_pass"] += int(row.get("behavior", {}).get("status") == "pass")
-        bucket["score_sum"] += float(row.get("semantic_score", 0.0) or 0.0)
-    for bucket in by_language.values():
+        add_bucket(bucket, row)
+
+        entry_bucket = by_entry.setdefault(
+            row["entry_id"],
+            {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
+        )
+        add_bucket(entry_bucket, row)
+
+        for tag in row.get("tags") or []:
+            tag_bucket = by_tag.setdefault(
+                tag,
+                {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
+            )
+            add_bucket(tag_bucket, row)
+
+    for bucket in list(by_language.values()) + list(by_tag.values()) + list(by_entry.values()):
         count = max(1, bucket["row_count"])
-        bucket["avg_semantic_score"] = round(bucket.pop("score_sum") / count, 6)
+        avg_score = round(bucket.pop("score_sum") / count, 6)
+        bucket["avg_semantic_score"] = avg_score
+        bucket["avg_semantic_score_percent"] = percent(avg_score)
     host_statuses = Counter(
         row.get("behavior", {}).get("reason")
         for row in rows
         if row.get("behavior", {}).get("status") == "host_execution_unavailable"
     )
+    weighted_semantic_similarity = round(sum(score_values) / total, 6) if total else 0.0
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -969,10 +1025,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "decomp_success_rate": round(decomp_ok / total, 6) if total else 0.0,
         "candidate_compile_rate": round(compile_ok / total, 6) if total else 0.0,
         "behavior_pass_rate": round(behavior_pass / total, 6) if total else 0.0,
-        "weighted_semantic_similarity": round(sum(score_values) / total, 6) if total else 0.0,
+        "weighted_semantic_similarity": weighted_semantic_similarity,
+        "weighted_semantic_similarity_percent": percent(weighted_semantic_similarity),
+        "perfect_row_count": sum(1 for score in score_values if score == 1.0),
+        "supported_behavior_row_count": sum(
+            1 for row in rows if row.get("behavior", {}).get("status") != "unsupported_signature"
+        ),
+        "mapping_status_counts": dict(sorted(mapping_status_counts.items())),
+        "decomp_failure_counts": dict(sorted(decomp_failure_counts.items())),
+        "behavior_status_counts": dict(sorted(behavior_status_counts.items())),
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
         "by_language": by_language,
+        "by_tag": by_tag,
+        "by_entry": by_entry,
     }
 
 
@@ -986,25 +1052,40 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         f"- Decompile success rate: {summary['decomp_success_rate']:.3f}",
         f"- Candidate compile rate: {summary['candidate_compile_rate']:.3f}",
         f"- Behavior pass rate: {summary['behavior_pass_rate']:.3f}",
-        f"- Weighted semantic similarity: {summary['weighted_semantic_similarity']:.3f}",
+        f"- Weighted semantic similarity: {summary['weighted_semantic_similarity_percent']:.3f}%",
+        f"- Perfect rows: {summary['perfect_row_count']}",
+        f"- Supported behavior rows: {summary['supported_behavior_row_count']}",
         f"- Host execution unavailable rows: {summary['host_execution_unavailable_count']}",
+    ]
+    if "wall_sec" in summary:
+        lines.append(f"- Wall time: {summary['wall_sec']:.3f}s")
+    lines.extend([
         "",
         "## By Language",
         "",
-        "| Language | Rows | Mapped | Decomp OK | Behavior Pass | Avg Score |",
+        "| Language | Rows | Mapped | Decomp OK | Behavior Pass | Avg Similarity |",
         "|---|---:|---:|---:|---:|---:|",
-    ]
+    ])
     for lang, bucket in sorted(summary["by_language"].items()):
         lines.append(
             f"| {lang} | {bucket['row_count']} | {bucket['mapped']} | {bucket['decomp_success']} | "
-            f"{bucket['behavior_pass']} | {bucket['avg_semantic_score']:.3f} |"
+            f"{bucket['behavior_pass']} | {bucket['avg_semantic_score_percent']:.3f}% |"
         )
+    if summary.get("behavior_status_counts"):
+        lines.extend(["", "## Behavior Status", "", "| Status | Rows |", "|---|---:|"])
+        for status, count in sorted(summary["behavior_status_counts"].items()):
+            lines.append(f"| {status} | {count} |")
+    if summary.get("decomp_failure_counts"):
+        lines.extend(["", "## Decompile Failures", "", "| Failure | Rows |", "|---|---:|"])
+        for failure, count in sorted(summary["decomp_failure_counts"].items()):
+            lines.append(f"| {failure} | {count} |")
     failing = [row for row in rows if row.get("semantic_score", 0.0) < 1.0][:20]
     if failing:
         lines.extend(["", "## First Non-Perfect Rows", ""])
         for row in failing:
             lines.append(
                 f"- `{row['entry_id']}` `{row['function_name']}`: score={row['semantic_score']:.3f}, "
+                f"similarity={row['semantic_score_percent']:.3f}%, "
                 f"map={row['mapping_status']}, behavior={row.get('behavior', {}).get('status')}"
             )
     lines.append("")
@@ -1051,12 +1132,15 @@ def row_for_function(
         "decomp_failure_detail": decomp.get("failure_detail"),
         "engine_used": decomp.get("engine_used"),
         "static_semantic_score": static_score,
+        "static_semantic_score_percent": percent(static_score),
         "behavior": behavior,
         "semantic_score": semantic_score,
+        "semantic_score_percent": percent(semantic_score),
     }
 
 
 def run_benchmark(args: argparse.Namespace) -> int:
+    start = time.perf_counter()
     manifest_path = resolve_path(args.manifest)
     manifest = load_json(manifest_path)
     entries = discover_source_entries(manifest)
@@ -1069,14 +1153,32 @@ def run_benchmark(args: argparse.Namespace) -> int:
     host_execution = c_host_execution_probe(args.timeout_sec)
 
     rows: list[dict[str, Any]] = []
+    jobs = max(1, int(args.jobs or 1))
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
         if args.limit_functions is not None:
             source_functions = source_functions[: args.limit_functions]
         fission_funcs, fission_error = run_fission_list(entry.binary_path, fission_bin, args.timeout_sec)
-        for func in source_functions:
-            rows.append(
-                row_for_function(
+        if jobs == 1 or len(source_functions) <= 1:
+            for func in source_functions:
+                rows.append(
+                    row_for_function(
+                        entry,
+                        func,
+                        fission_funcs,
+                        fission_error,
+                        fission_bin,
+                        args.timeout_sec,
+                        host_execution,
+                    )
+                )
+            continue
+
+        entry_rows: list[tuple[int, dict[str, Any]]] = []
+        with ThreadPoolExecutor(max_workers=jobs) as executor:
+            futures = {
+                executor.submit(
+                    row_for_function,
                     entry,
                     func,
                     fission_funcs,
@@ -1084,10 +1186,16 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     fission_bin,
                     args.timeout_sec,
                     host_execution,
-                )
-            )
+                ): index
+                for index, func in enumerate(source_functions)
+            }
+            for future in as_completed(futures):
+                entry_rows.append((futures[future], future.result()))
+        rows.extend(row for _index, row in sorted(entry_rows, key=lambda item: item[0]))
 
     summary = summarize(rows, manifest.get("name", manifest_path.stem), entries)
+    summary["jobs"] = jobs
+    summary["wall_sec"] = round(time.perf_counter() - start, 6)
     (output_dir / "source_semantic_rows.json").write_text(
         json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -1129,6 +1237,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-binaries", type=int, help="Limit discovered manifest entries")
     parser.add_argument("--limit-functions", type=int, help="Limit source functions per entry")
     parser.add_argument("--timeout-sec", type=int, default=30, help="Per-command timeout")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Run source-function rows in parallel per binary entry; default keeps deterministic serial execution",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run lightweight parser/scoring self-test")
     return parser.parse_args()
 

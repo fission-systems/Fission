@@ -27,8 +27,8 @@ class VerboseEngineSummary(FlexibleModel):
     unknown_type_var_total: float = 0.0
     ptr_offset_total: float = 0.0
     index_expr_total: float = 0.0
-    heuristic_avg_line_length_mean: float = 0.0
-    heuristic_max_brace_nesting_mean: float = 0.0
+    text_avg_line_length_mean: float = 0.0
+    text_max_brace_nesting_mean: float = 0.0
     synthetic_helper_call_total: float = 0.0
 
 

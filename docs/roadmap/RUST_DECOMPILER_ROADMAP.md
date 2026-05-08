@@ -19,7 +19,7 @@ This architecture is correct for long-term Rust ownership, as long as unsupporte
 ## Guiding Principles
 
 - Fix behavior at canonical semantic layers, not UI or printer-only layers.
-- Prefer deterministic CFG/dom/postdom/SCC-based transforms over binary-specific heuristics.
+- Prefer deterministic CFG/dom/postdom/SCC-based transforms over binary-specific shortcuts.
 - Keep metrics and telemetry contracts centralized (single source of truth).
 - Roll out with shadow mode and parity gates before switching defaults.
 - Preserve a safe fallback path until parity and reliability targets are met.
@@ -143,7 +143,7 @@ This architecture is correct for long-term Rust ownership, as long as unsupporte
   - Mitigation: mandatory parity reports per PR on hot paths.
 - **Performance regressions**
   - Mitigation: benchmark gates for representative binary sets.
-- **Heuristic overfitting to specific binaries**
+- **Binary-specific overfitting**
   - Mitigation: require invariant-based justifications for new logic.
 - **Printer masking semantic defects**
   - Mitigation: fail early in semantic/NIR validation layers.

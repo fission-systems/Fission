@@ -198,7 +198,7 @@ The goal in this wave was not to broadly relax structuring policy. The goal was 
 
 ### What changed
 
-The structuring driver now uses one canonical admission helper instead of scattered fallback heuristics:
+The structuring driver now uses one canonical admission helper instead of scattered fallback shortcuts:
 
 - added:
   - `StructuringAdmissionReason`
@@ -319,7 +319,7 @@ The final shipped state stays fail-closed for that family and keeps only:
 Duplicate logic was reduced in this wave:
 
 - force-linear admission now has one canonical owner in `structuring/driver.rs`
-- the old medium-CFG x64 heuristic is no longer duplicated as an implicit architecture policy
+- the old medium-CFG x64 shortcut is no longer duplicated as an implicit architecture policy
 - benchmark/reporting now consume typed telemetry instead of reconstructing why a row fell back
 
 Next owner after this wave:

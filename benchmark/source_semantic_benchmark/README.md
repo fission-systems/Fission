@@ -25,6 +25,18 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
 Use `manifests/source_owned_all.json` for the full checked-in source-owned
 corpus.
 
+For faster local iteration, run independent source-function rows in parallel
+within each binary entry:
+
+```bash
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/source_owned_all.json \
+  --fission-bin target/release/fission_cli \
+  --timeout-sec 45 \
+  --jobs 4 \
+  --output-dir benchmark/artifacts/source_semantic_benchmark/source-owned-jobs4
+```
+
 Generated artifacts:
 
 - `source_semantic_rows.json`
@@ -40,6 +52,13 @@ Generated artifacts:
 - `host_execution_unavailable_count`: supported behavior rows that could not run
   because the local host failed the compiled-C execution preflight.
 - `weighted_semantic_similarity`: `0.65 * behavior + 0.35 * static_similarity`.
+- `weighted_semantic_similarity_percent`: the same weighted score expressed as
+  a percentage for report display. Per-row `semantic_score_percent` and
+  `static_semantic_score_percent` are emitted alongside the raw 0..1 scores.
+
+The JSON and Markdown summaries also include mapping, decompile-failure, and
+behavior-status buckets plus language/tag/entry breakdowns. `--jobs` changes
+only execution scheduling; row order is restored before artifacts are written.
 
 The static comparison uses language-neutral fingerprints for control-flow,
 operators, constants, calls, memory access shape, and signature shape. Dynamic

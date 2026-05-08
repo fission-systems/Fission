@@ -30,7 +30,11 @@ pub(super) fn distinct_evidence_sources(evidence: &[IdentityEvidence]) -> usize 
 }
 
 #[must_use]
-pub(super) fn gate_high_for_kind(kind: IdentityKind, score: u32, distinct_sources: usize) -> Confidence {
+pub(super) fn gate_high_for_kind(
+    kind: IdentityKind,
+    score: u32,
+    distinct_sources: usize,
+) -> Confidence {
     let c = confidence_from_score(score);
     if c != Confidence::High {
         return c;

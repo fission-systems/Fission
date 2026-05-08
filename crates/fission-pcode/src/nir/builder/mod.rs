@@ -363,6 +363,27 @@ impl<'a> PreviewBuilder<'a> {
         evidence: UnsupportedControlEvidence,
         target_expr: Option<HirExpr>,
     ) -> HirStmt {
+        if matches!(
+            evidence.surface,
+            IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
+        ) && let Some(HirExpr::Call { .. }) = target_expr.as_ref()
+        {
+            return HirStmt::Expr(target_expr.expect("call target expression exists after guard"));
+        }
+
+        if matches!(
+            evidence.surface,
+            IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
+        ) && let Some(HirExpr::Var(target_name)) = target_expr.as_ref()
+            && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
+        {
+            return HirStmt::Expr(HirExpr::Call {
+                target: resolved_target,
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            });
+        }
+
         let pseudo_target = match evidence.surface {
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike => {
                 "__fission_branchind"

@@ -9,6 +9,32 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    fn is_x86_status_flag_output(output: &Varnode) -> bool {
+        is_register_varnode(output)
+            && output.size == 1
+            && matches!(
+                output.offset,
+                0x200 | 0x202 | 0x204 | 0x206 | 0x207 | 0x209 | 0x20a | 0x20b
+            )
+    }
+
+    fn no_consumer_flag_rhs_is_pure(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(..) => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                Self::no_consumer_flag_rhs_is_pure(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::no_consumer_flag_rhs_is_pure(lhs) && Self::no_consumer_flag_rhs_is_pure(rhs)
+            }
+            HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. } => false,
+        }
+    }
+
     pub(super) fn analyze_no_consumer_materialization_profile(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -76,6 +102,9 @@ impl<'a> PreviewBuilder<'a> {
             return NoConsumerMaterializationDecision::Keep(
                 NoConsumerMaterializationKeepReason::DebugUsePresent,
             );
+        }
+        if Self::is_x86_status_flag_output(output) && Self::no_consumer_flag_rhs_is_pure(rhs) {
+            return NoConsumerMaterializationDecision::SuppressAlways;
         }
         if legacy_inline_candidate {
             return NoConsumerMaterializationDecision::Keep(
@@ -370,5 +399,42 @@ mod tests {
                 NoConsumerMaterializationKeepReason::StateVisibleOutput
             )
         );
+    }
+
+    #[test]
+    fn no_consumer_materialization_decision_suppresses_unused_x86_flags() {
+        let mut output = varnode(0x206);
+        output.space_id = REGISTER_SPACE_ID;
+        output.size = 1;
+        let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
+            &output,
+            &HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(HirExpr::Const(0, int(32))),
+                ty: NirType::Bool,
+            },
+            false,
+            ReplacementValuePlan::incomplete(
+                ReplacementReadClass::SameBlockData,
+                MaterializationRejectionReason::AliasUnsafe,
+            ),
+            Some(AliasUnsafeHazard::new(
+                AliasUnsafeHazardKind::UnknownNoConsumerFound,
+                None,
+                None,
+                None,
+            )),
+            NoConsumerMaterializationProfile {
+                same_block_consumers: 0,
+                cross_block_consumers: 0,
+                has_later_block_use: false,
+                has_phi_merge_use: false,
+                has_debug_use: false,
+                rhs_side_effectful: false,
+            },
+        );
+
+        assert_eq!(decision, NoConsumerMaterializationDecision::SuppressAlways);
     }
 }

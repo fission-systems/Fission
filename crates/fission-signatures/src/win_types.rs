@@ -76,10 +76,7 @@ pub mod base_types {
         let json_str = read_typeinfo_json("base_types.json");
         let items: Vec<JsonTypeInfo> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
             let path = super::win32_typeinfo_json_path("base_types.json");
-            panic!(
-                "Failed to parse base_types.json at {}: {e}",
-                path.display()
-            )
+            panic!("Failed to parse base_types.json at {}: {e}", path.display())
         });
         items
             .into_iter()
@@ -147,10 +144,7 @@ impl WindowsStructures {
         let json_str = read_typeinfo_json("structures.json");
         let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
             let path = win32_typeinfo_json_path("structures.json");
-            panic!(
-                "Failed to parse structures.json at {}: {e}",
-                path.display()
-            )
+            panic!("Failed to parse structures.json at {}: {e}", path.display())
         });
 
         let mut structures = HashMap::with_capacity(items.len());

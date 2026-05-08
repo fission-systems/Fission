@@ -1105,7 +1105,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
 }
 
 #[test]
-fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
+fn region_follow_discovery_rejects_local_cycle_without_index_shortcut() {
     let func = PcodeFunction {
         blocks: vec![
             PcodeBasicBlock {
@@ -1183,6 +1183,6 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
     assert!(shared.is_empty());
     // Since Fission now detects the irreducible loop mathematically and isolates the
     // irregular back-edge, the remaining DAG falls back smoothly via SideEntryOrExit
-    // without triggering the generic ComplexArmShape loop tangling heuristic.
+    // without triggering the generic ComplexArmShape loop-tangling rejection.
     assert_eq!(subtype, Some("SideEntryOrExit"));
 }

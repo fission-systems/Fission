@@ -56,10 +56,7 @@ pub fn run(args: NirCheckArgs) -> Result<()> {
     let run_started = Instant::now();
     let root = repo_root();
     let (canonical_lane, deprecated_preview_lane) = normalize_lane_name(&args.lane);
-    let manifest_path = args
-        .manifest
-        .clone()
-        .unwrap_or_else(default_manifest_path);
+    let manifest_path = args.manifest.clone().unwrap_or_else(default_manifest_path);
     let source_inventory_path = default_source_inventory_path();
     let source_inventory = match source_inventory_path.as_ref() {
         Some(path) => load_source_inventory(path)

@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::{build_xref_index, FunctionXrefsSummary};
+use fission_static::analysis::{FunctionXrefsSummary, build_xref_index};
 use serde_json::json;
 use std::io::Write;
 

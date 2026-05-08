@@ -851,16 +851,16 @@ pub(crate) fn identity_pe_facts(binary: &LoadedBinary) -> Option<IdentityPeFacts
         && dd.virtual_address != 0
         && dd.size >= IMAGE_DEBUG_DIRECTORY_SIZE as u32
     {
-            let dbg_va = image_base.checked_add(u64::from(dd.virtual_address))?;
-            let dbg_fo = identity_va_to_file_offset(binary, dbg_va)?;
-            let entry_count = (dd.size as usize) / IMAGE_DEBUG_DIRECTORY_SIZE;
-            for idx in 0..entry_count {
-                let ent_fo = dbg_fo.saturating_add(idx * IMAGE_DEBUG_DIRECTORY_SIZE);
-                let end = ent_fo.checked_add(IMAGE_DEBUG_DIRECTORY_SIZE)?;
-                let slice = bytes.get(ent_fo..end)?;
-                let ty = u32::from_le_bytes(slice[12..16].try_into().ok()?);
-                debug_directory_kinds.push(debug_directory_kind_name(ty));
-            }
+        let dbg_va = image_base.checked_add(u64::from(dd.virtual_address))?;
+        let dbg_fo = identity_va_to_file_offset(binary, dbg_va)?;
+        let entry_count = (dd.size as usize) / IMAGE_DEBUG_DIRECTORY_SIZE;
+        for idx in 0..entry_count {
+            let ent_fo = dbg_fo.saturating_add(idx * IMAGE_DEBUG_DIRECTORY_SIZE);
+            let end = ent_fo.checked_add(IMAGE_DEBUG_DIRECTORY_SIZE)?;
+            let slice = bytes.get(ent_fo..end)?;
+            let ty = u32::from_le_bytes(slice[12..16].try_into().ok()?);
+            debug_directory_kinds.push(debug_directory_kind_name(ty));
+        }
     }
 
     Some(IdentityPeFacts {

@@ -1020,7 +1020,7 @@ interpretation: this wave is shadow-only and target rows remained code_changed=f
 
 ### Next Owner
 
-The next MIR wave should not broaden structuring heuristics. It should move one narrow representative/materialization read-only decision into MIR behind an env gate:
+The next MIR wave should not broaden structuring shortcuts. It should move one narrow representative/materialization read-only decision into MIR behind an env gate:
 
 - `FISSION_ENABLE_MIR_MATERIALIZATION`
 - target metric: `materialization_stabilized_count`

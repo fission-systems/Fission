@@ -83,294 +83,293 @@ pub(super) fn decode_construct_templates(
 
     // Helper to parse a constructor
     let trace_sla_parse = std::env::var_os("FISSION_TRACE_SLA_PARSE").is_some();
-    let mut parse_constructor = |subtable_id: u32,
-                                 subtable_name: &str,
-                                 constructor: &PackedElement,
-                                 local_index: usize|
-     -> std::result::Result<CompiledSlaConstructorTemplate, String> {
-        // Ghidra SubtableSymbol.decode() assigns constructor ids by local
-        // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
-        // through sub.getConstructor(id). The constructor element's own ATTR_ID
-        // is not the terminal selection index.
-        let id = local_index as u32;
-        let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);
-        let line = constructor
-            .attr_unsigned(sla_format::ATTR_LINE)
-            .unwrap_or(0);
-        let minimum_length = constructor
-            .attr_unsigned(sla_format::ATTR_LENGTH)
-            .unwrap_or(0) as u32;
-        let source_file = source_index
-            .and_then(|idx| source_files.get(&idx).cloned())
-            .unwrap_or_else(|| format!("<generated:{subtable_name}>"));
-        let source_key = if source_index.is_some() {
-            format!("{}:{line}", basename(&source_file))
-        } else {
-            format!("{subtable_name}#ctor{local_index}")
-        };
+    let mut parse_constructor =
+        |subtable_id: u32,
+         subtable_name: &str,
+         constructor: &PackedElement,
+         local_index: usize|
+         -> std::result::Result<CompiledSlaConstructorTemplate, String> {
+            // Ghidra SubtableSymbol.decode() assigns constructor ids by local
+            // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
+            // through sub.getConstructor(id). The constructor element's own ATTR_ID
+            // is not the terminal selection index.
+            let id = local_index as u32;
+            let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);
+            let line = constructor
+                .attr_unsigned(sla_format::ATTR_LINE)
+                .unwrap_or(0);
+            let minimum_length = constructor
+                .attr_unsigned(sla_format::ATTR_LENGTH)
+                .unwrap_or(0) as u32;
+            let source_file = source_index
+                .and_then(|idx| source_files.get(&idx).cloned())
+                .unwrap_or_else(|| format!("<generated:{subtable_name}>"));
+            let source_key = if source_index.is_some() {
+                format!("{}:{line}", basename(&source_file))
+            } else {
+                format!("{subtable_name}#ctor{local_index}")
+            };
 
-        let main_tpl = constructor
-            .children
-            .iter()
-            .find(|child| {
-                child.id == sla_format::ELEM_CONSTRUCT_TPL
-                    && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
-            })
-            .or_else(|| {
-                // Fallback: if no section-less template exists, pick any ELEM_CONSTRUCT_TPL
-                // that has no section attribute (only valid for truly section-less constructors).
-                constructor
-                    .children
-                    .iter()
-                    .find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)
-            });
-        let Some(main_tpl) = main_tpl else {
-            if trace_sla_parse {
-                eprintln!(
+            let main_tpl = constructor
+                .children
+                .iter()
+                .find(|child| {
+                    child.id == sla_format::ELEM_CONSTRUCT_TPL
+                        && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
+                })
+                .or_else(|| {
+                    // Fallback: if no section-less template exists, pick any ELEM_CONSTRUCT_TPL
+                    // that has no section attribute (only valid for truly section-less constructors).
+                    constructor
+                        .children
+                        .iter()
+                        .find(|child| child.id == sla_format::ELEM_CONSTRUCT_TPL)
+                });
+            let Some(main_tpl) = main_tpl else {
+                if trace_sla_parse {
+                    eprintln!(
                     "[sla-parse] missing construct_tpl subtable={subtable_name} slot={local_index} attrs={:?}",
                     constructor.attrs
                 );
-            }
-            return Err("missing_construct_tpl".to_string());
-        };
+                }
+                return Err("missing_construct_tpl".to_string());
+            };
 
-        let template = match decode_construct_tpl(main_tpl, &spaces) {
-            Ok(template) => template,
-            Err(err) => {
-                if trace_sla_parse {
-                    eprintln!(
+            let template = match decode_construct_tpl(main_tpl, &spaces) {
+                Ok(template) => template,
+                Err(err) => {
+                    if trace_sla_parse {
+                        eprintln!(
                         "[sla-parse] decode_construct_tpl failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
                     );
+                    }
+                    return Err(format!("decode_construct_tpl:{err:#}"));
                 }
-                return Err(format!("decode_construct_tpl:{err:#}"));
-            }
-        };
-
-        // Collect named p-code sections (Ghidra's namedtempl: ELEM_CONSTRUCT_TPL with
-        // ATTR_SECTION >= 0). These are referenced by CROSSBUILD and sectioned constructors.
-        let mut named_templates: Vec<Option<CompiledConstructTpl>> = Vec::new();
-        for child in &constructor.children {
-            if child.id != sla_format::ELEM_CONSTRUCT_TPL {
-                continue;
-            }
-            let Some(section_idx) = child.attr_unsigned(sla_format::ATTR_SECTION) else {
-                continue; // main template, already handled
             };
-            let section_idx = section_idx as usize;
-            // Extend vector to fit this section index.
-            while named_templates.len() <= section_idx {
-                named_templates.push(None);
-            }
-            match decode_construct_tpl(child, &spaces) {
-                Ok(named_tpl) => named_templates[section_idx] = Some(named_tpl),
-                Err(err) => {
-                    if trace_sla_parse {
-                        eprintln!(
+
+            // Collect named p-code sections (Ghidra's namedtempl: ELEM_CONSTRUCT_TPL with
+            // ATTR_SECTION >= 0). These are referenced by CROSSBUILD and sectioned constructors.
+            let mut named_templates: Vec<Option<CompiledConstructTpl>> = Vec::new();
+            for child in &constructor.children {
+                if child.id != sla_format::ELEM_CONSTRUCT_TPL {
+                    continue;
+                }
+                let Some(section_idx) = child.attr_unsigned(sla_format::ATTR_SECTION) else {
+                    continue; // main template, already handled
+                };
+                let section_idx = section_idx as usize;
+                // Extend vector to fit this section index.
+                while named_templates.len() <= section_idx {
+                    named_templates.push(None);
+                }
+                match decode_construct_tpl(child, &spaces) {
+                    Ok(named_tpl) => named_templates[section_idx] = Some(named_tpl),
+                    Err(err) => {
+                        if trace_sla_parse {
+                            eprintln!(
                             "[sla-parse] decode named section {section_idx} failed subtable={subtable_name} slot={local_index} err={err:#}"
                         );
+                        }
                     }
                 }
             }
-        }
 
-        let mut opprint_indices = Vec::new();
-        let mut display_pieces = Vec::new();
-        let mut operand_specs_by_index = BTreeMap::new();
-        let mut operand_minimum_lengths_by_index = BTreeMap::new();
-        let mut display_operands_by_index = BTreeMap::new();
-        let mut flowthru_operand_index = None;
-        for child in &constructor.children {
-            match child.id {
-                sla_format::ELEM_OPER => {
-                    let Some(symbol_id) =
-                        child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32)
-                    else {
-                        if trace_sla_parse {
-                            eprintln!(
+            let mut opprint_indices = Vec::new();
+            let mut display_pieces = Vec::new();
+            let mut operand_specs_by_index = BTreeMap::new();
+            let mut operand_minimum_lengths_by_index = BTreeMap::new();
+            let mut display_operands_by_index = BTreeMap::new();
+            let mut flowthru_operand_index = None;
+            for child in &constructor.children {
+                match child.id {
+                    sla_format::ELEM_OPER => {
+                        let Some(symbol_id) =
+                            child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32)
+                        else {
+                            if trace_sla_parse {
+                                eprintln!(
                                 "[sla-parse] oper missing symbol id subtable={subtable_name} slot={local_index} source_key={source_key}"
                             );
-                        }
-                        return Err("oper_missing_symbol_id".to_string());
-                    };
-                    let Some(operand_symbol) = operand_symbols.get(&symbol_id) else {
-                        if trace_sla_parse {
-                            eprintln!(
+                            }
+                            return Err("oper_missing_symbol_id".to_string());
+                        };
+                        let Some(operand_symbol) = operand_symbols.get(&symbol_id) else {
+                            if trace_sla_parse {
+                                eprintln!(
                                 "[sla-parse] missing operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id}"
                             );
-                        }
-                        return Err("missing_operand_symbol".to_string());
-                    };
-                    let Some(spec) =
-                        compiled_operand_spec_for_symbol(operand_symbol, &subtable_names_by_id)
-                    else {
-                        if trace_sla_parse {
-                            eprintln!(
+                            }
+                            return Err("missing_operand_symbol".to_string());
+                        };
+                        let Some(spec) =
+                            compiled_operand_spec_for_symbol(operand_symbol, &subtable_names_by_id)
+                        else {
+                            if trace_sla_parse {
+                                eprintln!(
                                 "[sla-parse] unsupported operand symbol subtable={subtable_name} slot={local_index} source_key={source_key} symbol_id={symbol_id} symbol={operand_symbol:?}"
                             );
-                        }
-                        return Err("unsupported_operand_symbol".to_string());
-                    };
-                    operand_specs_by_index.insert(operand_symbol.hand_index, spec);
-                    operand_minimum_lengths_by_index
-                        .insert(operand_symbol.hand_index, operand_symbol.minimum_length);
-                    display_operands_by_index.insert(
-                        operand_symbol.hand_index,
-                        CompiledDisplayOperand {
-                            operand_index: operand_symbol.hand_index,
-                            kind: operand_symbol.display_kind.clone(),
-                        },
-                    );
-                }
-                sla_format::ELEM_OPPRINT => {
-                    if let Some(index) = child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize)
-                    {
-                        opprint_indices.push(index);
-                        display_pieces.push(CompiledDisplayPiece::OperandRef(index));
-                    }
-                }
-                sla_format::ELEM_PRINT => {
-                    if let Some(piece) = child.attr_string(sla_format::ATTR_PIECE) {
-                        display_pieces.push(CompiledDisplayPiece::Literal(piece.to_string()));
-                    }
-                }
-                _ => {}
-            }
-        }
-        let operand_count = operand_specs_by_index
-            .keys()
-            .next_back()
-            .map(|value| value + 1)
-            .unwrap_or(0);
-        let mut operand_specs = Vec::with_capacity(operand_count);
-        let mut operand_minimum_lengths = Vec::with_capacity(operand_count);
-        let mut display_operands = Vec::with_capacity(operand_count);
-        for slot in 0..operand_count {
-            let Some(spec) = operand_specs_by_index.remove(&slot) else {
-                if trace_sla_parse {
-                    eprintln!(
-                        "[sla-parse] missing operand spec subtable={subtable_name} slot={local_index} operand={slot} source_key={source_key}"
-                    );
-                }
-                return Err("missing_operand_spec".to_string());
-            };
-            operand_specs.push(spec);
-            operand_minimum_lengths.push(
-                operand_minimum_lengths_by_index
-                    .remove(&slot)
-                    .unwrap_or(0),
-            );
-            display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
-                CompiledDisplayOperand {
-                    operand_index: slot,
-                    kind: CompiledDisplayOperandKind::Generic,
-                },
-            ));
-        }
-
-        let has_print_literals = display_pieces
-            .iter()
-            .any(|piece| matches!(piece, CompiledDisplayPiece::Literal(_)));
-        if !has_print_literals && display_pieces.len() == 1 {
-            if let Some(CompiledDisplayPiece::OperandRef(index)) = display_pieces.first() {
-                flowthru_operand_index = Some(*index);
-            }
-        }
-        let first_whitespace = display_pieces.iter().position(
-            |piece| matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' ')),
-        );
-        let display_text = display_pieces
-            .iter()
-            .map(|piece| match piece {
-                CompiledDisplayPiece::Literal(lit) => lit.clone(),
-                CompiledDisplayPiece::OperandRef(index) => {
-                    format!("\\n{}", operand_piece_label(*index))
-                }
-            })
-            .collect::<String>();
-
-        let mut context_changes = Vec::new();
-        for child in constructor
-            .children
-            .iter()
-            .filter(|child| child.id == sla_format::ELEM_CONTEXT_OP)
-        {
-            match decode_context_op(child) {
-                Ok(change) => context_changes.push(change),
-                Err(err) => {
-                    if trace_sla_parse {
-                        eprintln!(
-                            "[sla-parse] decode_context_op failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
+                            }
+                            return Err("unsupported_operand_symbol".to_string());
+                        };
+                        operand_specs_by_index.insert(operand_symbol.hand_index, spec);
+                        operand_minimum_lengths_by_index
+                            .insert(operand_symbol.hand_index, operand_symbol.minimum_length);
+                        display_operands_by_index.insert(
+                            operand_symbol.hand_index,
+                            CompiledDisplayOperand {
+                                operand_index: operand_symbol.hand_index,
+                                kind: operand_symbol.display_kind.clone(),
+                            },
                         );
                     }
-                    return Err(format!("decode_context_op:{err:#}"));
+                    sla_format::ELEM_OPPRINT => {
+                        if let Some(index) =
+                            child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize)
+                        {
+                            opprint_indices.push(index);
+                            display_pieces.push(CompiledDisplayPiece::OperandRef(index));
+                        }
+                    }
+                    sla_format::ELEM_PRINT => {
+                        if let Some(piece) = child.attr_string(sla_format::ATTR_PIECE) {
+                            display_pieces.push(CompiledDisplayPiece::Literal(piece.to_string()));
+                        }
+                    }
+                    _ => {}
                 }
             }
-        }
+            let operand_count = operand_specs_by_index
+                .keys()
+                .next_back()
+                .map(|value| value + 1)
+                .unwrap_or(0);
+            let mut operand_specs = Vec::with_capacity(operand_count);
+            let mut operand_minimum_lengths = Vec::with_capacity(operand_count);
+            let mut display_operands = Vec::with_capacity(operand_count);
+            for slot in 0..operand_count {
+                let Some(spec) = operand_specs_by_index.remove(&slot) else {
+                    if trace_sla_parse {
+                        eprintln!(
+                        "[sla-parse] missing operand spec subtable={subtable_name} slot={local_index} operand={slot} source_key={source_key}"
+                    );
+                    }
+                    return Err("missing_operand_spec".to_string());
+                };
+                operand_specs.push(spec);
+                operand_minimum_lengths
+                    .push(operand_minimum_lengths_by_index.remove(&slot).unwrap_or(0));
+                display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
+                    CompiledDisplayOperand {
+                        operand_index: slot,
+                        kind: CompiledDisplayOperandKind::Generic,
+                    },
+                ));
+            }
 
-        // Ghidra: ContextCommit elements encode deferred global context changes.
-        // Each ELEM_COMMIT child carries: symbol_id (ATTR_ID), word_index (ATTR_NUMBER),
-        // and mask (ATTR_MASK). See ContextCommit.encode() in Ghidra.
-        let mut context_commits = Vec::new();
-        for child in constructor
-            .children
-            .iter()
-            .filter(|child| child.id == sla_format::ELEM_COMMIT)
-        {
-            let symbol_id = child
-                .attr_unsigned(sla_format::ATTR_ID)
-                .map(|v| v as u32)
-                .unwrap_or(0);
-            let word_index = child
-                .attr_unsigned(sla_format::ATTR_NUMBER)
-                .map(|v| v as u32)
-                .unwrap_or(0);
-            let mask = child
-                .attr_unsigned(sla_format::ATTR_MASK)
-                .map(|v| v as u32)
-                .unwrap_or(0);
-            // Resolve symbol_id → hand_index: look up in the operand symbol table.
-            // If the symbol is a built-in (e.g. `inst_next`), store u32::MAX as sentinel.
-            let hand_index = operand_symbols
-                .get(&symbol_id)
-                .map(|sym| sym.hand_index as u32)
-                .unwrap_or(u32::MAX);
-            context_commits.push(CompiledContextCommit {
-                symbol_id,
-                hand_index,
-                word_index,
-                mask,
-            });
-        }
+            let has_print_literals = display_pieces
+                .iter()
+                .any(|piece| matches!(piece, CompiledDisplayPiece::Literal(_)));
+            if !has_print_literals && display_pieces.len() == 1 {
+                if let Some(CompiledDisplayPiece::OperandRef(index)) = display_pieces.first() {
+                    flowthru_operand_index = Some(*index);
+                }
+            }
+            let first_whitespace = display_pieces.iter().position(
+                |piece| matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' ')),
+            );
+            let display_text = display_pieces
+                .iter()
+                .map(|piece| match piece {
+                    CompiledDisplayPiece::Literal(lit) => lit.clone(),
+                    CompiledDisplayPiece::OperandRef(index) => {
+                        format!("\\n{}", operand_piece_label(*index))
+                    }
+                })
+                .collect::<String>();
 
-        Ok(CompiledSlaConstructorTemplate {
-            id,
-            subtable_id,
-            subtable_name: subtable_name.to_string(),
-            constructor_slot: local_index,
-            decode_status: CompiledSlaDecodeStatus::Decoded,
-            decode_error: None,
-            source_key,
-            source_file,
-            line,
-            minimum_length,
-            display_template: CompiledDisplayTemplate {
-                constructor_hash: 0,
-                pieces: display_pieces,
-                first_whitespace,
+            let mut context_changes = Vec::new();
+            for child in constructor
+                .children
+                .iter()
+                .filter(|child| child.id == sla_format::ELEM_CONTEXT_OP)
+            {
+                match decode_context_op(child) {
+                    Ok(change) => context_changes.push(change),
+                    Err(err) => {
+                        if trace_sla_parse {
+                            eprintln!(
+                            "[sla-parse] decode_context_op failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
+                        );
+                        }
+                        return Err(format!("decode_context_op:{err:#}"));
+                    }
+                }
+            }
+
+            // Ghidra: ContextCommit elements encode deferred global context changes.
+            // Each ELEM_COMMIT child carries: symbol_id (ATTR_ID), word_index (ATTR_NUMBER),
+            // and mask (ATTR_MASK). See ContextCommit.encode() in Ghidra.
+            let mut context_commits = Vec::new();
+            for child in constructor
+                .children
+                .iter()
+                .filter(|child| child.id == sla_format::ELEM_COMMIT)
+            {
+                let symbol_id = child
+                    .attr_unsigned(sla_format::ATTR_ID)
+                    .map(|v| v as u32)
+                    .unwrap_or(0);
+                let word_index = child
+                    .attr_unsigned(sla_format::ATTR_NUMBER)
+                    .map(|v| v as u32)
+                    .unwrap_or(0);
+                let mask = child
+                    .attr_unsigned(sla_format::ATTR_MASK)
+                    .map(|v| v as u32)
+                    .unwrap_or(0);
+                // Resolve symbol_id → hand_index: look up in the operand symbol table.
+                // If the symbol is a built-in (e.g. `inst_next`), store u32::MAX as sentinel.
+                let hand_index = operand_symbols
+                    .get(&symbol_id)
+                    .map(|sym| sym.hand_index as u32)
+                    .unwrap_or(u32::MAX);
+                context_commits.push(CompiledContextCommit {
+                    symbol_id,
+                    hand_index,
+                    word_index,
+                    mask,
+                });
+            }
+
+            Ok(CompiledSlaConstructorTemplate {
+                id,
+                subtable_id,
+                subtable_name: subtable_name.to_string(),
+                constructor_slot: local_index,
+                decode_status: CompiledSlaDecodeStatus::Decoded,
+                decode_error: None,
+                source_key,
+                source_file,
+                line,
+                minimum_length,
+                display_template: CompiledDisplayTemplate {
+                    constructor_hash: 0,
+                    pieces: display_pieces,
+                    first_whitespace,
+                    flowthru_operand_index,
+                    display: display_text,
+                },
+                display_operands,
+                opprint_indices,
+                operand_specs,
+                operand_minimum_lengths,
+                context_changes,
+                context_commits,
                 flowthru_operand_index,
-                display: display_text,
-            },
-            display_operands,
-            opprint_indices,
-            operand_specs,
-            operand_minimum_lengths,
-            context_changes,
-            context_commits,
-            flowthru_operand_index,
-            constructor_template: template,
-            named_templates,
-        })
-    };
+                constructor_template: template,
+                named_templates,
+            })
+        };
 
     // 2. Pass Two: Process subtable symbols and their content
     for subtable_sym in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
@@ -812,7 +811,9 @@ fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
         PcodeOpcode::IntEqual => CompiledOpTplOpcode::IntEqual,
         PcodeOpcode::IntNotEqual => CompiledOpTplOpcode::IntNotEqual,
         PcodeOpcode::IntSLess => CompiledOpTplOpcode::IntSLess,
+        PcodeOpcode::IntSLessEqual => CompiledOpTplOpcode::IntSLessEqual,
         PcodeOpcode::IntLess => CompiledOpTplOpcode::IntLess,
+        PcodeOpcode::IntLessEqual => CompiledOpTplOpcode::IntLessEqual,
         PcodeOpcode::IntZExt => CompiledOpTplOpcode::IntZExt,
         PcodeOpcode::IntSExt => CompiledOpTplOpcode::IntSExt,
         PcodeOpcode::IntAdd => CompiledOpTplOpcode::IntAdd,
@@ -820,6 +821,8 @@ fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
         PcodeOpcode::IntCarry => CompiledOpTplOpcode::IntCarry,
         PcodeOpcode::IntSCarry => CompiledOpTplOpcode::IntSCarry,
         PcodeOpcode::IntSBorrow => CompiledOpTplOpcode::IntSBorrow,
+        PcodeOpcode::Int2Comp => CompiledOpTplOpcode::Int2Comp,
+        PcodeOpcode::IntNegate => CompiledOpTplOpcode::IntNegate,
         PcodeOpcode::IntXor => CompiledOpTplOpcode::IntXor,
         PcodeOpcode::IntAnd => CompiledOpTplOpcode::IntAnd,
         PcodeOpcode::IntOr => CompiledOpTplOpcode::IntOr,

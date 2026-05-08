@@ -54,7 +54,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
 
 /// Discover functions from SLEIGH-decoded direct call and branch targets.
 /// This is a deeper analyzer pass than `analyze_functions`, but it does not
-/// use byte-pattern prologue heuristics.
+/// use byte-pattern prologue scans.
 #[tauri::command]
 pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<FunctionDto>> {
     let mut inner = state.inner.lock().await;

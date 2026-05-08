@@ -242,6 +242,45 @@ mod tests {
     }
 
     #[test]
+    fn cfg_blocks_split_symbolic_internal_targets_without_size_gate() {
+        let mut ops = Vec::new();
+        for idx in 0..48u32 {
+            let address = 0x1000 + u64::from(idx);
+            let op = if idx == 4 {
+                op(
+                    idx,
+                    address,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![var(0x1020, 8), var(0x7000, 1)],
+                )
+            } else {
+                op(
+                    idx,
+                    address,
+                    PcodeOpcode::Copy,
+                    Some(var(0x8000 + u64::from(idx), 8)),
+                    vec![var(0x9000 + u64::from(idx), 8)],
+                )
+            };
+            ops.push(op);
+        }
+
+        let blocks = build_cfg_blocks(0x1000, ops);
+        assert!(
+            blocks.iter().any(|block| block.start_address == 0x1020),
+            "{blocks:?}"
+        );
+        assert!(
+            blocks.iter().any(|block| block
+                .ops
+                .last()
+                .is_some_and(|op| op.address == 0x1004 && block.successors.len() == 2)),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
     fn runtime_registry_discovers_all_variants() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
         assert_eq!(registry.frontends().len(), 146);
@@ -322,6 +361,53 @@ mod tests {
         assert_eq!(
             ops.iter().map(|op| op.opcode).collect::<Vec<_>>(),
             vec![PcodeOpcode::Load, PcodeOpcode::IntAdd, PcodeOpcode::Return]
+        );
+    }
+
+    #[test]
+    fn runtime_function_lift_follows_conditional_target_after_fallthrough_ret() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for x86-64 branch lift");
+            return;
+        }
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
+        let bytes = [
+            0x85, 0xd2, // test EDX,EDX
+            0x7e, 0x03, // jle 0x1007
+            0x31, 0xc0, // xor EAX,EAX
+            0xc3, // ret
+            0xb8, 0x01, 0x00, 0x00, 0x00, // mov EAX,1
+            0xc3, // ret
+        ];
+
+        let lifted = frontend
+            .lift_raw_pcode_function_with_decode_contract(
+                &bytes,
+                0x1000,
+                DecodeContract::strict_function(16),
+            )
+            .expect("branch target after fallthrough ret should lift");
+
+        assert_eq!(lifted.decoded_instructions, 6);
+        assert!(
+            lifted
+                .function
+                .blocks
+                .iter()
+                .any(|block| block.start_address == 0x1007),
+            "{:?}",
+            lifted.function.blocks
+        );
+        assert_eq!(
+            lifted
+                .function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.ops)
+                .filter(|op| op.opcode == PcodeOpcode::Return)
+                .count(),
+            2
         );
     }
 
@@ -416,6 +502,86 @@ mod tests {
         assert_eq!(blocks[1].start_address, 0x108);
         assert_eq!(blocks[2].start_address, 0x110);
         assert_eq!(blocks[0].successors, vec![2, 1]);
+    }
+
+    #[test]
+    fn cfg_blocks_split_instruction_local_relative_conditional_target() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::Int2Comp,
+                Some(var(0x10, 4)),
+                vec![var(0x20, 4)],
+            ),
+            op(
+                1,
+                0x100,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(2, 8), var(0x30, 1)],
+            ),
+            op(
+                2,
+                0x100,
+                PcodeOpcode::Copy,
+                Some(var(0x10, 4)),
+                vec![var(0x20, 4)],
+            ),
+            op(
+                3,
+                0x100,
+                PcodeOpcode::IntZExt,
+                Some(var(0x40, 8)),
+                vec![var(0x10, 4)],
+            ),
+            op(4, 0x104, PcodeOpcode::Return, None, vec![]),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 4, "{blocks:?}");
+        assert_eq!(blocks[0].ops.last().unwrap().opcode, PcodeOpcode::CBranch);
+        assert_eq!(blocks[0].successors, vec![2, 1]);
+        assert_eq!(blocks[2].ops[0].seq_num, 3);
+    }
+
+    #[test]
+    fn cfg_blocks_split_instruction_local_relative_unconditional_target() {
+        let ops = vec![
+            op(
+                0,
+                0x200,
+                PcodeOpcode::Copy,
+                Some(var(0x10, 4)),
+                vec![Varnode::constant(1, 4)],
+            ),
+            op(
+                1,
+                0x200,
+                PcodeOpcode::Branch,
+                None,
+                vec![Varnode::constant(2, 8)],
+            ),
+            op(
+                2,
+                0x200,
+                PcodeOpcode::Copy,
+                Some(var(0x10, 4)),
+                vec![Varnode::constant(2, 4)],
+            ),
+            op(
+                3,
+                0x200,
+                PcodeOpcode::Copy,
+                Some(var(0x20, 4)),
+                vec![var(0x10, 4)],
+            ),
+        ];
+
+        let blocks = build_cfg_blocks(0x200, ops);
+        assert_eq!(blocks.len(), 3, "{blocks:?}");
+        assert_eq!(blocks[0].successors, vec![2]);
+        assert_eq!(blocks[2].ops[0].seq_num, 3);
     }
 
     #[test]

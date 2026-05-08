@@ -123,9 +123,7 @@ fn finding_from_map(m: &Map) -> ScriptFinding {
         .and_then(|d| d.clone().try_cast::<rhai::ImmutableString>())
         .map(|s| s.to_string());
 
-    let data = m
-        .get("data")
-        .map(|d| dynamic_to_json_value(d.clone()));
+    let data = m.get("data").map(|d| dynamic_to_json_value(d.clone()));
 
     ScriptFinding {
         kind,
@@ -137,7 +135,9 @@ fn finding_from_map(m: &Map) -> ScriptFinding {
 }
 
 fn approximate_findings_payload_bytes(findings: &[ScriptFinding]) -> usize {
-    serde_json::to_string(findings).map(|s| s.len()).unwrap_or(findings.len() * 64)
+    serde_json::to_string(findings)
+        .map(|s| s.len())
+        .unwrap_or(findings.len() * 64)
 }
 
 pub fn register_emit(

@@ -231,8 +231,8 @@ Current proxy set:
 - `unknown_type_var_total`
 - `ptr_offset_total`
 - `index_expr_total`
-- `heuristic_avg_line_length_mean`
-- `heuristic_max_brace_nesting_mean`
+- `text_avg_line_length_mean`
+- `text_max_brace_nesting_mean`
 - `synthetic_helper_call_total`
 
 `synthetic_helper_call_total` is derived conservatively from `__fission_*(` call sites only.

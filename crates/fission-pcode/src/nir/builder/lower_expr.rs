@@ -11,6 +11,18 @@ enum CallTargetConstReject {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn stack_pointer_register_name(&self, vn: &Varnode) -> Option<&'static str> {
+        match vn.space_id {
+            UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
+            space_id if is_register_space_id(space_id) => {
+                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
+                    .map(|(name, _)| name)
+                    .or_else(|| Some(register_name(vn.offset, vn.size)))
+            }
+            _ => None,
+        }
+    }
+
     fn debug_preview_log(&self, message: &str) {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
             return;
@@ -206,7 +218,8 @@ impl<'a> PreviewBuilder<'a> {
             && candidate.offset == requested.offset
             && candidate.size == 4
             && requested.size == 8
-            && x64_ghidra_reg_name(candidate.offset).is_some()
+            && (x64_ghidra_reg_name(candidate.offset).is_some()
+                || aarch64_ghidra_reg_name(candidate.offset, candidate.size).is_some())
     }
 
     fn register_key_cross_space_covers(
@@ -831,16 +844,16 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(name.to_string()));
             }
             if is_register_space_id(vn.space_id) {
-                return Ok(HirExpr::Var(register_name(vn.offset, vn.size).to_string()));
+                let name =
+                    register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
+                        .map(|(name, _)| name)
+                        .unwrap_or_else(|| register_name(vn.offset, vn.size));
+                return Ok(HirExpr::Var(name.to_string()));
             }
         }
-        let stack_reg_name = match vn.space_id {
-            UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
-            space_id if is_register_space_id(space_id) => Some(register_name(vn.offset, vn.size)),
-            _ => None,
-        };
+        let stack_reg_name = self.stack_pointer_register_name(vn);
         if let Some(name) = stack_reg_name
-            && matches!(name, "rsp" | "esp")
+            && matches!(name, "rsp" | "esp" | "sp")
         {
             return Ok(HirExpr::Var(name.to_string()));
         }
@@ -850,7 +863,7 @@ impl<'a> PreviewBuilder<'a> {
                     op.opcode,
                     PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
                 )
-                && is_primary_return_register(vn)
+                && is_primary_return_register_for_abi(vn, self.options.calling_convention)
                 && let Some((site, _)) = def_site
                 && let Some(name) = self.call_result_bindings.get(&site)
             {

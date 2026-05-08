@@ -16,9 +16,9 @@ mod metrics;
 mod summary;
 mod visualization;
 
+use crate::PcodeFunction;
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
 pub use dominator::DominatorTree;
-use crate::PcodeFunction;
 pub use graph::{CfgBuilder, ControlFlowGraph};
 pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};

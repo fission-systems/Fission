@@ -24,10 +24,7 @@ pub fn function_row(f: &FunctionInfo) -> Map {
     m.insert("size".into(), Dynamic::from(f.size as i64));
     m.insert("is_import".into(), Dynamic::from(f.is_import));
     m.insert("is_export".into(), Dynamic::from(f.is_export));
-    m.insert(
-        "library".into(),
-        fn_import_library(f),
-    );
+    m.insert("library".into(), fn_import_library(f));
     m
 }
 
@@ -64,10 +61,7 @@ pub fn sections_array(binary: &LoadedBinary) -> Array {
                 Dynamic::from(hex_addr(s.virtual_address)),
             );
             m.insert("virtual_size".into(), Dynamic::from(s.virtual_size as i64));
-            m.insert(
-                "file_offset".into(),
-                Dynamic::from(hex_addr(s.file_offset)),
-            );
+            m.insert("file_offset".into(), Dynamic::from(hex_addr(s.file_offset)));
             m.insert("file_size".into(), Dynamic::from(s.file_size as i64));
             m.insert("executable".into(), Dynamic::from(s.is_executable));
             m.insert("readable".into(), Dynamic::from(s.is_readable));
@@ -77,7 +71,7 @@ pub fn sections_array(binary: &LoadedBinary) -> Array {
         .collect()
 }
 
-/// Printable ASCII strings (same heuristic as CLI strings): `(offset_in_file, value)`.
+/// Printable ASCII strings using the same extraction rule as CLI strings: `(offset_in_file, value)`.
 pub fn extract_ascii_strings(data: &[u8], min_len: usize) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut current_bytes: Vec<u8> = Vec::with_capacity(256);

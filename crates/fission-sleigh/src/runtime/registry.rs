@@ -159,7 +159,10 @@ impl fmt::Display for RuntimeEntrySelectionError {
                     f,
                     "runtime selection '{language_id}' / '{compiler_spec_id}' has no executable entry"
                 ),
-                None => write!(f, "runtime selection '{language_id}' has no executable entry"),
+                None => write!(
+                    f,
+                    "runtime selection '{language_id}' has no executable entry"
+                ),
             },
         }
     }

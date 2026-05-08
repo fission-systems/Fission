@@ -8,8 +8,8 @@ use super::evidence::EvidenceBudget;
 use super::model::{
     EvidenceLocation, IdentityDetection, IdentityKind, IdentitySource, WinApiCatalogSummary,
 };
-use super::scoring::{distinct_evidence_sources, gate_high_for_kind};
 use super::pe::is_pe_format;
+use super::scoring::{distinct_evidence_sources, gate_high_for_kind};
 
 const ENTRY_PATTERN_WINDOW: usize = 512;
 
@@ -60,14 +60,13 @@ fn entry_window_bytes<'a>(binary: &'a LoadedBinary, window: usize) -> Option<&'a
         .sections
         .iter()
         .find(|s| {
-            ep_va >= s.virtual_address
-                && ep_va < s.virtual_address.saturating_add(s.virtual_size)
+            ep_va >= s.virtual_address && ep_va < s.virtual_address.saturating_add(s.virtual_size)
         })
         .and_then(|s| {
             let offset_in_section = ep_va.checked_sub(s.virtual_address)?;
-            let file_off = usize::try_from(s.file_offset).ok()?.checked_add(
-                usize::try_from(offset_in_section).unwrap_or(usize::MAX),
-            )?;
+            let file_off = usize::try_from(s.file_offset)
+                .ok()?
+                .checked_add(usize::try_from(offset_in_section).unwrap_or(usize::MAX))?;
             let end = file_off.checked_add(window)?.min(data.len());
             data.get(file_off..end)
         })

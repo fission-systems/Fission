@@ -1,6 +1,6 @@
 use crate::{DecompileEngineMode, DecompileRoutingDecision, DecompileSelection};
-use fission_loader::loader::LoadedBinary;
 use crate::{NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction};
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 
 #[derive(Debug, Clone)]

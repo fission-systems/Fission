@@ -1,12 +1,12 @@
 use crate::decode_rust_sleigh_pcode;
-use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
-use fission_loader::loader::LoadedBinary;
-use fission_loader::loader::types::DwarfLocation;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext, PcodeFunction,
     PcodeOpcode,
 };
+use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
+use fission_loader::loader::LoadedBinary;
+use fission_loader::loader::types::DwarfLocation;
 use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::win_types::WindowsStructures;
 use fission_static::analysis::decomp::facts::FactStore;

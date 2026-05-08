@@ -201,10 +201,7 @@ impl PathConfig {
             }
         }
         if let Some(ref base) = self.signatures_base {
-            let path = base
-                .join("typeinfo")
-                .join("win32")
-                .join(filename);
+            let path = base.join("typeinfo").join("win32").join(filename);
             if path.exists() {
                 return Some(path);
             }
@@ -262,9 +259,7 @@ impl PathConfig {
                 return Some(candidate);
             }
         }
-        self.workspace_root
-            .as_ref()
-            .and_then(workspace_die_mirror)
+        self.workspace_root.as_ref().and_then(workspace_die_mirror)
     }
 
     /// Find a file within search paths

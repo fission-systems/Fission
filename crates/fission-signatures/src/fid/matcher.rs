@@ -33,9 +33,11 @@ impl FidDatabaseSet {
         format: Option<&str>,
         is_64bit: bool,
     ) -> Self {
-        let paths = ResourceProvider::global()
-            .paths()
-            .get_preferred_fid_paths(is_64bit, format, compiler_id);
+        let paths = ResourceProvider::global().paths().get_preferred_fid_paths(
+            is_64bit,
+            format,
+            compiler_id,
+        );
         let mut databases = Vec::new();
         let mut errors = Vec::new();
         for path in paths {

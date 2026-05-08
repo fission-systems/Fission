@@ -7,7 +7,7 @@
   function name while filling an unknown `FunctionInfo.size` from `.pdata`
   unwind extents.
 - The change is zero-dependency and stays in the loader provenance layer. It
-  does not add binary-specific decompiler heuristics, printer rewrites, or
+  does not add binary-specific decompiler shortcuts, printer rewrites, or
   downstream benchmark/reporting repair.
 - Sample validation on
   `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe`:
@@ -64,7 +64,7 @@
 - Centralized that helper allowlist in `guarded_tail/mod.rs` and reused it from
   suffix call-effect classification and alias-forward purity checks. This keeps
   the change in NIR structuring proof logic instead of adding a printer patch or
-  a binary-specific heuristic.
+  a binary-specific shortcut.
 - Sample diagnostics on
   `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` showed the
   flag helpers are now internalized as pure known helper calls in the
@@ -161,7 +161,7 @@
 - Suppressed entry-register formal parameter surfacing for compiler/runtime
   bootstrap helpers (`CRTStartup` and dynamic TLS helpers) while preserving it
   for normal user functions. The same helper family is also classified as
-  `CompilerRuntimeHelper` in the function-provenance index.
+  explicit compiler/runtime provenance in the function-provenance index.
 - Tightened guarded-tail pure-helper suffix handling so known pure helper calls
   still go through the dedicated ownership/escape proof instead of being
   accepted by the generic pure-statement fast path.
@@ -254,7 +254,7 @@
 - Kept the return-value proof scoped to the primary ABI return register after
   the last side-effect barrier, reusing the existing return-def machinery
   rather than adding a printer-only cleanup.
-- Added a regression gate waiver for `heuristic_max_brace_nesting_mean` only
+- Added a regression gate waiver for `text_max_brace_nesting_mean` only
   when row fidelity passes, aggregate similarity does not fall, and generic
   locals, gotos, top-level labels, and synthetic helper calls do not increase.
   This keeps the gate strict for structural regressions while accepting the
@@ -309,7 +309,7 @@
   `top_level_label_total` stayed `24`; `synthetic_helper_call_total` stayed
   `3`; `alias_unsafe` improved from `13511` to `13101`; `missing_merge`
   improved from `4270` to `4254`; `materialization_stabilized=1408`.
-  `heuristic_max_brace_nesting_mean` increased from `1.25` to `1.35` and was
+  `text_max_brace_nesting_mean` increased from `1.25` to `1.35` and was
   waived by the structured-quality tradeoff gate because the row fidelity and
   non-regression conditions held.
 - Repeatability:
@@ -317,7 +317,7 @@
   `avg_normalized_similarity=38.38%`, `median_normalized_similarity=42.78%`,
   `aggregate_weighted_normalized_similarity=7.60%`,
   `generic_local_name_sum=276`, `generic_param_name_sum=14`, and
-  `heuristic_max_brace_nesting_mean=1.35`. Wall times were `6.806542s`,
+  `text_max_brace_nesting_mean=1.35`. Wall times were `6.806542s`,
   `7.441098s`, and `6.540807s`; median wall time was `6.806542s`, about
   `2.94` functions/s for the 20-row corpus.
 - Row notes:

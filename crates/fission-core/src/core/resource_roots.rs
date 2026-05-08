@@ -11,7 +11,9 @@ static CLI_RESOURCE_BUNDLE_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Process-global override from `--resource-root`. Must be set before the first [`crate::PATHS`] dereference if used.
 pub fn set_cli_resource_bundle_root(path: Option<PathBuf>) {
-    let mut guard = CLI_RESOURCE_BUNDLE_ROOT.write().expect("resource root lock poisoned");
+    let mut guard = CLI_RESOURCE_BUNDLE_ROOT
+        .write()
+        .expect("resource root lock poisoned");
     *guard = path;
 }
 
@@ -148,11 +150,7 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
     let cfg = PathConfig::detect();
     let roots = probe_resource_root_candidates();
     let die_pe = cfg.get_die_signatures_path();
-    let die_corpus_present = cfg
-        .die_dir
-        .as_ref()
-        .is_some_and(|p| p.exists())
-        || die_pe.is_some();
+    let die_corpus_present = cfg.die_dir.as_ref().is_some_and(|p| p.exists()) || die_pe.is_some();
     let win_api = cfg.get_win_api_signatures_path();
     let resources = ResourceAvailability {
         signatures_base: cfg.signatures_base.as_ref().map(path_display),
@@ -190,13 +188,22 @@ fn exe_adjacent_bundle_roots_labeled() -> Vec<(&'static str, PathBuf)> {
 
     let mut v = Vec::new();
     v.push(("exe_dir/fission-data", parent.join("fission-data")));
-    v.push(("exe_dir/share/fission", parent.join("share").join("fission")));
+    v.push((
+        "exe_dir/share/fission",
+        parent.join("share").join("fission"),
+    ));
     #[cfg(unix)]
     {
         if let Some(gp) = parent.parent() {
-            v.push(("exe_parent/../share/fission", gp.join("share").join("fission")));
+            v.push((
+                "exe_parent/../share/fission",
+                gp.join("share").join("fission"),
+            ));
         }
-        v.push(("system_/usr/share/fission", PathBuf::from("/usr/share/fission")));
+        v.push((
+            "system_/usr/share/fission",
+            PathBuf::from("/usr/share/fission"),
+        ));
         v.push((
             "system_/usr/local/share/fission",
             PathBuf::from("/usr/local/share/fission"),

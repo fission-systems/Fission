@@ -1,9 +1,9 @@
+use super::RuntimeMatchTrace;
 use crate::compiler::{
     CompiledConstructTpl, CompiledConstructTplKind, CompiledConstructorTemplate,
     CompiledContextCommit, CompiledDisplayOperand, CompiledDisplayTemplate, CompiledOperandSpec,
     CompiledSpaceRef,
 };
-use super::RuntimeMatchTrace;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

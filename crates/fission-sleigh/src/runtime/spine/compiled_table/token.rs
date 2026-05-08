@@ -73,9 +73,10 @@ fn frontend_has_shared_one_byte_subtable_token_operands(compiled: &CompiledFront
     }
 
     compiled.subtables.values().any(|subtable| {
-        subtable.constructors.iter().any(|constructor| {
-            constructor_uses_shared_token_cursor(compiled, constructor)
-        })
+        subtable
+            .constructors
+            .iter()
+            .any(|constructor| constructor_uses_shared_token_cursor(compiled, constructor))
     })
 }
 

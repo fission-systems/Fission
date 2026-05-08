@@ -60,7 +60,6 @@ impl ArtifactWriter {
             &serde_json::json!({
                 "timeout_rescue": corpus.timeout_rescue,
                 "quality_explicit_facts": corpus.quality_explicit_facts,
-                "quality_heuristic_surface": corpus.quality_heuristic_surface,
             }),
         )?;
         write_json_pretty(

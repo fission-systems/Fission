@@ -46,33 +46,6 @@ impl<'a> GoAnalyzer<'a> {
                 return Ok(section.virtual_address);
             }
         }
-        self.heuristic_search_pclntab()
-    }
-
-    fn heuristic_search_pclntab(&self) -> Result<u64> {
-        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
-        for section in &self.binary.sections {
-            if section.is_executable || section.file_size == 0 {
-                continue;
-            }
-            let Some(data) = self
-                .binary
-                .view_bytes(section.virtual_address, section.virtual_size as usize)
-            else {
-                continue;
-            };
-            for i in 0..(data.len().saturating_sub(8)) {
-                let magic = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
-                if matches!(
-                    magic,
-                    GO_1_2_MAGIC | GO_1_16_MAGIC | GO_1_18_MAGIC | GO_1_20_MAGIC
-                ) {
-                    if data[i + 4] == 0 && data[i + 5] == 0 && data[i + 7] == ptr_size as u8 {
-                        return Ok(section.virtual_address + i as u64);
-                    }
-                }
-            }
-        }
         Err(err!(loader, "Could not find Go pclntab"))
     }
 

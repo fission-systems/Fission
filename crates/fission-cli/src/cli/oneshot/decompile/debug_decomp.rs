@@ -2,7 +2,7 @@
 //!
 //! Does not influence decompilation output or routing — aggregates loader identity,
 //! coarse stage status strings, timing/size counters from [`NirBuildStats`], and
-//! heuristic [`owner_buckets`] for benchmarks.
+//! [`owner_buckets`] for benchmarks.
 
 use crate::cli::oneshot::debug_bundle_extra;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -157,7 +157,7 @@ fn derive_stage_status(
     } else {
         "partial"
     };
-    let struct_st = if structuring_partial_heuristic(s) {
+    let struct_st = if structuring_is_partial(s) {
         "partial"
     } else {
         "ok"
@@ -179,7 +179,7 @@ fn derive_stage_status(
     })
 }
 
-pub(super) fn structuring_partial_heuristic(s: &NirBuildStats) -> bool {
+pub(super) fn structuring_is_partial(s: &NirBuildStats) -> bool {
     if s.forced_linear_structuring_count > 0 {
         return true;
     }
@@ -340,7 +340,7 @@ fn owner_buckets_from_stats(s: &NirBuildStats) -> Vec<String> {
     {
         buckets.insert("replacement_plan_rejected".to_string());
     }
-    if structuring_partial_heuristic(s) {
+    if structuring_is_partial(s) {
         buckets.insert("structuring_partial".to_string());
     }
     buckets.into_iter().collect()
@@ -361,9 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn structuring_partial_heuristic_detects_forced_linear() {
+    fn structuring_partial_status_detects_forced_linear() {
         let mut s = NirBuildStats::default();
         s.forced_linear_structuring_count = 1;
-        assert!(structuring_partial_heuristic(&s));
+        assert!(structuring_is_partial(&s));
     }
 }

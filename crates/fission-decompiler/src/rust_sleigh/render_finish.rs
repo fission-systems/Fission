@@ -1,12 +1,12 @@
 use crate::engine::NirEngineMode;
 use crate::request::{DecompileRequest, decompile_prebuilt_pcode};
+use crate::rust_sleigh::decode::render_pcode_text;
 use crate::rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
 };
-use crate::rust_sleigh::decode::render_pcode_text;
 use crate::types::NirSelection;
-use fission_loader::loader::LoadedBinary;
 use crate::{NirRenderOptions, PcodeFunction};
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 
 pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
@@ -40,8 +40,7 @@ pub(crate) fn finish_rust_sleigh_render(
     .map_err(|e| format!("rust_sleigh routing failed: {e}"))?;
 
     evidence.nir_fallback_kind = selection.fallback_kind.map(|s| s.to_string());
-    evidence.nir_fallback_kind_refined =
-        selection.fallback_kind_refined.map(|s| s.to_string());
+    evidence.nir_fallback_kind_refined = selection.fallback_kind_refined.map(|s| s.to_string());
     evidence.nir_fallback_reason_summary = selection.fallback_reason.clone();
 
     if let Some(code) = selection.nir_code {

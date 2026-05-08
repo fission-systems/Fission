@@ -9,12 +9,12 @@ use crate::taxonomy::classify_native_failure_kind;
 use crate::types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
-use fission_loader::loader::LoadedBinary;
 use crate::{NirAdmissionFacts, NirRenderOptions, PcodeFunction, TargetProfile};
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
 
-/// Admission-only heuristic for preview/NIR auto mode.
+/// Admission-only gate for preview/NIR auto mode.
 ///
 /// This is intentionally a raw pcode-shape gate, not a semantic success/failure
 /// classifier. It should never be used as a substitute for canonical
@@ -244,8 +244,8 @@ pub fn select_nir_output_from_pcode_with_facts(
 #[cfg(test)]
 mod tests {
     use super::auto_nir_admission_eligible;
-    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
     use crate::{PcodeBasicBlock, PcodeFunction};
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn test_pcode(block_count: usize) -> PcodeFunction {
         PcodeFunction {

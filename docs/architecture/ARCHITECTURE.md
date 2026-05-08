@@ -67,7 +67,7 @@ canonical pipeline follows the Ghidra Loader owner chain:
 4. `symbols`: classify code/data, imports, exports, thunks, undefined externals, and debug-only symbols.
 5. `finalize`: build `LoadedBinary`, `FunctionInfo`, imports, exports, and canonical function views.
 
-**Binary identity (`loader::identity`).** After `LoaderPipeline::load`, Fission attaches an optional structured `BinaryIdentityReport` on the `LoadedBinary` wrapper (entropy, overlay tail hints, PE-oriented section/import signals, optional `/utils` resource summaries, bounded DIE JSON primitive subset telemetry + matches, PE TLS/debug-directory hints, MSVC CRT pattern hits near entry, WinAPI catalog coverage counts, evidence lists). This augments loader provenance for CLI JSON (`fission_cli info --identity`) and benchmark attribution; it is **not** a decompiler repair layer and does not alter parsing or IR. Flat heuristic/DiE-style hits remain available via `detector::detect` (`info --detections`).
+**Binary identity (`loader::identity`).** After `LoaderPipeline::load`, Fission attaches an optional structured `BinaryIdentityReport` on the `LoadedBinary` wrapper (entropy, overlay tail hints, PE-oriented section/import signals, optional `/utils` resource summaries, bounded DIE JSON primitive subset telemetry + matches, PE TLS/debug-directory hints, MSVC CRT pattern hits near entry, WinAPI catalog coverage counts, evidence lists). This augments loader provenance for CLI JSON (`fission_cli info --identity`) and benchmark attribution; it is **not** a decompiler repair layer and does not alter parsing or IR. Flat rule/DiE-style detections remain available via `detector::detect` (`info --detections`).
 
 PE/COFF/ELF/Mach-O parsing is Fission-owned through bounds-checked byte readers.
 `object` is not a loader decision owner; it may be used only as fixture/debug
@@ -131,7 +131,7 @@ Printer and postprocess must not reconstruct structure after this point.
 
 - Canonical telemetry owner: `NirBuildStats`
 - Benchmark/report layers project canonical counters only
-- Row regression reasons should be derived from canonical structuring/materialization families, not from downstream heuristics
+- Row regression reasons should be derived from canonical structuring/materialization families, not from downstream text matching
 
 ## Non-Goals
 

@@ -3,7 +3,7 @@ use super::schema::{
     FunctionFactsInventorySummary, ProvenanceFactBreakdown,
 };
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
-use fission_decompiler::{NirBuildStats, NirHintStats};
+use fission_decompiler::NirBuildStats;
 use fission_static::analysis::decomp::{FactStore, FunctionFacts};
 
 #[derive(Debug, Clone)]
@@ -55,7 +55,6 @@ pub(super) struct InventoryCandidateEntry {
     pub(super) nir_output_class: Option<String>,
     pub(super) nir_build_stats: Option<NirBuildStats>,
     pub(super) reason_tags: Vec<String>,
-    pub(super) preview_hint_stats: Option<NirHintStats>,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -109,7 +108,6 @@ impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCa
             nir_output_class: entry.nir_output_class,
             nir_build_stats: entry.nir_build_stats,
             reason_tags: entry.reason_tags,
-            preview_hint_stats: entry.preview_hint_stats,
         }
     }
 }
@@ -118,25 +116,6 @@ fn entry_indirect_classification(
     entry: &InventoryCandidateEntry,
 ) -> fission_decompiler::IndirectControlClassification {
     canonical_indirect_classification(entry.nir_build_stats.as_ref())
-}
-
-pub(super) fn heuristic_surface_candidate(entry: &InventoryCandidateEntry) -> bool {
-    let indirect = entry_indirect_classification(entry);
-    let hint_stats = entry.preview_hint_stats;
-    let heuristic_hits = hint_stats.is_some_and(|stats| {
-        stats.pointer_alias_hits > 0
-            || stats.local_surface_hits > 0
-            || stats.derived_origin_type_hits > 0
-    });
-    let has_reason_tag = entry.reason_tags.iter().any(|tag| {
-        matches!(
-            tag.as_str(),
-            "pointer_alias" | "local_surface" | "slot_alias_candidate"
-        )
-    });
-    entry.preview_direct_success
-        && indirect.allows_heuristic_surface_candidate()
-        && (heuristic_hits || has_reason_tag)
 }
 
 pub(super) fn detect_pdb_source_present(binary: &fission_loader::loader::LoadedBinary) -> bool {
@@ -238,7 +217,6 @@ pub(super) fn to_inventory_row(
     let explicit_fact_breakdown = explicit_fact_breakdown(&entry, &snapshot);
     let explicit_fact_total = explicit_fact_total(&explicit_fact_breakdown);
     let strict_explicit = strict_explicit_candidate_row(&entry, explicit_fact_total);
-    let heuristic_surface = heuristic_surface_candidate(&entry);
     let fact_sources_present = fact_sources_present(&snapshot, &entry, pdb_source_present);
     let provenance_fact_breakdown = provenance_fact_breakdown(&snapshot);
     let inventory_surface_gap = inventory_surface_gap(&fact_sources_present, explicit_fact_total);
@@ -302,7 +280,6 @@ pub(super) fn to_inventory_row(
         nir_output_class: entry.nir_output_class,
         nir_build_stats: entry.nir_build_stats,
         strict_explicit_candidate: strict_explicit,
-        heuristic_surface_candidate: heuristic_surface,
         reason_tags: entry.reason_tags,
         row_status: entry.row_status,
         row_error_kind: entry.row_error_kind,
@@ -359,9 +336,6 @@ pub(super) fn update_inventory_summary(
     }
     if row.strict_explicit_candidate {
         summary.strict_explicit_candidate_count += 1;
-    }
-    if row.heuristic_surface_candidate {
-        summary.heuristic_surface_candidate_count += 1;
     }
     if let Some(strategy) = row.recovery_strategy_attempted.as_ref() {
         *summary
@@ -446,7 +420,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stats_prefer_over_raw_flags_for_heuristic_surface_classification() {
+    fn stats_prefer_over_raw_flags_for_indirect_classification() {
         let classification = canonical_indirect_classification(Some(&NirBuildStats {
             indirect_surface_preserved_count: 1,
             ..Default::default()
