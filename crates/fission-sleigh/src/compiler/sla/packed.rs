@@ -340,6 +340,7 @@ pub mod sla_format {
     pub const ATTR_LINE: u32 = 24;
     pub const ATTR_SOURCE: u32 = 25;
     pub const ATTR_LENGTH: u32 = 26;
+    pub const ATTR_FIRST: u32 = 27;
     pub const ATTR_PLUS: u32 = 28;
     pub const ATTR_SHIFT: u32 = 29;
     pub const ATTR_ENDBIT: u32 = 30;

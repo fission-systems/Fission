@@ -235,6 +235,8 @@ fn sla_pattern_block_decode_does_not_synthesize_zero_shape_fields() {
 fn sla_constructor_identity_fields_are_not_synthesized() {
     let templates = include_str!("templates.rs");
     for forbidden in [
+        "constructor\n                .attr_unsigned(sla_format::ATTR_PARENT)\n                .unwrap_or",
+        "constructor\n                .attr_signed(sla_format::ATTR_FIRST)\n                .unwrap_or",
         ".attr_unsigned(sla_format::ATTR_LINE)\n                .unwrap_or(0)",
         ".attr_unsigned(sla_format::ATTR_LENGTH)\n                .unwrap_or(0)",
         "let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);",
@@ -244,6 +246,19 @@ fn sla_constructor_identity_fields_are_not_synthesized() {
             "constructor decode must use required signed SLA fields, not synthesized defaults: {forbidden}"
         );
     }
+}
+
+#[test]
+fn sla_constructor_first_whitespace_comes_from_sla_payload() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("display_pieces.iter().position"),
+        "constructor first whitespace must come from ATTR_FIRST, not reconstructed display text"
+    );
+    assert!(
+        templates.contains("sla_format::ATTR_FIRST"),
+        "constructor decode must read Ghidra's encoded first whitespace attribute"
+    );
 }
 
 #[test]

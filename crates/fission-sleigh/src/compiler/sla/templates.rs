@@ -89,6 +89,26 @@ pub(super) fn decode_construct_templates(
             // through sub.getConstructor(id). The constructor element's own ATTR_ID
             // is not the terminal selection index.
             let id = local_index as u32;
+            let parent_id = constructor
+                .attr_unsigned(sla_format::ATTR_PARENT)
+                .ok_or_else(|| "constructor_missing_parent".to_string())?;
+            let parent_id = u32::try_from(parent_id)
+                .map_err(|_| "constructor_parent_out_of_range".to_string())?;
+            if parent_id != subtable_id {
+                return Err("constructor_parent_mismatch".to_string());
+            }
+            let first_whitespace = constructor
+                .attr_signed(sla_format::ATTR_FIRST)
+                .ok_or_else(|| "constructor_missing_first_whitespace".to_string())
+                .and_then(|value| {
+                    if value < 0 {
+                        Ok(None)
+                    } else {
+                        usize::try_from(value)
+                            .map(Some)
+                            .map_err(|_| "constructor_first_whitespace_out_of_range".to_string())
+                    }
+                })?;
             let source_index = constructor
                 .attr_signed(sla_format::ATTR_SOURCE)
                 .ok_or_else(|| "constructor_missing_source_index".to_string())?;
@@ -275,9 +295,6 @@ pub(super) fn decode_construct_templates(
                     flowthru_operand_index = Some(*index);
                 }
             }
-            let first_whitespace = display_pieces.iter().position(
-                |piece| matches!(piece, CompiledDisplayPiece::Literal(lit) if lit.starts_with(' ')),
-            );
             let display_text = display_pieces
                 .iter()
                 .map(|piece| match piece {
