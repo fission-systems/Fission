@@ -263,6 +263,16 @@ fn sla_context_commit_decode_does_not_synthesize_zero_fields() {
 }
 
 #[test]
+fn sla_offset_plus_requires_encoded_plus() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        templates.contains("const_handle offset_plus missing plus")
+            && templates.contains("const_handle non-offset_plus has unexpected plus"),
+        "ConstTpl v_offset_plus must preserve Ghidra ATTR_PLUS shape instead of defaulting"
+    );
+}
+
+#[test]
 fn sla_pattern_block_decode_does_not_synthesize_zero_shape_fields() {
     let templates = include_str!("templates.rs");
     for forbidden in [

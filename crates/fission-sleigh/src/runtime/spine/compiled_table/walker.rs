@@ -497,7 +497,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .get(*handle_index as usize)
                     .ok_or_else(|| anyhow!("export handle {} is missing", handle_index))?;
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {
-                    return Ok(resolve_offset_plus_pub(handle, plus.unwrap_or(0)));
+                    let plus =
+                        plus.ok_or_else(|| anyhow!("export offset_plus handle is missing plus"))?;
+                    return Ok(resolve_offset_plus_pub(handle, plus));
                 }
                 let value = match selector {
                     CompiledHandleSelector::Space => handle
@@ -510,7 +512,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     CompiledHandleSelector::Size => u64::from(handle.fixed.size),
                     CompiledHandleSelector::OffsetPlus => unreachable!(),
                 };
-                Ok(value.wrapping_add(plus.unwrap_or(0)))
+                match plus {
+                    Some(plus) => Ok(value.wrapping_add(*plus)),
+                    None => Ok(value),
+                }
             }
             CompiledConstTpl::InstStart => Ok(self.ctx.address),
             CompiledConstTpl::InstNext => {

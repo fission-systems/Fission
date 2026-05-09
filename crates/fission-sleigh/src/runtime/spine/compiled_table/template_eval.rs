@@ -1319,7 +1319,8 @@ impl<'c> CompiledTableEmitter<'c> {
                     .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
 
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {
-                    return Ok(resolve_offset_plus(handle, plus.unwrap_or(0)));
+                    let plus = plus.ok_or_else(|| anyhow!("offset_plus handle is missing plus"))?;
+                    return Ok(resolve_offset_plus(handle, plus));
                 }
 
                 let val = self.resolve_fixed_handle_selector(handle, *selector)?;

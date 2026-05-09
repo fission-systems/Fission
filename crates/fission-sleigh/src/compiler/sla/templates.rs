@@ -958,10 +958,17 @@ fn decode_const_tpl(
                 3 => CompiledHandleSelector::OffsetPlus,
                 other => bail!("unsupported const_handle selector {other}"),
             };
+            let plus = element.attr_unsigned(sla_format::ATTR_PLUS);
+            if matches!(selector, CompiledHandleSelector::OffsetPlus) && plus.is_none() {
+                bail!("const_handle offset_plus missing plus");
+            }
+            if !matches!(selector, CompiledHandleSelector::OffsetPlus) && plus.is_some() {
+                bail!("const_handle non-offset_plus has unexpected plus");
+            }
             Ok(CompiledConstTpl::Handle {
                 handle_index,
                 selector,
-                plus: element.attr_unsigned(sla_format::ATTR_PLUS),
+                plus,
             })
         }
         sla_format::ELEM_CONST_SPACEID => Ok(CompiledConstTpl::SpaceId(decode_space_ref(
