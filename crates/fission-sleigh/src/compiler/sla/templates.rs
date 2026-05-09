@@ -300,16 +300,16 @@ pub(super) fn decode_construct_templates(
             {
                 let symbol_id = child
                     .attr_unsigned(sla_format::ATTR_ID)
-                    .map(|v| v as u32)
-                    .unwrap_or(0);
+                    .ok_or_else(|| "context_commit_missing_symbol_id".to_string())?
+                    as u32;
                 let word_index = child
                     .attr_unsigned(sla_format::ATTR_NUMBER)
-                    .map(|v| v as u32)
-                    .unwrap_or(0);
+                    .ok_or_else(|| "context_commit_missing_word_index".to_string())?
+                    as u32;
                 let mask = child
                     .attr_unsigned(sla_format::ATTR_MASK)
-                    .map(|v| v as u32)
-                    .unwrap_or(0);
+                    .ok_or_else(|| "context_commit_missing_mask".to_string())?
+                    as u32;
                 // Resolve symbol_id → hand_index: look up in the operand symbol table.
                 // If the symbol is a built-in (e.g. `inst_next`), store u32::MAX as sentinel.
                 let hand_index = operand_symbols

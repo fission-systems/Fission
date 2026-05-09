@@ -159,6 +159,21 @@ fn sla_constructor_decode_errors_are_not_broadly_downgraded_to_unsupported_templ
 }
 
 #[test]
+fn sla_context_commit_decode_does_not_synthesize_zero_fields() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        ".attr_unsigned(sla_format::ATTR_ID)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
+        ".attr_unsigned(sla_format::ATTR_NUMBER)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
+        ".attr_unsigned(sla_format::ATTR_MASK)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "context commit decode must fail closed instead of synthesizing zero fields"
+        );
+    }
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
