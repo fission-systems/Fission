@@ -636,6 +636,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     .join(" ");
     let context_commit_addr_unit_fallback = ".unwrap_or(1)";
     let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
+    let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
+    let tokenfield_saturating_bit_range = "bit_end.saturating_sub(bit_start)";
     let empty_or_pattern_length_fallback = [
         ".map(disjoint_pattern_instruction_byte_len)",
         ".max()\n            .unwrap_or(0)",
@@ -784,6 +786,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(decoded_bytes_truncation_fallback),
             "{} still truncates decoded instruction bytes when decoded length exceeds input window",
+            file.display()
+        );
+        assert!(
+            !source.contains(tokenfield_saturating_range)
+                && !source.contains(tokenfield_saturating_bit_range),
+            "{} still accepts inverted SLA tokenfield ranges via saturating arithmetic",
             file.display()
         );
         assert!(

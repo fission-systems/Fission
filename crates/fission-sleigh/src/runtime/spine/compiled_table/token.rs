@@ -280,13 +280,24 @@ pub(super) fn read_sla_token_field_at(
     byte_end: u32,
     shift: i32,
 ) -> Result<u64> {
-    let size = byte_end.saturating_sub(byte_start) + 1;
+    if byte_end < byte_start {
+        bail!("tokenfield byte range is inverted: {byte_start}..={byte_end}");
+    }
+    if bit_end < bit_start {
+        bail!("tokenfield bit range is inverted: {bit_start}..={bit_end}");
+    }
+    let size = byte_end
+        .checked_sub(byte_start)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| anyhow!("tokenfield byte range overflow: {byte_start}..={byte_end}"))?;
     let mut res = 0u64;
     for idx in 0..size {
         let off = if big_endian {
             byte_start + idx
         } else {
-            byte_end.saturating_sub(idx)
+            byte_end
+                .checked_sub(idx)
+                .ok_or_else(|| anyhow!("tokenfield byte index underflow"))?
         } as usize;
         let byte = *ctx
             .bytes
@@ -299,7 +310,10 @@ pub(super) fn read_sla_token_field_at(
     } else {
         res << ((-shift) as u32)
     };
-    let width = bit_end.saturating_sub(bit_start) + 1;
+    let width = bit_end
+        .checked_sub(bit_start)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| anyhow!("tokenfield bit range overflow: {bit_start}..={bit_end}"))?;
     Ok(if sign_bit {
         sign_extend_bits(shifted, width)
     } else {
