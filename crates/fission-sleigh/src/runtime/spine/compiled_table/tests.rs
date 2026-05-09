@@ -609,6 +609,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let silent_u32_overflow_zero = ["u32::try_from(value).ok())", ".unwrap_or(0)"].join("\n");
     let debug_pattern_value_fallback = ["debug", "_value) = handle.debug_value.clone()"].concat();
     let callother_size_fallback = ["template_varnode_size(input, state).", "unwrap_or(8)"].concat();
+    let delay_slot_zero_fallback = ["delay_slot_length", "unwrap_or(0)"].join(".");
     let decision_probe_zero_padding = [
         "self.ctx.bytes.get(start + i).copied().unwrap_or(0)",
         "get(self.ctx.cursor + byte_offset as usize + i as usize)\n                            .copied()\n                            .unwrap_or(0)",
@@ -691,6 +692,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&callother_size_fallback),
             "{} still guesses CALLOTHER input size after template size resolution failure",
+            file.display()
+        );
+        assert!(
+            !source.contains(&delay_slot_zero_fallback),
+            "{} still treats missing delay-slot length as zero",
             file.display()
         );
         for forbidden in decision_probe_zero_padding {

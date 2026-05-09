@@ -110,7 +110,7 @@ pub(super) fn emit_pcode_for_state_with_bytes(
         || uses_delay_slot_indirect(&decoded.constructor_template.ops))
         && !memory_window.is_empty()
     {
-        emitter.precompute_delay_slot_length(decoded.length);
+        emitter.precompute_delay_slot_length(decoded.length)?;
     }
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, decoded)
@@ -276,21 +276,25 @@ impl<'c> CompiledTableEmitter<'c> {
     /// Pre-compute the delay slot instruction length. Called from the emit wrapper
     /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
     /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
-    fn precompute_delay_slot_length(&mut self, inst_length: usize) {
-        let inst_next_offset = (self.address + inst_length as u64)
-            .checked_sub(self.memory_base)
-            .unwrap_or(0) as usize;
+    fn precompute_delay_slot_length(&mut self, inst_length: usize) -> Result<()> {
         let inst_next_address = self.address.saturating_add(inst_length as u64);
+        let inst_next_offset = inst_next_address
+            .checked_sub(self.memory_base)
+            .ok_or_else(|| {
+                anyhow!(
+                    "delay-slot instruction at 0x{inst_next_address:x} precedes memory base 0x{:x}",
+                    self.memory_base
+                )
+            })? as usize;
         let len = decode_instruction_length(
             self.compiled,
             self.native,
             self.memory_window,
             inst_next_address,
             inst_next_offset,
-        );
-        if len > 0 {
-            self.delay_slot_length = Some(len);
-        }
+        )?;
+        self.delay_slot_length = Some(len);
+        Ok(())
     }
 
     fn truncate_to_pointer_size(space: &CompiledSpaceRef, offset: u64) -> u64 {
@@ -1335,7 +1339,10 @@ impl<'c> CompiledTableEmitter<'c> {
                 // `delay_slot_length` = actual length of the instruction in the delay slot,
                 // pre-decoded in `precompute_delay_slot_length`.
                 let inst_next = self.address.saturating_add(state.length as u64);
-                let delay_len = self.delay_slot_length.unwrap_or(0) as u64;
+                let delay_len = self
+                    .delay_slot_length
+                    .ok_or_else(|| anyhow!("InstNext2 requires decoded delay-slot length"))?
+                    as u64;
                 Ok(inst_next.saturating_add(delay_len))
             }
             CompiledConstTpl::CurSpace => self.compiled.sla_default_cur_space_index(),

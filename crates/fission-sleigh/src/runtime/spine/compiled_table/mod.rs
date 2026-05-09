@@ -261,33 +261,37 @@ pub(super) fn decode_instruction_length(
     bytes: &[u8],
     inst_next_address: u64,
     inst_next_byte_offset: usize,
-) -> u32 {
+) -> Result<u32> {
     let remaining = match bytes.get(inst_next_byte_offset..) {
         Some(b) if !b.is_empty() => b,
-        _ => return 0,
+        _ => {
+            bail!("delay-slot instruction at 0x{inst_next_address:x} is outside the memory window")
+        }
     };
-    let ctx = match CompiledInstructionContext::parse(remaining, inst_next_address) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
+    let ctx = CompiledInstructionContext::parse(remaining, inst_next_address)?;
     let mut ctx = ctx;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = match candidate_selections(compiled, &strategy, &ctx, inst_next_address) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
+    let candidates = candidate_selections(compiled, &strategy, &ctx, inst_next_address)?;
+    let mut first_err: Option<anyhow::Error> = None;
     for selection in candidates {
         if !selection.constructor.runtime_ready {
             continue;
         }
         let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-        if let Ok(decoded) = bind_instruction(compiled, strategy, &ctx, selection) {
-            return decoded.length as u32;
+        match bind_instruction(compiled, strategy, &ctx, selection) {
+            Ok(decoded) => return Ok(decoded.length as u32),
+            Err(err) => {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
         }
     }
-    0
+    Err(first_err.unwrap_or_else(|| {
+        anyhow!("unable to decode delay-slot instruction at 0x{inst_next_address:x}")
+    }))
 }
 
 /// Bind (decode operands/handles for) the instruction at `target_address` using a
