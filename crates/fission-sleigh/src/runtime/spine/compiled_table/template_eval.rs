@@ -304,12 +304,15 @@ impl<'c> CompiledTableEmitter<'c> {
         Ok(())
     }
 
-    fn truncate_to_pointer_size(space: &CompiledSpaceRef, offset: u64) -> u64 {
-        let bits = (space.addr_size as u32).saturating_mul(8);
+    fn truncate_to_pointer_size(space: &CompiledSpaceRef, offset: u64) -> Result<u64> {
+        let bits = space
+            .addr_size
+            .checked_mul(8)
+            .ok_or_else(|| anyhow!("address space {} pointer size overflowed", space.name))?;
         if space.addr_size == 0 || bits >= 64 {
-            offset
+            Ok(offset)
         } else {
-            offset & ((1u64 << bits) - 1)
+            Ok(offset & ((1u64 << bits) - 1))
         }
     }
 
@@ -714,7 +717,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 }
                 let (target_space, target_offset) =
                     self.crossbuild_flat_address(&op.inputs[0], state)?;
-                let target_pc = Self::truncate_to_pointer_size(&target_space, target_offset);
+                let target_pc = Self::truncate_to_pointer_size(&target_space, target_offset)?;
                 let section = ptrsub_named_section_index(op)?;
                 let ctx_reg = self.flow.instruction_context_register;
                 let ctx_mask = self.flow.instruction_context_known_mask;
@@ -1541,6 +1544,38 @@ mod tests {
         assert!(
             !source.contains(&saturating_shift_fallback),
             "constant-space offset_plus must mirror Ghidra Java long shift masking"
+        );
+    }
+
+    #[test]
+    fn pointer_size_truncation_fails_on_metadata_overflow() {
+        let space = CompiledSpaceRef {
+            name: "oversized".to_string(),
+            index: 1,
+            word_size: 1,
+            addr_size: u32::MAX,
+        };
+
+        let err = CompiledTableEmitter::truncate_to_pointer_size(&space, 0x1234)
+            .expect_err("pointer-size overflow must fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("address space oversized pointer size overflowed"));
+    }
+
+    #[test]
+    fn pointer_size_truncation_masks_known_widths() {
+        let space = CompiledSpaceRef {
+            name: "ram32".to_string(),
+            index: 1,
+            word_size: 1,
+            addr_size: 4,
+        };
+
+        assert_eq!(
+            CompiledTableEmitter::truncate_to_pointer_size(&space, 0x1_0000_1234).unwrap(),
+            0x1234
         );
     }
 }
