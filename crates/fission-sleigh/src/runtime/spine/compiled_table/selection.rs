@@ -105,11 +105,15 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 mask,
                 shift,
             } => {
-                let byte = *self
+                let absolute = self
                     .ctx
-                    .bytes
-                    .get(self.ctx.cursor + usize::from(offset))
-                    .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
+                    .cursor
+                    .checked_add(usize::from(offset))
+                    .ok_or_else(|| anyhow!("instruction byte probe cursor overflow"))?;
+                let byte =
+                    *self.ctx.bytes.get(absolute).ok_or_else(|| {
+                        anyhow!("missing instruction byte probe at offset {offset}")
+                    })?;
                 vec![(byte & mask) >> shift]
             }
             CompiledDecisionProbe::ContextBitSlice {
@@ -133,8 +137,15 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 let bit_offset = start_bit % 8;
                 let byte_cnt = (bit_offset + bit_size + 7) / 8;
                 let mut word = 0u64;
+                let start = self
+                    .ctx
+                    .cursor
+                    .checked_add(byte_offset as usize)
+                    .ok_or_else(|| anyhow!("instruction bit probe cursor overflow"))?;
                 for i in 0..byte_cnt {
-                    let absolute = self.ctx.cursor + byte_offset as usize + i as usize;
+                    let absolute = start
+                        .checked_add(i as usize)
+                        .ok_or_else(|| anyhow!("instruction bit probe range overflow"))?;
                     let byte = self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
                         anyhow!("instruction bit read out of range at bit {start_bit}")
                     })?;
@@ -165,8 +176,11 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             .ok_or_else(|| anyhow!("instruction byte read underflow at offset {offset}"))?;
         let mut word = 0u32;
         for i in 0..size as usize {
+            let absolute = start
+                .checked_add(i)
+                .ok_or_else(|| anyhow!("instruction byte read range overflow"))?;
             let byte =
-                self.ctx.bytes.get(start + i).copied().ok_or_else(|| {
+                self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
                     anyhow!("instruction byte read out of range at offset {offset}")
                 })?;
             word <<= 8;
@@ -254,17 +268,25 @@ pub(super) fn constructor_matches(
 
     match &constructor.matcher {
         CompiledPatternMatcher::ExactBytes(bytes) => {
-            if ctx.bytes.get(ctx.cursor..ctx.cursor + bytes.len()) != Some(bytes.as_slice()) {
+            let end = ctx
+                .cursor
+                .checked_add(bytes.len())
+                .ok_or_else(|| anyhow!("exact opcode range overflow"))?;
+            if ctx.bytes.get(ctx.cursor..end) != Some(bytes.as_slice()) {
                 bail!("exact opcode mismatch");
             }
         }
         CompiledPatternMatcher::RowCc { prefix, row } => {
-            if ctx.bytes.get(ctx.cursor..ctx.cursor + prefix.len()) != Some(prefix.as_slice()) {
+            let prefix_end = ctx
+                .cursor
+                .checked_add(prefix.len())
+                .ok_or_else(|| anyhow!("row prefix range overflow"))?;
+            if ctx.bytes.get(ctx.cursor..prefix_end) != Some(prefix.as_slice()) {
                 bail!("prefix mismatch");
             }
             let opcode = *ctx
                 .bytes
-                .get(ctx.cursor + prefix.len())
+                .get(prefix_end)
                 .ok_or_else(|| anyhow!("missing row opcode"))?;
             if (opcode >> 4) != *row {
                 bail!("row mismatch");

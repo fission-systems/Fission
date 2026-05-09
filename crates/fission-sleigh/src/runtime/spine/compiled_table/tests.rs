@@ -688,6 +688,14 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ];
     let bit_constraint_zero_padding =
         "if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i)";
+    let selection_unchecked_ranges = [
+        ".get(self.ctx.cursor + usize::from(offset))",
+        "self.ctx.cursor + byte_offset as usize + i as usize",
+        "self.ctx.bytes.get(start + i)",
+        "ctx.cursor..ctx.cursor + bytes.len()",
+        "ctx.cursor..ctx.cursor + prefix.len()",
+        ".get(ctx.cursor + prefix.len())",
+    ];
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -902,6 +910,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             "{} still zero-pads missing instruction bit-constraint bytes",
             file.display()
         );
+        for forbidden in selection_unchecked_ranges {
+            assert!(
+                !source.contains(forbidden),
+                "{} still uses unchecked compiled-table selection byte ranges",
+                file.display()
+            );
+        }
     }
 }
 
