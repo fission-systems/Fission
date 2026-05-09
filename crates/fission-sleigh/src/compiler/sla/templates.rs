@@ -450,6 +450,7 @@ pub(super) fn decode_construct_templates(
         subtables.insert(
             name.clone(),
             CompiledSlaSubtable {
+                id,
                 name,
                 constructors: subtable_constructors,
                 decision_tree,

@@ -156,6 +156,7 @@ fn sla_operand_subsymbol_refs_are_not_downgraded_to_generic() {
 fn sla_operand_symbol_shape_fields_are_not_synthesized() {
     let symbols = include_str!("symbols.rs");
     let packed = include_str!("packed.rs");
+    let native = include_str!("native.rs");
     for forbidden in [
         "pub fn attr_int",
         "pub fn attr_bool(&self",
@@ -167,6 +168,10 @@ fn sla_operand_symbol_shape_fields_are_not_synthesized() {
             "packed SLA attribute access must expose optional values instead of synthesized defaults: {forbidden}"
         );
     }
+    assert!(
+        !native.contains("unwrap_or(u32::MAX)"),
+        "native SLA model must preserve subtable ids instead of synthesizing sentinel ids"
+    );
     for forbidden in [
         ".attr_signed(sla_format::ATTR_OFF).unwrap_or(0)",
         ".attr_signed(sla_format::ATTR_BASE).unwrap_or(-1)",

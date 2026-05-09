@@ -15,6 +15,7 @@ pub struct CompiledSlaArtifact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledSlaSubtable {
+    pub id: u32,
     pub name: String,
     pub constructors: Vec<CompiledSlaConstructorTemplate>,
     pub decision_tree: Option<crate::compiler::ir::CompiledDecisionTree>,

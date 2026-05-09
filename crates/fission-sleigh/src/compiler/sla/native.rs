@@ -101,16 +101,10 @@ impl SlaLanguage {
             .subtables
             .iter()
             .map(|(name, subtable)| {
-                let id = subtable
-                    .constructors
-                    .iter()
-                    .map(|constructor| constructor.subtable_id)
-                    .next()
-                    .unwrap_or(u32::MAX);
                 (
                     name.clone(),
                     SlaSubtable {
-                        id,
+                        id: subtable.id,
                         name: name.clone(),
                         constructors: subtable
                             .constructors
@@ -120,7 +114,7 @@ impl SlaLanguage {
                         decision_tree: subtable
                             .decision_tree
                             .as_ref()
-                            .map(|tree| SlaDecisionTree::from_compiled_tree(id, tree)),
+                            .map(|tree| SlaDecisionTree::from_compiled_tree(subtable.id, tree)),
                     },
                 )
             })
