@@ -209,12 +209,9 @@ pub(super) fn decode_operand_symbols(
         let reloffset = operand.attr_signed(sla_format::ATTR_OFF).unwrap_or(0) as i32;
         let offsetbase = operand.attr_signed(sla_format::ATTR_BASE).unwrap_or(-1) as i32;
         let minimum_length = operand.attr_unsigned(sla_format::ATTR_MINLEN).unwrap_or(0) as u32;
-        let direct_pattern_expression = operand
-            .children
-            .iter()
-            .rev()
-            .find_map(|child| decode_pattern_expression(child).ok())
-            .filter(|expr| !pattern_expression_references_operand(expr, hand_index));
+        let direct_pattern_expression =
+            first_decoded_pattern_expression(operand.children.iter().rev())?
+                .filter(|expr| !pattern_expression_references_operand(expr, hand_index));
         let (
             subtable_name,
             display_kind,
@@ -550,6 +547,41 @@ pub(super) fn decode_pattern_expression(
         }
         other => bail!("unsupported pattern expression element {other}"),
     }
+}
+
+pub(super) fn first_decoded_pattern_expression<'a>(
+    children: impl Iterator<Item = &'a PackedElement>,
+) -> Result<Option<CompiledPatternExpression>> {
+    for child in children {
+        if is_pattern_expression_element(child.id) {
+            return decode_pattern_expression(child).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+pub(super) fn is_pattern_expression_element(id: u32) -> bool {
+    matches!(
+        id,
+        sla_format::ELEM_INTB
+            | sla_format::ELEM_START_EXP
+            | sla_format::ELEM_END_EXP
+            | sla_format::ELEM_NEXT2_EXP
+            | sla_format::ELEM_TOKENFIELD
+            | sla_format::ELEM_CONTEXTFIELD
+            | sla_format::ELEM_OPERAND_EXP
+            | sla_format::ELEM_PLUS_EXP
+            | sla_format::ELEM_SUB_EXP
+            | sla_format::ELEM_MULT_EXP
+            | sla_format::ELEM_DIV_EXP
+            | sla_format::ELEM_LSHIFT_EXP
+            | sla_format::ELEM_RSHIFT_EXP
+            | sla_format::ELEM_AND_EXP
+            | sla_format::ELEM_OR_EXP
+            | sla_format::ELEM_XOR_EXP
+            | sla_format::ELEM_MINUS_EXP
+            | sla_format::ELEM_NOT_EXP
+    )
 }
 
 pub(super) fn pattern_expression_references_operand(

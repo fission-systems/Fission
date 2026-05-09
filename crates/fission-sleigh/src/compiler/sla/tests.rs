@@ -101,6 +101,18 @@ fn sla_named_section_decode_errors_are_not_dropped() {
 }
 
 #[test]
+fn sla_symbol_pattern_expression_decode_errors_are_not_dropped() {
+    let symbols = include_str!("symbols.rs");
+    let display = include_str!("display.rs");
+    for (name, source) in [("symbols.rs", symbols), ("display.rs", display)] {
+        assert!(
+            !source.contains("decode_pattern_expression(child).ok()"),
+            "{name} must not silently drop malformed SLA pattern expressions"
+        );
+    }
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

@@ -117,10 +117,7 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
-            let selector_expr = symbol
-                .children
-                .iter()
-                .find_map(|child| decode_pattern_expression(child).ok());
+            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
             let names = symbol
                 .children
                 .iter()
@@ -153,10 +150,7 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
-            let selector_expr = symbol
-                .children
-                .iter()
-                .find_map(|child| decode_pattern_expression(child).ok());
+            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
             let values = symbol
                 .children
                 .iter()
@@ -184,10 +178,7 @@ pub(super) fn decode_display_symbols(
                 .map(decode_token_field_if_direct)
                 .transpose()?
                 .flatten();
-            let selector_expr = symbol
-                .children
-                .iter()
-                .find_map(|child| decode_pattern_expression(child).ok());
+            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
             let entries = symbol
                 .children
                 .iter()
