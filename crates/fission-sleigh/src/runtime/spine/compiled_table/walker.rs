@@ -403,15 +403,16 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         {
             // Convert constant offset_space to static handle: multiply offset by addressable unit
             // size. For RAM (word_size=1) this is a no-op; for other spaces it scales correctly.
-            let addr_unit = space
+            let space_ref = space
                 .as_ref()
-                .and_then(|s| {
-                    self.compiled
-                        .sla_spaces
-                        .get(&s.index)
-                        .map(|sr| sr.word_size.max(1) as u64)
-                })
-                .unwrap_or(1);
+                .ok_or_else(|| anyhow!("static HandleTpl missing target space"))?;
+            let addr_unit = self
+                .compiled
+                .sla_spaces
+                .get(&space_ref.index)
+                .ok_or_else(|| anyhow!("static HandleTpl target space missing SLA metadata"))?
+                .word_size
+                .max(1) as u64;
             (
                 None,
                 offset_offset.wrapping_mul(addr_unit),
