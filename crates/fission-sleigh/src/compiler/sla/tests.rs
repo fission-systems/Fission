@@ -106,6 +106,21 @@ fn sla_decision_node_shape_fields_are_not_synthesized() {
 }
 
 #[test]
+fn sla_decision_pair_constructor_id_is_required() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        "child.attr_unsigned(sla_format::ATTR_ID).or_else",
+        "then(|| pair_child.attr_unsigned(sla_format::ATTR_ID))",
+        "let Some(constructor_id) = constructor_id else",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "decision pair decode must read ATTR_ID directly instead of falling back or skipping: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_named_section_decode_errors_are_not_dropped() {
     let templates = include_str!("templates.rs");
     assert!(

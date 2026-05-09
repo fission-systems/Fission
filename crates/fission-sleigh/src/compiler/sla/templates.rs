@@ -627,16 +627,13 @@ fn decode_decision_node(
         nodes[node_idx].probe = crate::compiler::ir::CompiledDecisionProbe::Terminal;
         for child in &element.children {
             if child.id == sla_format::ELEM_PAIR {
-                let constructor_id = child.attr_unsigned(sla_format::ATTR_ID).or_else(|| {
-                    child.children.iter().find_map(|pair_child| {
-                        (pair_child.id == sla_format::ELEM_CONSTRUCTOR)
-                            .then(|| pair_child.attr_unsigned(sla_format::ATTR_ID))
-                            .flatten()
-                    })
-                });
-                let Some(constructor_id) = constructor_id else {
-                    continue;
-                };
+                let constructor_id = child
+                    .attr_signed(sla_format::ATTR_ID)
+                    .ok_or_else(|| anyhow!("decision pair missing constructor id"))
+                    .and_then(|value| {
+                        u32::try_from(value)
+                            .map_err(|_| anyhow!("decision pair has negative constructor id"))
+                    })?;
                 nodes[node_idx]
                     .leaf_constructor_indexes
                     .push(constructor_id as usize);
