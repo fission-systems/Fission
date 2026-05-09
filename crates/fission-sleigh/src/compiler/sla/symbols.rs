@@ -206,9 +206,21 @@ pub(super) fn decode_operand_symbols(
         let hand_index = operand
             .attr_signed(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("operand_sym missing index"))? as usize;
-        let reloffset = operand.attr_signed(sla_format::ATTR_OFF).unwrap_or(0) as i32;
-        let offsetbase = operand.attr_signed(sla_format::ATTR_BASE).unwrap_or(-1) as i32;
-        let minimum_length = operand.attr_unsigned(sla_format::ATTR_MINLEN).unwrap_or(0) as u32;
+        let reloffset = operand
+            .attr_signed(sla_format::ATTR_OFF)
+            .ok_or_else(|| anyhow!("operand_sym {id} missing relative offset"))?
+            as i32;
+        let offsetbase = operand
+            .attr_signed(sla_format::ATTR_BASE)
+            .ok_or_else(|| anyhow!("operand_sym {id} missing offset base"))?
+            as i32;
+        let minimum_length = operand
+            .attr_signed(sla_format::ATTR_MINLEN)
+            .ok_or_else(|| anyhow!("operand_sym {id} missing minimum length"))
+            .and_then(|value| {
+                u32::try_from(value)
+                    .map_err(|_| anyhow!("operand_sym {id} has negative minimum length"))
+            })?;
         let direct_pattern_expression =
             first_decoded_pattern_expression(operand.children.iter().rev())?
                 .filter(|expr| !pattern_expression_references_operand(expr, hand_index));

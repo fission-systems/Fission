@@ -123,6 +123,21 @@ fn sla_operand_subsymbol_refs_are_not_downgraded_to_generic() {
 }
 
 #[test]
+fn sla_operand_symbol_shape_fields_are_not_synthesized() {
+    let symbols = include_str!("symbols.rs");
+    for forbidden in [
+        ".attr_signed(sla_format::ATTR_OFF).unwrap_or(0)",
+        ".attr_signed(sla_format::ATTR_BASE).unwrap_or(-1)",
+        ".attr_unsigned(sla_format::ATTR_MINLEN).unwrap_or(0)",
+    ] {
+        assert!(
+            !symbols.contains(forbidden),
+            "operand symbol decode must fail closed instead of synthesizing shape fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_display_symbol_decode_does_not_synthesize_defaults() {
     let display = include_str!("display.rs");
     for forbidden in [
