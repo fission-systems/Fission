@@ -155,6 +155,18 @@ fn sla_operand_subsymbol_refs_are_not_downgraded_to_generic() {
 #[test]
 fn sla_operand_symbol_shape_fields_are_not_synthesized() {
     let symbols = include_str!("symbols.rs");
+    let packed = include_str!("packed.rs");
+    for forbidden in [
+        "pub fn attr_int",
+        "pub fn attr_bool(&self",
+        "attr_signed(id).unwrap_or(0)",
+        "attr_bool_value(id).unwrap_or(false)",
+    ] {
+        assert!(
+            !packed.contains(forbidden),
+            "packed SLA attribute access must expose optional values instead of synthesized defaults: {forbidden}"
+        );
+    }
     for forbidden in [
         ".attr_signed(sla_format::ATTR_OFF).unwrap_or(0)",
         ".attr_signed(sla_format::ATTR_BASE).unwrap_or(-1)",

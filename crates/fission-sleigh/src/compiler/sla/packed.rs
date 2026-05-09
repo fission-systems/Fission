@@ -41,14 +41,6 @@ impl PackedElement {
         }
     }
 
-    pub fn attr_int(&self, id: u32) -> i64 {
-        self.attr_signed(id).unwrap_or(0)
-    }
-
-    pub fn attr_bool(&self, id: u32) -> bool {
-        self.attr_bool_value(id).unwrap_or(false)
-    }
-
     pub fn attr_bool_value(&self, id: u32) -> Option<bool> {
         match self.attrs.get(&id) {
             Some(PackedAttrValue::Bool(value)) => Some(*value),

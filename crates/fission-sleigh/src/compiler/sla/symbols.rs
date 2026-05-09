@@ -379,8 +379,12 @@ fn decoded_operand_display_binding(symbol: &DecodedDisplaySymbol) -> DecodedOper
 
 pub(super) fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
     Ok(DecodedTokenField {
-        big_endian: element.attr_bool(sla_format::ATTR_BIGENDIAN),
-        sign_bit: element.attr_bool(sla_format::ATTR_SIGNBIT),
+        big_endian: element
+            .attr_bool_value(sla_format::ATTR_BIGENDIAN)
+            .ok_or_else(|| anyhow!("tokenfield missing bigendian"))?,
+        sign_bit: element
+            .attr_bool_value(sla_format::ATTR_SIGNBIT)
+            .ok_or_else(|| anyhow!("tokenfield missing signbit"))?,
         bit_start: element
             .attr_signed(sla_format::ATTR_STARTBIT)
             .ok_or_else(|| anyhow!("tokenfield missing startbit"))? as u32,
@@ -657,7 +661,9 @@ pub(super) fn pattern_expression_references_operand(
 
 pub(super) fn decode_context_field(element: &PackedElement) -> Result<DecodedContextField> {
     Ok(DecodedContextField {
-        sign_bit: element.attr_bool(sla_format::ATTR_SIGNBIT),
+        sign_bit: element
+            .attr_bool_value(sla_format::ATTR_SIGNBIT)
+            .ok_or_else(|| anyhow!("contextfield missing signbit"))?,
         bit_start: element
             .attr_signed(sla_format::ATTR_STARTBIT)
             .ok_or_else(|| anyhow!("contextfield missing startbit"))? as u32,
