@@ -636,6 +636,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let pattern_inst_next_saturating_address =
         "self.ctx.address.saturating_add(next_offset as u64)";
     let subtable_cursor_saturating_delta = "self.cursor.saturating_sub(self.ctx.cursor)";
+    let template_delay_slot_inst_next_saturating =
+        "self.address.saturating_add(inst_length as u64)";
+    let template_delay_slot_pc_saturating = "self.address.saturating_add(fall_offset)";
+    let template_delay_slot_fall_saturating =
+        "fall_offset = fall_offset.saturating_add(u64::from(slot_len))";
+    let template_const_inst_next_saturating = "self.address.saturating_add(state.length as u64)";
+    let template_const_inst_next2_saturating = "inst_next.saturating_add(delay_len)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -849,7 +856,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(export_inst_next_saturating)
                 && !source.contains(pattern_inst_next_saturating_constructor)
                 && !source.contains(pattern_inst_next_saturating_address)
-                && !source.contains(subtable_cursor_saturating_delta),
+                && !source.contains(subtable_cursor_saturating_delta)
+                && !source.contains(template_delay_slot_inst_next_saturating)
+                && !source.contains(template_delay_slot_pc_saturating)
+                && !source.contains(template_delay_slot_fall_saturating)
+                && !source.contains(template_const_inst_next_saturating)
+                && !source.contains(template_const_inst_next2_saturating),
             "{} still hides malformed SLA parser cursor or InstNext arithmetic",
             file.display()
         );

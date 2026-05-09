@@ -286,7 +286,10 @@ impl<'c> CompiledTableEmitter<'c> {
     /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
     /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
     fn precompute_delay_slot_length(&mut self, inst_length: usize) -> Result<()> {
-        let inst_next_address = self.address.saturating_add(inst_length as u64);
+        let inst_next_address = self
+            .address
+            .checked_add(inst_length as u64)
+            .ok_or_else(|| anyhow!("delay-slot InstNext address overflowed"))?;
         let inst_next_offset = inst_next_address
             .checked_sub(self.memory_base)
             .ok_or_else(|| {
@@ -766,7 +769,10 @@ impl<'c> CompiledTableEmitter<'c> {
                     let mut fall_offset = state.length as u64;
                     let mut byte_count: u32 = 0;
                     while byte_count < delay_total {
-                        let slot_pc = self.address.saturating_add(fall_offset);
+                        let slot_pc = self
+                            .address
+                            .checked_add(fall_offset)
+                            .ok_or_else(|| anyhow!("delay slot address overflow"))?;
                         let slot_state = try_bind_runtime_state_at(
                             self.compiled,
                             self.native,
@@ -796,7 +802,9 @@ impl<'c> CompiledTableEmitter<'c> {
                         self.label_positions = saved_labels;
                         self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
                         inner?;
-                        fall_offset = fall_offset.saturating_add(u64::from(slot_len));
+                        fall_offset = fall_offset
+                            .checked_add(u64::from(slot_len))
+                            .ok_or_else(|| anyhow!("delay slot fallthrough offset overflow"))?;
                         byte_count = byte_count
                             .checked_add(slot_len)
                             .ok_or_else(|| anyhow!("delay slot byte count overflow"))?;
@@ -1301,7 +1309,10 @@ impl<'c> CompiledTableEmitter<'c> {
                 Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
             }
             CompiledConstTpl::InstStart => Ok(self.address),
-            CompiledConstTpl::InstNext => Ok(self.address.saturating_add(state.length as u64)),
+            CompiledConstTpl::InstNext => self
+                .address
+                .checked_add(state.length as u64)
+                .ok_or_else(|| anyhow!("InstNext address overflowed")),
             CompiledConstTpl::SpaceId(space) => Ok(space.index),
             CompiledConstTpl::Handle {
                 handle_index,
@@ -1337,12 +1348,17 @@ impl<'c> CompiledTableEmitter<'c> {
                 // `inst_next` = address of the instruction after the current one.
                 // `delay_slot_length` = actual length of the instruction in the delay slot,
                 // pre-decoded in `precompute_delay_slot_length`.
-                let inst_next = self.address.saturating_add(state.length as u64);
+                let inst_next = self
+                    .address
+                    .checked_add(state.length as u64)
+                    .ok_or_else(|| anyhow!("InstNext2 base address overflowed"))?;
                 let delay_len = self
                     .delay_slot_length
                     .ok_or_else(|| anyhow!("InstNext2 requires decoded delay-slot length"))?
                     as u64;
-                Ok(inst_next.saturating_add(delay_len))
+                inst_next
+                    .checked_add(delay_len)
+                    .ok_or_else(|| anyhow!("InstNext2 address overflowed"))
             }
             CompiledConstTpl::CurSpace => self.compiled.sla_default_cur_space_index(),
             CompiledConstTpl::CurSpaceSize => self
