@@ -116,13 +116,9 @@ fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
     }
 }
 
-fn optional_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
-    match value {
-        Some(value) => {
-            u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
-        }
-        None => Ok(0),
-    }
+fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
+    let value = value.ok_or_else(|| anyhow!("{role} is missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
 }
 
 #[cfg(test)]
@@ -367,7 +363,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
             .transpose()
-            .and_then(|value| optional_const_tpl_u32(value, "export HandleTpl size"))?;
+            .and_then(|value| required_const_tpl_u32(value, "export HandleTpl size"))?;
         let offset_space = handle_tpl
             .ptr_space
             .as_ref()
@@ -378,13 +374,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
             .transpose()?
-            .unwrap_or(0);
+            .ok_or_else(|| anyhow!("export HandleTpl ptr_offset is missing"))?;
         let offset_size = handle_tpl
             .ptr_size
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
             .transpose()
-            .and_then(|value| optional_const_tpl_u32(value, "export HandleTpl ptr_size"))?;
+            .and_then(|value| required_const_tpl_u32(value, "export HandleTpl ptr_size"))?;
         let temp_space = handle_tpl
             .temp_space
             .as_ref()
@@ -395,7 +391,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .as_ref()
             .map(|value| self.resolve_export_const_tpl(value, handles))
             .transpose()?
-            .unwrap_or(0);
+            .ok_or_else(|| anyhow!("export HandleTpl temp_offset is missing"))?;
         // Ghidra: HandleTpl.fix() sets offset_space = null when the pointer space is
         // the constant address space (TYPE_CONSTANT). This distinguishes static handles
         // (register/RAM at a constant offset) from truly dynamic handles (pointer in unique).

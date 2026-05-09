@@ -51,13 +51,9 @@ fn label_id_from_op_tpl(op: &CompiledOpTpl) -> Result<u64> {
     Ok(*value)
 }
 
-fn optional_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
-    match value {
-        Some(value) => {
-            u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
-        }
-        None => Ok(0),
-    }
+fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
+    let value = value.ok_or_else(|| anyhow!("{role} is missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
 }
 
 pub(super) fn emit_pcode_for_state(
@@ -895,12 +891,12 @@ impl<'c> CompiledTableEmitter<'c> {
                 u32::try_from(value).map_err(|_| anyhow!("VarnodeTpl size {value} exceeds u32"))
             }
             CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
-                if let Some(size) = &handle_tpl.size {
-                    let value = self.resolve_const_value(size, state)?;
-                    u32::try_from(value).map_err(|_| anyhow!("HandleTpl size {value} exceeds u32"))
-                } else {
-                    Ok(0)
-                }
+                let size = handle_tpl
+                    .size
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("HandleTpl size is missing"))?;
+                let value = self.resolve_const_value(size, state)?;
+                u32::try_from(value).map_err(|_| anyhow!("HandleTpl size {value} exceeds u32"))
             }
         }
     }
@@ -1198,7 +1194,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         .as_ref()
                         .map(|size| self.resolve_const_value(size, state))
                         .transpose()
-                        .and_then(|size| optional_const_tpl_u32(size, "HandleTpl ptr_size"))?;
+                        .and_then(|size| required_const_tpl_u32(size, "HandleTpl ptr_size"))?;
                     if ptr_space.index == 0 || ptr_space.name == "const" {
                         return Ok(const_varnode(ptr_offset, ptr_size));
                     }
@@ -1220,12 +1216,12 @@ impl<'c> CompiledTableEmitter<'c> {
                 } else {
                     bail!("HandleTpl missing ptr_offset")
                 };
-                let size = if let Some(size) = &handle_tpl.size {
-                    u32::try_from(self.resolve_const_value(size, state)?)
-                        .map_err(|_| anyhow!("HandleTpl size exceeds u32"))?
-                } else {
-                    0
-                };
+                let size_tpl = handle_tpl
+                    .size
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("HandleTpl size is missing"))?;
+                let size = u32::try_from(self.resolve_const_value(size_tpl, state)?)
+                    .map_err(|_| anyhow!("HandleTpl size exceeds u32"))?;
                 if space.index == 0 || space.name == "const" {
                     return Ok(const_varnode(offset, size));
                 }
