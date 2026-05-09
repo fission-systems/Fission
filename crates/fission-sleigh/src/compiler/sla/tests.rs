@@ -113,6 +113,28 @@ fn sla_symbol_pattern_expression_decode_errors_are_not_dropped() {
 }
 
 #[test]
+fn sla_display_symbol_decode_does_not_synthesize_defaults() {
+    let display = include_str!("display.rs");
+    for forbidden in [
+        "unwrap_or_default()",
+        "let Some(space_index)",
+        "let Some(name)",
+        "let Some(space)",
+        "filter_map(|child| child.attr_unsigned",
+        "filter_map(|var_id| fixed_varnodes",
+    ] {
+        assert!(
+            !display.contains(forbidden),
+            "display symbol decode must fail closed instead of skipping/defaulting: {forbidden}"
+        );
+    }
+    assert!(
+        display.contains("fn decoded_name_table_entry"),
+        "empty name table entries must be represented explicitly, not through broad defaulting"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::*;
 use crate::compiler::ir::*;
@@ -38,163 +38,168 @@ pub(super) fn decode_display_symbols(
     let mut out = BTreeMap::new();
     let mut fixed_varnodes = BTreeMap::new();
     for symbol in root.descendants_with_id(sla_format::ELEM_VARNODE_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let Some(space_index) = symbol.attr_unsigned(sla_format::ATTR_SPACE) else {
-                continue;
-            };
-            let Some(name) = symbol_names.get(&id).cloned() else {
-                continue;
-            };
-            let Some(space) = spaces.get(&space_index).cloned() else {
-                continue;
-            };
-            fixed_varnodes.insert(
-                id,
-                CompiledResolvedVarnode {
-                    name,
-                    space,
-                    offset: symbol
-                        .attr_unsigned(sla_format::ATTR_OFF)
-                        .unwrap_or_default(),
-                    size: symbol
-                        .attr_signed(sla_format::ATTR_SIZE)
-                        .unwrap_or_default()
-                        .max(0) as u32,
-                },
-            );
-        }
+            .ok_or_else(|| anyhow!("varnode_sym missing id"))?;
+        let space_index = symbol
+            .attr_unsigned(sla_format::ATTR_SPACE)
+            .ok_or_else(|| anyhow!("varnode_sym {id} missing space"))?;
+        let name = symbol_names
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("varnode_sym {id} missing symbol name"))?;
+        let space = spaces
+            .get(&space_index)
+            .cloned()
+            .ok_or_else(|| anyhow!("varnode_sym {id} references unknown space {space_index}"))?;
+        let offset = symbol
+            .attr_unsigned(sla_format::ATTR_OFF)
+            .ok_or_else(|| anyhow!("varnode_sym {id} missing offset"))?;
+        let size = symbol
+            .attr_signed(sla_format::ATTR_SIZE)
+            .ok_or_else(|| anyhow!("varnode_sym {id} missing size"))?;
+        fixed_varnodes.insert(
+            id,
+            CompiledResolvedVarnode {
+                name,
+                space,
+                offset,
+                size: size.max(0) as u32,
+            },
+        );
     }
     for (id, varnode) in &fixed_varnodes {
         out.insert(*id, DecodedDisplaySymbol::FixedVarnode(varnode.clone()));
     }
     for subtable in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        if let Some(id) = subtable
+        let id = subtable
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            if let Some(name) = subtable_names_by_id.get(&id) {
-                out.insert(id, DecodedDisplaySymbol::Subtable(name.clone()));
-            }
-        }
+            .ok_or_else(|| anyhow!("subtable_sym missing id"))?;
+        let name = subtable_names_by_id
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("subtable_sym {id} missing decoded subtable name"))?;
+        out.insert(id, DecodedDisplaySymbol::Subtable(name));
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VALUE_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let expression = symbol
-                .children
-                .first()
-                .map(decode_pattern_expression)
-                .transpose()?;
-            out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
-        }
+            .ok_or_else(|| anyhow!("value_sym missing id"))?;
+        let expression = symbol
+            .children
+            .first()
+            .map(decode_pattern_expression)
+            .transpose()?;
+        out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_CONTEXT_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let expression = symbol
-                .children
-                .first()
-                .map(decode_pattern_expression)
-                .transpose()?;
-            out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
-        }
+            .ok_or_else(|| anyhow!("context_sym missing id"))?;
+        let expression = symbol
+            .children
+            .first()
+            .map(decode_pattern_expression)
+            .transpose()?;
+        out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_NAME_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let token_field = symbol
-                .children
-                .first()
-                .map(decode_token_field_if_direct)
-                .transpose()?
-                .flatten();
-            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
-            let names = symbol
-                .children
-                .iter()
-                .filter(|child| child.id == sla_format::ELEM_NAMETAB)
-                .map(|child| {
-                    child
-                        .attr_string(sla_format::ATTR_NAME)
-                        .unwrap_or_default()
-                        .to_string()
-                })
-                .collect::<Vec<_>>();
-            out.insert(
-                id,
-                DecodedDisplaySymbol::NameTable {
-                    names,
-                    token_field,
-                    selector_expr,
-                },
-            );
-        }
+            .ok_or_else(|| anyhow!("name_sym missing id"))?;
+        let token_field = symbol
+            .children
+            .first()
+            .map(decode_token_field_if_direct)
+            .transpose()?
+            .flatten();
+        let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
+        let names = symbol
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_NAMETAB)
+            .map(decoded_name_table_entry)
+            .collect::<Vec<_>>();
+        out.insert(
+            id,
+            DecodedDisplaySymbol::NameTable {
+                names,
+                token_field,
+                selector_expr,
+            },
+        );
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VALUEMAP_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let token_field = symbol
-                .children
-                .first()
-                .map(decode_token_field_if_direct)
-                .transpose()?
-                .flatten();
-            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
-            let values = symbol
-                .children
-                .iter()
-                .filter(|child| child.id == sla_format::ELEM_VALUETAB)
-                .map(|child| child.attr_signed(sla_format::ATTR_VAL).unwrap_or_default())
-                .collect::<Vec<_>>();
-            out.insert(
-                id,
-                DecodedDisplaySymbol::ValueMap {
-                    values,
-                    token_field,
-                    selector_expr,
-                },
-            );
-        }
+            .ok_or_else(|| anyhow!("valuemap_sym missing id"))?;
+        let token_field = symbol
+            .children
+            .first()
+            .map(decode_token_field_if_direct)
+            .transpose()?
+            .flatten();
+        let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
+        let values = symbol
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_VALUETAB)
+            .map(|child| {
+                child
+                    .attr_signed(sla_format::ATTR_VAL)
+                    .ok_or_else(|| anyhow!("valuemap_sym {id} has valuetab without value"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        out.insert(
+            id,
+            DecodedDisplaySymbol::ValueMap {
+                values,
+                token_field,
+                selector_expr,
+            },
+        );
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VARLIST_SYM) {
-        if let Some(id) = symbol
+        let id = symbol
             .attr_unsigned(sla_format::ATTR_ID)
             .map(|value| value as u32)
-        {
-            let token_field = symbol
-                .children
-                .first()
-                .map(decode_token_field_if_direct)
-                .transpose()?
-                .flatten();
-            let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
-            let entries = symbol
-                .children
-                .iter()
-                .filter(|child| child.id == sla_format::ELEM_VAR)
-                .filter_map(|child| child.attr_unsigned(sla_format::ATTR_ID))
-                .filter_map(|var_id| fixed_varnodes.get(&(var_id as u32)).cloned())
-                .collect::<Vec<_>>();
-            out.insert(
-                id,
-                DecodedDisplaySymbol::VarnodeList {
-                    entries,
-                    token_field,
-                    selector_expr,
-                },
-            );
-        }
+            .ok_or_else(|| anyhow!("varlist_sym missing id"))?;
+        let token_field = symbol
+            .children
+            .first()
+            .map(decode_token_field_if_direct)
+            .transpose()?
+            .flatten();
+        let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
+        let entries = symbol
+            .children
+            .iter()
+            .filter(|child| child.id == sla_format::ELEM_VAR)
+            .map(|child| {
+                let var_id = child
+                    .attr_unsigned(sla_format::ATTR_ID)
+                    .ok_or_else(|| anyhow!("varlist_sym {id} has var without id"))?
+                    as u32;
+                fixed_varnodes
+                    .get(&var_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("varlist_sym {id} references unknown varnode {var_id}"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        out.insert(
+            id,
+            DecodedDisplaySymbol::VarnodeList {
+                entries,
+                token_field,
+                selector_expr,
+            },
+        );
     }
     Ok(out)
 }
@@ -216,6 +221,13 @@ pub(super) fn decoded_display_kind(symbol: &DecodedDisplaySymbol) -> CompiledDis
         }
         DecodedDisplaySymbol::FixedVarnode(_) => CompiledDisplayOperandKind::Generic,
     }
+}
+
+fn decoded_name_table_entry(element: &PackedElement) -> String {
+    element
+        .attr_string(sla_format::ATTR_NAME)
+        .unwrap_or("")
+        .to_string()
 }
 
 pub(super) fn decode_token_field_if_direct(
