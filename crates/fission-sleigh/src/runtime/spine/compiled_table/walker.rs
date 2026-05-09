@@ -260,7 +260,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                                 subtable_offset = (
                                     Some(reloffset),
                                     Some(offsetbase),
-                                    self.operand_absolute_offset(&h.spec)?,
+                                    Some(self.operand_absolute_offset(&h.spec)?),
                                 );
                                 break;
                             }
@@ -532,9 +532,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .get(operand_index)
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
-        let operand_absolute_offset = self
-            .operand_absolute_offset(&template.spec)?
-            .unwrap_or(self.cursor);
+        let operand_absolute_offset = self.operand_absolute_offset(&template.spec)?;
         let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
         let operand_relative_length = binding
@@ -572,9 +570,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn operand_absolute_offset(&self, spec: &CompiledOperandSpec) -> Result<Option<usize>> {
+    fn operand_absolute_offset(&self, spec: &CompiledOperandSpec) -> Result<usize> {
         let Some((reloffset, offsetbase)) = operand_spec_offsets(spec) else {
-            return Ok(None);
+            return self.offset_irrelevant_operand_start(spec);
         };
         let base = self.offset_for_operand_base(offsetbase).ok_or_else(|| {
             anyhow!("operand offset base {offsetbase} is unresolved for reloffset {reloffset}")
@@ -583,7 +581,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         if offset < 0 {
             bail!("operand offset resolved before instruction start: {offset}");
         }
-        Ok(Some(offset as usize))
+        Ok(offset as usize)
+    }
+
+    fn offset_irrelevant_operand_start(&self, spec: &CompiledOperandSpec) -> Result<usize> {
+        match spec {
+            CompiledOperandSpec::SlaFixedVarnode { .. }
+            | CompiledOperandSpec::ContextFieldExtraction { .. } => Ok(self.ctx.cursor),
+            other => bail!("SLA operand spec is missing offset metadata: {other:?}"),
+        }
     }
 
     fn offset_for_operand_base(&self, offsetbase: i32) -> Option<usize> {
