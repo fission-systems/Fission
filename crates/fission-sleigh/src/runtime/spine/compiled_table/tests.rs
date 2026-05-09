@@ -622,6 +622,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         ".unwrap_or(0)",
     ]
     .join("");
+    let missing_sla_identity_slot_fallback = [
+        ".sla_identity\n",
+        ".map(|identity| identity.constructor_slot)",
+        ".unwrap_or(constructor_index)",
+    ]
+    .join("");
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
         "else {\n                continue;\n            }",
@@ -739,6 +745,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&handle_ptr_offset_zero_fallback),
             "{} still treats missing HandleTpl ptr_offset as zero",
+            file.display()
+        );
+        assert!(
+            !source.contains(&missing_sla_identity_slot_fallback),
+            "{} still treats missing SLA constructor identity as constructor_index",
             file.display()
         );
         assert!(

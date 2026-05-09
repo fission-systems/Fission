@@ -1214,20 +1214,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         "invalid constructor index {constructor_index} in subtable {table_name}"
                     )
                 })?;
+            let (subtable_id, constructor_slot) = constructor_sla_selection_identity(
+                subtable,
+                constructor,
+                constructor_index,
+                table_name,
+            )?;
             RuntimeSelection {
                 constructor,
                 constructor_index,
-                subtable_id: constructor
-                    .sla_identity
-                    .as_ref()
-                    .map(|identity| identity.subtable_id)
-                    .unwrap_or(0),
+                subtable_id,
                 constructor_id: constructor.constructor_id,
-                constructor_slot: constructor
-                    .sla_identity
-                    .as_ref()
-                    .map(|identity| identity.constructor_slot)
-                    .unwrap_or(constructor_index),
+                constructor_slot,
                 trace: spine::RuntimeMatchTrace {
                     root_bucket: format!("native:{}", table_name),
                     probes: Vec::new(),

@@ -23,20 +23,18 @@ pub(super) fn candidate_selections<'a>(
             .constructors
             .get(constructor_index)
             .ok_or_else(|| anyhow!("invalid constructor index returned by backend"))?;
+        let (subtable_id, constructor_slot) = constructor_sla_selection_identity(
+            instruction_table,
+            constructor,
+            constructor_index,
+            "instruction",
+        )?;
         RuntimeSelection {
             constructor,
             constructor_index,
-            subtable_id: constructor
-                .sla_identity
-                .as_ref()
-                .map(|identity| identity.subtable_id)
-                .unwrap_or(0),
+            subtable_id,
             constructor_id: constructor.constructor_id,
-            constructor_slot: constructor
-                .sla_identity
-                .as_ref()
-                .map(|identity| identity.constructor_slot)
-                .unwrap_or(constructor_index),
+            constructor_slot,
             trace: spine::RuntimeMatchTrace {
                 root_bucket: "native".to_string(),
                 probes: Vec::new(),
@@ -54,6 +52,21 @@ pub(super) fn candidate_selections<'a>(
     };
 
     Ok(vec![primary])
+}
+
+pub(super) fn constructor_sla_selection_identity(
+    subtable: &CompiledSubtableDefinition,
+    constructor: &CompiledExecutableConstructor,
+    constructor_index: usize,
+    table_name: &str,
+) -> Result<(u32, usize)> {
+    if let Some(identity) = &constructor.sla_identity {
+        return Ok((identity.subtable_id, identity.constructor_slot));
+    }
+    if subtable.sla_subtable_id == 0 {
+        return Ok((0, constructor_index));
+    }
+    bail!("selected SLA constructor in {table_name} is missing SLA identity")
 }
 
 pub(super) fn select_constructor<'a>(

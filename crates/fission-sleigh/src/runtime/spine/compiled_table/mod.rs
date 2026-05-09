@@ -11,7 +11,7 @@ use crate::compiler::{
     CompiledHandleSelector, CompiledHandleTemplate, CompiledHandleTpl, CompiledOpTpl,
     CompiledOpTplOpcode, CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternBlock,
     CompiledPatternExpression, CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl,
-    CompiledTemplateSource, CompiledVarnodeTpl,
+    CompiledSubtableDefinition, CompiledTemplateSource, CompiledVarnodeTpl,
 };
 use crate::runtime::spine::{
     self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeFixedHandle,

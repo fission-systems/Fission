@@ -138,16 +138,18 @@ where
                 if constructor_matches(constructor).is_ok() {
                     if constructor.runtime_ready {
                         trace.matched_leaf_pattern = Some(entry.pattern.clone());
+                        let constructor_slot = selection_constructor_slot(
+                            subtable,
+                            constructor,
+                            constructor_index,
+                            entry.subtable_id,
+                        )?;
                         return Some(RuntimeSelection {
                             constructor,
                             constructor_index,
                             subtable_id: entry.subtable_id,
                             constructor_id: entry.constructor_id,
-                            constructor_slot: constructor
-                                .sla_identity
-                                .as_ref()
-                                .map(|identity| identity.constructor_slot)
-                                .unwrap_or(constructor_index),
+                            constructor_slot,
                             trace,
                         });
                     }
@@ -164,18 +166,22 @@ where
             if !matched_any_pattern {
                 return None;
             }
-            first_unsupported_match.map(
-                |(constructor, constructor_index, subtable_id, constructor_id)| RuntimeSelection {
-                    constructor,
-                    constructor_index,
-                    subtable_id,
-                    constructor_id,
-                    constructor_slot: constructor
-                        .sla_identity
-                        .as_ref()
-                        .map(|identity| identity.constructor_slot)
-                        .unwrap_or(constructor_index),
-                    trace,
+            first_unsupported_match.and_then(
+                |(constructor, constructor_index, subtable_id, constructor_id)| {
+                    let constructor_slot = selection_constructor_slot(
+                        subtable,
+                        constructor,
+                        constructor_index,
+                        subtable_id,
+                    )?;
+                    Some(RuntimeSelection {
+                        constructor,
+                        constructor_index,
+                        subtable_id,
+                        constructor_id,
+                        constructor_slot,
+                        trace,
+                    })
                 },
             )
         }
@@ -225,6 +231,18 @@ where
             None
         }
     }
+}
+
+fn selection_constructor_slot(
+    subtable: &CompiledSubtableDefinition,
+    constructor: &CompiledExecutableConstructor,
+    constructor_index: usize,
+    entry_subtable_id: u32,
+) -> Option<usize> {
+    if let Some(identity) = &constructor.sla_identity {
+        return Some(identity.constructor_slot);
+    }
+    (subtable.sla_subtable_id == 0 && entry_subtable_id == 0).then_some(constructor_index)
 }
 
 fn resolve_leaf_constructor<'a>(
