@@ -29,6 +29,7 @@ DEFAULT_MANIFEST = Path(__file__).resolve().parent / "manifests" / "source_owned
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
 DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
+DEFAULT_LIST_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "list_cache.json"
 DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
 DEFAULT_LATEST_INDEX_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_latest_by_manifest.json"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
@@ -231,6 +232,16 @@ def decomp_cache_key(
     )
 
 
+def list_cache_key(binary_path: Path, fission_bin: Path) -> str:
+    return "|".join(
+        [
+            "source-semantic-list-v1",
+            f"binary={file_cache_fingerprint(binary_path)}",
+            f"fission_bin={file_cache_fingerprint(fission_bin)}",
+        ]
+    )
+
+
 def load_decomp_cache(path: Path | None) -> dict[str, dict[str, Any]]:
     if path is None or not path.exists():
         return {}
@@ -252,6 +263,25 @@ def save_decomp_cache(path: Path | None, cache: dict[str, dict[str, Any]]) -> No
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "format": "source-semantic-decomp-cache-v1",
+        "updated_at_unix": round(time.time(), 6),
+        "entry_count": len(cache),
+        "entries": cache,
+    }
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(dump_json_pretty(payload), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def load_list_cache(path: Path | None) -> dict[str, dict[str, Any]]:
+    return load_decomp_cache(path)
+
+
+def save_list_cache(path: Path | None, cache: dict[str, dict[str, Any]]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format": "source-semantic-list-cache-v1",
         "updated_at_unix": round(time.time(), 6),
         "entry_count": len(cache),
         "entries": cache,
@@ -596,6 +626,35 @@ def run_fission_list(binary_path: Path, fission_bin: Path, timeout_sec: int) -> 
         name = TRAILING_DECORATION_RE.sub("", m.group(2).strip()).strip()
         funcs.append(FissionFunction(address=canonical_address(m.group(1)), name=name))
     return funcs, None
+
+
+def run_fission_list_cached(
+    binary_path: Path,
+    fission_bin: Path,
+    timeout_sec: int,
+    cache: dict[str, dict[str, Any]],
+    cache_stats: Counter[str],
+) -> tuple[list[FissionFunction], str | None]:
+    key = list_cache_key(binary_path, fission_bin)
+    cached = cache.get(key)
+    if cached is not None:
+        cache_stats["hit"] += 1
+        funcs = [
+            FissionFunction(address=str(raw.get("address")), name=str(raw.get("name")))
+            for raw in cached.get("functions", [])
+            if isinstance(raw, dict) and raw.get("address") and raw.get("name")
+        ]
+        error = cached.get("error")
+        return funcs, str(error) if error else None
+
+    cache_stats["miss"] += 1
+    funcs, error = run_fission_list(binary_path, fission_bin, timeout_sec)
+    cache[key] = {
+        "functions": [{"address": func.address, "name": func.name} for func in funcs],
+        "error": error,
+    }
+    cache_stats["stored"] += 1
+    return funcs, error
 
 
 def canonical_address(value: str | int) -> str:
@@ -1969,6 +2028,102 @@ def comparison_outcome(comparison: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def improvement_summary(comparison: dict[str, Any]) -> dict[str, Any]:
+    metric_deltas = comparison.get("metric_deltas") if isinstance(comparison.get("metric_deltas"), dict) else {}
+
+    def delta_for(key: str) -> float | None:
+        metric = metric_deltas.get(key)
+        if not isinstance(metric, dict):
+            return None
+        delta = metric.get("delta")
+        return float(delta) if isinstance(delta, int | float) else None
+
+    improved_metrics: list[dict[str, Any]] = []
+    regressed_metrics: list[dict[str, Any]] = []
+    for key in [
+        "weighted_semantic_similarity_percent",
+        "function_mapping_rate",
+        "decomp_success_rate",
+        "candidate_compile_rate",
+        "behavior_pass_rate",
+        "perfect_row_count",
+        "supported_behavior_row_count",
+    ]:
+        delta = delta_for(key)
+        if delta is None or delta == 0:
+            continue
+        metric = {
+            "metric": key,
+            "delta": delta,
+            "current": metric_deltas.get(key, {}).get("current"),
+            "baseline": metric_deltas.get(key, {}).get("baseline"),
+        }
+        if delta > 0:
+            improved_metrics.append(metric)
+        else:
+            regressed_metrics.append(metric)
+
+    return {
+        "headline": comparison_outcome(comparison)["headline"],
+        "improved_metric_count": len(improved_metrics),
+        "regressed_metric_count": len(regressed_metrics),
+        "improved_metrics": improved_metrics,
+        "regressed_metrics": regressed_metrics,
+        "top_improved_functions": [
+            {
+                "function_name": row.get("function_name"),
+                "delta_percent": row.get("delta_percent"),
+                "baseline_score_percent": row.get("baseline_score_percent"),
+                "current_score_percent": row.get("current_score_percent"),
+                "baseline_behavior": row.get("baseline_behavior"),
+                "current_behavior": row.get("current_behavior"),
+            }
+            for row in (comparison.get("top_improvements") or [])[:10]
+        ],
+        "top_regressed_functions": [
+            {
+                "function_name": row.get("function_name"),
+                "delta_percent": row.get("delta_percent"),
+                "baseline_score_percent": row.get("baseline_score_percent"),
+                "current_score_percent": row.get("current_score_percent"),
+                "baseline_behavior": row.get("baseline_behavior"),
+                "current_behavior": row.get("current_behavior"),
+            }
+            for row in (comparison.get("top_regressions") or [])[:10]
+        ],
+    }
+
+
+def snapshot_baseline_artifacts(
+    output_dir: Path,
+    baseline_summary_path: Path,
+    baseline_summary: dict[str, Any],
+    baseline_rows: list[dict[str, Any]],
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    snapshot_dir = output_dir / "baseline_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    summary_snapshot_path = snapshot_dir / "source_semantic_summary.json"
+    rows_snapshot_path = snapshot_dir / "source_semantic_rows.json"
+    comparison_snapshot_path = snapshot_dir / "source_semantic_comparison.json"
+    manifest_path = snapshot_dir / "snapshot.json"
+    summary_snapshot_path.write_text(dump_json_pretty(baseline_summary), encoding="utf-8")
+    rows_snapshot_path.write_text(dump_json_pretty(baseline_rows), encoding="utf-8")
+    comparison_snapshot_path.write_text(dump_json_pretty(comparison), encoding="utf-8")
+    manifest = {
+        "format": "source-semantic-baseline-snapshot-v1",
+        "created_at_utc": utc_isoformat(utc_now()),
+        "baseline_summary_path": rel(baseline_summary_path),
+        "baseline_artifact_dir": rel(baseline_summary_path.parent),
+        "summary_snapshot_path": rel(summary_snapshot_path),
+        "rows_snapshot_path": rel(rows_snapshot_path),
+        "comparison_snapshot_path": rel(comparison_snapshot_path),
+    }
+    manifest_path.write_text(dump_json_pretty(manifest), encoding="utf-8")
+    manifest["snapshot_manifest_path"] = rel(manifest_path)
+    return manifest
+
+
 def append_history_record(path: Path, summary: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     comparison = summary.get("comparison") if isinstance(summary.get("comparison"), dict) else {}
@@ -1994,6 +2149,8 @@ def append_history_record(path: Path, summary: dict[str, Any]) -> None:
         "baseline_summary_path": comparison.get("baseline_summary_path") if isinstance(comparison, dict) else None,
         "decomp_cache_hit_count": summary.get("decomp_cache_hit_count"),
         "decomp_cache_miss_count": summary.get("decomp_cache_miss_count"),
+        "list_cache_hit_count": summary.get("list_cache_hit_count"),
+        "list_cache_miss_count": summary.get("list_cache_miss_count"),
         "wall_sec": summary.get("wall_sec"),
     }
     with path.open("a", encoding="utf-8") as handle:
@@ -2018,6 +2175,7 @@ def update_latest_index(path: Path, summary: dict[str, Any]) -> None:
         "weighted_semantic_similarity_percent": summary.get("weighted_semantic_similarity_percent"),
         "comparison_outcome": summary.get("comparison_outcome"),
         "decomp_cache_file": summary.get("decomp_cache_file"),
+        "list_cache_file": summary.get("list_cache_file"),
         "history_file": summary.get("history_file"),
     }
     path.write_text(dump_json_pretty(index), encoding="utf-8")
@@ -2107,6 +2265,12 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"- Decomp cache hits/misses: {summary.get('decomp_cache_hit_count', 0)}/"
             f"{summary.get('decomp_cache_miss_count', 0)}"
         )
+    if summary.get("list_cache_file"):
+        lines.append(f"- List cache: `{summary['list_cache_file']}`")
+        lines.append(
+            f"- List cache hits/misses: {summary.get('list_cache_hit_count', 0)}/"
+            f"{summary.get('list_cache_miss_count', 0)}"
+        )
     if summary.get("history_file"):
         lines.append(f"- History: `{summary['history_file']}`")
     if summary.get("latest_index_file"):
@@ -2135,6 +2299,38 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"- Latest history delta: {latest_delta_text} "
             f"(previous run `{latest_record.get('run_id', 'unknown')}`)"
         )
+    if summary.get("baseline_snapshot"):
+        snapshot = summary["baseline_snapshot"]
+        lines.append(f"- Baseline snapshot: `{snapshot.get('snapshot_manifest_path')}`")
+    improvement = summary.get("improvement_summary")
+    if isinstance(improvement, dict):
+        lines.extend(["", "## Improvement Summary", "", f"- {improvement.get('headline', 'n/a')}"])
+        improved_metrics = improvement.get("improved_metrics") or []
+        regressed_metrics = improvement.get("regressed_metrics") or []
+        if improved_metrics:
+            lines.extend(["", "### Improved Metrics", "", "| Metric | Delta | Baseline | Current |", "|---|---:|---:|---:|"])
+            for metric in improved_metrics:
+                lines.append(
+                    f"| `{metric.get('metric')}` | {float(metric.get('delta', 0.0) or 0.0):+.3f} | "
+                    f"{metric.get('baseline')} | {metric.get('current')} |"
+                )
+        if regressed_metrics:
+            lines.extend(["", "### Regressed Metrics", "", "| Metric | Delta | Baseline | Current |", "|---|---:|---:|---:|"])
+            for metric in regressed_metrics:
+                lines.append(
+                    f"| `{metric.get('metric')}` | {float(metric.get('delta', 0.0) or 0.0):+.3f} | "
+                    f"{metric.get('baseline')} | {metric.get('current')} |"
+                )
+        top_improved = improvement.get("top_improved_functions") or []
+        if top_improved:
+            lines.extend(["", "### Improved Functions", "", "| Function | Delta | Baseline | Current | Behavior |", "|---|---:|---:|---:|---|"])
+            for row in top_improved[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | {float(row.get('delta_percent', 0.0) or 0.0):+.3f}% | "
+                    f"{float(row.get('baseline_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('current_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
+                )
     lines.extend([
         "",
         "## By Language",
@@ -2386,11 +2582,21 @@ def run_benchmark(args: argparse.Namespace) -> int:
     decomp_cache_lock = threading.Lock()
     decomp_cache_stats: Counter[str] = Counter()
     decomp_cache_initial_entry_count = len(decomp_cache)
+    list_cache_path = None if args.no_list_cache else resolve_path(args.list_cache_file)
+    list_cache: dict[str, dict[str, Any]] = load_list_cache(list_cache_path)
+    list_cache_stats: Counter[str] = Counter()
+    list_cache_initial_entry_count = len(list_cache)
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
         if args.limit_functions is not None:
             source_functions = source_functions[: args.limit_functions]
-        fission_funcs, fission_error = run_fission_list(entry.binary_path, fission_bin, args.timeout_sec)
+        fission_funcs, fission_error = run_fission_list_cached(
+            entry.binary_path,
+            fission_bin,
+            args.timeout_sec,
+            list_cache,
+            list_cache_stats,
+        )
         if jobs == 1 or len(source_functions) <= 1:
             for func in source_functions:
                 rows.append(
@@ -2442,6 +2648,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["artifact_dir"] = rel(output_dir)
     summary["jobs"] = jobs
     summary["decomp_cache_file"] = rel(decomp_cache_path) if decomp_cache_path is not None else None
+    summary["list_cache_file"] = rel(list_cache_path) if list_cache_path is not None else None
     summary["history_file"] = rel(DEFAULT_HISTORY_FILE)
     summary["latest_index_file"] = rel(DEFAULT_LATEST_INDEX_FILE)
     summary["decomp_cache_initial_entry_count"] = decomp_cache_initial_entry_count
@@ -2449,11 +2656,17 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["decomp_cache_hit_count"] = int(decomp_cache_stats.get("hit", 0))
     summary["decomp_cache_miss_count"] = int(decomp_cache_stats.get("miss", 0))
     summary["decomp_cache_stored_count"] = int(decomp_cache_stats.get("stored", 0))
+    summary["list_cache_initial_entry_count"] = list_cache_initial_entry_count
+    summary["list_cache_entry_count"] = len(list_cache)
+    summary["list_cache_hit_count"] = int(list_cache_stats.get("hit", 0))
+    summary["list_cache_miss_count"] = int(list_cache_stats.get("miss", 0))
+    summary["list_cache_stored_count"] = int(list_cache_stats.get("stored", 0))
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
     history = history_snapshot(DEFAULT_HISTORY_FILE, summary)
     if history is not None:
         summary["history"] = history
     save_decomp_cache(decomp_cache_path, decomp_cache)
+    save_list_cache(list_cache_path, list_cache)
     baseline_path: Path | None = None
     if not args.no_baseline_compare:
         baseline_path = resolve_path(args.baseline_dir) if args.baseline_dir else find_latest_baseline_dir(
@@ -2472,6 +2685,15 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 baseline_summary_path,
             )
             summary["comparison_outcome"] = comparison_outcome(summary["comparison"])
+            summary["improvement_summary"] = improvement_summary(summary["comparison"])
+            if not args.no_baseline_snapshot:
+                summary["baseline_snapshot"] = snapshot_baseline_artifacts(
+                    output_dir,
+                    baseline_summary_path,
+                    baseline_summary,
+                    baseline_rows,
+                    summary["comparison"],
+                )
         except Exception as exc:
             summary["comparison_error"] = {
                 "baseline": str(baseline_path),
@@ -2582,6 +2804,11 @@ def parse_args() -> argparse.Namespace:
         help="Disable automatic comparison against previous source-semantic artifacts",
     )
     parser.add_argument(
+        "--no-baseline-snapshot",
+        action="store_true",
+        help="Do not copy the selected baseline summary/rows/comparison into the current artifact directory",
+    )
+    parser.add_argument(
         "--include-debug-decomp",
         action="store_true",
         help="Pass fission_cli decomp --debug-decomp and attach compact stage/owner evidence to each row",
@@ -2617,6 +2844,16 @@ def parse_args() -> argparse.Namespace:
         "--no-decomp-cache",
         action="store_true",
         help="Disable the persistent decompile-result cache; the in-run memory cache remains enabled",
+    )
+    parser.add_argument(
+        "--list-cache-file",
+        default=str(DEFAULT_LIST_CACHE_FILE),
+        help="Persistent fission_cli list-result cache file keyed by input binary and fission_cli build metadata",
+    )
+    parser.add_argument(
+        "--no-list-cache",
+        action="store_true",
+        help="Disable the persistent fission_cli list-result cache",
     )
     parser.add_argument(
         "--jobs",
