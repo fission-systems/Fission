@@ -121,7 +121,7 @@ impl RuntimeSleighFrontend {
                 .unwrap_or(false);
             let last_opcode = ins_ops.last().map(|op| op.opcode);
             let direct_target = ins_ops.last().and_then(direct_pcode_branch_target);
-            let fallthrough = current.saturating_add(decoded_len);
+            let fallthrough = checked_instruction_fallthrough(current, decoded_len)?;
 
             match last_opcode {
                 Some(PcodeOpcode::Branch) => {
@@ -156,7 +156,9 @@ impl RuntimeSleighFrontend {
         for mut ins_ops in decoded.into_values() {
             for op in &mut ins_ops {
                 op.seq_num = global_seq;
-                global_seq = global_seq.saturating_add(1);
+                global_seq = global_seq
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("p-code seq_num overflowed"))?;
             }
             ops.extend(ins_ops);
         }

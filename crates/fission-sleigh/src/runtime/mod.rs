@@ -31,6 +31,12 @@ const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
 
 pub const UNIQUE_SPACE_ID: u64 = 3;
 
+fn checked_instruction_fallthrough(address: u64, length: u64) -> Result<u64> {
+    address
+        .checked_add(length)
+        .ok_or_else(|| anyhow!("instruction address overflow at 0x{address:x} length {length}"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeFrontendStatus {
     RegisteredCompileOnly,
@@ -239,6 +245,29 @@ mod tests {
             inputs,
             asm_mnemonic: None,
         }
+    }
+
+    #[test]
+    fn runtime_instruction_address_advance_fails_on_overflow() {
+        assert_eq!(checked_instruction_fallthrough(0x1000, 4).unwrap(), 0x1004);
+        assert!(checked_instruction_fallthrough(u64::MAX, 1).is_err());
+    }
+
+    #[test]
+    fn runtime_decode_and_lift_do_not_saturate_instruction_addresses() {
+        let decode_source = include_str!("decode.rs");
+        let lift_source = include_str!("lift.rs");
+        let current_saturating = ["current", "saturating_add"].join(".");
+        let seq_saturating = ["global_seq", "saturating_add"].join(".");
+
+        assert!(
+            !decode_source.contains(&current_saturating),
+            "decode traversal must fail on instruction address overflow"
+        );
+        assert!(
+            !lift_source.contains(&current_saturating) && !lift_source.contains(&seq_saturating),
+            "function lifting must fail on instruction address or seq_num overflow"
+        );
     }
 
     #[test]

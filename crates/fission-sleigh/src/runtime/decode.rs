@@ -104,8 +104,10 @@ impl RuntimeSleighFrontend {
                 entry.1 |= mask_u64;
             }
 
-            current = current.saturating_add(step as u64);
-            offset = offset.saturating_add(step);
+            current = checked_instruction_fallthrough(current, step as u64)?;
+            offset = offset
+                .checked_add(step)
+                .ok_or_else(|| anyhow!("decode byte offset overflowed at 0x{current:x}"))?;
             decoded.push(instruction);
         }
         Ok(decoded)
@@ -134,8 +136,10 @@ impl RuntimeSleighFrontend {
             if instruction.length == 0 || instruction.length > remaining.len() {
                 break;
             }
-            current = current.saturating_add(instruction.length as u64);
-            offset = offset.saturating_add(instruction.length);
+            current = checked_instruction_fallthrough(current, instruction.length as u64)?;
+            offset = offset.checked_add(instruction.length).ok_or_else(|| {
+                anyhow!("direct-call discovery byte offset overflowed at 0x{current:x}")
+            })?;
         }
         Ok(targets.into_iter().collect())
     }
