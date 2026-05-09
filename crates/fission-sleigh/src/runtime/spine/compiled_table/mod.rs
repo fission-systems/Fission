@@ -371,12 +371,11 @@ pub(crate) fn apply_context_commits(
                 let handle = decoded.handles.get(hand_index as usize).ok_or_else(|| {
                     anyhow!("context commit references missing operand handle {hand_index}")
                 })?;
-                // Ghidra: if handle.offset_space.type == CONSTANT, multiply by ram addr_unit.
-                let offset = if handle.fixed.offset_space.is_some() {
-                    handle.fixed.temp_offset
-                } else {
-                    handle.fixed.offset_offset
-                };
+                // Ghidra SleighParserContext.applyCommits(): context-set addresses
+                // are resolved from hand.offset_offset. If the resolved handle
+                // lives in the constant space, scale by the current address
+                // space's addressable unit size.
+                let offset = handle.fixed.offset_offset;
                 if handle
                     .fixed
                     .space
@@ -384,15 +383,17 @@ pub(crate) fn apply_context_commits(
                     .map(|s| s.name == "const")
                     .unwrap_or(false)
                 {
-                    let addr_unit = compiled
-                        .sla_spaces
-                        .values()
-                        .find(|s| {
-                            s.name == "ram"
-                                || (s.name != "const" && s.name != "unique" && s.name != "register")
-                        })
-                        .map(|s| s.word_size as u64)
-                        .unwrap_or(1);
+                    let cur_space_index = compiled.sla_default_cur_space_index()?;
+                    let cur_space = compiled.sla_spaces.get(&cur_space_index).ok_or_else(|| {
+                        anyhow!("CurSpace index {cur_space_index} missing from sla_spaces")
+                    })?;
+                    if cur_space.word_size == 0 {
+                        bail!(
+                            "SLA CurSpace {} has word_size=0 for context commit",
+                            cur_space.name
+                        );
+                    }
+                    let addr_unit = u64::from(cur_space.word_size);
                     offset.wrapping_mul(addr_unit)
                 } else {
                     offset
