@@ -683,11 +683,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *shift,
                 )?;
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                    self.cursor = self
-                        .cursor
-                        .max(token_base.saturating_add(encoded_size as usize));
-                }
+                self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
                         value,
@@ -722,11 +718,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *shift,
                 )?;
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                    self.cursor = self
-                        .cursor
-                        .max(token_base.saturating_add(encoded_size as usize));
-                }
+                self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 let entry = entries.get(selector as usize).ok_or_else(|| {
                     anyhow!(
                         "varnode list selector {} out of range for {} entries",
@@ -800,11 +792,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     )
                 })?;
                 let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                    self.cursor = self
-                        .cursor
-                        .max(token_base.saturating_add(encoded_size as usize));
-                }
+                self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
                         value: value as u64,
@@ -876,11 +864,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         *shift,
                     )? as i64;
                     encoded_size = ((*byte_end - *byte_start) + 1).max(1);
-                    if !self.sla_field_is_within_constructor_minimum(token_base, encoded_size) {
-                        self.cursor = self
-                            .cursor
-                            .max(token_base.saturating_add(encoded_size as usize));
-                    }
+                    self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                     value
                 } else {
                     self.eval_pattern_expression(expr)?
@@ -1053,13 +1037,35 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset
     }
 
+    fn advance_cursor_past_sla_field(
+        &mut self,
+        token_base: usize,
+        encoded_size: u32,
+    ) -> Result<()> {
+        if self.sla_field_is_within_constructor_minimum(token_base, encoded_size)? {
+            return Ok(());
+        }
+        let field_end = token_base
+            .checked_add(encoded_size as usize)
+            .ok_or_else(|| anyhow!("SLA token field end offset overflowed"))?;
+        self.cursor = self.cursor.max(field_end);
+        Ok(())
+    }
+
     fn sla_field_is_within_constructor_minimum(
         &self,
         token_base: usize,
         encoded_size: u32,
-    ) -> bool {
-        let constructor_end = self.ctx.cursor + self.selection.constructor.minimum_length as usize;
-        token_base == self.ctx.cursor && token_base + encoded_size as usize <= constructor_end
+    ) -> Result<bool> {
+        let constructor_end = self
+            .ctx
+            .cursor
+            .checked_add(self.selection.constructor.minimum_length as usize)
+            .ok_or_else(|| anyhow!("constructor minimum token range overflowed"))?;
+        let token_end = token_base
+            .checked_add(encoded_size as usize)
+            .ok_or_else(|| anyhow!("SLA token field end offset overflowed"))?;
+        Ok(token_base == self.ctx.cursor && token_end <= constructor_end)
     }
 
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {

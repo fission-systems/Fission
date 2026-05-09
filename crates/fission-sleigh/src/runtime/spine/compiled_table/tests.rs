@@ -621,8 +621,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let operand_base_saturating_end_fallback = "offset.saturating_add(length)";
     let operand_end_unchecked_add_fallback = "Some((*offset)? + (*length)?)";
     let constructor_minimum_unchecked_end = "self.ctx.cursor + self.minimum_length";
+    let token_constructor_minimum_unchecked_end =
+        "self.ctx.cursor + self.selection.constructor.minimum_length as usize";
     let constructor_relative_saturating_length = "length.saturating_sub(absolute_offset)";
     let subtable_relative_saturating_length = "sub_state.length.saturating_sub(self.ctx.cursor)";
+    let token_field_saturating_end = "token_base.saturating_add(encoded_size as usize)";
+    let token_field_unchecked_end = "token_base + encoded_size as usize";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -777,9 +781,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
         assert!(
             !source.contains(constructor_minimum_unchecked_end)
+                && !source.contains(token_constructor_minimum_unchecked_end)
                 && !source.contains(constructor_relative_saturating_length)
                 && !source.contains(subtable_relative_saturating_length),
             "{} still hides malformed SLA construct length arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(token_field_saturating_end)
+                && !source.contains(token_field_unchecked_end),
+            "{} still hides malformed SLA token-field cursor arithmetic",
             file.display()
         );
         assert!(
