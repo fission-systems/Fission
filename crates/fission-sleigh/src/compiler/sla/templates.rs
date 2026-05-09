@@ -152,6 +152,7 @@ pub(super) fn decode_construct_templates(
                             "[sla-parse] decode named section {section_idx} failed subtable={subtable_name} slot={local_index} err={err:#}"
                         );
                         }
+                        return Err(format!("decode_named_construct_tpl:{section_idx}:{err:#}"));
                     }
                 }
             }

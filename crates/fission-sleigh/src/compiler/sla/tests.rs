@@ -91,6 +91,16 @@ fn sla_decision_decode_does_not_synthesize_always_true_patterns() {
 }
 
 #[test]
+fn sla_named_section_decode_errors_are_not_dropped() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("decode named section")
+            || templates.contains("decode_named_construct_tpl"),
+        "named ConstructTpl decode failures must be surfaced, not only traced"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
