@@ -109,8 +109,9 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                     shift,
                 } => {
                     output.push_str(&format!(
-                        "    let probe = (bytes.get({offset}).copied().unwrap_or(0) & {mask}) >> {shift};\n"
+                        "    let Some(byte) = bytes.get({offset}).copied() else {{ return -1; }};\n"
                     ));
+                    output.push_str(&format!("    let probe = (byte & {mask}) >> {shift};\n"));
                     output.push_str(&format!(
                         "    eprintln!(\"Trace node {}: InstructionBitSlice offset={}, mask={}, probe={{}}\", probe);\n",
                         i, offset, mask
@@ -170,7 +171,7 @@ pub fn render_native_backend(compiled: &CompiledFrontend) -> String {
                         start_bit, bit_size
                     ));
                     output.push_str(
-                        "    let mut word = 0u64;\n    for i in 0..byte_cnt { word |= (*bytes.get(i as usize).unwrap_or(&0) as u64) << (i * 8); }\n"
+                        "    if bytes.len() < byte_cnt as usize { return -1; }\n    let mut word = 0u64;\n    for i in 0..byte_cnt { word |= (bytes[i as usize] as u64) << (i * 8); }\n"
                     );
                     output.push_str(&format!(
                         "    let probe = (word >> {start_bit}) & {mask};\n"

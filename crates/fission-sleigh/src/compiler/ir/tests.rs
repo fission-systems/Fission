@@ -253,6 +253,25 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
 }
 
 #[test]
+fn generated_native_backend_does_not_zero_pad_short_instruction_bytes() {
+    let codegen = include_str!("../codegen.rs");
+    for forbidden in [
+        "bytes.get({offset}).copied().unwrap_or(0)",
+        "bytes.get(i as usize).unwrap_or(&0)",
+    ] {
+        assert!(
+            !codegen.contains(forbidden),
+            "generated native backend must fail closed on short instruction bytes: {forbidden}"
+        );
+    }
+    assert!(
+        codegen.contains("else { return -1; }")
+            && codegen.contains("if bytes.len() < byte_cnt as usize { return -1; }"),
+        "generated native backend should reject short decision probes instead of padding"
+    );
+}
+
+#[test]
 fn sla_template_parser_does_not_promote_named_sections_to_main() {
     let templates = include_str!("../sla/templates.rs");
     for forbidden in [
