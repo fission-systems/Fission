@@ -218,17 +218,21 @@ pub(super) fn decode_construct_templates(
                         );
                     }
                     sla_format::ELEM_OPPRINT => {
-                        if let Some(index) =
-                            child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize)
-                        {
-                            opprint_indices.push(index);
-                            display_pieces.push(CompiledDisplayPiece::OperandRef(index));
-                        }
+                        let index = child
+                            .attr_signed(sla_format::ATTR_ID)
+                            .ok_or_else(|| "opprint_missing_operand_index".to_string())
+                            .and_then(|value| {
+                                usize::try_from(value)
+                                    .map_err(|_| "opprint_negative_operand_index".to_string())
+                            })?;
+                        opprint_indices.push(index);
+                        display_pieces.push(CompiledDisplayPiece::OperandRef(index));
                     }
                     sla_format::ELEM_PRINT => {
-                        if let Some(piece) = child.attr_string(sla_format::ATTR_PIECE) {
-                            display_pieces.push(CompiledDisplayPiece::Literal(piece.to_string()));
-                        }
+                        let piece = child
+                            .attr_string(sla_format::ATTR_PIECE)
+                            .ok_or_else(|| "print_missing_piece".to_string())?;
+                        display_pieces.push(CompiledDisplayPiece::Literal(piece.to_string()));
                     }
                     _ => {}
                 }

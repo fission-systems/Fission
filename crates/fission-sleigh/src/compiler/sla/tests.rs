@@ -241,6 +241,20 @@ fn sla_constructor_operand_lengths_are_not_synthesized() {
 }
 
 #[test]
+fn sla_constructor_display_pieces_are_not_silently_dropped() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        "if let Some(index) =\n                            child.attr_signed(sla_format::ATTR_ID).map(|x| x as usize)",
+        "if let Some(piece) = child.attr_string(sla_format::ATTR_PIECE)",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "constructor display decode must fail closed instead of dropping malformed display pieces: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_root_unique_base_is_not_synthesized() {
     let templates = include_str!("templates.rs");
     assert!(
