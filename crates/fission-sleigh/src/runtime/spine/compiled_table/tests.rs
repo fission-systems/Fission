@@ -617,6 +617,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "unwrap_or(self.cursor)",
     ]
     .join("\n");
+    let operand_length_cursor_fallback = "saturating_sub(operand_absolute_offset)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -756,6 +757,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&operand_offset_cursor_fallback),
             "{} still treats unresolved operand offsets as the current cursor",
+            file.display()
+        );
+        assert!(
+            !source.contains(operand_length_cursor_fallback),
+            "{} still derives non-subtable operand lengths from the runtime cursor instead of SLA minimum_length",
             file.display()
         );
         assert!(

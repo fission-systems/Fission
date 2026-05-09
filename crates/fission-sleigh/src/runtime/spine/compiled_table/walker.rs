@@ -540,11 +540,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .subtable_state
             .as_ref()
             .map(|state| state.relative_length)
-            .unwrap_or_else(|| {
-                self.cursor
-                    .saturating_sub(operand_absolute_offset)
-                    .max(template.minimum_length as usize)
-            });
+            .unwrap_or(template.minimum_length as usize);
         self.walker.record_operand_node(
             operand_index,
             0,
