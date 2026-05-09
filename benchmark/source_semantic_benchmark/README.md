@@ -132,6 +132,14 @@ saves `fission_cli decomp --debug-decomp-bundle`, `disasm --function`, `xrefs
 adds a `debug_triage` block to the JSON and Markdown summaries. Keep this off
 for throughput runs; enable it for diagnosis-focused artifact snapshots.
 
+Use `--materialize-regression-debug-triage` when comparing against a previous
+artifact and the question is specifically "what got worse?". The runner takes
+the comparison's top regressed rows, then materializes the same existing
+`fission_cli decomp`, `disasm`, `xrefs`, and `inventory function-facts` captures
+for those rows and adds a `regression_debug_triage` block to the JSON and
+Markdown summaries. This turns previous-artifact comparison into a ready-to-open
+CLI debug bundle without changing the semantic score.
+
 For dynamic behavior failures, each non-passing row also records a
 `behavior.artifact_dir` with the exact generated oracle harness, candidate
 harness, and compile/run result JSON. These files make timeouts, compile

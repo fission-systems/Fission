@@ -1039,21 +1039,14 @@ def run_command_capture(cmd: list[Any], timeout_sec: int) -> dict[str, Any]:
         }
 
 
-def materialize_debug_triage(
-    rows: list[dict[str, Any]],
+def materialize_debug_triage_for_rows(
+    selected: list[dict[str, Any]],
     fission_bin: Path,
     output_dir: Path,
     timeout_sec: int,
-    limit: int,
 ) -> list[dict[str, Any]]:
-    selected = [
-        row
-        for row in rows
-        if row.get("address") and float(row.get("semantic_score", 0.0) or 0.0) < 1.0
-    ]
-    selected.sort(key=lambda row: (float(row.get("semantic_score", 0.0) or 0.0), row.get("function_name") or ""))
     triage_rows: list[dict[str, Any]] = []
-    for row in selected[: max(0, limit)]:
+    for row in selected:
         binary_path = resolve_path(str(row["binary_path"]))
         address = str(row["address"])
         decomp_bundle_path = debug_bundle_path_for_row(output_dir, row)
@@ -1137,6 +1130,7 @@ def materialize_debug_triage(
             "address": address,
             "semantic_score_percent": row.get("semantic_score_percent"),
             "behavior_status": row.get("behavior", {}).get("status"),
+            "baseline_regression": row.get("baseline_regression"),
             "preview_candidate_note": row.get("preview_candidate_note"),
             "debug_decomp_capture_path": rel(decomp_capture_path),
             "debug_decomp_bundle_path": rel(decomp_bundle_path),
@@ -1154,6 +1148,54 @@ def materialize_debug_triage(
         row["debug_triage"] = triage
         triage_rows.append(triage)
     return triage_rows
+
+
+def materialize_debug_triage(
+    rows: list[dict[str, Any]],
+    fission_bin: Path,
+    output_dir: Path,
+    timeout_sec: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    selected = [
+        row
+        for row in rows
+        if row.get("address") and float(row.get("semantic_score", 0.0) or 0.0) < 1.0
+    ]
+    selected.sort(key=lambda row: (float(row.get("semantic_score", 0.0) or 0.0), row.get("function_name") or ""))
+    return materialize_debug_triage_for_rows(selected[: max(0, limit)], fission_bin, output_dir, timeout_sec)
+
+
+def materialize_regression_debug_triage(
+    rows: list[dict[str, Any]],
+    comparison: dict[str, Any],
+    fission_bin: Path,
+    output_dir: Path,
+    timeout_sec: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows_by_key = {row_key(row): row for row in rows if row.get("address")}
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for delta in comparison.get("top_regressions") or []:
+        key = str(delta.get("key") or "")
+        if not key or key in seen:
+            continue
+        row = rows_by_key.get(key)
+        if row is None:
+            continue
+        row["baseline_regression"] = {
+            "baseline_score_percent": delta.get("baseline_score_percent"),
+            "current_score_percent": delta.get("current_score_percent"),
+            "delta_percent": delta.get("delta_percent"),
+            "baseline_behavior": delta.get("baseline_behavior"),
+            "current_behavior": delta.get("current_behavior"),
+        }
+        selected.append(row)
+        seen.add(key)
+        if len(selected) >= max(0, limit):
+            break
+    return materialize_debug_triage_for_rows(selected, fission_bin, output_dir, timeout_sec)
 
 
 def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[str]:
@@ -2183,6 +2225,18 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"`{row.get('debug_decomp_bundle_path')}` | `{row.get('disasm_capture_path')}` | "
                 f"`{row.get('xrefs_capture_path')}` | `{row.get('function_facts_summary_path')}` |"
             )
+    regression_debug_triage = summary.get("regression_debug_triage") or []
+    if regression_debug_triage:
+        lines.extend(["", "## Regression Debug Triage", "", "| Function | Delta | Score | Debug Bundle | Disasm | Xrefs | Facts |", "|---|---:|---:|---|---|---|---|"])
+        for row in regression_debug_triage[:12]:
+            regression = row.get("baseline_regression") if isinstance(row.get("baseline_regression"), dict) else {}
+            delta = regression.get("delta_percent")
+            delta_text = "n/a" if delta is None else f"{delta:+.3f}%"
+            lines.append(
+                f"| `{row.get('function_name')}` | {delta_text} | {row.get('semantic_score_percent', 0.0):.3f}% | "
+                f"`{row.get('debug_decomp_bundle_path')}` | `{row.get('disasm_capture_path')}` | "
+                f"`{row.get('xrefs_capture_path')}` | `{row.get('function_facts_summary_path')}` |"
+            )
     debug_commands = summary.get("debug_repro_commands") or []
     if debug_commands:
         lines.extend(["", "## Debug Repro Commands", ""])
@@ -2433,6 +2487,17 @@ def run_benchmark(args: argparse.Namespace) -> int:
         )
         summary["debug_triage"] = triage_rows
         summary["debug_triage_count"] = len(triage_rows)
+    if args.materialize_regression_debug_triage and isinstance(summary.get("comparison"), dict):
+        regression_triage_rows = materialize_regression_debug_triage(
+            rows,
+            summary["comparison"],
+            fission_bin,
+            output_dir,
+            args.timeout_sec,
+            args.regression_debug_triage_limit,
+        )
+        summary["regression_debug_triage"] = regression_triage_rows
+        summary["regression_debug_triage_count"] = len(regression_triage_rows)
     debug_commands = top_debug_commands(rows)
     if debug_commands:
         summary["debug_repro_commands"] = debug_commands
@@ -2531,6 +2596,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help="Maximum non-perfect rows to materialize with --materialize-debug-triage",
+    )
+    parser.add_argument(
+        "--materialize-regression-debug-triage",
+        action="store_true",
+        help="Run fission_cli debug surfaces for rows that regressed versus the selected baseline",
+    )
+    parser.add_argument(
+        "--regression-debug-triage-limit",
+        type=int,
+        default=8,
+        help="Maximum regressed rows to materialize with --materialize-regression-debug-triage",
     )
     parser.add_argument(
         "--decomp-cache-file",
