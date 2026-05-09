@@ -138,6 +138,20 @@ fn sla_operand_symbol_shape_fields_are_not_synthesized() {
 }
 
 #[test]
+fn sla_space_shape_fields_are_not_synthesized() {
+    let symbols = include_str!("symbols.rs");
+    for forbidden in [
+        ".attr_unsigned(sla_format::ATTR_SIZE)\n            .map(|v| v as u32)\n            .unwrap_or(0)",
+        "space.attr_string(sla_format::ATTR_NAME).unwrap_or(\"unique\")",
+    ] {
+        assert!(
+            !symbols.contains(forbidden),
+            "space decode must fail closed instead of synthesizing shape fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_display_symbol_decode_does_not_synthesize_defaults() {
     let display = include_str!("display.rs");
     for forbidden in [

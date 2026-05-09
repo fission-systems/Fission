@@ -155,9 +155,11 @@ pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult
             .map(|v| v as u32)
             .unwrap_or(1);
         let addr_size = space
-            .attr_unsigned(sla_format::ATTR_SIZE)
-            .map(|v| v as u32)
-            .unwrap_or(0);
+            .attr_signed(sla_format::ATTR_SIZE)
+            .ok_or_else(|| anyhow!("space {name} missing address size"))
+            .and_then(|value| {
+                u32::try_from(value).map_err(|_| anyhow!("space {name} has negative address size"))
+            })?;
         if name == "register" {
             register_space_index = index;
         }
@@ -175,7 +177,16 @@ pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult
         let index = space
             .attr_unsigned(sla_format::ATTR_INDEX)
             .ok_or_else(|| anyhow!("unique space missing index"))?;
-        let name = space.attr_string(sla_format::ATTR_NAME).unwrap_or("unique");
+        let name = space
+            .attr_string(sla_format::ATTR_NAME)
+            .ok_or_else(|| anyhow!("unique space missing name"))?;
+        let addr_size = space
+            .attr_signed(sla_format::ATTR_SIZE)
+            .ok_or_else(|| anyhow!("unique space {name} missing address size"))
+            .and_then(|value| {
+                u32::try_from(value)
+                    .map_err(|_| anyhow!("unique space {name} has negative address size"))
+            })?;
         unique_space_index = index;
         spaces.insert(
             index,
@@ -183,7 +194,7 @@ pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult
                 name: name.to_string(),
                 index,
                 word_size: 0,
-                addr_size: 0,
+                addr_size,
             },
         );
     }
