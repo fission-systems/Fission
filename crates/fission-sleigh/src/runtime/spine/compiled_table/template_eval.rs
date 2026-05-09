@@ -418,7 +418,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 // Use the emitter's actual op count so even recursively emitted ops
                 // (via BUILD) are accounted for correctly.
                 self.label_positions
-                    .insert(label_num, self.emitter.op_count());
+                    .insert(label_num, self.emitter.op_count()?);
                 Ok(())
             }
             CompiledOpTplOpcode::Return => {

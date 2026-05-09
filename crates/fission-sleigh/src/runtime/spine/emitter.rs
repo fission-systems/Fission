@@ -57,11 +57,11 @@ impl RuntimePcodeEmitter {
         self.ops
     }
 
-    pub fn op_count(&self) -> u32 {
-        self.ops.len() as u32
+    pub fn op_count(&self) -> Result<u32> {
+        u32::try_from(self.ops.len()).map_err(|_| anyhow!("p-code op count overflowed"))
     }
 
-    pub fn tmp(&mut self, space_id: u64, size: u32) -> Varnode {
+    pub fn tmp(&mut self, space_id: u64, size: u32) -> Result<Varnode> {
         let vn = Varnode {
             space_id,
             offset: self.next_tmp,
@@ -69,8 +69,11 @@ impl RuntimePcodeEmitter {
             is_constant: false,
             constant_val: 0,
         };
-        self.next_tmp = self.next_tmp.wrapping_add(0x200);
-        vn
+        self.next_tmp = self
+            .next_tmp
+            .checked_add(0x200)
+            .ok_or_else(|| anyhow!("unique temporary offset overflowed"))?;
+        Ok(vn)
     }
 
     pub fn append_checked(
@@ -80,6 +83,10 @@ impl RuntimePcodeEmitter {
         inputs: Vec<Varnode>,
         mnemonic: &str,
     ) -> Result<()> {
+        let next_seq = self
+            .seq
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("p-code seq_num overflowed"))?;
         let op = PcodeOp {
             seq_num: self.seq,
             opcode,
@@ -95,7 +102,7 @@ impl RuntimePcodeEmitter {
             })
         })?;
         self.ops.push(op);
-        self.seq = self.seq.saturating_add(1);
+        self.seq = next_seq;
         Ok(())
     }
 
@@ -179,5 +186,65 @@ impl RuntimePcodeEmitter {
         mnemonic: &str,
     ) -> Result<()> {
         self.append_checked(PcodeOpcode::CallOther, output, inputs, mnemonic)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_varnode(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 3,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn const_varnode(value: i64, size: u32) -> Varnode {
+        Varnode::constant(value, size)
+    }
+
+    #[test]
+    fn emitter_fails_on_seq_num_overflow() {
+        let mut emitter = RuntimePcodeEmitter::new(0x1000, 0);
+        emitter.seq = u32::MAX;
+
+        let err = emitter
+            .append_checked(
+                PcodeOpcode::Copy,
+                Some(unique_varnode(1, 1)),
+                vec![const_varnode(2, 1)],
+                "seq",
+            )
+            .expect_err("seq overflow must fail closed");
+
+        assert!(err.to_string().contains("p-code seq_num overflowed"));
+    }
+
+    #[test]
+    fn emitter_fails_on_unique_temp_overflow() {
+        let mut emitter = RuntimePcodeEmitter::new(0x1000, u64::MAX - 0xff);
+        let err = emitter
+            .tmp(3, 8)
+            .expect_err("temporary overflow must fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("unique temporary offset overflowed"));
+    }
+
+    #[test]
+    fn emitter_source_has_no_wrapping_or_saturating_allocators() {
+        let source = include_str!("emitter.rs");
+        let tmp_wrap = ["next_tmp", "wrapping_add"].join(".");
+        let seq_saturating = ["seq", "saturating_add"].join(".");
+
+        assert!(
+            !source.contains(&tmp_wrap) && !source.contains(&seq_saturating),
+            "p-code emission must not hide seq or unique temp overflow"
+        );
     }
 }
