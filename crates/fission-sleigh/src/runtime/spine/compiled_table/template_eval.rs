@@ -4,7 +4,7 @@ use super::*;
 ///
 /// `plus` is value_real read from ATTR_PLUS in the SLA.
 /// - Non-constant space: effective_offset + (plus & 0xFFFF)
-/// - Constant space: effective_offset >> (8 * (plus >> 16))
+/// - Constant space: effective_offset >> (8 * (plus >> 16)), using Java long shift masking.
 pub(super) fn resolve_offset_plus_pub(handle: &RuntimeHandle, plus: u64) -> u64 {
     resolve_offset_plus(handle, plus)
 }
@@ -24,13 +24,8 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
     if !is_const_space {
         effective_offset.wrapping_add(plus & 0xFFFF)
     } else {
-        let shift_bytes = plus >> 16;
-        let shift_bits = shift_bytes.saturating_mul(8);
-        if shift_bits >= 64 {
-            0
-        } else {
-            effective_offset >> shift_bits
-        }
+        let shift_bits = ((plus >> 16).wrapping_mul(8) & 0x3f) as u32;
+        effective_offset >> shift_bits
     }
 }
 
@@ -1491,5 +1486,61 @@ impl RuntimeTemplateExecutor for CompiledTableEmitter<'_> {
         op: &CompiledOpTpl,
     ) -> Result<()> {
         CompiledTableEmitter::emit_op_template(self, state, op)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_handle(space_name: &str, offset: u64) -> RuntimeHandle {
+        RuntimeHandle {
+            operand_index: 0,
+            spec: CompiledOperandSpec::ContextFieldExtraction {
+                bit_offset: 0,
+                bit_width: 1,
+                sign_extend: false,
+            },
+            fixed: RuntimeFixedHandle {
+                space: Some(CompiledSpaceRef {
+                    name: space_name.to_string(),
+                    index: 0,
+                    word_size: 1,
+                    addr_size: 8,
+                }),
+                size: 8,
+                offset_offset: offset,
+                ..RuntimeFixedHandle::default()
+            },
+            debug_value: None,
+            subtable_state: None,
+        }
+    }
+
+    #[test]
+    fn offset_plus_constant_space_uses_ghidra_java_shift_masking() {
+        let handle = test_handle("const", 0x8877_6655_4433_2211);
+
+        assert_eq!(resolve_offset_plus(&handle, 1 << 16), 0x0088_7766_5544_3322);
+        assert_eq!(resolve_offset_plus(&handle, 8 << 16), 0x8877_6655_4433_2211);
+    }
+
+    #[test]
+    fn offset_plus_non_constant_space_preserves_ghidra_long_addition() {
+        let handle = test_handle("ram", u64::MAX);
+
+        assert_eq!(resolve_offset_plus(&handle, 1), 0);
+    }
+
+    #[test]
+    fn offset_plus_source_has_no_saturating_shift_fallback() {
+        let source = include_str!("template_eval.rs");
+        let saturating_shift_fallback =
+            ["let shift_bits = shift_bytes.", "saturating", "_mul(8);"].concat();
+
+        assert!(
+            !source.contains(&saturating_shift_fallback),
+            "constant-space offset_plus must mirror Ghidra Java long shift masking"
+        );
     }
 }
