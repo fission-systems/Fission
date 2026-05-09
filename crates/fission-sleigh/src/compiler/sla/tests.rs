@@ -113,6 +113,16 @@ fn sla_symbol_pattern_expression_decode_errors_are_not_dropped() {
 }
 
 #[test]
+fn sla_operand_subsymbol_refs_are_not_downgraded_to_generic() {
+    let symbols = include_str!("symbols.rs");
+    assert!(
+        symbols.contains("references unknown subsym")
+            && !symbols.contains(".and_then(|value| display_symbols.get(&(value as u32)))"),
+        "operand subsym references must fail closed instead of becoming generic operands"
+    );
+}
+
+#[test]
 fn sla_display_symbol_decode_does_not_synthesize_defaults() {
     let display = include_str!("display.rs");
     for forbidden in [

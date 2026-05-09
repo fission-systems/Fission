@@ -221,84 +221,13 @@ pub(super) fn decode_operand_symbols(
             varnode_list,
             value_map,
             fixed_varnode,
-        ) = operand
-            .attr_unsigned(sla_format::ATTR_SUBSYM)
-            .and_then(|value| display_symbols.get(&(value as u32)))
-            .map(|symbol| match symbol {
-                DecodedDisplaySymbol::Subtable(name) => (
-                    Some(name.clone()),
-                    CompiledDisplayOperandKind::Subtable,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                DecodedDisplaySymbol::ValueHex { expression } => (
-                    None,
-                    decoded_display_kind(symbol),
-                    None,
-                    expression.clone(),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                DecodedDisplaySymbol::NameTable {
-                    token_field,
-                    selector_expr,
-                    ..
-                } => (
-                    None,
-                    decoded_display_kind(symbol),
-                    token_field.clone(),
-                    selector_expr.clone(),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                DecodedDisplaySymbol::ValueMap {
-                    token_field,
-                    values,
-                    selector_expr,
-                } => (
-                    None,
-                    decoded_display_kind(symbol),
-                    token_field.clone(),
-                    None,
-                    selector_expr.clone(),
-                    None,
-                    Some(values.clone()),
-                    None,
-                ),
-                DecodedDisplaySymbol::VarnodeList {
-                    entries,
-                    token_field,
-                    selector_expr,
-                } => (
-                    None,
-                    decoded_display_kind(symbol),
-                    token_field.clone(),
-                    None,
-                    selector_expr.clone(),
-                    Some(entries.clone()),
-                    None,
-                    None,
-                ),
-                DecodedDisplaySymbol::FixedVarnode(varnode) => (
-                    None,
-                    decoded_display_kind(symbol),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    Some(varnode.clone()),
-                ),
-            })
-            .unwrap_or((
+        ) = if let Some(subsym_id) = operand.attr_unsigned(sla_format::ATTR_SUBSYM) {
+            let symbol = display_symbols
+                .get(&(subsym_id as u32))
+                .ok_or_else(|| anyhow!("operand_sym {id} references unknown subsym {subsym_id}"))?;
+            decoded_operand_display_binding(symbol)
+        } else {
+            (
                 None,
                 CompiledDisplayOperandKind::Generic,
                 None,
@@ -307,7 +236,8 @@ pub(super) fn decode_operand_symbols(
                 None,
                 None,
                 None,
-            ));
+            )
+        };
         let token_field = operand
             .children
             .iter()
@@ -334,6 +264,94 @@ pub(super) fn decode_operand_symbols(
         );
     }
     Ok(out)
+}
+
+type DecodedOperandDisplayBinding = (
+    Option<String>,
+    CompiledDisplayOperandKind,
+    Option<DecodedTokenField>,
+    Option<CompiledPatternExpression>,
+    Option<CompiledPatternExpression>,
+    Option<Vec<CompiledResolvedVarnode>>,
+    Option<Vec<i64>>,
+    Option<CompiledResolvedVarnode>,
+);
+
+fn decoded_operand_display_binding(symbol: &DecodedDisplaySymbol) -> DecodedOperandDisplayBinding {
+    match symbol {
+        DecodedDisplaySymbol::Subtable(name) => (
+            Some(name.clone()),
+            CompiledDisplayOperandKind::Subtable,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        DecodedDisplaySymbol::ValueHex { expression } => (
+            None,
+            decoded_display_kind(symbol),
+            None,
+            expression.clone(),
+            None,
+            None,
+            None,
+            None,
+        ),
+        DecodedDisplaySymbol::NameTable {
+            token_field,
+            selector_expr,
+            ..
+        } => (
+            None,
+            decoded_display_kind(symbol),
+            token_field.clone(),
+            selector_expr.clone(),
+            None,
+            None,
+            None,
+            None,
+        ),
+        DecodedDisplaySymbol::ValueMap {
+            token_field,
+            values,
+            selector_expr,
+        } => (
+            None,
+            decoded_display_kind(symbol),
+            token_field.clone(),
+            None,
+            selector_expr.clone(),
+            None,
+            Some(values.clone()),
+            None,
+        ),
+        DecodedDisplaySymbol::VarnodeList {
+            entries,
+            token_field,
+            selector_expr,
+        } => (
+            None,
+            decoded_display_kind(symbol),
+            token_field.clone(),
+            None,
+            selector_expr.clone(),
+            Some(entries.clone()),
+            None,
+            None,
+        ),
+        DecodedDisplaySymbol::FixedVarnode(varnode) => (
+            None,
+            decoded_display_kind(symbol),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(varnode.clone()),
+        ),
+    }
 }
 
 pub(super) fn decode_token_field(element: &PackedElement) -> Result<DecodedTokenField> {
