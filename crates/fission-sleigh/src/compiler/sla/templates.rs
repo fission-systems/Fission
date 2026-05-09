@@ -563,9 +563,21 @@ fn decode_decision_node(
         leaf_entries: Vec::new(),
     });
 
-    let is_context = element.attr_bool(sla_format::ATTR_CONTEXT);
-    let start_bit = element.attr_int(sla_format::ATTR_STARTBIT) as u32;
-    let bit_size = element.attr_int(sla_format::ATTR_SIZE) as u32;
+    let is_context = element
+        .attr_bool_value(sla_format::ATTR_CONTEXT)
+        .ok_or_else(|| anyhow!("decision node missing context flag"))?;
+    let start_bit = element
+        .attr_signed(sla_format::ATTR_STARTBIT)
+        .ok_or_else(|| anyhow!("decision node missing start bit"))
+        .and_then(|value| {
+            u32::try_from(value).map_err(|_| anyhow!("decision node has negative start bit"))
+        })?;
+    let bit_size = element
+        .attr_signed(sla_format::ATTR_SIZE)
+        .ok_or_else(|| anyhow!("decision node missing bit size"))
+        .and_then(|value| {
+            u32::try_from(value).map_err(|_| anyhow!("decision node has negative bit size"))
+        })?;
 
     if bit_size > 0 {
         let probe = if is_context {

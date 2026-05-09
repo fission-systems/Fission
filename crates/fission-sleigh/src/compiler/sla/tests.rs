@@ -91,6 +91,21 @@ fn sla_decision_decode_does_not_synthesize_always_true_patterns() {
 }
 
 #[test]
+fn sla_decision_node_shape_fields_are_not_synthesized() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        "element.attr_bool(sla_format::ATTR_CONTEXT)",
+        "element.attr_int(sla_format::ATTR_STARTBIT)",
+        "element.attr_int(sla_format::ATTR_SIZE)",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "decision node decode must fail closed instead of synthesizing shape fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_named_section_decode_errors_are_not_dropped() {
     let templates = include_str!("templates.rs");
     assert!(
