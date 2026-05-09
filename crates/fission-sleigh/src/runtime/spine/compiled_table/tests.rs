@@ -643,6 +643,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "fall_offset = fall_offset.saturating_add(u64::from(slot_len))";
     let template_const_inst_next_saturating = "self.address.saturating_add(state.length as u64)";
     let template_const_inst_next2_saturating = "inst_next.saturating_add(delay_len)";
+    let context_commit_inst_next_saturating =
+        "instruction_address.saturating_add(decoded.length as u64)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -861,7 +863,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(template_delay_slot_pc_saturating)
                 && !source.contains(template_delay_slot_fall_saturating)
                 && !source.contains(template_const_inst_next_saturating)
-                && !source.contains(template_const_inst_next2_saturating),
+                && !source.contains(template_const_inst_next2_saturating)
+                && !source.contains(context_commit_inst_next_saturating),
             "{} still hides malformed SLA parser cursor or InstNext arithmetic",
             file.display()
         );

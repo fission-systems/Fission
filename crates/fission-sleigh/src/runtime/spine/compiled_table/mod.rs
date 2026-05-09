@@ -364,9 +364,9 @@ pub(crate) fn apply_context_commits(
     for commit in &decoded.context_commits {
         let target_addr = match commit.target {
             CompiledContextCommitTarget::InstStart => instruction_address,
-            CompiledContextCommitTarget::InstNext => {
-                instruction_address.saturating_add(decoded.length as u64)
-            }
+            CompiledContextCommitTarget::InstNext => instruction_address
+                .checked_add(decoded.length as u64)
+                .ok_or_else(|| anyhow!("context commit InstNext address overflowed"))?,
             CompiledContextCommitTarget::OperandHandle { hand_index } => {
                 let handle = decoded.handles.get(hand_index as usize).ok_or_else(|| {
                     anyhow!("context commit references missing operand handle {hand_index}")
