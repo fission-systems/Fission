@@ -232,6 +232,15 @@ fn sla_constructor_identity_fields_are_not_synthesized() {
 }
 
 #[test]
+fn sla_constructor_operand_lengths_are_not_synthesized() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("operand_minimum_lengths_by_index.remove(&slot).unwrap_or(0)"),
+        "constructor operand length decode must fail closed instead of synthesizing zero length"
+    );
+}
+
+#[test]
 fn sla_root_unique_base_is_not_synthesized() {
     let templates = include_str!("templates.rs");
     assert!(

@@ -251,8 +251,10 @@ pub(super) fn decode_construct_templates(
                     return Err("missing_operand_spec".to_string());
                 };
                 operand_specs.push(spec);
-                operand_minimum_lengths
-                    .push(operand_minimum_lengths_by_index.remove(&slot).unwrap_or(0));
+                let Some(minimum_length) = operand_minimum_lengths_by_index.remove(&slot) else {
+                    return Err("missing_operand_minimum_length".to_string());
+                };
+                operand_minimum_lengths.push(minimum_length);
                 display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
                     CompiledDisplayOperand {
                         operand_index: slot,
