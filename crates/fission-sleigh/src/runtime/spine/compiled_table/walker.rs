@@ -75,6 +75,18 @@ fn instruction_terminal_pattern_len(selection: &RuntimeSelection<'_>) -> Result<
     Ok(len)
 }
 
+fn spec_derived_instruction_opcode_len(selection: &RuntimeSelection<'_>) -> Result<usize> {
+    if let Some(len) = opcode_len_from_matcher(&selection.constructor.matcher)? {
+        return Ok(len);
+    }
+    let len = usize::try_from(selection.constructor.minimum_length)
+        .map_err(|_| anyhow!("constructor minimum length exceeds usize"))?;
+    if len == 0 {
+        bail!("instruction constructor has neither matcher opcode span nor minimum length");
+    }
+    Ok(len)
+}
+
 fn operand_spec_offsets(spec: &CompiledOperandSpec) -> Option<(i32, i32)> {
     match spec {
         CompiledOperandSpec::SlaTokenField {
@@ -189,15 +201,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 instruction_terminal_pattern_len(&selection)?
             } else if selection.trace.root_bucket == "instruction" {
                 // Some instruction-level constructors encode address bytes directly in the
-                // terminal matcher instead of through a descendant operand subtable. In that
-                // case the matcher span is the SLA-derived cursor advance before binding
-                // displacement/address operands.
-                opcode_len_from_matcher(&selection.constructor.matcher)
+                // terminal matcher instead of through a descendant operand subtable. If the
+                // matcher is context-only, the SLA-derived constructor minimum length is the
+                // typed cursor advance before binding displacement/address operands.
+                spec_derived_instruction_opcode_len(&selection)?
             } else {
                 0
             }
         } else {
-            opcode_len_from_matcher(&selection.constructor.matcher)
+            opcode_len_from_matcher(&selection.constructor.matcher)?.ok_or_else(|| {
+                anyhow!("native matcher has no instruction byte span for opcode length")
+            })?
         };
         let minimum_length = selection.constructor.minimum_length as usize;
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];

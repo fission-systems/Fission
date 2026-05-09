@@ -690,6 +690,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ];
     let bit_constraint_zero_padding =
         "if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i)";
+    let matcher_opcode_len_zero_fallback = ".max()\n            .unwrap_or(0)";
     let selection_unchecked_ranges = [
         ".get(self.ctx.cursor + usize::from(offset))",
         "self.ctx.cursor + byte_offset as usize + i as usize",
@@ -912,6 +913,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(bit_constraint_zero_padding),
             "{} still zero-pads missing instruction bit-constraint bytes",
+            file.display()
+        );
+        assert!(
+            !source.contains(matcher_opcode_len_zero_fallback),
+            "{} still treats matchers without instruction bytes as zero-length opcodes",
             file.display()
         );
         for forbidden in selection_unchecked_ranges {

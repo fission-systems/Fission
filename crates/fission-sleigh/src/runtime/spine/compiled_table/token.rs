@@ -328,21 +328,30 @@ pub(super) fn read_sla_token_field_at(
     })
 }
 
-pub(super) fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> usize {
+pub(super) fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> Result<Option<usize>> {
     match matcher {
-        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
-        CompiledPatternMatcher::RowPage { .. } => 1,
-        CompiledPatternMatcher::BitConstraints(constraints) => constraints
-            .iter()
-            .filter_map(|c| match c {
-                crate::compiler::PatternConstraint::Instruction { offset, .. } => {
-                    Some(*offset as usize + 1)
+        CompiledPatternMatcher::ExactBytes(bytes) => Ok(Some(bytes.len())),
+        CompiledPatternMatcher::RowCc { prefix, .. } => prefix
+            .len()
+            .checked_add(1)
+            .map(Some)
+            .ok_or_else(|| anyhow!("row-cc opcode length overflowed")),
+        CompiledPatternMatcher::RowPage { .. } => Ok(Some(1)),
+        CompiledPatternMatcher::BitConstraints(constraints) => {
+            let mut len = None;
+            for constraint in constraints {
+                if let crate::compiler::PatternConstraint::Instruction { offset, .. } = constraint {
+                    let end = usize::try_from(*offset)
+                        .map_err(|_| anyhow!("bit-constraint matcher offset is negative"))?
+                        .checked_add(1)
+                        .ok_or_else(|| {
+                            anyhow!("bit-constraint matcher opcode length overflowed")
+                        })?;
+                    len = Some(len.map_or(end, |current: usize| current.max(end)));
                 }
-                _ => None,
-            })
-            .max()
-            .unwrap_or(0),
+            }
+            Ok(len)
+        }
     }
 }
 
