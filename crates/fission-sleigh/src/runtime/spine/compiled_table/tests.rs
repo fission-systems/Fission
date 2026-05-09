@@ -617,6 +617,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "unwrap_or(self.cursor)",
     ]
     .join("\n");
+    let handle_ptr_offset_zero_fallback = [
+        ".ptr_offset\n                        .as_ref()",
+        ".unwrap_or(0)",
+    ]
+    .join("");
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
         "else {\n                continue;\n            }",
@@ -729,6 +734,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&operand_offset_cursor_fallback),
             "{} still treats unresolved operand offsets as the current cursor",
+            file.display()
+        );
+        assert!(
+            !source.contains(&handle_ptr_offset_zero_fallback),
+            "{} still treats missing HandleTpl ptr_offset as zero",
             file.display()
         );
         assert!(

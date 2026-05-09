@@ -1188,12 +1188,11 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledVarnodeTpl::HandleTpl(handle_tpl) => {
                 if let Some(ptr_space_tpl) = &handle_tpl.ptr_space {
                     let ptr_space = self.resolve_space_tpl(ptr_space_tpl, state)?;
-                    let ptr_offset = handle_tpl
+                    let ptr_offset_tpl = handle_tpl
                         .ptr_offset
                         .as_ref()
-                        .map(|offset| self.resolve_const_value(offset, state))
-                        .transpose()?
-                        .unwrap_or(0);
+                        .ok_or_else(|| anyhow!("HandleTpl missing ptr_offset"))?;
+                    let ptr_offset = self.resolve_const_value(ptr_offset_tpl, state)?;
                     let ptr_size = handle_tpl
                         .ptr_size
                         .as_ref()
