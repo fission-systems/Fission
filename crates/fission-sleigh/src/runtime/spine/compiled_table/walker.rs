@@ -211,7 +211,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             vec![None; selection.constructor.constructor_template.handles.len()];
         let handle_reference_bitmap = constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
-        );
+        )?;
         Ok(Self {
             compiled,
             strategy,
@@ -928,7 +928,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         if constructor_template_references_handle(
                             &self.handle_reference_bitmap,
                             template.operand_index,
-                        ) {
+                        )? {
                             bail!(
                                 "missing_sla_exported_fixed_handle: subtable {table_name} did not export handle for referenced operand {}",
                                 template.operand_index
