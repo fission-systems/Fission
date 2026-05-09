@@ -629,6 +629,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let token_field_unchecked_end = "token_base + encoded_size as usize";
     let token_read_unchecked_end = "offset + size as usize";
     let token_read_unchecked_absolute = "base_cursor + off";
+    let constructor_cursor_unchecked_add = "cursor: ctx.cursor + opcode_len";
+    let export_inst_next_saturating = "self.ctx.address.saturating_add(self.minimum_length as u64)";
+    let pattern_inst_next_saturating_constructor =
+        "saturating_add(self.selection.constructor.minimum_length as usize)";
+    let pattern_inst_next_saturating_address =
+        "self.ctx.address.saturating_add(next_offset as u64)";
+    let subtable_cursor_saturating_delta = "self.cursor.saturating_sub(self.ctx.cursor)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -835,6 +842,15 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(token_read_unchecked_end)
                 && !source.contains(token_read_unchecked_absolute),
             "{} still hides malformed SLA token byte read arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(constructor_cursor_unchecked_add)
+                && !source.contains(export_inst_next_saturating)
+                && !source.contains(pattern_inst_next_saturating_constructor)
+                && !source.contains(pattern_inst_next_saturating_address)
+                && !source.contains(subtable_cursor_saturating_delta),
+            "{} still hides malformed SLA parser cursor or InstNext arithmetic",
             file.display()
         );
         assert!(

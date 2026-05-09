@@ -216,7 +216,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             minimum_length,
             context_register: ctx.context_register,
             context_known_mask: ctx.context_known_mask,
-            cursor: ctx.cursor + opcode_len,
+            cursor: ctx
+                .cursor
+                .checked_add(opcode_len)
+                .ok_or_else(|| anyhow!("constructor cursor overflowed"))?,
             handles,
             operand_absolute_offsets,
             operand_relative_lengths,
@@ -512,9 +515,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 }
             }
             CompiledConstTpl::InstStart => Ok(self.ctx.address),
-            CompiledConstTpl::InstNext => {
-                Ok(self.ctx.address.saturating_add(self.minimum_length as u64))
-            }
+            CompiledConstTpl::InstNext => self
+                .ctx
+                .address
+                .checked_add(self.minimum_length as u64)
+                .ok_or_else(|| anyhow!("export InstNext address overflowed")),
             other => bail!("export ConstTpl {:?} is unsupported", other),
         }
     }
@@ -1076,9 +1081,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let construct_end = self
                     .ctx
                     .cursor
-                    .saturating_add(self.selection.constructor.minimum_length as usize);
+                    .checked_add(self.selection.constructor.minimum_length as usize)
+                    .ok_or_else(|| anyhow!("pattern InstNext construct end overflowed"))?;
                 let next_offset = self.cursor.max(construct_end);
-                Ok(self.ctx.address.saturating_add(next_offset as u64) as i64)
+                Ok(self
+                    .ctx
+                    .address
+                    .checked_add(next_offset as u64)
+                    .ok_or_else(|| anyhow!("pattern InstNext address overflowed"))?
+                    as i64)
             }
             CompiledPatternExpression::InstNext2 => {
                 bail!("pattern expression inst_next2 requires delayed instruction context")
@@ -1209,8 +1220,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         {
             self.cursor
         } else {
-            self.ctx.cursor
-                + consumed_instruction_bytes.max(self.cursor.saturating_sub(self.ctx.cursor))
+            let cursor_delta = self
+                .cursor
+                .checked_sub(self.ctx.cursor)
+                .ok_or_else(|| anyhow!("subtable cursor resolved before instruction start"))?;
+            let advance = consumed_instruction_bytes.max(cursor_delta);
+            self.ctx
+                .cursor
+                .checked_add(advance)
+                .ok_or_else(|| anyhow!("subtable cursor overflowed"))?
         };
         sub_ctx.context_register = self.context_register;
         sub_ctx.context_known_mask = self.context_known_mask;
