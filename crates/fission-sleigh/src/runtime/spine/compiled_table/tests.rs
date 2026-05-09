@@ -628,6 +628,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         ".unwrap_or(constructor_index)",
     ]
     .join("");
+    let subtable_offset_base_fallback = "offsetbase.unwrap_or(-1)";
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
         "else {\n                continue;\n            }",
@@ -750,6 +751,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&missing_sla_identity_slot_fallback),
             "{} still treats missing SLA constructor identity as constructor_index",
+            file.display()
+        );
+        assert!(
+            !source.contains(subtable_offset_base_fallback),
+            "{} still treats missing subtable offset base as constructor start",
             file.display()
         );
         assert!(

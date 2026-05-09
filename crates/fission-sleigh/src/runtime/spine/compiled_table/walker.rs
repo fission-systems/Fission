@@ -620,7 +620,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let Some(rel) = reloffset else {
             return Ok(None);
         };
-        let base_index = offsetbase.unwrap_or(-1);
+        let base_index = offsetbase
+            .ok_or_else(|| anyhow!("subtable offset missing base for reloffset {rel}"))?;
         let base = self.offset_for_operand_base(base_index).ok_or_else(|| {
             anyhow!("subtable offset base {base_index} is unresolved for reloffset {rel}")
         })?;
