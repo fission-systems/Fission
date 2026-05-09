@@ -7,11 +7,10 @@ use super::*;
 use crate::compiler::ir::{
     CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextOp,
     CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
-    CompiledDisplayOperandKind, CompiledDisplayPiece, CompiledDisplayTemplate,
-    CompiledHandleSelector, CompiledHandleTpl, CompiledLabelRef, CompiledOpTpl,
-    CompiledOpTplOpcode, CompiledOperandSpec, CompiledPatternBlock, CompiledPatternExpression,
-    CompiledResolvedVarnode, CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl,
-    CompiledVarnodeTpl,
+    CompiledDisplayPiece, CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl,
+    CompiledLabelRef, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandSpec,
+    CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode,
+    CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl, CompiledVarnodeTpl,
 };
 
 pub(super) fn decode_construct_templates(
@@ -279,12 +278,10 @@ pub(super) fn decode_construct_templates(
                     return Err("missing_operand_minimum_length".to_string());
                 };
                 operand_minimum_lengths.push(minimum_length);
-                display_operands.push(display_operands_by_index.remove(&slot).unwrap_or(
-                    CompiledDisplayOperand {
-                        operand_index: slot,
-                        kind: CompiledDisplayOperandKind::Generic,
-                    },
-                ));
+                let Some(display_operand) = display_operands_by_index.remove(&slot) else {
+                    return Err("missing_display_operand".to_string());
+                };
+                display_operands.push(display_operand);
             }
 
             let has_print_literals = display_pieces

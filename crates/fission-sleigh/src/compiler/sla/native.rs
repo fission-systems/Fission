@@ -156,12 +156,11 @@ impl SlaConstructor {
                     symbol_id: None,
                     hand_index: index,
                     spec,
-                    display: template.display_operands.get(index).cloned().unwrap_or(
-                        CompiledDisplayOperand {
-                            operand_index: index,
-                            kind: CompiledDisplayOperandKind::Generic,
-                        },
-                    ),
+                    display: template
+                        .display_operands
+                        .get(index)
+                        .cloned()
+                        .expect("compiled constructor operand display metadata is incomplete"),
                 })
                 .collect(),
             print: template.display_template.clone(),

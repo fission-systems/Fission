@@ -299,6 +299,21 @@ fn sla_constructor_operand_lengths_are_not_synthesized() {
 }
 
 #[test]
+fn sla_constructor_display_operands_are_not_synthesized() {
+    let templates = include_str!("templates.rs");
+    let native = include_str!("native.rs");
+    for forbidden in [
+        "display_operands_by_index.remove(&slot).unwrap_or",
+        "display: template.display_operands.get(index).cloned().unwrap_or",
+    ] {
+        assert!(
+            !templates.contains(forbidden) && !native.contains(forbidden),
+            "constructor display operands must be decoded metadata, not synthesized Generic fallbacks: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_constructor_display_pieces_are_not_silently_dropped() {
     let templates = include_str!("templates.rs");
     for forbidden in [
