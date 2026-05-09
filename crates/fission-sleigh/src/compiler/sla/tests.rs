@@ -218,6 +218,15 @@ fn sla_constructor_identity_fields_are_not_synthesized() {
 }
 
 #[test]
+fn sla_root_unique_base_is_not_synthesized() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("root.attr_unsigned(sla_format::ATTR_UNIQBASE).unwrap_or(0)"),
+        "compiled .sla root decode must fail closed instead of synthesizing uniqbase"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

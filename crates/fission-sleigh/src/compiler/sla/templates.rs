@@ -38,7 +38,9 @@ pub(super) fn decode_construct_templates(
     let spaces = space_result.spaces;
     let unique_space_index = space_result.unique_space_index;
     let register_space_index = space_result.register_space_index;
-    let uniqbase = root.attr_unsigned(sla_format::ATTR_UNIQBASE).unwrap_or(0);
+    let uniqbase = root
+        .attr_unsigned(sla_format::ATTR_UNIQBASE)
+        .ok_or_else(|| anyhow!("compiled SLEIGH root missing uniqbase"))?;
     let uniqmask = root
         .attr_unsigned(sla_format::ATTR_UNIQMASK)
         .unwrap_or(u64::MAX);
