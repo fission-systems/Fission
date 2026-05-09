@@ -770,10 +770,12 @@ fn decode_construct_tpl(
     element: &PackedElement,
     spaces: &BTreeMap<u64, CompiledSpaceRef>,
 ) -> Result<CompiledConstructTpl> {
-    let num_labels = element
-        .attr_signed(sla_format::ATTR_LABELS)
-        .unwrap_or_default()
-        .max(0) as u32;
+    let num_labels = match element.attr_signed(sla_format::ATTR_LABELS) {
+        Some(value) => {
+            u32::try_from(value).map_err(|_| anyhow!("construct_tpl has negative label count"))?
+        }
+        None => 0,
+    };
     let mut children = element.children.iter();
     let result = match children.next() {
         Some(child) if child.id == sla_format::ELEM_NULL => None,

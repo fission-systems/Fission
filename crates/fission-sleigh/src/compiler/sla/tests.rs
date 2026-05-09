@@ -204,6 +204,19 @@ fn sla_display_symbol_decode_does_not_synthesize_defaults() {
 }
 
 #[test]
+fn sla_construct_tpl_label_count_is_not_clamped() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains(".unwrap_or_default()\n        .max(0)"),
+        "construct_tpl labels must preserve Ghidra's explicit signed field semantics and fail on malformed negative values"
+    );
+    assert!(
+        templates.contains("construct_tpl has negative label count"),
+        "construct_tpl decode must fail closed on negative label counts"
+    );
+}
+
+#[test]
 fn sla_constructor_decode_errors_are_not_broadly_downgraded_to_unsupported_templates() {
     let templates = include_str!("templates.rs");
     assert!(
