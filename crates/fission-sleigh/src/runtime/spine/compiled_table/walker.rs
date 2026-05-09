@@ -294,7 +294,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let length = self
             .cursor
             .max(self.ctx.cursor + self.minimum_length)
-            .max(self.max_operand_end());
+            .max(self.max_operand_end()?);
         let absolute_offset = self.ctx.cursor;
         let relative_length = length.saturating_sub(absolute_offset);
 
@@ -571,9 +571,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let Some((reloffset, offsetbase)) = operand_spec_offsets(spec) else {
             return self.offset_irrelevant_operand_start(spec);
         };
-        let base = self.offset_for_operand_base(offsetbase).ok_or_else(|| {
-            anyhow!("operand offset base {offsetbase} is unresolved for reloffset {reloffset}")
-        })?;
+        let base = self.offset_for_operand_base(offsetbase, "operand offset")?;
         let offset = base as i64 + i64::from(reloffset);
         if offset < 0 {
             bail!("operand offset resolved before instruction start: {offset}");
@@ -589,23 +587,43 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
     }
 
-    fn offset_for_operand_base(&self, offsetbase: i32) -> Option<usize> {
+    fn offset_for_operand_base(&self, offsetbase: i32, role: &str) -> Result<usize> {
         if offsetbase < 0 {
-            return Some(self.ctx.cursor);
+            return Ok(self.ctx.cursor);
         }
-        let index = usize::try_from(offsetbase).ok()?;
-        let offset = (*self.operand_absolute_offsets.get(index)?)?;
-        let length = (*self.operand_relative_lengths.get(index)?)?;
-        Some(offset.saturating_add(length))
+        let index = usize::try_from(offsetbase)
+            .map_err(|_| anyhow!("{role} base {offsetbase} does not fit usize"))?;
+        let offset = (*self
+            .operand_absolute_offsets
+            .get(index)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
+        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
+        let length = (*self
+            .operand_relative_lengths
+            .get(index)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
+        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved length"))?;
+        offset
+            .checked_add(length)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} end offset overflowed"))
     }
 
-    fn max_operand_end(&self) -> usize {
-        self.operand_absolute_offsets
+    fn max_operand_end(&self) -> Result<usize> {
+        let mut max_end = self.ctx.cursor;
+        for (offset, length) in self
+            .operand_absolute_offsets
             .iter()
             .zip(self.operand_relative_lengths.iter())
-            .filter_map(|(offset, length)| Some((*offset)? + (*length)?))
-            .max()
-            .unwrap_or(self.ctx.cursor)
+        {
+            let (Some(offset), Some(length)) = (*offset, *length) else {
+                continue;
+            };
+            let end = offset
+                .checked_add(length)
+                .ok_or_else(|| anyhow!("operand end offset overflowed"))?;
+            max_end = max_end.max(end);
+        }
+        Ok(max_end)
     }
 
     fn subtable_offset_from_sla_operands(
@@ -618,9 +636,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         };
         let base_index = offsetbase
             .ok_or_else(|| anyhow!("subtable offset missing base for reloffset {rel}"))?;
-        let base = self.offset_for_operand_base(base_index).ok_or_else(|| {
-            anyhow!("subtable offset base {base_index} is unresolved for reloffset {rel}")
-        })?;
+        let base = self.offset_for_operand_base(base_index, "subtable offset")?;
         let offset = base as i64 + i64::from(rel);
         if offset < 0 {
             bail!("subtable offset resolved before instruction start: {offset}");

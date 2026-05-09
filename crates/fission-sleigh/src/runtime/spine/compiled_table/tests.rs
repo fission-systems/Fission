@@ -618,6 +618,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join("\n");
     let operand_length_cursor_fallback = "saturating_sub(operand_absolute_offset)";
+    let operand_base_saturating_end_fallback = "offset.saturating_add(length)";
+    let operand_end_unchecked_add_fallback = "Some((*offset)? + (*length)?)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -762,6 +764,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(operand_length_cursor_fallback),
             "{} still derives non-subtable operand lengths from the runtime cursor instead of SLA minimum_length",
+            file.display()
+        );
+        assert!(
+            !source.contains(operand_base_saturating_end_fallback)
+                && !source.contains(operand_end_unchecked_add_fallback),
+            "{} still hides malformed SLA operand end arithmetic",
             file.display()
         );
         assert!(
