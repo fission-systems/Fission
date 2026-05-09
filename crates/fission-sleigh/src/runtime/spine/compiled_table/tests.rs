@@ -620,6 +620,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let operand_length_cursor_fallback = "saturating_sub(operand_absolute_offset)";
     let operand_base_saturating_end_fallback = "offset.saturating_add(length)";
     let operand_end_unchecked_add_fallback = "Some((*offset)? + (*length)?)";
+    let constructor_minimum_unchecked_end = "self.ctx.cursor + self.minimum_length";
+    let constructor_relative_saturating_length = "length.saturating_sub(absolute_offset)";
+    let subtable_relative_saturating_length = "sub_state.length.saturating_sub(self.ctx.cursor)";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -770,6 +773,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(operand_base_saturating_end_fallback)
                 && !source.contains(operand_end_unchecked_add_fallback),
             "{} still hides malformed SLA operand end arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(constructor_minimum_unchecked_end)
+                && !source.contains(constructor_relative_saturating_length)
+                && !source.contains(subtable_relative_saturating_length),
+            "{} still hides malformed SLA construct length arithmetic",
             file.display()
         );
         assert!(

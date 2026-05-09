@@ -293,10 +293,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
         let length = self
             .cursor
-            .max(self.ctx.cursor + self.minimum_length)
+            .max(self.constructor_minimum_end()?)
             .max(self.max_operand_end()?);
         let absolute_offset = self.ctx.cursor;
-        let relative_length = length.saturating_sub(absolute_offset);
+        let relative_length = length
+            .checked_sub(absolute_offset)
+            .ok_or_else(|| anyhow!("constructor length resolved before instruction start"))?;
 
         Ok(RuntimeConstructState {
             subtable_id: self.selection.subtable_id,
@@ -626,6 +628,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(max_end)
     }
 
+    fn constructor_minimum_end(&self) -> Result<usize> {
+        self.ctx
+            .cursor
+            .checked_add(self.minimum_length)
+            .ok_or_else(|| anyhow!("constructor minimum length overflowed"))
+    }
+
     fn subtable_offset_from_sla_operands(
         &self,
         reloffset: Option<i32>,
@@ -930,15 +939,15 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .template_source
                     == CompiledTemplateSource::SpecDerived
                     && operand_spec_offsets(&template.spec).is_some();
+                let sub_relative_length = sub_state
+                    .length
+                    .checked_sub(self.ctx.cursor)
+                    .ok_or_else(|| anyhow!("subtable length resolved before instruction start"))?;
                 if spec_derived_sla_operand {
-                    self.minimum_length = self
-                        .minimum_length
-                        .max(sub_state.length.saturating_sub(self.ctx.cursor));
+                    self.minimum_length = self.minimum_length.max(sub_relative_length);
                     self.cursor = cursor_start;
                 } else if !subtable_consumes_sequential_bytes(self.compiled, table_name, 0) {
-                    self.minimum_length = self
-                        .minimum_length
-                        .max(sub_state.length.saturating_sub(self.ctx.cursor));
+                    self.minimum_length = self.minimum_length.max(sub_relative_length);
                     self.cursor = cursor_start;
                 } else {
                     self.cursor = self.cursor.max(sub_state.length);
