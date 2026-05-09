@@ -154,10 +154,17 @@ fn infer_default_context_from_pspec(
         if line.starts_with("<set ") {
             if let Some(name) = extract_xml_attribute(line, "name") {
                 if let Some(val_str) = extract_xml_attribute(line, "val") {
-                    let val = if val_str.starts_with("0x") {
-                        u64::from_str_radix(&val_str[2..], 16).unwrap_or(0)
+                    let val = if let Some(hex) = val_str
+                        .strip_prefix("0x")
+                        .or_else(|| val_str.strip_prefix("0X"))
+                    {
+                        u64::from_str_radix(hex, 16).with_context(|| {
+                            format!("parse pspec default context value {val_str:?}")
+                        })?
                     } else {
-                        val_str.parse::<u64>().unwrap_or(0)
+                        val_str.parse::<u64>().with_context(|| {
+                            format!("parse pspec default context value {val_str:?}")
+                        })?
                     };
 
                     if let Some(info) = field_info.get(&name) {
@@ -780,9 +787,8 @@ impl Collector {
         if !runtime_signature_is_supported(signature) {
             return None;
         }
-        let matcher = self
-            .parse_opcode_matcher(signature)
-            .unwrap_or_else(|| CompiledPatternMatcher::BitConstraints(vec![]));
+        let matcher = self.parse_opcode_matcher(signature)?;
+        let minimum_length = u32::try_from(native_matcher_minimum_length(&matcher)?).ok()?;
         let opsize_variants = parse_opsize_variants(signature);
         let operand_specs = parse_operand_specs(signature, &matcher).ok()?;
         let hidden_subtables = parse_hidden_subtables(signature, &self.field_info);
@@ -827,7 +833,7 @@ impl Collector {
             display: signature.to_string(),
             display_template: CompiledDisplayTemplate::from_literal_display(signature.to_string()),
             signature_hash,
-            minimum_length: native_matcher_minimum_length(&matcher) as u32,
+            minimum_length,
             context_changes,
             matcher,
             opsize_variants,
@@ -1032,19 +1038,21 @@ fn define_bits_kind(line: &str) -> Option<&'static str> {
     }
 }
 
-fn native_matcher_minimum_length(matcher: &CompiledPatternMatcher) -> usize {
+fn native_matcher_minimum_length(matcher: &CompiledPatternMatcher) -> Option<usize> {
     match matcher {
-        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len() + 1,
-        CompiledPatternMatcher::RowPage { .. } => 1,
-        CompiledPatternMatcher::BitConstraints(constraints) => constraints
-            .iter()
-            .filter_map(|constraint| match constraint {
-                PatternConstraint::Instruction { offset, .. } => Some(*offset as usize + 1),
-                PatternConstraint::Context { .. } => None,
-            })
-            .max()
-            .unwrap_or(0),
+        CompiledPatternMatcher::ExactBytes(bytes) => Some(bytes.len()),
+        CompiledPatternMatcher::RowCc { prefix, .. } => prefix.len().checked_add(1),
+        CompiledPatternMatcher::RowPage { .. } => Some(1),
+        CompiledPatternMatcher::BitConstraints(constraints) => {
+            let mut len = None;
+            for constraint in constraints {
+                if let PatternConstraint::Instruction { offset, .. } = constraint {
+                    let end = usize::try_from(*offset).ok()?.checked_add(1)?;
+                    len = Some(len.map_or(end, |current: usize| current.max(end)));
+                }
+            }
+            len
+        }
     }
 }
 
@@ -1161,24 +1169,6 @@ fn decision_probes_for_constructors(
         });
     }
     probes
-}
-
-fn pattern_matcher_probe_len(matcher: &CompiledPatternMatcher) -> usize {
-    match matcher {
-        CompiledPatternMatcher::ExactBytes(bytes) => bytes.len(),
-        CompiledPatternMatcher::BitConstraints(constraints) => constraints
-            .iter()
-            .filter_map(|c| {
-                if let PatternConstraint::Instruction { offset, .. } = c {
-                    Some(*offset as usize + 1)
-                } else {
-                    None
-                }
-            })
-            .max()
-            .unwrap_or(0),
-        _ => 1,
-    }
 }
 
 fn build_bucket_node(
