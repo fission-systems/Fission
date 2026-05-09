@@ -375,9 +375,13 @@ pub(super) fn decode_construct_templates(
                 .attr_unsigned(sla_format::ATTR_ID)
                 .map(|value| value as usize)
                 .unwrap_or(local_index);
-            let template = parse_constructor(id, &name, child, slot).unwrap_or_else(|reason| {
-                unsupported_sla_constructor_template(id, &name, slot, reason)
-            });
+            let template = match parse_constructor(id, &name, child, slot) {
+                Ok(template) => template,
+                Err(reason) if reason == "missing_construct_tpl" => {
+                    unsupported_sla_constructor_template(id, &name, slot, reason)
+                }
+                Err(reason) => return Err(anyhow!(reason)),
+            };
             constructors_by_index.insert(slot, template);
         }
 

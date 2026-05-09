@@ -135,6 +135,20 @@ fn sla_display_symbol_decode_does_not_synthesize_defaults() {
 }
 
 #[test]
+fn sla_constructor_decode_errors_are_not_broadly_downgraded_to_unsupported_templates() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("parse_constructor(id, &name, child, slot).unwrap_or_else"),
+        "constructor decode failures must not be broadly downgraded through unwrap_or_else"
+    );
+    assert!(
+        templates.contains("reason == \"missing_construct_tpl\"")
+            && templates.contains("Err(reason) => return Err(anyhow!(reason))"),
+        "only constructors without ConstructTpl may become explicit unsupported inventory"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
