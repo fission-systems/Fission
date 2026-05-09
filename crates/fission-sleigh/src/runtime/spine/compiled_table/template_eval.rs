@@ -38,6 +38,19 @@ fn const_varnode(value: u64, size: u32) -> Varnode {
     Varnode::constant(value as i64, size)
 }
 
+fn label_id_from_op_tpl(op: &CompiledOpTpl) -> Result<u64> {
+    if op.output.is_some() || op.inputs.len() != 1 {
+        bail!("LABEL template shape is unsupported");
+    }
+    let CompiledVarnodeTpl::Varnode { offset, .. } = &op.inputs[0] else {
+        bail!("LABEL template input must be a constant varnode");
+    };
+    let CompiledConstTpl::Real { value } = offset.as_ref() else {
+        bail!("LABEL template input offset must be a real label id");
+    };
+    Ok(*value)
+}
+
 fn optional_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
     match value {
         Some(value) => {
@@ -400,19 +413,9 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::Label => {
                 // Record the current emitter op count as this label's position.
                 // Labels themselves don't emit pcode ops; they are position markers.
-                // The label number is encoded in the output varnode's offset field.
-                let label_num = op
-                    .output
-                    .as_ref()
-                    .and_then(|out| {
-                        if let CompiledVarnodeTpl::Varnode { offset, .. } = out {
-                            if let CompiledConstTpl::Real { value } = offset.as_ref() {
-                                return Some(*value);
-                            }
-                        }
-                        None
-                    })
-                    .unwrap_or(0);
+                // Ghidra PcodeCompile::placeLabel encodes the label id in the
+                // first input varnode's offset, with no output varnode.
+                let label_num = label_id_from_op_tpl(op)?;
                 // Use the emitter's actual op count so even recursively emitted ops
                 // (via BUILD) are accounted for correctly.
                 self.label_positions
