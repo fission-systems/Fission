@@ -627,6 +627,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let subtable_relative_saturating_length = "sub_state.length.saturating_sub(self.ctx.cursor)";
     let token_field_saturating_end = "token_base.saturating_add(encoded_size as usize)";
     let token_field_unchecked_end = "token_base + encoded_size as usize";
+    let token_read_unchecked_end = "offset + size as usize";
+    let token_read_unchecked_absolute = "base_cursor + off";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -827,6 +829,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(tokenfield_saturating_range)
                 && !source.contains(tokenfield_saturating_bit_range),
             "{} still accepts inverted SLA tokenfield ranges via saturating arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(token_read_unchecked_end)
+                && !source.contains(token_read_unchecked_absolute),
+            "{} still hides malformed SLA token byte read arithmetic",
             file.display()
         );
         assert!(

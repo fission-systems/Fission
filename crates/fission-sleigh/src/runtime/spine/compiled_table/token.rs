@@ -153,7 +153,9 @@ fn token_span_from_sla_field(
 }
 
 pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
-    let end = offset + size as usize;
+    let end = offset
+        .checked_add(size as usize)
+        .ok_or_else(|| anyhow!("immediate byte range overflow"))?;
     let slice = bytes
         .get(offset..end)
         .ok_or_else(|| anyhow!("missing immediate bytes"))?;
@@ -166,7 +168,9 @@ pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
 
 pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
     let value = read_uint(bytes, offset, size)?;
-    let bits = size * 8;
+    let bits = size
+        .checked_mul(8)
+        .ok_or_else(|| anyhow!("signed immediate bit width overflow"))?;
     if bits == 64 {
         Ok(i64::from_ne_bytes(value.to_ne_bytes()))
     } else {
@@ -299,9 +303,12 @@ pub(super) fn read_sla_token_field_at(
                 .checked_sub(idx)
                 .ok_or_else(|| anyhow!("tokenfield byte index underflow"))?
         } as usize;
+        let absolute_off = base_cursor
+            .checked_add(off)
+            .ok_or_else(|| anyhow!("tokenfield absolute byte offset overflow"))?;
         let byte = *ctx
             .bytes
-            .get(base_cursor + off)
+            .get(absolute_off)
             .ok_or_else(|| anyhow!("tokenfield byte {} out of range", off))?;
         res = (res << 8) | u64::from(byte);
     }
