@@ -689,10 +689,10 @@ fn decode_pattern_block(element: &PackedElement) -> Result<CompiledPatternBlock>
     }
     let offset = element
         .attr_signed(sla_format::ATTR_OFF)
-        .unwrap_or_default() as i32;
+        .ok_or_else(|| anyhow!("pat_block missing offset"))? as i32;
     let nonzero_size = element
         .attr_signed(sla_format::ATTR_NONZERO)
-        .unwrap_or_default() as i32;
+        .ok_or_else(|| anyhow!("pat_block missing nonzero size"))? as i32;
     let mut mask_words = Vec::new();
     let mut value_words = Vec::new();
     for child in &element.children {

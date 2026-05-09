@@ -174,6 +174,20 @@ fn sla_context_commit_decode_does_not_synthesize_zero_fields() {
 }
 
 #[test]
+fn sla_pattern_block_decode_does_not_synthesize_zero_shape_fields() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        ".attr_signed(sla_format::ATTR_OFF)\n        .unwrap_or_default()",
+        ".attr_signed(sla_format::ATTR_NONZERO)\n        .unwrap_or_default()",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "pattern block decode must fail closed instead of synthesizing shape fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
