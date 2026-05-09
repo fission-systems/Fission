@@ -300,7 +300,9 @@ fn pattern_block_instruction_matches<E: DecisionProbeEvaluator>(
         let Ok(data) = evaluator.instruction_bytes(block.offset + (index as i32 * 4), 4) else {
             return false;
         };
-        let value = block.value_words.get(index).copied().unwrap_or_default();
+        let Some(value) = block.value_words.get(index).copied() else {
+            return false;
+        };
         if (mask & data) != value {
             return false;
         }
@@ -319,7 +321,9 @@ fn pattern_block_context_matches<E: DecisionProbeEvaluator>(
         let Ok(data) = evaluator.context_bytes(block.offset + (index as i32 * 4), 4) else {
             return false;
         };
-        let value = block.value_words.get(index).copied().unwrap_or_default();
+        let Some(value) = block.value_words.get(index).copied() else {
+            return false;
+        };
         if (mask & data) != value {
             return false;
         }
