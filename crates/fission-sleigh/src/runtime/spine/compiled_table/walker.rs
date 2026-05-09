@@ -252,30 +252,25 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     // Mirror Ghidra's operand positioning from the handle template:
                     // ParserWalker uses getOffset(offsetbase) + reloffset before
                     // descending into a subtable.
-                    let (reloffset, offsetbase, operand_absolute_offset) = self
-                        .selection
-                        .constructor
-                        .constructor_template
-                        .handles
-                        .iter()
-                        .find_map(|h| {
-                            if let CompiledOperandSpec::SubtableEvaluation {
-                                table_name: ref tn,
-                                reloffset,
-                                offsetbase,
-                            } = h.spec
-                            {
-                                if tn.as_str() == table_name.as_str() {
-                                    return Some((
-                                        Some(reloffset),
-                                        Some(offsetbase),
-                                        self.operand_absolute_offset(&h.spec),
-                                    ));
-                                }
+                    let mut subtable_offset = (None, None, None);
+                    for h in &self.selection.constructor.constructor_template.handles {
+                        if let CompiledOperandSpec::SubtableEvaluation {
+                            table_name: ref tn,
+                            reloffset,
+                            offsetbase,
+                        } = h.spec
+                        {
+                            if tn.as_str() == table_name.as_str() {
+                                subtable_offset = (
+                                    Some(reloffset),
+                                    Some(offsetbase),
+                                    self.operand_absolute_offset(&h.spec)?,
+                                );
+                                break;
                             }
-                            None
-                        })
-                        .unwrap_or((None, None, None));
+                        }
+                    }
+                    let (reloffset, offsetbase, operand_absolute_offset) = subtable_offset;
                     let sub_state = self.decode_subtable(
                         &table_name,
                         reloffset,
@@ -542,7 +537,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
         let operand_absolute_offset = self
-            .operand_absolute_offset(&template.spec)
+            .operand_absolute_offset(&template.spec)?
             .unwrap_or(self.cursor);
         let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
@@ -581,11 +576,18 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(())
     }
 
-    fn operand_absolute_offset(&self, spec: &CompiledOperandSpec) -> Option<usize> {
-        let (reloffset, offsetbase) = operand_spec_offsets(spec)?;
-        let base = self.offset_for_operand_base(offsetbase)?;
+    fn operand_absolute_offset(&self, spec: &CompiledOperandSpec) -> Result<Option<usize>> {
+        let Some((reloffset, offsetbase)) = operand_spec_offsets(spec) else {
+            return Ok(None);
+        };
+        let base = self.offset_for_operand_base(offsetbase).ok_or_else(|| {
+            anyhow!("operand offset base {offsetbase} is unresolved for reloffset {reloffset}")
+        })?;
         let offset = base as i64 + i64::from(reloffset);
-        usize::try_from(offset.max(0)).ok()
+        if offset < 0 {
+            bail!("operand offset resolved before instruction start: {offset}");
+        }
+        Ok(Some(offset as usize))
     }
 
     fn offset_for_operand_base(&self, offsetbase: i32) -> Option<usize> {
@@ -611,11 +613,19 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         &self,
         reloffset: Option<i32>,
         offsetbase: Option<i32>,
-    ) -> Option<usize> {
-        let rel = reloffset?;
-        let base = self.offset_for_operand_base(offsetbase.unwrap_or(-1))?;
+    ) -> Result<Option<usize>> {
+        let Some(rel) = reloffset else {
+            return Ok(None);
+        };
+        let base_index = offsetbase.unwrap_or(-1);
+        let base = self.offset_for_operand_base(base_index).ok_or_else(|| {
+            anyhow!("subtable offset base {base_index} is unresolved for reloffset {rel}")
+        })?;
         let offset = base as i64 + i64::from(rel);
-        usize::try_from(offset.max(0)).ok()
+        if offset < 0 {
+            bail!("subtable offset resolved before instruction start: {offset}");
+        }
+        Ok(Some(offset as usize))
     }
 
     fn bind_operand(
@@ -1158,7 +1168,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .unwrap_or(0);
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
-        } else if let Some(offset) = self.subtable_offset_from_sla_operands(reloffset, offsetbase) {
+        } else if let Some(offset) =
+            self.subtable_offset_from_sla_operands(reloffset, offsetbase)?
+        {
             offset
         } else if self.selection.constructor.context_changes.is_empty()
             || consumed_instruction_bytes == 0

@@ -612,6 +612,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let delay_slot_zero_fallback = ["delay_slot_length", "unwrap_or(0)"].join(".");
     let label_zero_fallback = [".output\n                    .as_ref()", ".unwrap_or(0)"].join("");
     let offset_plus_zero_fallback = ["OffsetPlus)", "plus.unwrap_or(0)"].join("\n");
+    let operand_offset_cursor_fallback = [
+        "operand_absolute_offset(&template.spec)",
+        "unwrap_or(self.cursor)",
+    ]
+    .join("\n");
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
         "else {\n                continue;\n            }",
@@ -719,6 +724,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&offset_plus_zero_fallback),
             "{} still treats missing offset_plus ATTR_PLUS as zero",
+            file.display()
+        );
+        assert!(
+            !source.contains(&operand_offset_cursor_fallback),
+            "{} still treats unresolved operand offsets as the current cursor",
             file.display()
         );
         assert!(
