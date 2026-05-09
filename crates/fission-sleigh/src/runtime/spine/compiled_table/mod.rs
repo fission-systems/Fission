@@ -394,7 +394,9 @@ pub(crate) fn apply_context_commits(
                         );
                     }
                     let addr_unit = u64::from(cur_space.word_size);
-                    offset.wrapping_mul(addr_unit)
+                    offset
+                        .checked_mul(addr_unit)
+                        .ok_or_else(|| anyhow!("context commit address-unit scaling overflowed"))?
                 } else {
                     offset
                 }

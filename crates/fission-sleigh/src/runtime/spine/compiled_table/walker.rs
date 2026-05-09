@@ -420,7 +420,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 .max(1) as u64;
             (
                 None,
-                offset_offset.wrapping_mul(addr_unit),
+                offset_offset
+                    .checked_mul(addr_unit)
+                    .ok_or_else(|| anyhow!("static HandleTpl address-unit scaling overflowed"))?,
                 0u32,
                 None,
                 0u64,

@@ -663,6 +663,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join(" ");
     let context_commit_addr_unit_fallback = ".unwrap_or(1)";
+    let context_commit_addr_unit_wrap = "offset.wrapping_mul(addr_unit)";
+    let static_handle_addr_unit_wrap = "offset_offset.wrapping_mul(addr_unit)";
     let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
     let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
     let tokenfield_saturating_bit_range = "bit_end.saturating_sub(bit_start)";
@@ -842,8 +844,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             file.display()
         );
         assert!(
-            !source.contains(context_commit_addr_unit_fallback),
-            "{} still defaults context commit address-unit scaling to 1",
+            !source.contains(context_commit_addr_unit_fallback)
+                && !source.contains(context_commit_addr_unit_wrap)
+                && !source.contains(static_handle_addr_unit_wrap),
+            "{} still hides invalid address-unit scaling",
             file.display()
         );
         assert!(
