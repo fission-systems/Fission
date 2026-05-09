@@ -612,6 +612,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let delay_slot_zero_fallback = ["delay_slot_length", "unwrap_or(0)"].join(".");
     let label_zero_fallback = [".output\n                    .as_ref()", ".unwrap_or(0)"].join("");
     let offset_plus_zero_fallback = ["OffsetPlus)", "plus.unwrap_or(0)"].join("\n");
+    let context_commit_missing_handle_skip = [
+        "decoded.handles.get(commit.hand_index as usize)",
+        "else {\n                continue;\n            }",
+    ]
+    .join(" ");
     let pattern_value_zero_fallback = [
         "block.value_words.get(index).copied()",
         "unwrap_or_default()",
@@ -714,6 +719,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&offset_plus_zero_fallback),
             "{} still treats missing offset_plus ATTR_PLUS as zero",
+            file.display()
+        );
+        assert!(
+            !source.contains(&context_commit_missing_handle_skip),
+            "{} still skips malformed context commit handle targets",
             file.display()
         );
         assert!(

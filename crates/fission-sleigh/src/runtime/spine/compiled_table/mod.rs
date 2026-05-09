@@ -6,10 +6,10 @@ use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::compiler::{
-    CompiledConstTpl, CompiledConstructTplKind, CompiledDecisionProbe, CompiledDisjointPattern,
-    CompiledExecutableConstructor, CompiledFrontend, CompiledHandleSelector,
-    CompiledHandleTemplate, CompiledHandleTpl, CompiledOpTpl, CompiledOpTplOpcode,
-    CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternBlock,
+    CompiledConstTpl, CompiledConstructTplKind, CompiledContextCommitTarget, CompiledDecisionProbe,
+    CompiledDisjointPattern, CompiledExecutableConstructor, CompiledFrontend,
+    CompiledHandleSelector, CompiledHandleTemplate, CompiledHandleTpl, CompiledOpTpl,
+    CompiledOpTplOpcode, CompiledOperandDecodeStep, CompiledOperandSpec, CompiledPatternBlock,
     CompiledPatternExpression, CompiledPatternMatcher, CompiledSpaceRef, CompiledSpaceTpl,
     CompiledTemplateSource, CompiledVarnodeTpl,
 };
@@ -350,7 +350,7 @@ pub(crate) type ResolvedContextCommit = (u64, u32, u32, u32);
 /// `(target_address, word_index, mask, value)` tuples for the caller to apply.
 ///
 /// Ghidra algorithm (SleighParserContext.applyCommits):
-/// - For each commit, look up the handle (by hand_index or built-in symbol).
+/// - For each commit, look up the handle or built-in target symbol.
 /// - Extract the target address from the handle's offset.
 /// - Read the current context bits at (word_index, mask).
 /// - Return (target_addr, word_index, mask, value) for the caller to apply.
@@ -359,52 +359,51 @@ pub(crate) fn apply_context_commits(
     decoded: &RuntimeConstructState,
     instruction_address: u64,
     current_context: u64,
-) -> Vec<ResolvedContextCommit> {
+) -> Result<Vec<ResolvedContextCommit>> {
     let mut results = Vec::new();
     for commit in &decoded.context_commits {
-        let target_addr = if commit.hand_index == u32::MAX {
-            // Built-in symbol (e.g. `inst_next`): target = instruction start + length.
-            instruction_address.saturating_add(decoded.length as u64)
-        } else {
-            // Resolve via the operand's fixed handle.
-            let Some(handle) = decoded.handles.get(commit.hand_index as usize) else {
-                continue;
-            };
-            // Ghidra: if handle.offset_space.type == CONSTANT, multiply by ram addr_unit
-            let offset = if handle.fixed.offset_space.is_some() {
-                handle.fixed.temp_offset
-            } else {
-                handle.fixed.offset_offset
-            };
-            if handle
-                .fixed
-                .space
-                .as_ref()
-                .map(|s| s.name == "const")
-                .unwrap_or(false)
-            {
-                let addr_unit = compiled
-                    .sla_spaces
-                    .values()
-                    .find(|s| {
-                        s.name == "ram"
-                            || (s.name != "const" && s.name != "unique" && s.name != "register")
-                    })
-                    .map(|s| s.word_size as u64)
-                    .unwrap_or(1);
-                offset.wrapping_mul(addr_unit)
-            } else {
-                offset
+        let target_addr = match commit.target {
+            CompiledContextCommitTarget::InstStart => instruction_address,
+            CompiledContextCommitTarget::InstNext => {
+                instruction_address.saturating_add(decoded.length as u64)
+            }
+            CompiledContextCommitTarget::OperandHandle { hand_index } => {
+                let handle = decoded.handles.get(hand_index as usize).ok_or_else(|| {
+                    anyhow!("context commit references missing operand handle {hand_index}")
+                })?;
+                // Ghidra: if handle.offset_space.type == CONSTANT, multiply by ram addr_unit.
+                let offset = if handle.fixed.offset_space.is_some() {
+                    handle.fixed.temp_offset
+                } else {
+                    handle.fixed.offset_offset
+                };
+                if handle
+                    .fixed
+                    .space
+                    .as_ref()
+                    .map(|s| s.name == "const")
+                    .unwrap_or(false)
+                {
+                    let addr_unit = compiled
+                        .sla_spaces
+                        .values()
+                        .find(|s| {
+                            s.name == "ram"
+                                || (s.name != "const" && s.name != "unique" && s.name != "register")
+                        })
+                        .map(|s| s.word_size as u64)
+                        .unwrap_or(1);
+                    offset.wrapping_mul(addr_unit)
+                } else {
+                    offset
+                }
             }
         };
         // Read current context bits at (word_index, mask) to get the value to commit.
-        let value = match packed_context_word(current_context, commit.word_index) {
-            Ok(word) => word & commit.mask,
-            Err(_) => continue,
-        };
+        let value = packed_context_word(current_context, commit.word_index)? & commit.mask;
         results.push((target_addr, commit.word_index, commit.mask, value));
     }
-    results
+    Ok(results)
 }
 
 /// Applies resolved context commits to a mutable context register.
@@ -436,7 +435,7 @@ fn decoded_instruction_from_state(
     let flow_kind = flow_kind_for_state(&decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let pending_context_commits =
-        apply_context_commits(compiled, &decoded, address, ctx.context_register);
+        apply_context_commits(compiled, &decoded, address, ctx.context_register)?;
     Ok(DecodedInstruction {
         address,
         bytes: bytes.get(..length).unwrap_or(bytes).to_vec(),

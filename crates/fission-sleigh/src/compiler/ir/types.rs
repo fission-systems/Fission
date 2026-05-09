@@ -180,6 +180,13 @@ pub struct CompiledMacro {
     pub body_line_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompiledContextCommitTarget {
+    OperandHandle { hand_index: u32 },
+    InstStart,
+    InstNext,
+}
+
 /// Deferred global context change (Ghidra `ContextCommit` / `globalset` statement).
 ///
 /// When a constructor fires, its `context_commits` are queued. After the instruction
@@ -188,12 +195,9 @@ pub struct CompiledMacro {
 /// cache for future instructions at that address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledContextCommit {
-    /// Symbol table ID of the target operand (raw SLA `ATTR_ID`). Used for tracing.
+    /// Symbol table ID of the target TripleSymbol (raw SLA `ATTR_ID`). Used for tracing.
     pub symbol_id: u32,
-    /// Resolved operand handle index within the constructor's handle list.
-    /// `u32::MAX` means the symbol is a built-in (e.g. `inst_next`): the target
-    /// address is computed at runtime as `instruction_start + instruction_length`.
-    pub hand_index: u32,
+    pub target: CompiledContextCommitTarget,
     /// Word index within the context register (Ghidra `ATTR_NUMBER`).
     pub word_index: u32,
     /// Bit mask of the context bits to commit (Ghidra `ATTR_MASK`).

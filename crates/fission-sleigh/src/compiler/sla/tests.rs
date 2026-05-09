@@ -254,12 +254,19 @@ fn sla_context_commit_decode_does_not_synthesize_zero_fields() {
         ".attr_unsigned(sla_format::ATTR_ID)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
         ".attr_unsigned(sla_format::ATTR_NUMBER)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
         ".attr_unsigned(sla_format::ATTR_MASK)\n                    .map(|v| v as u32)\n                    .unwrap_or(0)",
+        ".map(|sym| sym.hand_index as u32)\n                    .unwrap_or(u32::MAX)",
     ] {
         assert!(
             !templates.contains(forbidden),
-            "context commit decode must fail closed instead of synthesizing zero fields"
+            "context commit decode must fail closed instead of synthesizing fields or targets"
         );
     }
+    assert!(
+        templates.contains("CompiledContextCommitTarget::OperandHandle")
+            && templates.contains("Some(\"inst_next\") => CompiledContextCommitTarget::InstNext")
+            && templates.contains("context_commit_unknown_target_symbol"),
+        "context commit target must be decoded as a checked TripleSymbol target"
+    );
 }
 
 #[test]

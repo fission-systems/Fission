@@ -5,8 +5,8 @@ use fission_pcode::PcodeOpcode;
 
 use super::*;
 use crate::compiler::ir::{
-    CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextOp,
-    CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledConstTpl, CompiledConstructTpl, CompiledContextCommit, CompiledContextCommitTarget,
+    CompiledContextOp, CompiledDecisionLeafEntry, CompiledDisjointPattern, CompiledDisplayOperand,
     CompiledDisplayPiece, CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl,
     CompiledLabelRef, CompiledOpTpl, CompiledOpTplOpcode, CompiledOperandSpec,
     CompiledPatternBlock, CompiledPatternExpression, CompiledResolvedVarnode,
@@ -342,15 +342,26 @@ pub(super) fn decode_construct_templates(
                     .attr_unsigned(sla_format::ATTR_MASK)
                     .ok_or_else(|| "context_commit_missing_mask".to_string())?
                     as u32;
-                // Resolve symbol_id → hand_index: look up in the operand symbol table.
-                // If the symbol is a built-in (e.g. `inst_next`), store u32::MAX as sentinel.
-                let hand_index = operand_symbols
-                    .get(&symbol_id)
-                    .map(|sym| sym.hand_index as u32)
-                    .unwrap_or(u32::MAX);
+                let target = if let Some(sym) = operand_symbols.get(&symbol_id) {
+                    CompiledContextCommitTarget::OperandHandle {
+                        hand_index: sym.hand_index as u32,
+                    }
+                } else {
+                    match symbol_names.get(&symbol_id).map(String::as_str) {
+                        Some("inst_start") => CompiledContextCommitTarget::InstStart,
+                        Some("inst_next") => CompiledContextCommitTarget::InstNext,
+                        Some("inst_next2") => {
+                            return Err("context_commit_unsupported_inst_next2".to_string());
+                        }
+                        Some(name) => {
+                            return Err(format!("context_commit_unsupported_target:{name}"));
+                        }
+                        None => return Err("context_commit_unknown_target_symbol".to_string()),
+                    }
+                };
                 context_commits.push(CompiledContextCommit {
                     symbol_id,
-                    hand_index,
+                    target,
                     word_index,
                     mask,
                 });
