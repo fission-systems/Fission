@@ -288,10 +288,25 @@ pub(super) fn constructor_matches(
                         value,
                     } => {
                         let mut inst_val = 0u64;
-                        for i in 0..8 {
-                            if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i) {
-                                inst_val |= u64::from(*byte) << (i * 8);
-                            }
+                        let required_bytes = if *mask == 0 {
+                            0usize
+                        } else {
+                            (64usize - mask.leading_zeros() as usize).div_ceil(8)
+                        };
+                        let offset = usize::try_from(*offset)
+                            .map_err(|_| anyhow!("instruction constraint offset overflow"))?;
+                        let start = ctx
+                            .cursor
+                            .checked_add(offset)
+                            .ok_or_else(|| anyhow!("instruction constraint cursor overflow"))?;
+                        for i in 0..required_bytes {
+                            let absolute = start
+                                .checked_add(i)
+                                .ok_or_else(|| anyhow!("instruction constraint range overflow"))?;
+                            let byte = ctx.bytes.get(absolute).copied().ok_or_else(|| {
+                                anyhow!("instruction bit constraint byte out of range")
+                            })?;
+                            inst_val |= u64::from(byte) << (i * 8);
                         }
                         if (inst_val & mask) != *value {
                             bail!("instruction bit constraint mismatch");

@@ -686,6 +686,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "self.ctx.bytes.get(start + i).copied().unwrap_or(0)",
         "get(self.ctx.cursor + byte_offset as usize + i as usize)\n                            .copied()\n                            .unwrap_or(0)",
     ];
+    let bit_constraint_zero_padding =
+        "if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i)";
     let files = [
         manifest_dir.join("src/runtime/spine/compiled_table/mod.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/strategy.rs"),
@@ -895,6 +897,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 file.display()
             );
         }
+        assert!(
+            !source.contains(bit_constraint_zero_padding),
+            "{} still zero-pads missing instruction bit-constraint bytes",
+            file.display()
+        );
     }
 }
 
