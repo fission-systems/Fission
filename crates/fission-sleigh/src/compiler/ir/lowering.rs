@@ -419,7 +419,7 @@ fn executable_constructor_from_sla_template(
                         .operand_minimum_lengths
                         .get(operand_index)
                         .copied()
-                        .unwrap_or(0);
+                        .expect("SLA operand minimum lengths must match operand specs");
                     CompiledHandleTemplate {
                         operand_index,
                         spec,
