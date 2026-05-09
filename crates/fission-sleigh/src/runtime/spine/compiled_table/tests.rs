@@ -629,6 +629,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join("");
     let subtable_offset_base_fallback = "offsetbase.unwrap_or(-1)";
+    let empty_or_pattern_length_fallback = [
+        ".map(disjoint_pattern_instruction_byte_len)",
+        ".max()\n            .unwrap_or(0)",
+    ]
+    .join("\n");
+    let pattern_length_overflow_fallback = ".unwrap_or(usize::MAX)";
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
         "else {\n                continue;\n            }",
@@ -756,6 +762,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(subtable_offset_base_fallback),
             "{} still treats missing subtable offset base as constructor start",
+            file.display()
+        );
+        assert!(
+            !source.contains(&empty_or_pattern_length_fallback),
+            "{} still treats empty SLA OR patterns as zero instruction bytes",
+            file.display()
+        );
+        assert!(
+            !source.contains(pattern_length_overflow_fallback),
+            "{} still saturates malformed SLA pattern byte lengths",
             file.display()
         );
         assert!(

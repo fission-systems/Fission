@@ -68,7 +68,7 @@ fn instruction_terminal_pattern_len(selection: &RuntimeSelection<'_>) -> Result<
         .matched_leaf_pattern
         .as_ref()
         .ok_or_else(|| anyhow!("instruction selection missing terminal SLA pattern"))?;
-    let len = disjoint_pattern_instruction_byte_len(pattern);
+    let len = disjoint_pattern_instruction_byte_len(pattern)?;
     if len == 0 {
         bail!("instruction terminal SLA pattern has zero instruction byte length");
     }
@@ -1169,6 +1169,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .matched_leaf_pattern
             .as_ref()
             .map(disjoint_pattern_instruction_byte_len)
+            .transpose()?
             .unwrap_or(0);
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset

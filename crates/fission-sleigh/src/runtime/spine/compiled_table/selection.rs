@@ -315,27 +315,31 @@ pub(super) fn constructor_matches(
     Ok(())
 }
 
-pub(super) fn disjoint_pattern_instruction_byte_len(pattern: &CompiledDisjointPattern) -> usize {
+pub(super) fn disjoint_pattern_instruction_byte_len(
+    pattern: &CompiledDisjointPattern,
+) -> Result<usize> {
     match pattern {
         CompiledDisjointPattern::Instruction(block) => pattern_block_byte_len(block),
-        CompiledDisjointPattern::Context(_) => 0,
+        CompiledDisjointPattern::Context(_) => Ok(0),
         CompiledDisjointPattern::Combine { instruction, .. } => pattern_block_byte_len(instruction),
-        CompiledDisjointPattern::Or(patterns) => patterns
+        CompiledDisjointPattern::Or(patterns) => Ok(patterns
             .iter()
             .map(disjoint_pattern_instruction_byte_len)
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
             .max()
-            .unwrap_or(0),
+            .ok_or_else(|| anyhow!("empty SLA OR pattern has no instruction length"))?),
     }
 }
 
-pub(super) fn pattern_block_byte_len(block: &CompiledPatternBlock) -> usize {
+pub(super) fn pattern_block_byte_len(block: &CompiledPatternBlock) -> Result<usize> {
     if block.nonzero_size <= 0 {
-        return 0;
+        return Ok(0);
     }
-    block
+    let len = block
         .offset
         .max(0)
-        .saturating_add(block.nonzero_size)
-        .try_into()
-        .unwrap_or(usize::MAX)
+        .checked_add(block.nonzero_size)
+        .ok_or_else(|| anyhow!("SLA pattern byte length overflow"))?;
+    usize::try_from(len).map_err(|_| anyhow!("SLA pattern byte length {len} does not fit usize"))
 }
