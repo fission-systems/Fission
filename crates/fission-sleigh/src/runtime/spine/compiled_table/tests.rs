@@ -635,6 +635,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join(" ");
     let context_commit_addr_unit_fallback = ".unwrap_or(1)";
+    let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
     let empty_or_pattern_length_fallback = [
         ".map(disjoint_pattern_instruction_byte_len)",
         ".max()\n            .unwrap_or(0)",
@@ -778,6 +779,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(context_commit_addr_unit_fallback),
             "{} still defaults context commit address-unit scaling to 1",
+            file.display()
+        );
+        assert!(
+            !source.contains(decoded_bytes_truncation_fallback),
+            "{} still truncates decoded instruction bytes when decoded length exceeds input window",
             file.display()
         );
         assert!(

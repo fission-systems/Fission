@@ -437,9 +437,15 @@ fn decoded_instruction_from_state(
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let pending_context_commits =
         apply_context_commits(compiled, &decoded, address, ctx.context_register)?;
+    let instruction_bytes = bytes.get(..length).ok_or_else(|| {
+        anyhow!(
+            "decoded instruction length {length} exceeds available byte window {}",
+            bytes.len()
+        )
+    })?;
     Ok(DecodedInstruction {
         address,
-        bytes: bytes.get(..length).unwrap_or(bytes).to_vec(),
+        bytes: instruction_bytes.to_vec(),
         length,
         mnemonic,
         operands_text,
