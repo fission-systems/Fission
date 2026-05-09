@@ -87,17 +87,27 @@ pub(super) fn decode_construct_templates(
             // through sub.getConstructor(id). The constructor element's own ATTR_ID
             // is not the terminal selection index.
             let id = local_index as u32;
-            let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);
+            let source_index = constructor
+                .attr_signed(sla_format::ATTR_SOURCE)
+                .ok_or_else(|| "constructor_missing_source_index".to_string())?;
             let line = constructor
-                .attr_unsigned(sla_format::ATTR_LINE)
-                .unwrap_or(0);
+                .attr_signed(sla_format::ATTR_LINE)
+                .ok_or_else(|| "constructor_missing_line".to_string())
+                .and_then(|value| {
+                    u64::try_from(value).map_err(|_| "constructor_negative_line".to_string())
+                })?;
             let minimum_length = constructor
-                .attr_unsigned(sla_format::ATTR_LENGTH)
-                .unwrap_or(0) as u32;
-            let source_file = source_index
+                .attr_signed(sla_format::ATTR_LENGTH)
+                .ok_or_else(|| "constructor_missing_minimum_length".to_string())
+                .and_then(|value| {
+                    u32::try_from(value)
+                        .map_err(|_| "constructor_negative_minimum_length".to_string())
+                })?;
+            let source_index_key = u64::try_from(source_index).ok();
+            let source_file = source_index_key
                 .and_then(|idx| source_files.get(&idx).cloned())
                 .unwrap_or_else(|| format!("<generated:{subtable_name}>"));
-            let source_key = if source_index.is_some() {
+            let source_key = if source_index_key.is_some() {
                 format!("{}:{line}", basename(&source_file))
             } else {
                 format!("{subtable_name}#ctor{local_index}")

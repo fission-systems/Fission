@@ -188,6 +188,21 @@ fn sla_pattern_block_decode_does_not_synthesize_zero_shape_fields() {
 }
 
 #[test]
+fn sla_constructor_identity_fields_are_not_synthesized() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        ".attr_unsigned(sla_format::ATTR_LINE)\n                .unwrap_or(0)",
+        ".attr_unsigned(sla_format::ATTR_LENGTH)\n                .unwrap_or(0)",
+        "let source_index = constructor.attr_unsigned(sla_format::ATTR_SOURCE);",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "constructor decode must use required signed SLA fields, not synthesized defaults: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;
