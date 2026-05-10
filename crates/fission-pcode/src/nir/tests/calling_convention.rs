@@ -372,13 +372,286 @@ fn aarch64_return_only_join_inlines_predecessor_return_values() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "return_join", 0x1000, &options)
-        .expect("preview render");
+    let code = render_mlil_preview(&func, "return_join", 0x1000, &options).expect("preview render");
     assert!(code.contains("param_1 + 10"), "{code}");
     assert!(code.contains("param_1 ^ 43690"), "{code}");
     assert!(code.contains("return xVar"), "{code}");
     assert!(!code.contains("block_1030:"), "{code}");
     assert!(!code.contains("goto block_1030"), "{code}");
+}
+
+fn aarch64_preview_options() -> MlilPreviewOptions {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    options
+}
+
+fn aarch64_reg(offset: u64, size: u32) -> Varnode {
+    Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+#[test]
+fn aarch64_same_block_wide_const_copy_overrides_dominating_register_alias() {
+    let options = aarch64_preview_options();
+
+    let w0 = aarch64_reg(0x4000, 4);
+    let x0 = aarch64_reg(0x4000, 8);
+    let x8 = aarch64_reg(0x4040, 8);
+    let w8 = aarch64_reg(0x4040, 4);
+    let x30 = aarch64_reg(0x40f0, 8);
+    let ret_target = aarch64_reg(0, 8);
+    let cond = uniq(0x5100, 1);
+    let modulo_like = uniq(0x5200, 4);
+    let xor_tmp = uniq(0x5300, 4);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntSub,
+                        address: 0x1000,
+                        output: Some(modulo_like.clone()),
+                        inputs: vec![w0.clone(), cst(5, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1000,
+                        output: Some(x8.clone()),
+                        inputs: vec![modulo_like],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![cst(0x1010, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1010,
+                        output: Some(x8),
+                        inputs: vec![cst(0xaaaa, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::IntXor,
+                        address: 0x1014,
+                        output: Some(xor_tmp.clone()),
+                        inputs: vec![w0, w8],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1014,
+                        output: Some(x0),
+                        inputs: vec![xor_tmp],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1018,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1018,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1018,
+                        output: None,
+                        inputs: vec![cst(0, 8), x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "const_alias", 0x1000, &options).expect("preview render");
+    assert!(code.contains("param_1 ^ 43690"), "{code}");
+    assert!(
+        !code.contains("param_1 ^ (uint)(param_1 - 5)") && !code.contains("param_1 ^ xVar"),
+        "{code}"
+    );
+}
+
+#[test]
+fn aarch64_join_return_preserves_predecessor_local_const_alias() {
+    let options = aarch64_preview_options();
+
+    let w0 = aarch64_reg(0x4000, 4);
+    let x0 = aarch64_reg(0x4000, 8);
+    let x8 = aarch64_reg(0x4040, 8);
+    let w8 = aarch64_reg(0x4040, 4);
+    let x30 = aarch64_reg(0x40f0, 8);
+    let ret_target = aarch64_reg(0, 8);
+    let cond = uniq(0x6100, 1);
+    let stale_x8 = uniq(0x6200, 4);
+    let add_tmp = uniq(0x6300, 4);
+    let xor_tmp = uniq(0x6400, 4);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntSub,
+                        address: 0x1000,
+                        output: Some(stale_x8.clone()),
+                        inputs: vec![w0.clone(), cst(5, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1000,
+                        output: Some(x8.clone()),
+                        inputs: vec![stale_x8],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![cst(0x1020, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1010,
+                        output: Some(add_tmp.clone()),
+                        inputs: vec![w0.clone(), cst(10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1010,
+                        output: Some(x0.clone()),
+                        inputs: vec![add_tmp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1014,
+                        output: None,
+                        inputs: vec![cst(0x1030, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1020,
+                        output: Some(x8),
+                        inputs: vec![cst(0xaaaa, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::IntXor,
+                        address: 0x1024,
+                        output: Some(xor_tmp.clone()),
+                        inputs: vec![w0, w8],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 8,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1024,
+                        output: Some(x0),
+                        inputs: vec![xor_tmp],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x1030,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 9,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1030,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 10,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1030,
+                        output: None,
+                        inputs: vec![cst(0, 8), x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code =
+        render_mlil_preview(&func, "join_const_alias", 0x1000, &options).expect("preview render");
+    assert!(code.contains("param_1 + 10"), "{code}");
+    assert!(code.contains("param_1 ^ 43690"), "{code}");
+    assert!(
+        !code.contains("param_1 ^ (uint)(param_1 - 5)") && !code.contains("param_1 ^ xVar"),
+        "{code}"
+    );
 }
 
 #[test]

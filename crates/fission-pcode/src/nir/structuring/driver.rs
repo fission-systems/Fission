@@ -185,16 +185,17 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<(), MlilPreviewError> {
         if let Some((stmt, skip_to)) =
             Self::capture_structuring_failure(result, last_structuring_failure)?
-            && self.accept_structured_region(start_idx, skip_to, targeted)
         {
-            let Some(proof) = self.build_region_proof(start_idx, skip_to, &stmt) else {
-                return Ok(());
-            };
-            self.record_region_candidate(&proof);
-            candidates.push(CollapseCandidate {
-                rule,
-                node: StructureNode::region(usize::MAX, stmt, skip_to, proof),
-            });
+            if self.accept_structured_region(start_idx, skip_to, targeted) {
+                let Some(proof) = self.build_region_proof(start_idx, skip_to, &stmt) else {
+                    return Ok(());
+                };
+                self.record_region_candidate(&proof);
+                candidates.push(CollapseCandidate {
+                    rule,
+                    node: StructureNode::region(usize::MAX, stmt, skip_to, proof),
+                });
+            }
         }
         Ok(())
     }
@@ -603,24 +604,29 @@ impl<'a> PreviewBuilder<'a> {
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => node_body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
-                    if let Some(target_idx) = self.find_block_index_by_address(target)
-                        && let Some(expr) =
+                    if let Some(target_idx) = self.find_block_index_by_address(target) {
+                        if let Some(expr) =
                             self.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        node_body.push(HirStmt::Return(Some(expr)));
-                        explicit_edge_surface = true;
+                        {
+                            node_body.push(HirStmt::Return(Some(expr)));
+                            explicit_edge_surface = true;
+                        } else if self.next_block_address(idx) != Some(target) {
+                            node_body.push(HirStmt::Goto(block_label(target)));
+                            explicit_edge_surface = true;
+                        }
                     } else if self.next_block_address(idx) != Some(target) {
                         node_body.push(HirStmt::Goto(block_label(target)));
                         explicit_edge_surface = true;
                     }
                 }
                 LoweredTerminator::Fallthrough(Some(target)) => {
-                    if let Some(target_idx) = self.find_block_index_by_address(target)
-                        && let Some(expr) =
+                    if let Some(target_idx) = self.find_block_index_by_address(target) {
+                        if let Some(expr) =
                             self.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        node_body.push(HirStmt::Return(Some(expr)));
-                        explicit_edge_surface = true;
+                        {
+                            node_body.push(HirStmt::Return(Some(expr)));
+                            explicit_edge_surface = true;
+                        }
                     }
                 }
                 LoweredTerminator::Cond {
@@ -629,28 +635,34 @@ impl<'a> PreviewBuilder<'a> {
                     false_target,
                 } => {
                     let next_addr = self.next_block_address(idx);
-                    let then_body = if let Some(true_idx) =
-                        self.find_block_index_by_address(true_target)
-                        && let Some(expr) =
-                            self.lower_return_join_expr_for_predecessor(idx, true_idx)?
-                    {
-                        vec![HirStmt::Return(Some(expr))]
-                    } else if next_addr == Some(true_target) {
+                    let mut then_body = if next_addr == Some(true_target) {
                         Vec::new()
                     } else {
                         vec![HirStmt::Goto(block_label(true_target))]
                     };
-                    let else_body = match false_target {
-                        Some(false_target)
-                            if let Some(false_idx) =
-                                self.find_block_index_by_address(false_target)
-                                && let Some(expr) = self
-                                    .lower_return_join_expr_for_predecessor(idx, false_idx)? =>
+                    if let Some(true_idx) = self.find_block_index_by_address(true_target) {
+                        if let Some(expr) =
+                            self.lower_return_join_expr_for_predecessor(idx, true_idx)?
                         {
-                            vec![HirStmt::Return(Some(expr))]
+                            then_body = vec![HirStmt::Return(Some(expr))];
                         }
-                        Some(false_target) if Some(false_target) != next_addr => {
-                            vec![HirStmt::Goto(block_label(false_target))]
+                    }
+                    let else_body = match false_target {
+                        Some(false_target) => {
+                            let mut else_body = if Some(false_target) != next_addr {
+                                vec![HirStmt::Goto(block_label(false_target))]
+                            } else {
+                                Vec::new()
+                            };
+                            if let Some(false_idx) = self.find_block_index_by_address(false_target)
+                            {
+                                if let Some(expr) =
+                                    self.lower_return_join_expr_for_predecessor(idx, false_idx)?
+                                {
+                                    else_body = vec![HirStmt::Return(Some(expr))];
+                                }
+                            }
+                            else_body
                         }
                         _ => Vec::new(),
                     };
@@ -910,14 +922,14 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
 #[cfg(test)]
 mod tests {
     use super::{
-        PreviewBuilder, StructuringAdmissionInput, StructuringAdmissionReason,
-        apply_mir_blockgraph_admission_gate, decide_structuring_admission,
+        apply_mir_blockgraph_admission_gate, decide_structuring_admission, PreviewBuilder,
+        StructuringAdmissionInput, StructuringAdmissionReason,
     };
-    use crate::PcodeFunction;
     use crate::nir::types::{
         HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
     };
     use crate::nir::{CollapseCandidate, CollapseRule, RegionKind, RegionProof, StructureNode};
+    use crate::PcodeFunction;
 
     fn const_expr(value: i64) -> HirExpr {
         HirExpr::Const(
