@@ -48,11 +48,18 @@ def count_pattern(paths: Iterable[Path], pattern: str) -> int:
     return total
 
 
-def rust_files(root: Path, relative: str) -> list[Path]:
+def rust_files(root: Path, relative: str, *, include_tests: bool = False) -> list[Path]:
     base = root / relative
     if not base.exists():
         return []
-    return sorted(base.rglob("*.rs"))
+    files = sorted(base.rglob("*.rs"))
+    if include_tests:
+        return files
+    return [path for path in files if path.name != "tests.rs"]
+
+
+def existing_files(root: Path, paths: Iterable[str]) -> list[Path]:
+    return [root / path for path in paths if (root / path).is_file()]
 
 
 def exists_all(root: Path, paths: Iterable[str]) -> list[str]:
@@ -61,6 +68,12 @@ def exists_all(root: Path, paths: Iterable[str]) -> list[str]:
 
 def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
     fission_files = rust_files(repo, "crates/fission-sleigh/src")
+    template_executor_files = existing_files(
+        repo,
+        [
+            "crates/fission-sleigh/src/runtime/spine/compiled_table/template_eval.rs",
+        ],
+    )
     ghidra_refs = exists_all(
         ghidra,
         [
@@ -74,9 +87,15 @@ def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
     native_model = count_pattern(fission_files, r"\bSlaLanguage\b")
     construct_tpl = count_pattern(fission_files, r"\bConstructTpl\b")
     legacy_token = count_pattern(fission_files, r"\bCompiledTokenCursorPolicy\b|\bdecode_shared_token_fields\b")
-    manual_handle = count_pattern(fission_files, r"\bfixed_handle_for_bound_operand\b|\bBoundOperand::Memory\b")
+    manual_handle = count_pattern(
+        template_executor_files,
+        r"\bfixed_handle_for_bound_operand\b|\bBoundOperand\b|\bCompiledVarnodeTpl::(?:EffectiveAddress|FixedRegister|Flag)\b",
+    )
     no_export = count_pattern(fission_files, r"\bfallback_binding_for_no_export_subtable\b")
-    compatibility = count_pattern(fission_files, r"\bCompatibilityLowered\b|\bNativeFission\b")
+    compatibility = count_pattern(
+        template_executor_files,
+        r"\bCompatibilityLowered\b|\bNativeFission\b|\bemit_compat\b|\bsemantic_ops_for_kind\b",
+    )
     mnemonic_kind = count_pattern(fission_files, r"\bclassify_display_construct_kind\b")
 
     return [
@@ -103,7 +122,7 @@ def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
             "HandleTpl.fix -> FixedHandle -> PcodeEmit",
             STATUS_LEGACY_DEBT if manual_handle or no_export else STATUS_IMPLEMENTED,
             [
-                f"BoundOperand/manual handle mentions={manual_handle}",
+                f"template-executor manual handle mentions={manual_handle}",
                 f"no-export fallback mentions={no_export}",
             ],
             "Remove BoundOperand-derived fixed handles from raw P-code success path after row-level audit shows exact exported handle coverage.",
