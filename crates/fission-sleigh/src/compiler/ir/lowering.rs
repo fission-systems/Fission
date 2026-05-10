@@ -311,12 +311,7 @@ pub fn build_frontend_from_sla_native_model(
             name.clone(),
             CompiledSubtableDefinition {
                 name: name.clone(),
-                sla_subtable_id: sla_subtable
-                    .constructors
-                    .iter()
-                    .map(|constructor| constructor.subtable_id)
-                    .next()
-                    .unwrap_or(0),
+                sla_subtable_id: sla_subtable.id,
                 constructors_by_sla_id: constructors_by_sla_id(&executable_constructors),
                 constructors: executable_constructors,
                 decision_tree,
