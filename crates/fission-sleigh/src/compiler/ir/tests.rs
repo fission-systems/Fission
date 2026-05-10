@@ -228,6 +228,7 @@ fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
         "info.map(|i| i.bit_offset).unwrap_or(0)",
         "info.map(|i| i.bit_width).unwrap_or(0)",
         ".map(|constructor| constructor.subtable_id)\n                    .next()\n                    .unwrap_or(0)",
+        "score = score.saturating_sub(500)",
     ] {
         assert!(
             !lowering.contains(forbidden),

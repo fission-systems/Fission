@@ -1342,29 +1342,29 @@ fn context_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<
     }
 }
 
-fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
-    let mut score = 0usize;
+fn decision_specificity(constructor: &CompiledExecutableConstructor) -> i64 {
+    let mut score = 0i64;
     if constructor.mnemonic.starts_with('^') {
-        score = score.saturating_sub(500);
+        score -= 500;
     }
     if let CompiledPatternMatcher::BitConstraints(ref constraints) = constructor.matcher {
         if !constraints.is_empty() {
             score += 1000;
         }
     }
-    score += constructor.opsize_variants.len().min(1) * 2;
+    score += (constructor.opsize_variants.len().min(1) as i64) * 2;
     match &constructor.matcher {
-        CompiledPatternMatcher::ExactBytes(bytes) => score += bytes.len() * 80,
-        CompiledPatternMatcher::RowCc { prefix, .. } => score += prefix.len() * 80 + 40,
+        CompiledPatternMatcher::ExactBytes(bytes) => score += (bytes.len() as i64) * 80,
+        CompiledPatternMatcher::RowCc { prefix, .. } => score += (prefix.len() as i64) * 80 + 40,
         CompiledPatternMatcher::RowPage { .. } => score += 50,
         CompiledPatternMatcher::BitConstraints(constraints) => {
             for constraint in constraints {
                 match constraint {
                     PatternConstraint::Instruction { mask, .. } => {
-                        score += (mask.count_ones() as usize) * 10;
+                        score += i64::from(mask.count_ones()) * 10;
                     }
                     PatternConstraint::Context { mask, .. } => {
-                        score += (mask.count_ones() as usize) * 10;
+                        score += i64::from(mask.count_ones()) * 10;
                     }
                 }
             }
@@ -1381,7 +1381,7 @@ fn decision_specificity(constructor: &CompiledExecutableConstructor) -> usize {
                     | CompiledOperandSpec::SubtableEvaluation { .. }
             )
         })
-        .count()
+        .count() as i64
         * 20;
     score
 }
