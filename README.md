@@ -155,6 +155,9 @@ PE x64 has the strongest direct NIR coverage. Other architectures and formats ex
 | [`crates/fission-signatures`](./crates/fission-signatures) | Function/type signatures, identifier resolution |
 | [`crates/fission-core`](./crates/fission-core) | Core data structures |
 | [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis capabilities |
+| [`crates/fission-ttd`](./crates/fission-ttd) | Time-travel debugging and trace-adjacent analysis support |
+| [`crates/fission-plugin`](./crates/fission-plugin) | Plugin contracts, manager/loader/hooks, and runtime extension points |
+| [`crates/fission-script`](./crates/fission-script) | Rhai-based scripting surface for automation and operator workflows |
 
 ### Product Surfaces
 

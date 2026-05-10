@@ -1,6 +1,6 @@
 # Fission project map
 
-**Last verified:** 2026-05-02
+**Last verified:** 2026-05-10
 
 Single-page orientation for directories and crates. **Canonical ownership** for engineering tasks remains [`AGENTS.md`](../AGENTS.md) (“Where To Look” table). **System design** remains [`docs/architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md).
 
@@ -11,6 +11,7 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | Crate path | Role (summary) |
 |------------|----------------|
 | [`crates/fission-automation`](../crates/fission-automation) | Quality lanes (`nir-check`), reporting |
+| [`crates/fission-script`](../crates/fission-script) | Rhai scripting support and script runtime surface |
 | [`crates/fission-core`](../crates/fission-core) | Shared core types/utilities |
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
 | [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printer |
