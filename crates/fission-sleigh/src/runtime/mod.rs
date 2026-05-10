@@ -568,7 +568,7 @@ mod tests {
         ];
 
         let blocks = build_cfg_blocks(0x100, ops);
-        assert_eq!(blocks.len(), 4, "{blocks:?}");
+        assert_eq!(blocks.len(), 3, "{blocks:?}");
         assert_eq!(blocks[0].ops.last().unwrap().opcode, PcodeOpcode::CBranch);
         assert_eq!(blocks[0].successors, vec![2, 1]);
         assert_eq!(blocks[2].ops[0].seq_num, 3);

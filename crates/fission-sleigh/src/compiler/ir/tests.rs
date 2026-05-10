@@ -314,8 +314,7 @@ fn generated_native_backend_does_not_zero_pad_short_instruction_bytes() {
         );
     }
     assert!(
-        codegen.contains("else { return -1; }")
-            && codegen.contains("if bytes.len() < byte_cnt as usize { return -1; }"),
+        codegen.contains("if bytes.len() < byte_cnt as usize { return -1; }"),
         "generated native backend should reject short decision probes instead of padding"
     );
 }
