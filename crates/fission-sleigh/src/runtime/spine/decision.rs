@@ -311,40 +311,117 @@ fn pattern_block_instruction_matches<E: DecisionProbeEvaluator>(
     evaluator: &E,
     block: &CompiledPatternBlock,
 ) -> bool {
-    if block.nonzero_size <= 0 {
-        return block.nonzero_size == 0;
-    }
-    for (index, mask) in block.mask_words.iter().enumerate() {
-        let Ok(data) = evaluator.instruction_bytes(block.offset + (index as i32 * 4), 4) else {
-            return false;
-        };
-        let Some(value) = block.value_words.get(index).copied() else {
-            return false;
-        };
-        if (mask & data) != value {
-            return false;
-        }
-    }
-    true
+    pattern_block_matches(block, |offset, size| {
+        evaluator.instruction_bytes(offset, size)
+    })
 }
 
 fn pattern_block_context_matches<E: DecisionProbeEvaluator>(
     evaluator: &E,
     block: &CompiledPatternBlock,
 ) -> bool {
+    pattern_block_matches(block, |offset, size| evaluator.context_bytes(offset, size))
+}
+
+fn pattern_block_matches(
+    block: &CompiledPatternBlock,
+    mut read_bytes: impl FnMut(i32, u32) -> Result<u32>,
+) -> bool {
     if block.nonzero_size <= 0 {
         return block.nonzero_size == 0;
     }
+    let mut remaining = block.nonzero_size as u32;
     for (index, mask) in block.mask_words.iter().enumerate() {
-        let Ok(data) = evaluator.context_bytes(block.offset + (index as i32 * 4), 4) else {
+        if remaining == 0 {
+            break;
+        }
+        let chunk_size = remaining.min(4);
+        let Ok(mut data) = read_bytes(block.offset + (index as i32 * 4), chunk_size) else {
             return false;
         };
+        if chunk_size < 4 {
+            data <<= (4 - chunk_size) * 8;
+        }
         let Some(value) = block.value_words.get(index).copied() else {
             return false;
         };
         if (mask & data) != value {
             return false;
         }
+        remaining -= chunk_size;
     }
-    true
+    remaining == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{anyhow, bail};
+
+    struct BytesEvaluator {
+        instruction: Vec<u8>,
+        context: Vec<u8>,
+    }
+
+    impl BytesEvaluator {
+        fn read(buf: &[u8], offset: i32, size: u32) -> Result<u32> {
+            if offset < 0 || size == 0 || size > 4 {
+                bail!("invalid read");
+            }
+            let start = offset as usize;
+            let end = start
+                .checked_add(size as usize)
+                .ok_or_else(|| anyhow!("overflow"))?;
+            let bytes = buf.get(start..end).ok_or_else(|| anyhow!("out of range"))?;
+            Ok(bytes
+                .iter()
+                .fold(0u32, |word, byte| (word << 8) | u32::from(*byte)))
+        }
+    }
+
+    impl DecisionProbeEvaluator for BytesEvaluator {
+        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<Vec<u8>> {
+            Ok(vec![0])
+        }
+
+        fn instruction_bytes(&self, offset: i32, size: u32) -> Result<u32> {
+            Self::read(&self.instruction, offset, size)
+        }
+
+        fn context_bytes(&self, offset: i32, size: u32) -> Result<u32> {
+            Self::read(&self.context, offset, size)
+        }
+    }
+
+    #[test]
+    fn terminal_pattern_matches_short_instruction_word_prefix() {
+        let evaluator = BytesEvaluator {
+            instruction: vec![0xc3],
+            context: Vec::new(),
+        };
+        let pattern = CompiledPatternBlock {
+            offset: 0,
+            nonzero_size: 1,
+            mask_words: vec![0xff00_0000],
+            value_words: vec![0xc300_0000],
+        };
+
+        assert!(pattern_block_instruction_matches(&evaluator, &pattern));
+    }
+
+    #[test]
+    fn terminal_pattern_matches_partial_final_word_prefix() {
+        let evaluator = BytesEvaluator {
+            instruction: vec![0x48, 0x8d, 0x84, 0x24, 0x80, 0xff],
+            context: Vec::new(),
+        };
+        let pattern = CompiledPatternBlock {
+            offset: 0,
+            nonzero_size: 6,
+            mask_words: vec![0xffff_ffff, 0xffff_0000],
+            value_words: vec![0x488d_8424, 0x80ff_0000],
+        };
+
+        assert!(pattern_block_instruction_matches(&evaluator, &pattern));
+    }
 }
