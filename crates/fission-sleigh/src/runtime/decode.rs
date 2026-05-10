@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 impl RuntimeSleighFrontend {
     pub fn decode_and_lift(&self, bytes: &[u8], address: u64) -> Result<Vec<PcodeOp>> {
@@ -97,8 +98,10 @@ impl RuntimeSleighFrontend {
             for (target_addr, word_index, mask_u32, value_u32) in
                 &instruction.pending_context_commits
             {
-                let mask_u64 = (u64::from(*mask_u32)) << (word_index * 32);
-                let value_u64 = (u64::from(*value_u32)) << (word_index * 32);
+                let mask_u64 = packed_context_commit_word_to_u64(*word_index, *mask_u32)
+                    .with_context(|| "merge pending context commit mask")?;
+                let value_u64 = packed_context_commit_word_to_u64(*word_index, *value_u32)
+                    .with_context(|| "merge pending context commit value")?;
                 let entry = pending_overrides.entry(*target_addr).or_insert((0, 0));
                 entry.0 = (entry.0 & !mask_u64) | (value_u64 & mask_u64);
                 entry.1 |= mask_u64;
@@ -208,5 +211,32 @@ impl RuntimeSleighFrontend {
                 address,
             ),
         }
+    }
+}
+
+fn packed_context_commit_word_to_u64(word_index: u32, value: u32) -> Result<u64> {
+    let shift = word_index
+        .checked_mul(32)
+        .ok_or_else(|| anyhow!("context commit word index {word_index} shift overflows"))?;
+    let shifted = u64::from(value).checked_shl(shift).ok_or_else(|| {
+        anyhow!("context commit word index {word_index} exceeds packed u64 context")
+    })?;
+    Ok(shifted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::packed_context_commit_word_to_u64;
+
+    #[test]
+    fn context_commit_word_shift_fails_closed_above_packed_u64() {
+        assert_eq!(
+            packed_context_commit_word_to_u64(1, 0x8000_0000).expect("word 1"),
+            0x8000_0000_0000_0000
+        );
+        assert!(
+            packed_context_commit_word_to_u64(2, 1).is_err(),
+            "word 2 must not wrap or silently clear in the u64 context cache"
+        );
     }
 }

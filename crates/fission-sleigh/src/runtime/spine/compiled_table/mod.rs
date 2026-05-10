@@ -416,13 +416,14 @@ pub(crate) fn apply_pending_commits_to_context(
     context_known_mask: &mut u64,
     address: u64,
     pending: &[(u64, u32, u32, u32)],
-) {
+) -> Result<()> {
     for &(target_addr, word_index, mask, value) in pending {
         if target_addr == address {
-            let _ = set_packed_context_word(context_register, word_index, value, mask);
-            let _ = set_packed_context_word(context_known_mask, word_index, mask, mask);
+            set_packed_context_word(context_register, word_index, value, mask)?;
+            set_packed_context_word(context_known_mask, word_index, mask, mask)?;
         }
     }
+    Ok(())
 }
 
 fn decoded_instruction_from_state(
