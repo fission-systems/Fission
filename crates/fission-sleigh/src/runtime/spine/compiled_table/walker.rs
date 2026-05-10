@@ -146,6 +146,79 @@ fn exported_fixed_handle_needs_memory_display_fixup(value: &BoundOperand) -> boo
     )
 }
 
+fn exported_handle_allows_fixed_display_fallback(
+    handle_tpl: &CompiledHandleTpl,
+    display_template: &crate::compiler::CompiledDisplayTemplate,
+) -> bool {
+    let Some(mut refs) = handle_tpl_operand_handle_indices(handle_tpl) else {
+        return false;
+    };
+    refs.sort_unstable();
+    refs.dedup();
+    match refs.len() {
+        0 => !display_template_references_operand(display_template),
+        1 => true,
+        _ => false,
+    }
+}
+
+fn display_template_references_operand(
+    template: &crate::compiler::CompiledDisplayTemplate,
+) -> bool {
+    template.flowthru_operand_index.is_some()
+        || template
+            .pieces
+            .iter()
+            .any(|piece| matches!(piece, crate::compiler::CompiledDisplayPiece::OperandRef(_)))
+}
+
+fn handle_tpl_operand_handle_indices(handle_tpl: &CompiledHandleTpl) -> Option<Vec<usize>> {
+    let mut refs = Vec::new();
+    if let Some(space) = &handle_tpl.space {
+        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
+    }
+    if let Some(value) = &handle_tpl.size {
+        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
+    }
+    if let Some(space) = &handle_tpl.ptr_space {
+        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
+    }
+    if let Some(value) = &handle_tpl.ptr_offset {
+        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
+    }
+    if let Some(value) = &handle_tpl.ptr_size {
+        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
+    }
+    if let Some(space) = &handle_tpl.temp_space {
+        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
+    }
+    if let Some(value) = &handle_tpl.temp_offset {
+        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
+    }
+    Some(refs)
+}
+
+fn collect_space_tpl_operand_handle_indices(
+    space_tpl: &CompiledSpaceTpl,
+    refs: &mut Vec<usize>,
+) -> Option<()> {
+    match space_tpl {
+        CompiledSpaceTpl::SpaceRef(_) => {}
+        CompiledSpaceTpl::Const(value) => collect_const_tpl_operand_handle_indices(value, refs)?,
+    }
+    Some(())
+}
+
+fn collect_const_tpl_operand_handle_indices(
+    value: &CompiledConstTpl,
+    refs: &mut Vec<usize>,
+) -> Option<()> {
+    if let CompiledConstTpl::Handle { handle_index, .. } = value {
+        refs.push(usize::try_from(*handle_index).ok()?);
+    }
+    Some(())
+}
+
 #[cfg(test)]
 mod construct_state_offset_tests {
     use crate::compiler::{compile_x86_64_frontend, discovery};
@@ -369,10 +442,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let fixed_value = display_operand_from_exported_fixed_handle(&fixed)?;
         let value = if exported_fixed_handle_needs_memory_display_fixup(&fixed_value) {
             fixed_value
+        } else if let Some(display_value) = self
+            .display_operand_from_exported_display_template(handles)
+            .transpose()?
+        {
+            display_value
+        } else if exported_handle_allows_fixed_display_fallback(
+            &export_tpl,
+            &self.selection.constructor.display_template,
+        ) {
+            fixed_value
         } else {
-            self.display_operand_from_exported_display_template(handles)
-                .transpose()?
-                .unwrap_or(fixed_value)
+            bail!(
+                "exported display value missing .sla display operand for {}",
+                self.selection.constructor.source
+            )
         };
         Ok(Some(RuntimeHandle {
             operand_index: usize::MAX,
