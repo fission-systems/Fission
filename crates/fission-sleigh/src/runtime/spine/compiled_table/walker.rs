@@ -1217,34 +1217,37 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let mut sub_ctx = (*self.ctx).clone();
-        let consumed_instruction_bytes = self
-            .selection
-            .trace
-            .matched_leaf_pattern
-            .as_ref()
-            .map(disjoint_pattern_instruction_byte_len)
-            .transpose()?
-            .unwrap_or(0);
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
         } else if let Some(offset) =
             self.subtable_offset_from_sla_operands(reloffset, offsetbase)?
         {
             offset
-        } else if self.selection.constructor.context_changes.is_empty()
-            || consumed_instruction_bytes == 0
-        {
+        } else if self.selection.constructor.context_changes.is_empty() {
             self.cursor
         } else {
-            let cursor_delta = self
-                .cursor
-                .checked_sub(self.ctx.cursor)
-                .ok_or_else(|| anyhow!("subtable cursor resolved before instruction start"))?;
-            let advance = consumed_instruction_bytes.max(cursor_delta);
-            self.ctx
-                .cursor
-                .checked_add(advance)
-                .ok_or_else(|| anyhow!("subtable cursor overflowed"))?
+            let pattern = self
+                .selection
+                .trace
+                .matched_leaf_pattern
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow!("context-dependent subtable {table_name} missing terminal SLA pattern")
+                })?;
+            let consumed_instruction_bytes = disjoint_pattern_instruction_byte_len(pattern)?;
+            if consumed_instruction_bytes == 0 {
+                self.cursor
+            } else {
+                let cursor_delta = self
+                    .cursor
+                    .checked_sub(self.ctx.cursor)
+                    .ok_or_else(|| anyhow!("subtable cursor resolved before instruction start"))?;
+                let advance = consumed_instruction_bytes.max(cursor_delta);
+                self.ctx
+                    .cursor
+                    .checked_add(advance)
+                    .ok_or_else(|| anyhow!("subtable cursor overflowed"))?
+            }
         };
         sub_ctx.context_register = self.context_register;
         sub_ctx.context_known_mask = self.context_known_mask;

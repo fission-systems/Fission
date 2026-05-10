@@ -673,6 +673,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         ".max()\n            .unwrap_or(0)",
     ]
     .join("\n");
+    let missing_terminal_pattern_length_fallback = [
+        ".matched_leaf_pattern\n            .as_ref()",
+        ".map(disjoint_pattern_instruction_byte_len)",
+        ".unwrap_or(0)",
+    ]
+    .join("\n");
     let pattern_length_overflow_fallback = ".unwrap_or(usize::MAX)";
     let context_commit_missing_handle_skip = [
         "decoded.handles.get(commit.hand_index as usize)",
@@ -886,6 +892,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&empty_or_pattern_length_fallback),
             "{} still treats empty SLA OR patterns as zero instruction bytes",
+            file.display()
+        );
+        assert!(
+            !source.contains(&missing_terminal_pattern_length_fallback),
+            "{} still treats missing terminal SLA patterns as zero instruction bytes",
             file.display()
         );
         assert!(
