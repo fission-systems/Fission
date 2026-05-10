@@ -16,10 +16,10 @@ pub(super) fn display_value_for_exported_handle(
         }
     );
     if exported_is_direct_memory {
-        if let Some(rip_relative_operand) = first_rip_relative_memory(sub_state) {
+        if let Some(rip_relative_operand) = display_template_rip_relative_memory(sub_state) {
             return Ok(rip_relative_operand.clone());
         }
-        if let Some(relative_target) = first_relative_target(sub_state) {
+        if let Some(relative_target) = display_template_relative_target(sub_state) {
             if let BoundOperand::Memory { size, .. } = exported_value {
                 return Ok(BoundOperand::Memory {
                     base: None,
@@ -34,6 +34,57 @@ pub(super) fn display_value_for_exported_handle(
         }
     }
     Ok(exported_value)
+}
+
+fn display_template_operand_indices(state: &RuntimeConstructState) -> Vec<usize> {
+    if let Some(flowthru_index) = state.display_template.flowthru_operand_index {
+        return vec![flowthru_index];
+    }
+    state
+        .display_template
+        .pieces
+        .iter()
+        .filter_map(|piece| match piece {
+            crate::compiler::CompiledDisplayPiece::OperandRef(index) => Some(*index),
+            crate::compiler::CompiledDisplayPiece::Literal(_) => None,
+        })
+        .collect()
+}
+
+fn display_template_rip_relative_memory(state: &RuntimeConstructState) -> Option<&BoundOperand> {
+    display_template_operand_indices(state)
+        .into_iter()
+        .filter_map(|index| state.handles.get(index))
+        .find_map(|handle| {
+            if let Some(
+                operand @ BoundOperand::Memory {
+                    rip_relative: true,
+                    ..
+                },
+            ) = handle.debug_value.as_ref()
+            {
+                return Some(operand);
+            }
+            handle
+                .subtable_state
+                .as_deref()
+                .and_then(display_template_rip_relative_memory)
+        })
+}
+
+fn display_template_relative_target(state: &RuntimeConstructState) -> Option<u64> {
+    display_template_operand_indices(state)
+        .into_iter()
+        .filter_map(|index| state.handles.get(index))
+        .find_map(|handle| {
+            if let Some(BoundOperand::Relative { target }) = handle.debug_value.as_ref() {
+                return Some(*target);
+            }
+            handle
+                .subtable_state
+                .as_deref()
+                .and_then(display_template_relative_target)
+        })
 }
 
 fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<BoundOperand> {
@@ -454,6 +505,9 @@ pub(super) fn add_signed(base: u64, delta: i64) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::compiler::{CompiledConstructorTemplate, CompiledDisplayTemplate};
+
     #[test]
     fn display_renderer_has_no_zero_bound_operand_fallback() {
         let source = include_str!("display.rs");
@@ -488,5 +542,160 @@ mod tests {
             !source.contains(&decoded_cc_field),
             "display rendering must not carry decoded condition-code side channels"
         );
+    }
+
+    #[test]
+    fn exported_direct_memory_display_uses_referenced_display_operand_only() {
+        let exported = handle(BoundOperand::Memory {
+            base: None,
+            index: None,
+            scale: 1,
+            displacement: 0x3000,
+            rip_relative: false,
+            absolute: Some(0x3000),
+            size: 8,
+        });
+        let unreferenced_rip = handle(BoundOperand::Memory {
+            base: None,
+            index: None,
+            scale: 1,
+            displacement: 4,
+            rip_relative: true,
+            absolute: Some(0x2000),
+            size: 8,
+        });
+        let referenced_relative = handle(BoundOperand::Relative { target: 0x3000 });
+        let state = state_with_display(
+            vec![
+                crate::compiler::CompiledDisplayPiece::OperandRef(1),
+                crate::compiler::CompiledDisplayPiece::Literal(" ".to_string()),
+            ],
+            vec![unreferenced_rip, referenced_relative],
+        );
+
+        let value =
+            display_value_for_exported_handle(&exported, &state).expect("exported display value");
+
+        assert!(matches!(
+            value,
+            BoundOperand::Memory {
+                rip_relative: true,
+                absolute: Some(0x3000),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn exported_direct_memory_display_uses_referenced_child_display_operand() {
+        let exported = handle(BoundOperand::Memory {
+            base: None,
+            index: None,
+            scale: 1,
+            displacement: 0x4000,
+            rip_relative: false,
+            absolute: Some(0x4000),
+            size: 8,
+        });
+        let child = state_with_display(
+            vec![crate::compiler::CompiledDisplayPiece::OperandRef(0)],
+            vec![handle(BoundOperand::Memory {
+                base: None,
+                index: None,
+                scale: 1,
+                displacement: -8,
+                rip_relative: true,
+                absolute: Some(0x4000),
+                size: 8,
+            })],
+        );
+        let parent_operand = RuntimeHandle {
+            subtable_state: Some(Box::new(child)),
+            ..handle(BoundOperand::Immediate {
+                value: 0,
+                encoded_size: 1,
+                signed: false,
+            })
+        };
+        let state = state_with_display(
+            vec![crate::compiler::CompiledDisplayPiece::OperandRef(0)],
+            vec![parent_operand],
+        );
+
+        let value =
+            display_value_for_exported_handle(&exported, &state).expect("exported display value");
+
+        assert!(matches!(
+            value,
+            BoundOperand::Memory {
+                rip_relative: true,
+                absolute: Some(0x4000),
+                ..
+            }
+        ));
+    }
+
+    fn handle(value: BoundOperand) -> RuntimeHandle {
+        RuntimeHandle {
+            operand_index: 0,
+            spec: CompiledOperandSpec::SubtableEvaluation {
+                table_name: "test".to_string(),
+                reloffset: 0,
+                offsetbase: -1,
+            },
+            fixed: RuntimeFixedHandle::default(),
+            debug_value: Some(value),
+            subtable_state: None,
+        }
+    }
+
+    fn state_with_display(
+        pieces: Vec<crate::compiler::CompiledDisplayPiece>,
+        mut handles: Vec<RuntimeHandle>,
+    ) -> RuntimeConstructState {
+        for (index, handle) in handles.iter_mut().enumerate() {
+            handle.operand_index = index;
+        }
+        RuntimeConstructState {
+            subtable_id: 0,
+            constructor_id: 0,
+            constructor_slot: 0,
+            mnemonic: "test".to_string(),
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
+            constructor_template: CompiledConstructorTemplate {
+                handles: Vec::new(),
+                decode_steps: Vec::new(),
+                num_labels: 0,
+                result: None,
+                ops: Vec::new(),
+                template_source: CompiledTemplateSource::SpecDerived,
+            },
+            named_templates: Vec::new(),
+            context_commits: Vec::new(),
+            display_template: CompiledDisplayTemplate {
+                constructor_hash: 0,
+                pieces,
+                first_whitespace: None,
+                flowthru_operand_index: None,
+                display: String::new(),
+            },
+            display_operands: Vec::new(),
+            construct_nodes: Vec::new(),
+            operands: handles
+                .iter()
+                .filter_map(|handle| handle.debug_value.clone())
+                .collect(),
+            handles,
+            exported_handle: None,
+            absolute_offset: 0,
+            relative_length: 0,
+            length: 0,
+            match_trace: spine::RuntimeMatchTrace {
+                root_bucket: "test".to_string(),
+                probes: Vec::new(),
+                leaf_constructor_indexes: Vec::new(),
+                matched_leaf_pattern: None,
+            },
+        }
     }
 }
