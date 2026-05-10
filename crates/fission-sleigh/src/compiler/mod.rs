@@ -468,7 +468,8 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
         let library = sla::load_construct_templates_from_sla(&sla_path)
             .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
-        ir::build_frontend_from_sla_native_model(&mut compiled, &library);
+        ir::build_frontend_from_sla_native_model(&mut compiled, &library)
+            .with_context(|| format!("lower compiled SLEIGH artifact {}", sla_path.display()))?;
     }
     Ok(compiled)
 }

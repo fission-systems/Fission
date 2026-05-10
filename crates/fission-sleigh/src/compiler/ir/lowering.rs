@@ -266,7 +266,7 @@ fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {
 pub fn build_frontend_from_sla_native_model(
     compiled: &mut CompiledFrontend,
     library: &CompiledSlaTemplateLibrary,
-) -> usize {
+) -> Result<usize> {
     let mut updated = 0usize;
 
     // Propagate SLA-native space metadata so the runtime never uses hardcoded
@@ -296,16 +296,13 @@ pub fn build_frontend_from_sla_native_model(
             updated += 1;
         }
 
-        let decision_tree =
-            sla_subtable
-                .decision_tree
-                .clone()
-                .unwrap_or_else(|| CompiledDecisionTree {
-                    root_node_index: 0,
-                    nodes: Vec::new(),
-                    decision_node_count: 0,
-                    root_buckets: Vec::new(),
-                });
+        let decision_tree = sla_subtable.decision_tree.clone().ok_or_else(|| {
+            anyhow!(
+                "compiled .sla subtable {} ({}) has no decision tree",
+                name,
+                sla_subtable.id
+            )
+        })?;
 
         compiled.subtables.insert(
             name.clone(),
@@ -332,7 +329,7 @@ pub fn build_frontend_from_sla_native_model(
         })
         .collect();
 
-    updated
+    Ok(updated)
 }
 
 fn constructors_by_sla_id(constructors: &[CompiledExecutableConstructor]) -> BTreeMap<u32, usize> {
