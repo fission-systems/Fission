@@ -133,6 +133,19 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
     u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
 }
 
+fn exported_fixed_handle_needs_memory_display_fixup(value: &BoundOperand) -> bool {
+    matches!(
+        value,
+        BoundOperand::Memory {
+            base: None,
+            index: None,
+            rip_relative: false,
+            absolute: Some(_),
+            ..
+        }
+    )
+}
+
 #[cfg(test)]
 mod construct_state_offset_tests {
     use crate::compiler::{compile_x86_64_frontend, discovery};
@@ -353,7 +366,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             return Ok(None);
         };
         let fixed = self.fixed_handle_from_handle_tpl(&export_tpl, handles)?;
-        let value = display_operand_from_exported_fixed_handle(&fixed)?;
+        let fixed_value = display_operand_from_exported_fixed_handle(&fixed)?;
+        let value = if exported_fixed_handle_needs_memory_display_fixup(&fixed_value) {
+            fixed_value
+        } else {
+            self.display_operand_from_exported_display_template(handles)
+                .transpose()?
+                .unwrap_or(fixed_value)
+        };
         Ok(Some(RuntimeHandle {
             operand_index: usize::MAX,
             spec: CompiledOperandSpec::SubtableEvaluation {
@@ -365,6 +385,37 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             debug_value: Some(value),
             subtable_state: None,
         }))
+    }
+
+    fn display_operand_from_exported_display_template(
+        &self,
+        handles: &[RuntimeHandle],
+    ) -> Option<Result<BoundOperand>> {
+        let template = &self.selection.constructor.display_template;
+        let mut operand_indices = if let Some(flowthru_index) = template.flowthru_operand_index {
+            vec![flowthru_index]
+        } else {
+            template
+                .pieces
+                .iter()
+                .filter_map(|piece| match piece {
+                    crate::compiler::CompiledDisplayPiece::OperandRef(index) => Some(*index),
+                    crate::compiler::CompiledDisplayPiece::Literal(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        operand_indices.sort_unstable();
+        operand_indices.dedup();
+        let mut referenced_values = operand_indices
+            .into_iter()
+            .filter_map(|index| handles.get(index))
+            .filter_map(|handle| handle.debug_value.clone())
+            .collect::<Vec<_>>();
+        if referenced_values.len() == 1 {
+            Some(Ok(referenced_values.remove(0)))
+        } else {
+            None
+        }
     }
 
     fn fixed_handle_from_handle_tpl(
