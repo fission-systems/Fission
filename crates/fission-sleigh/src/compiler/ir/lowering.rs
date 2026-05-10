@@ -514,24 +514,28 @@ impl Collector {
                     source: definition.source.clone(),
                 }),
                 "token" => {
-                    let name = definition_name(&definition.statement);
-                    let info = self.field_info.get(&name);
-                    token_fields.push(CompiledTokenField {
-                        name,
-                        bit_offset: info.map(|i| i.bit_offset).unwrap_or(0),
-                        bit_width: info.map(|i| i.bit_width).unwrap_or(0),
-                        source: definition.source.clone(),
-                    })
+                    for (name, info) in
+                        parse_define_bit_ranges(&definition.statement, FieldKind::Instruction)
+                    {
+                        token_fields.push(CompiledTokenField {
+                            name,
+                            bit_offset: info.bit_offset,
+                            bit_width: info.bit_width,
+                            source: definition.source.clone(),
+                        })
+                    }
                 }
                 "context" => {
-                    let name = definition_name(&definition.statement);
-                    let info = self.field_info.get(&name);
-                    context_fields.push(CompiledContextField {
-                        name,
-                        bit_offset: info.map(|i| i.bit_offset).unwrap_or(0),
-                        bit_width: info.map(|i| i.bit_width).unwrap_or(0),
-                        source: definition.source.clone(),
-                    })
+                    for (name, info) in
+                        parse_define_bit_ranges(&definition.statement, FieldKind::Context)
+                    {
+                        context_fields.push(CompiledContextField {
+                            name,
+                            bit_offset: info.bit_offset,
+                            bit_width: info.bit_width,
+                            source: definition.source.clone(),
+                        })
+                    }
                 }
                 "table" => subtables.push(CompiledSubtable {
                     name: definition_name(&definition.statement),
@@ -971,65 +975,73 @@ impl Collector {
     }
 
     pub(super) fn parse_define_bits(&mut self, statement: &str, kind_str: &str) {
-        let trimmed = strip_comments(statement).trim();
         let kind = match kind_str {
             "token" => FieldKind::Instruction,
             "context" => FieldKind::Context,
             _ => return,
         };
-        let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
-        let start_pos = if trimmed[..first_line_end].contains('(') {
-            if let Some(pos) = trimmed.find(')') {
-                pos + 1
+        for (name, info) in parse_define_bit_ranges(statement, kind) {
+            self.field_info.insert(name, info);
+        }
+    }
+}
+
+fn parse_define_bit_ranges(statement: &str, kind: FieldKind) -> Vec<(String, FieldBitRange)> {
+    let trimmed = strip_comments(statement).trim();
+    let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let start_pos = if trimmed[..first_line_end].contains('(') {
+        if let Some(pos) = trimmed.find(')') {
+            pos + 1
+        } else {
+            return Vec::new();
+        }
+    } else {
+        first_line_end
+    };
+    let fields_str = trimmed[start_pos..].trim_end_matches(';');
+    let mut ranges = Vec::new();
+    for (pos, _) in fields_str.match_indices('(') {
+        let left = fields_str[..pos].trim();
+        let name = if let Some(last) = left.split_whitespace().last() {
+            let n = last.trim_end_matches('=').trim();
+            if n.is_empty() {
+                left.split_whitespace().rev().nth(1).unwrap_or("")
             } else {
-                return;
+                n
             }
         } else {
-            first_line_end
+            ""
         };
-        let fields_str = trimmed[start_pos..].trim_end_matches(';');
-        for (pos, _) in fields_str.match_indices('(') {
-            let left = fields_str[..pos].trim();
-            let name = if let Some(last) = left.split_whitespace().last() {
-                let n = last.trim_end_matches('=').trim();
-                if n.is_empty() {
-                    left.split_whitespace().rev().nth(1).unwrap_or("")
+        if name.is_empty() || name == "endian" {
+            continue;
+        }
+        let right = &fields_str[pos + 1..];
+        if let Some(end_pos) = right.find(')') {
+            let range_part = &right[..end_pos];
+            if let Some((start_str, end_str)) = range_part.split_once(',') {
+                let Ok(start) = start_str.trim().parse::<u32>() else {
+                    continue;
+                };
+                let Ok(end) = end_str.trim().parse::<u32>() else {
+                    continue;
+                };
+                let (bit_offset, bit_width) = if start <= end {
+                    (start, end - start + 1)
                 } else {
-                    n
-                }
-            } else {
-                ""
-            };
-            if name.is_empty() || name == "endian" {
-                continue;
-            }
-            let right = &fields_str[pos + 1..];
-            if let Some(end_pos) = right.find(')') {
-                let range_part = &right[..end_pos];
-                if let Some((start_str, end_str)) = range_part.split_once(',') {
-                    let Ok(start) = start_str.trim().parse::<u32>() else {
-                        continue;
-                    };
-                    let Ok(end) = end_str.trim().parse::<u32>() else {
-                        continue;
-                    };
-                    let (bit_offset, bit_width) = if start <= end {
-                        (start, end - start + 1)
-                    } else {
-                        (end, start - end + 1)
-                    };
-                    self.field_info.insert(
-                        name.to_string(),
-                        FieldBitRange {
-                            bit_offset,
-                            bit_width,
-                            kind,
-                        },
-                    );
-                }
+                    (end, start - end + 1)
+                };
+                ranges.push((
+                    name.to_string(),
+                    FieldBitRange {
+                        bit_offset,
+                        bit_width,
+                        kind,
+                    },
+                ));
             }
         }
     }
+    ranges
 }
 
 fn define_bits_kind(line: &str) -> Option<&'static str> {

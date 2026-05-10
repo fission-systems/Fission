@@ -29,6 +29,24 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
         .any(|item| item.mnemonic.eq_ignore_ascii_case("RET")));
     assert!(!compiled.language_layout.address_spaces.is_empty());
     assert!(!compiled.language_layout.registers.is_empty());
+    assert!(!compiled.language_layout.token_fields.is_empty());
+    assert!(!compiled.language_layout.context_fields.is_empty());
+    assert!(
+        compiled
+            .language_layout
+            .token_fields
+            .iter()
+            .all(|field| field.bit_width > 0),
+        "token field layout must be sourced from define token ranges, not zero-filled"
+    );
+    assert!(
+        compiled
+            .language_layout
+            .context_fields
+            .iter()
+            .all(|field| field.bit_width > 0),
+        "context field layout must be sourced from define context ranges, not zero-filled"
+    );
     assert!(!compiled.language_layout.display_templates.is_empty());
     assert!(!compiled.construct_templates.is_empty());
     assert!(compiled
@@ -207,6 +225,8 @@ fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
         "checked_shl(info.bit_offset)\n                    .unwrap_or(0)",
         "value.checked_shl(end_bit).unwrap_or(0)",
         ".operand_minimum_lengths\n                        .get(operand_index)\n                        .copied()\n                        .unwrap_or(0)",
+        "info.map(|i| i.bit_offset).unwrap_or(0)",
+        "info.map(|i| i.bit_width).unwrap_or(0)",
     ] {
         assert!(
             !lowering.contains(forbidden),
