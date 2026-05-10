@@ -204,6 +204,7 @@ fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
         "start_str.trim().parse::<u32>().unwrap_or(0)",
         "end_str.trim().parse::<u32>().unwrap_or(0)",
         "value.checked_shl(info.bit_offset).unwrap_or(0)",
+        "checked_shl(info.bit_offset)\n                    .unwrap_or(0)",
         "value.checked_shl(end_bit).unwrap_or(0)",
         ".operand_minimum_lengths\n                        .get(operand_index)\n                        .copied()\n                        .unwrap_or(0)",
     ] {

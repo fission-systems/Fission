@@ -28,7 +28,7 @@ pub fn compile_frontend(
     };
 
     if let Ok(ast) = ast_result {
-        collector.collect_items(&ast.items, &mut Vec::new());
+        collector.collect_items(&ast.items, &mut Vec::new())?;
     }
     collector.collect_define_bits_from_expanded(&expanded.lines);
 
@@ -574,7 +574,11 @@ impl Collector {
             .collect()
     }
 
-    fn collect_items(&mut self, items: &[AstItem], with_stack: &mut Vec<WithContextFrame>) {
+    fn collect_items(
+        &mut self,
+        items: &[AstItem],
+        with_stack: &mut Vec<WithContextFrame>,
+    ) -> Result<()> {
         for item in items {
             match item {
                 AstItem::Define(definition) => {
@@ -629,18 +633,19 @@ impl Collector {
                     });
                 }
                 AstItem::Constructor(constructor) => {
-                    self.record_constructor(constructor, with_stack);
+                    self.record_constructor(constructor, with_stack)?;
                 }
                 AstItem::WithBlock(with) => {
                     with_stack.push(WithContextFrame {
                         header: with.header.clone(),
                     });
-                    self.collect_items(&with.items, with_stack);
+                    self.collect_items(&with.items, with_stack)?;
                     with_stack.pop();
                 }
                 AstItem::Raw(_) => {}
             }
         }
+        Ok(())
     }
 
     fn collect_define_bits_from_expanded(&mut self, lines: &[PreprocessedLine]) {
@@ -681,7 +686,7 @@ impl Collector {
         &mut self,
         constructor: &AstConstructor,
         with_stack: &[WithContextFrame],
-    ) {
+    ) -> Result<()> {
         // Hierarchical subtable name extraction
         let mut table_name = "instruction".to_string();
         for frame in with_stack {
@@ -742,7 +747,7 @@ impl Collector {
         }
         full_signature.push_str(&constructor.signature);
 
-        let context_changes = parse_context_changes(&full_signature, &self.field_info);
+        let context_changes = parse_context_changes(&full_signature, &self.field_info)?;
 
         self.constructors.push(CompiledConstructor {
             mnemonic: mnemonic.clone(),
@@ -774,6 +779,7 @@ impl Collector {
                 .or_default()
                 .push(executable);
         }
+        Ok(())
     }
 
     fn compile_executable_constructor(
@@ -1459,13 +1465,13 @@ fn parse_hidden_subtables(
 fn parse_context_changes(
     signature: &str,
     field_info: &BTreeMap<String, FieldBitRange>,
-) -> Vec<CompiledContextOp> {
+) -> Result<Vec<CompiledContextOp>> {
     let mut ops = Vec::new();
     let Some(start) = signature.find('[') else {
-        return ops;
+        return Ok(ops);
     };
     let Some(end_rel) = signature[start + 1..].find(']') else {
-        return ops;
+        return Ok(ops);
     };
     let block = &signature[start + 1..start + 1 + end_rel];
     for stmt in block.split(';') {
@@ -1489,18 +1495,51 @@ fn parse_context_changes(
             bit_width: info.bit_width,
             value,
             word_index: 0,
-            mask: if info.bit_width >= 64 {
-                u64::MAX
-            } else {
-                ((1u64 << info.bit_width) - 1)
-                    .checked_shl(info.bit_offset)
-                    .unwrap_or(0)
-            },
+            mask: context_change_mask(info)
+                .with_context(|| format!("lower context change for field {name:?}"))?,
             shift: info.bit_offset as i32,
             expr: None,
         });
     }
-    ops
+    Ok(ops)
+}
+
+fn context_change_mask(info: &FieldBitRange) -> Result<u64> {
+    if info.bit_width == 0 {
+        return Ok(0);
+    }
+    if info.bit_width > 64 {
+        return Err(anyhow!(
+            "context change bit width {} exceeds packed context width",
+            info.bit_width
+        ));
+    }
+    let end_bit = info.bit_offset.checked_add(info.bit_width).ok_or_else(|| {
+        anyhow!(
+            "context change bit range offset={} width={} overflows",
+            info.bit_offset,
+            info.bit_width
+        )
+    })?;
+    if end_bit > 64 {
+        return Err(anyhow!(
+            "context change bit range offset={} width={} exceeds packed context width",
+            info.bit_offset,
+            info.bit_width
+        ));
+    }
+    let field_mask = if info.bit_width == 64 {
+        u64::MAX
+    } else {
+        (1u64 << info.bit_width) - 1
+    };
+    field_mask.checked_shl(info.bit_offset).ok_or_else(|| {
+        anyhow!(
+            "context change bit range offset={} width={} exceeds packed context width",
+            info.bit_offset,
+            info.bit_width
+        )
+    })
 }
 
 fn parse_context_literal(text: &str) -> Option<u64> {
