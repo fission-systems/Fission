@@ -208,6 +208,25 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
 }
 
 #[test]
+fn legacy_source_context_changes_preserve_high_context_words() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for JVM context-word check");
+        return;
+    }
+
+    let entry_spec = spec_root_for_arch("JVM").join("JVM.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile JVM frontend");
+    let high_word_change = compiled
+        .constructors
+        .iter()
+        .flat_map(|constructor| &constructor.context_changes)
+        .find(|change| change.word_index == 3 && change.mask == 0x3000_0000)
+        .expect("JVM in_lookup_switch context change should preserve word 3 mask");
+    assert_eq!(high_word_change.bit_offset, 98);
+    assert_eq!(high_word_change.bit_width, 2);
+}
+
+#[test]
 fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
     let lowering = include_str!("lowering.rs");
     for forbidden in [

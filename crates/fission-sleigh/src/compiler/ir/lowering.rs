@@ -1494,23 +1494,17 @@ fn parse_context_changes(
         let Some(value) = parse_context_literal(rhs) else {
             continue;
         };
-        ops.push(CompiledContextOp {
-            bit_offset: info.bit_offset,
-            bit_width: info.bit_width,
-            value,
-            word_index: 0,
-            mask: context_change_mask(info)
+        ops.extend(
+            context_change_ops(info, value)
                 .with_context(|| format!("lower context change for field {name:?}"))?,
-            shift: info.bit_offset as i32,
-            expr: None,
-        });
+        );
     }
     Ok(ops)
 }
 
-fn context_change_mask(info: &FieldBitRange) -> Result<u64> {
+fn context_change_ops(info: &FieldBitRange, value: u64) -> Result<Vec<CompiledContextOp>> {
     if info.bit_width == 0 {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     if info.bit_width > 64 {
         return Err(anyhow!(
@@ -1526,24 +1520,62 @@ fn context_change_mask(info: &FieldBitRange) -> Result<u64> {
         )
     })?;
     if end_bit > 64 {
-        return Err(anyhow!(
-            "context change bit range offset={} width={} exceeds packed context width",
-            info.bit_offset,
-            info.bit_width
-        ));
+        return context_change_word_ops(info, value);
     }
     let field_mask = if info.bit_width == 64 {
         u64::MAX
     } else {
         (1u64 << info.bit_width) - 1
     };
-    field_mask.checked_shl(info.bit_offset).ok_or_else(|| {
+    let mask = field_mask.checked_shl(info.bit_offset).ok_or_else(|| {
         anyhow!(
             "context change bit range offset={} width={} exceeds packed context width",
             info.bit_offset,
             info.bit_width
         )
-    })
+    })?;
+    Ok(vec![CompiledContextOp {
+        bit_offset: info.bit_offset,
+        bit_width: info.bit_width,
+        value,
+        word_index: info.bit_offset / 32,
+        mask,
+        shift: info.bit_offset as i32,
+        expr: None,
+    }])
+}
+
+fn context_change_word_ops(info: &FieldBitRange, value: u64) -> Result<Vec<CompiledContextOp>> {
+    let mut ops = Vec::new();
+    let mut remaining = info.bit_width;
+    let mut word_index = info.bit_offset / 32;
+    let mut bit_offset = info.bit_offset % 32;
+    let mut absolute_bit_offset = info.bit_offset;
+    while remaining > 0 {
+        let chunk_bits = remaining.min(32 - bit_offset);
+        let chunk_mask = if chunk_bits >= 32 {
+            u32::MAX
+        } else {
+            (1u32 << chunk_bits) - 1
+        };
+        let word_shift = 32 - chunk_bits - bit_offset;
+        let value_shift = remaining - chunk_bits;
+        let chunk_value = ((value >> value_shift) as u32) & chunk_mask;
+        ops.push(CompiledContextOp {
+            bit_offset: absolute_bit_offset,
+            bit_width: chunk_bits,
+            value: u64::from(chunk_value << word_shift),
+            word_index,
+            mask: u64::from(chunk_mask << word_shift),
+            shift: word_shift as i32,
+            expr: None,
+        });
+        remaining -= chunk_bits;
+        absolute_bit_offset += chunk_bits;
+        word_index += 1;
+        bit_offset = 0;
+    }
+    Ok(ops)
 }
 
 fn parse_context_literal(text: &str) -> Option<u64> {

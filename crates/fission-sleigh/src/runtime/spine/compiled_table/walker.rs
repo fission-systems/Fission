@@ -1022,6 +1022,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             }
             Ok(())
         } else {
+            if change.bit_offset >= 64 {
+                set_packed_context_word(
+                    &mut self.context_register,
+                    change.word_index,
+                    change.value as u32,
+                    change.mask as u32,
+                )?;
+                set_packed_context_word(
+                    &mut self.context_known_mask,
+                    change.word_index,
+                    change.mask as u32,
+                    change.mask as u32,
+                )?;
+                return Ok(());
+            }
             let field_mask = if change.bit_width >= 64 {
                 u64::MAX
             } else {
