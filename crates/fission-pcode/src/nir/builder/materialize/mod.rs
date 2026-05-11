@@ -448,12 +448,82 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
+        } else if let Some(name) =
+            self.merge_binding_name_for_materialized_output(block, op_idx, output, &rhs)
+        {
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
         } else {
             self.ensure_temp_binding_for_output(op, output, preserve_materialization)
                 .name
         };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    fn merge_binding_name_for_materialized_output(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<String> {
+        let block_idx = self.lowering_block_index(block);
+        let key = VarnodeKey::from(output);
+        for succ_idx in self.successors.get(block_idx)? {
+            if let Some(name) = self.explicit_merge_bindings.get(&(*succ_idx, key.clone())) {
+                return Some(name.clone());
+            }
+        }
+
+        let proof = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)?;
+        if !self.duplicate_start_merge_block(proof.merge_block)
+            || !proof.can_synthesize_phi_like_binding
+            || proof.predecessor_count != 2
+            || proof.missing_incoming_count != 0
+            || proof.conflicting_incoming_count != 1
+            || proof.consumer_kind != DisallowedSingleConsumerConsumerKind::OtherData
+        {
+            return None;
+        }
+        let (merge_idx, merge_addr, _, _) =
+            self.first_output_use_site_outside_block_by_index(block_idx, output)?;
+        if merge_addr != proof.merge_block
+            || !self
+                .successors
+                .get(block_idx)
+                .is_some_and(|succs| succs.contains(&merge_idx))
+        {
+            return None;
+        }
+        let binding = self.ensure_explicit_merge_binding_for_block(merge_idx, output);
+        self.trace_explicit_merge_binding_trial(
+            proof.merge_block,
+            output,
+            &[],
+            &[],
+            &proof.incoming_value_kinds,
+            proof.rhs_kind,
+            &binding.name,
+            true,
+            ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
+        );
+        Some(binding.name)
+    }
+
+    fn duplicate_start_merge_block(&self, merge_block: u64) -> bool {
+        self.pcode
+            .blocks
+            .iter()
+            .filter(|block| block.start_address == merge_block)
+            .take(2)
+            .count()
+            >= 2
     }
 
     fn output_used_only_as_stack_return_target(
@@ -786,8 +856,20 @@ impl<'a> PreviewBuilder<'a> {
         if self.output_has_nonlocal_use(block, op_idx, output) {
             let rejection_reason =
                 self.classify_nonlocal_materialization_rejection_reason(block, op_idx, output, rhs);
+            let duplicate_start_merge_candidate = || {
+                self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)
+                    .is_some_and(|proof| {
+                        self.duplicate_start_merge_block(proof.merge_block)
+                            && proof.can_synthesize_phi_like_binding
+                            && proof.predecessor_count == 2
+                            && proof.missing_incoming_count == 0
+                            && proof.conflicting_incoming_count == 1
+                            && proof.consumer_kind
+                                == DisallowedSingleConsumerConsumerKind::OtherData
+                    })
+            };
             if rejection_reason == MaterializationRejectionReason::MissingMergeBinding
-                && Self::explicit_merge_binding_enabled()
+                && (Self::explicit_merge_binding_enabled() || duplicate_start_merge_candidate())
             {
                 match self.describe_explicit_merge_binding_trial(block, op_idx, output, rhs) {
                     Ok(proof) => {
@@ -983,6 +1065,8 @@ mod tests {
     use crate::nir::builder::materialize::test_support::{
         block, block_at, constant, op, pcode_function,
     };
+    use crate::nir::render_mlil_preview;
+    use crate::PcodeBasicBlock;
 
     fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -1157,5 +1241,100 @@ mod tests {
         assert_eq!(site.block_idx, 0);
         assert_eq!(site.op_idx, 0);
         assert_eq!(producer.seq_num, 0);
+    }
+
+    #[test]
+    fn duplicate_start_join_uses_shared_merge_binding_for_conflicting_defs() {
+        fn op_at(
+            seq_num: u32,
+            address: u64,
+            opcode: PcodeOpcode,
+            output: Option<Varnode>,
+            inputs: Vec<Varnode>,
+        ) -> PcodeOp {
+            PcodeOp {
+                seq_num,
+                opcode,
+                address,
+                output,
+                inputs,
+                asm_mnemonic: None,
+            }
+        }
+
+        let merge = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x82b00, 4);
+        let param = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let denom = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4);
+        let cond = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x82c00, 1);
+        let w0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let x30 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x40f0, 8);
+        let ret_target = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![
+                    op_at(
+                        0,
+                        0x1000,
+                        PcodeOpcode::Copy,
+                        Some(merge.clone()),
+                        vec![Varnode::constant(0, 4)],
+                    ),
+                    op_at(
+                        1,
+                        0x1000,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![Varnode::constant(2, 8), cond],
+                    ),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![op_at(
+                    2,
+                    0x1010,
+                    PcodeOpcode::IntDiv,
+                    Some(merge.clone()),
+                    vec![param, denom],
+                )],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1010,
+                successors: Vec::new(),
+                ops: vec![
+                    op_at(
+                        3,
+                        0x1010,
+                        PcodeOpcode::IntAdd,
+                        Some(w0),
+                        vec![merge, Varnode::constant(5, 4)],
+                    ),
+                    op_at(
+                        4,
+                        0x1014,
+                        PcodeOpcode::Copy,
+                        Some(ret_target),
+                        vec![x30.clone()],
+                    ),
+                    op_at(5, 0x1014, PcodeOpcode::Return, None, vec![x30]),
+                ],
+            },
+        ]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let code =
+            render_mlil_preview(&pcode, "duplicate_merge", 0x1000, &options).expect("render");
+        assert!(code.contains("if ("), "{code}");
+        assert!(code.contains(" / "), "{code}");
+        assert!(code.contains(" + 5"), "{code}");
     }
 }
