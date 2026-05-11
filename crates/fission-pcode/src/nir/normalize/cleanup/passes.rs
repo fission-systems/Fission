@@ -644,6 +644,57 @@ mod tests {
         };
         assert!(!expr_contains_var(rhs, "xVar0"));
     }
+
+    #[test]
+    fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar0".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__sborrow".to_string(),
+                    args: vec![
+                        HirExpr::Var("param_1".to_string()),
+                        HirExpr::Const(1, int(32)),
+                    ],
+                    ty: NirType::Bool,
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("xVar0".to_string()),
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            },
+        ];
+
+        assert!(inline_single_use_temps(&mut stmts, &HashSet::new()));
+        assert_eq!(stmts.len(), 1);
+        let HirStmt::If { cond, .. } = &stmts[0] else {
+            panic!("expected if");
+        };
+        assert!(matches!(cond, HirExpr::Call { target, .. } if target == "__sborrow"));
+    }
+
+    #[test]
+    fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar0".to_string()),
+                rhs: HirExpr::Call {
+                    target: "unknown_helper".to_string(),
+                    args: vec![HirExpr::Var("param_1".to_string())],
+                    ty: int(32),
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("xVar0".to_string()),
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            },
+        ];
+
+        assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+        assert_eq!(stmts.len(), 2);
+    }
 }
 
 fn next_adjacent_label_name(stmts: &[HirStmt], start_idx: usize) -> Option<String> {
@@ -1098,6 +1149,9 @@ fn is_trivial_temp_name(name: &str) -> bool {
 fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
+            args.iter().all(expr_is_low_cost_inline_candidate)
+        }
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             expr_is_low_cost_inline_candidate(expr)
         }
@@ -1130,6 +1184,9 @@ fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Var(_) | HirExpr::Const(_, _) => false,
         HirExpr::Cast { expr, .. } => expr_prefers_stable_materialization(expr),
+        HirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
+            args.iter().any(expr_prefers_stable_materialization)
+        }
         HirExpr::Unary { .. }
         | HirExpr::Load { .. }
         | HirExpr::PtrOffset { .. }
@@ -1157,6 +1214,10 @@ fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
                 | HirBinaryOp::SLe
         ),
     }
+}
+
+fn is_low_cost_flag_intrinsic(target: &str) -> bool {
+    matches!(target, "__carry" | "__scarry" | "__sborrow")
 }
 
 fn is_dead_local_clobber_name(name: &str) -> bool {

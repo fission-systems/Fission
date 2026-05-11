@@ -524,6 +524,236 @@ fn promote_return_signedness_from_returns(func: &mut HirFunction) -> bool {
     }
 }
 
+fn count_var_uses_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
+    match expr {
+        HirExpr::Var(name) => {
+            *out.entry(name.clone()).or_default() += 1;
+        }
+        HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => count_var_uses_expr(expr, out),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            count_var_uses_expr(lhs, out);
+            count_var_uses_expr(rhs, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                count_var_uses_expr(arg, out);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            count_var_uses_expr(base, out);
+            count_var_uses_expr(index, out);
+        }
+    }
+}
+
+fn count_var_uses_lvalue(lhs: &HirLValue, out: &mut HashMap<String, usize>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => count_var_uses_expr(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            count_var_uses_expr(base, out);
+            count_var_uses_expr(index, out);
+        }
+    }
+}
+
+fn count_var_uses_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            count_var_uses_lvalue(lhs, out);
+            count_var_uses_expr(rhs, out);
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => {
+            count_var_uses_expr(va_list, out);
+        }
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => count_var_uses_stmts(stmts, out),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            count_var_uses_expr(cond, out);
+            count_var_uses_stmts(then_body, out);
+            count_var_uses_stmts(else_body, out);
+        }
+        HirStmt::For {
+            init, cond, update, ..
+        } => {
+            if let Some(init) = init {
+                count_var_uses_stmt(init, out);
+            }
+            if let Some(cond) = cond {
+                count_var_uses_expr(cond, out);
+            }
+            if let Some(update) = update {
+                count_var_uses_stmt(update, out);
+            }
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            count_var_uses_expr(expr, out);
+            for case in cases {
+                count_var_uses_stmts(&case.body, out);
+            }
+            count_var_uses_stmts(default, out);
+        }
+        HirStmt::Return(Some(expr)) => count_var_uses_expr(expr, out),
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn count_var_uses_stmts(stmts: &[HirStmt], out: &mut HashMap<String, usize>) {
+    for stmt in stmts {
+        count_var_uses_stmt(stmt, out);
+    }
+}
+
+fn wrapping_narrow_op(op: HirBinaryOp) -> bool {
+    matches!(
+        op,
+        HirBinaryOp::Add
+            | HirBinaryOp::Sub
+            | HirBinaryOp::Mul
+            | HirBinaryOp::And
+            | HirBinaryOp::Or
+            | HirBinaryOp::Xor
+    )
+}
+
+fn collect_wrapping_narrow_return_vars(
+    expr: &HirExpr,
+    context_bits: u32,
+    out: &mut HashMap<String, usize>,
+) {
+    match expr {
+        HirExpr::Var(name) => {
+            *out.entry(name.clone()).or_default() += 1;
+        }
+        HirExpr::Cast { ty, expr } => {
+            let bits = nir_type_bits(ty).unwrap_or(context_bits).min(context_bits);
+            collect_wrapping_narrow_return_vars(expr, bits, out);
+        }
+        HirExpr::Unary {
+            op: HirUnaryOp::Neg,
+            expr,
+            ..
+        } => collect_wrapping_narrow_return_vars(expr, context_bits, out),
+        HirExpr::Binary { op, lhs, rhs, .. } if wrapping_narrow_op(*op) => {
+            collect_wrapping_narrow_return_vars(lhs, context_bits, out);
+            collect_wrapping_narrow_return_vars(rhs, context_bits, out);
+        }
+        HirExpr::Const(_, _)
+        | HirExpr::Unary { .. }
+        | HirExpr::Binary { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::Load { .. }
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::Index { .. }
+        | HirExpr::AggregateCopy { .. } => {}
+    }
+}
+
+fn collect_wrapping_narrow_return_vars_stmt(
+    stmt: &HirStmt,
+    return_bits: u32,
+    out: &mut HashMap<String, usize>,
+) {
+    match stmt {
+        HirStmt::Return(Some(expr)) => collect_wrapping_narrow_return_vars(expr, return_bits, out),
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => {
+            collect_wrapping_narrow_return_vars_stmts(stmts, return_bits, out)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_wrapping_narrow_return_vars_stmts(then_body, return_bits, out);
+            collect_wrapping_narrow_return_vars_stmts(else_body, return_bits, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_wrapping_narrow_return_vars_stmts(&case.body, return_bits, out);
+            }
+            collect_wrapping_narrow_return_vars_stmts(default, return_bits, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_wrapping_narrow_return_vars_stmts(
+    stmts: &[HirStmt],
+    return_bits: u32,
+    out: &mut HashMap<String, usize>,
+) {
+    for stmt in stmts {
+        collect_wrapping_narrow_return_vars_stmt(stmt, return_bits, out);
+    }
+}
+
+fn narrow_integer_params_from_wrapping_return_uses(func: &mut HirFunction) -> bool {
+    let NirType::Int {
+        bits: return_bits,
+        signed: return_signed,
+    } = &func.return_type
+    else {
+        return false;
+    };
+    let return_bits = *return_bits;
+    let return_signed = *return_signed;
+    if return_bits >= 64 {
+        return false;
+    }
+
+    let mut all_uses = HashMap::new();
+    count_var_uses_stmts(&func.body, &mut all_uses);
+    let mut constrained_uses = HashMap::new();
+    collect_wrapping_narrow_return_vars_stmts(&func.body, return_bits, &mut constrained_uses);
+
+    let mut changed = false;
+    for binding in &mut func.params {
+        if binding.surface_type_name.is_some() {
+            continue;
+        }
+        if !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_))) {
+            continue;
+        }
+        let NirType::Int { bits, .. } = binding.ty else {
+            continue;
+        };
+        if bits <= return_bits {
+            continue;
+        }
+        let all = all_uses.get(&binding.name).copied().unwrap_or(0);
+        let constrained = constrained_uses.get(&binding.name).copied().unwrap_or(0);
+        if all > 0 && all == constrained {
+            binding.ty = NirType::Int {
+                bits: return_bits,
+                signed: return_signed,
+            };
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Merge a `UseConstraint` into a binding, returning `true` if the type changed.
 ///
 /// The merge is monotone: types only move from weaker to stronger:
@@ -640,6 +870,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
             }
         }
         round_changed |= promote_return_signedness_from_returns(func);
+        round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         if !round_changed {
             break;
         }
@@ -810,6 +1041,74 @@ mod tests {
         assert_eq!(func.params[0].ty, signed_i32);
         assert_eq!(func.params[1].ty, signed_i32);
         assert_eq!(func.return_type, signed_i32);
+    }
+
+    #[test]
+    fn wrapping_return_use_narrows_wide_integer_params() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "add32".to_owned(),
+            params: vec![
+                make_typed_binding("param_1", u64_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("param_2", u64_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: u32_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("param_1".to_owned())),
+                rhs: Box::new(HirExpr::Var("param_2".to_owned())),
+                ty: u64_ty,
+            }))],
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, u32_ty);
+        assert_eq!(func.params[1].ty, u32_ty);
+    }
+
+    #[test]
+    fn wrapping_return_use_does_not_narrow_param_with_unconstrained_use() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "add32_with_call".to_owned(),
+            params: vec![make_typed_binding(
+                "param_1",
+                u64_ty.clone(),
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            locals: vec![],
+            return_type: u32_ty,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Call {
+                    target: "observe64".to_owned(),
+                    args: vec![HirExpr::Var("param_1".to_owned())],
+                    ty: NirType::Unknown,
+                }),
+                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, u64_ty);
     }
 
     #[test]
