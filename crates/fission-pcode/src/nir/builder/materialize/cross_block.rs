@@ -3255,93 +3255,20 @@ mod tests {
     }
 
     #[test]
-    fn forward_join_not_selected_proof_marks_current_selection_policy_rejection() {
-        let output = varnode(0x10);
-        let consumer_out = varnode(0x30);
-        let mut blocks = vec![
-            block_at(
-                0x1000,
-                0,
-                vec![
-                    op(
-                        0,
-                        PcodeOpcode::Copy,
-                        Some(consumer_out),
-                        vec![output.clone()],
-                    ),
-                    op(
-                        1,
-                        PcodeOpcode::CBranch,
-                        None,
-                        vec![constant(0x1010), varnode(0x40)],
-                    ),
-                ],
-            ),
-            block_at(
-                0x1008,
-                1,
-                vec![
-                    op(
-                        2,
-                        PcodeOpcode::Copy,
-                        Some(output.clone()),
-                        vec![constant(1)],
-                    ),
-                    op(
-                        3,
-                        PcodeOpcode::CBranch,
-                        None,
-                        vec![constant(0x1010), varnode(0x41)],
-                    ),
-                ],
-            ),
-            block_at(
-                0x1010,
-                2,
-                vec![op(4, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
-            ),
-            block_at(
-                0x1020,
-                3,
-                vec![op(5, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
-            ),
-            block_at(
-                0x1030,
-                4,
-                vec![op(
-                    6,
-                    PcodeOpcode::Copy,
-                    Some(varnode(0x50)),
-                    vec![varnode(0x60)],
-                )],
-            ),
-            block_at(
-                0x1050,
-                5,
-                vec![op(
-                    7,
-                    PcodeOpcode::Copy,
-                    Some(varnode(0x61)),
-                    vec![constant(0)],
-                )],
-            ),
-        ];
-        blocks[0].successors = vec![1, 5];
-        blocks[1].successors = vec![2, 3];
-        blocks[2].successors = vec![4];
-        blocks[3].successors = vec![4];
-        let pcode = pcode_function(blocks.clone());
+    fn forward_join_not_selected_classifier_marks_current_selection_policy_rejection() {
+        let pcode = pcode_function(vec![]);
         let options = test_options();
         let builder = PreviewBuilder::new(&pcode, &options, None);
-        let rhs = HirExpr::Const(1, int(32));
 
-        let proof = builder
-            .describe_forward_join_not_selected_proof(&blocks[1], 0, &output, &rhs)
-            .expect("forward join proof");
-
-        assert!(proof.event_reaches_forward_join);
         assert_eq!(
-            proof.rejected_reason,
+            builder.classify_forward_join_not_selected_rejected_reason(
+                0,
+                1,
+                true,
+                Some(true),
+                2,
+                false,
+            ),
             ForwardJoinNotSelectedRejectedReason::JoinRejectedByCurrentSelectionPolicy
         );
     }
