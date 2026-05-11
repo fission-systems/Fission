@@ -6,8 +6,9 @@ use super::super::analysis::preservation::preserved_materialization_names;
 use super::super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
-    normalize_boolean_logic, recognize_hi_lo_extract, recognize_magic_number_division,
-    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, simplify_subpiece_chain,
+    normalize_boolean_logic, recognize_compiler_runtime_division, recognize_hi_lo_extract,
+    recognize_magic_number_division, recognize_mod_div_power_of_two,
+    recognize_wide_integer_recombine, simplify_subpiece_chain,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
@@ -1871,6 +1872,7 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
     let mut current = expr.clone();
     loop {
         let next = canonicalize_integer_expr(&current)
+            .or_else(|| recognize_compiler_runtime_division(&current))
             .or_else(|| recognize_mod_div_power_of_two(&current))
             .or_else(|| recognize_magic_number_division(&current))
             .or_else(|| recognize_hi_lo_extract(&current))

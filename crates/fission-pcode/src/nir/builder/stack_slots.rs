@@ -109,23 +109,53 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(super) fn read_readonly_scalar_from_binary(&self, address: u64, size: u32) -> Option<u64> {
+        if self.options.relocation_names.contains_key(&address)
+            || self.options.global_names.contains_key(&address)
+        {
+            return None;
+        }
+        self.read_scalar_from_binary(address, size, true)
+    }
+
     fn read_pointer_from_binary(&self, address: u64) -> Option<u64> {
+        self.read_scalar_from_binary(address, self.options.pointer_size, false)
+    }
+
+    fn read_scalar_from_binary(
+        &self,
+        address: u64,
+        size: u32,
+        require_readonly: bool,
+    ) -> Option<u64> {
         let binary = self.binary?;
-        let pointer_size = self.options.pointer_size as usize;
+        let size = size as usize;
         let section = binary.inner().sections.iter().find(|section| {
             let start = section.virtual_address;
             start
                 .checked_add(section.file_size.min(section.virtual_size))
                 .is_some_and(|end| (start..end).contains(&address))
         })?;
+        if require_readonly && section.is_writable {
+            return None;
+        }
         let offset_in_section = address.checked_sub(section.virtual_address)?;
         let file_offset = section.file_offset.checked_add(offset_in_section)? as usize;
         let bytes = binary.inner().data.as_slice();
-        let raw = bytes.get(file_offset..file_offset.checked_add(pointer_size)?)?;
+        let raw = bytes.get(file_offset..file_offset.checked_add(size)?)?;
         let is_big_endian = binary
             .sleigh_language_id()
             .is_some_and(|language_id| language_id.contains(":BE:"));
-        match pointer_size {
+        match size {
+            1 => raw.first().copied().map(u64::from),
+            2 => {
+                let arr: [u8; 2] = raw.try_into().ok()?;
+                Some(if is_big_endian {
+                    u16::from_be_bytes(arr)
+                } else {
+                    u16::from_le_bytes(arr)
+                } as u64)
+            }
             4 => {
                 let arr: [u8; 4] = raw.try_into().ok()?;
                 Some(if is_big_endian {
@@ -146,7 +176,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn resolve_global_address(&self, ptr: &Varnode, budget: usize) -> Option<u64> {
+    pub(super) fn resolve_global_address(&self, ptr: &Varnode, budget: usize) -> Option<u64> {
         if ptr.is_constant {
             return if ptr.offset != 0 {
                 Some(ptr.offset)

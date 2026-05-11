@@ -13,7 +13,10 @@ pub(crate) use cleanup_shifts::{
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
     simplify_subpiece_chain,
 };
-pub(crate) use div_mod::{recognize_magic_number_division, recognize_mod_div_power_of_two};
+pub(crate) use div_mod::{
+    recognize_compiler_runtime_division, recognize_magic_number_division,
+    recognize_mod_div_power_of_two,
+};
 pub(crate) use flags_cond::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, normalize_boolean_logic,
 };

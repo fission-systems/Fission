@@ -440,7 +440,9 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         let target = if let Some(target) = op.inputs.first() {
-            if let Some(name) = self.resolve_constant_call_target_name(op, target) {
+            if let Some(name) = self.resolve_relocation_call_target_name(op) {
+                name
+            } else if let Some(name) = self.resolve_constant_call_target_name(op, target) {
                 name
             } else {
                 match self.lower_varnode(target, visiting) {
@@ -579,6 +581,13 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|out| type_from_size(out.size, false))
                 .unwrap_or(NirType::Unknown),
         })
+    }
+
+    fn resolve_relocation_call_target_name(&mut self, op: &PcodeOp) -> Option<String> {
+        if !matches!(op.opcode, PcodeOpcode::Call) {
+            return None;
+        }
+        self.options.relocation_names.get(&op.address).cloned()
     }
 
     fn resolve_constant_call_target_name(
@@ -1159,6 +1168,13 @@ impl<'a> PreviewBuilder<'a> {
                     type_from_size(out.size, false),
                 ) {
                     Ok(HirExpr::Var(slot_name))
+                } else if let Some(addr) = self.resolve_global_address(&op.inputs[1], 16)
+                    && let Some(value) = self.read_readonly_scalar_from_binary(addr, out.size)
+                {
+                    Ok(HirExpr::Const(
+                        value as i64,
+                        type_from_size(out.size, false),
+                    ))
                 } else {
                     Ok(HirExpr::Load {
                         ptr: Box::new(self.lower_varnode(&op.inputs[1], visiting)?),

@@ -308,6 +308,63 @@ fn preview_call_target_refs_resolve_direct_import_call_target() {
 }
 
 #[test]
+fn preview_call_target_uses_relocation_symbol_for_direct_placeholder_call() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x10002c,
+                    output: None,
+                    inputs: vec![Varnode {
+                        space_id: 3,
+                        offset: 0x10002c,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }],
+                    asm_mnemonic: Some("bl 0x10002c".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100030,
+                    output: None,
+                    inputs: vec![cst(1, 4)],
+                    asm_mnemonic: Some("bx lr".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut options = preview_options();
+    options.pe_x64_only = false;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "ELF32".to_string();
+    options.calling_convention = CallingConvention::Arm32;
+    options
+        .relocation_names
+        .insert(0x10002c, "__aeabi_uidiv".to_string());
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "run_mathematics",
+        0x100000,
+        &options,
+        Some(&PreviewTypeContext::default()),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("__aeabi_uidiv()"), "{rendered}");
+    assert!(!rendered.contains("sub_10002c"), "{rendered}");
+}
+
+#[test]
 fn preview_call_target_refs_resolve_direct_symbol_call_target() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

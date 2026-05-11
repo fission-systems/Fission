@@ -8,6 +8,45 @@ pub(crate) fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> 
         .or_else(|| normalize_unsigned_power_of_two_div(expr))
 }
 
+pub(crate) fn recognize_compiler_runtime_division(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Call {
+        target, args, ty, ..
+    } = expr
+    else {
+        return None;
+    };
+    let (op, signed) = match target.as_str() {
+        "__aeabi_uidiv" | "__aeabi_uidivmod" => (HirBinaryOp::Div, false),
+        "__aeabi_idiv" | "__aeabi_idivmod" => (HirBinaryOp::Div, true),
+        _ => return None,
+    };
+    if args.len() < 2 {
+        return None;
+    }
+    let bits = match ty {
+        NirType::Int { bits, .. } => *bits,
+        _ => 32,
+    };
+    Some(HirExpr::Binary {
+        op,
+        lhs: Box::new(cast_runtime_div_arg(args[0].clone(), bits, signed)),
+        rhs: Box::new(cast_runtime_div_arg(args[1].clone(), bits, signed)),
+        ty: NirType::Int { bits, signed },
+    })
+}
+
+fn cast_runtime_div_arg(expr: HirExpr, bits: u32, signed: bool) -> HirExpr {
+    let target_ty = NirType::Int { bits, signed };
+    if expr_type(&expr) == target_ty {
+        expr
+    } else {
+        HirExpr::Cast {
+            ty: target_ty,
+            expr: Box::new(expr),
+        }
+    }
+}
+
 fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Binary {
         op: HirBinaryOp::And,
@@ -517,4 +556,49 @@ pub(crate) fn recognize_magic_number_division(expr: &HirExpr) -> Option<HirExpr>
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(name: &str) -> HirExpr {
+        HirExpr::Var(name.to_string())
+    }
+
+    #[test]
+    fn recognizes_arm_eabi_unsigned_division_helper() {
+        let expr = HirExpr::Call {
+            target: "__aeabi_uidiv".to_string(),
+            args: vec![var("numerator"), var("denominator"), var("dead_r2")],
+            ty: NirType::Unknown,
+        };
+
+        let normalized = recognize_compiler_runtime_division(&expr).expect("runtime div");
+
+        assert_eq!(
+            normalized,
+            HirExpr::Binary {
+                op: HirBinaryOp::Div,
+                lhs: Box::new(HirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(var("numerator")),
+                }),
+                rhs: Box::new(HirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(var("denominator")),
+                }),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }
+        );
+    }
 }
