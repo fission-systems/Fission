@@ -87,6 +87,22 @@ pub(crate) fn decode_rust_sleigh_pcode(
         )),
         Err(first_err) => {
             if retry_on_decode_error {
+                if continue_past_indirect_branch {
+                    if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
+                        &bytes,
+                        entry_address,
+                        DecodeContract::strict_function(instruction_limit),
+                    ) {
+                        return Ok((
+                            retry.function,
+                            DecodeDiag {
+                                attempts: 2,
+                                stop_reason: "success_after_strict_indirect_retry".into(),
+                            },
+                        ));
+                    }
+                }
+
                 let err_str = format!("{first_err:#}");
                 if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
                     if safe > 0 && safe < bytes.len() {
@@ -125,6 +141,38 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 },
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::LoadedBinary;
+    use fission_sleigh::compiler::discovery;
+    use std::path::Path;
+
+    #[test]
+    fn retries_strict_indirect_stop_when_jump_table_data_fails_decode() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM strict retry check");
+            return;
+        }
+
+        let fixture =
+            Path::new("../../benchmark/binary/ARM4_be/baremetal/small/binary/c/control_flow.o");
+        if !fixture.exists() {
+            eprintln!("skip: benchmark fixture not found: {}", fixture.display());
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(fixture).expect("load ARM4_be control_flow fixture");
+        let (pcode, diag) =
+            decode_rust_sleigh_pcode(&binary, "run_control_flow", 0x100150, 616, 512, true, true)
+                .expect("strict indirect retry should avoid decoding inline jump-table data");
+
+        assert_eq!(diag.attempts, 2);
+        assert_eq!(diag.stop_reason, "success_after_strict_indirect_retry");
+        assert!(!pcode.blocks.is_empty());
     }
 }
 
