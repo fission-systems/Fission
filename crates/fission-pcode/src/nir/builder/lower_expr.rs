@@ -412,6 +412,145 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn loop_exit_materialized_register_binding(&mut self, vn: &Varnode) -> Option<HirExpr> {
+        if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size < 4 {
+            return None;
+        }
+        let site = self.current_lowering_site?;
+        let predecessor_idxs = self.predecessors.get(site.block_idx)?.clone();
+        if predecessor_idxs.len() < 2 || predecessor_idxs.contains(&site.block_idx) {
+            return None;
+        }
+
+        let mut materialized_name = None;
+        let mut materialized_expr = None;
+        let mut zero_incoming = false;
+        for pred_idx in predecessor_idxs {
+            let pred_block = self.pcode.blocks.get(pred_idx)?;
+            let term_idx = self
+                .block_terminator_index(pred_block)
+                .unwrap_or(pred_block.ops.len());
+            let (_, pred_op) =
+                self.last_register_redefinition_before(pred_block, term_idx, vn)?;
+            if self.register_redefinition_is_zero(pred_block, term_idx, pred_op) {
+                zero_incoming = true;
+                continue;
+            }
+            if let Some(name) = pred_op.output.as_ref().and_then(|output| {
+                self.materialized_vns
+                    .get(&MaterializedVarnodeKey::new(output, pred_op))
+                    .filter(|_| self.varnode_aliases_value(output, vn))
+                    .cloned()
+            }) {
+                match &materialized_name {
+                    Some(existing) if existing != &name => return None,
+                    None => {
+                        materialized_expr = Some(
+                            self.project_alias_def_expr(vn, pred_op, HirExpr::Var(name.clone())),
+                        );
+                        materialized_name = Some(name);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            return None;
+        }
+
+        let name = materialized_name?;
+        if !zero_incoming {
+            return None;
+        }
+        if let Some(binding) = self.temps.get_mut(&name)
+            && binding.initializer.is_none()
+        {
+            binding.initializer = Some(HirExpr::Const(0, type_from_size(vn.size, false)));
+        }
+        materialized_expr
+    }
+
+    fn last_register_redefinition_before<'b>(
+        &self,
+        block: &'b crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        vn: &Varnode,
+    ) -> Option<(usize, &'b PcodeOp)> {
+        let requested = VarnodeKey::from(vn);
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(before_idx)
+            .rev()
+            .find(|(_, op)| {
+                op.output.as_ref().is_some_and(|output| {
+                    let candidate = VarnodeKey::from(output);
+                    !candidate.is_constant
+                        && candidate.space_id == requested.space_id
+                        && is_register_space_id(candidate.space_id)
+                        && Self::register_key_ranges_overlap_for_lookup(&candidate, &requested)
+                })
+            })
+    }
+
+    fn register_key_ranges_overlap_for_lookup(lhs: &VarnodeKey, rhs: &VarnodeKey) -> bool {
+        let Some(lhs_end) = lhs.offset.checked_add(u64::from(lhs.size)) else {
+            return false;
+        };
+        let Some(rhs_end) = rhs.offset.checked_add(u64::from(rhs.size)) else {
+            return false;
+        };
+        lhs.offset < rhs_end && rhs.offset < lhs_end
+    }
+
+    fn register_redefinition_is_zero(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        op: &PcodeOp,
+    ) -> bool {
+        match op.opcode {
+            PcodeOpcode::Copy => op
+                .inputs
+                .first()
+                .is_some_and(|input| input.is_constant && input.constant_val == 0),
+            PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast => op
+                .inputs
+                .first()
+                .is_some_and(|input| self.varnode_is_same_block_zero(block, before_idx, input)),
+            _ => false,
+        }
+    }
+
+    fn varnode_is_same_block_zero(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        vn: &Varnode,
+    ) -> bool {
+        if vn.is_constant && vn.constant_val == 0 {
+            return true;
+        }
+        let key = VarnodeKey::from(vn);
+        block
+            .ops
+            .iter()
+            .take(before_idx)
+            .rev()
+            .find(|op| {
+                op.output
+                    .as_ref()
+                    .is_some_and(|output| VarnodeKey::from(output) == key)
+            })
+            .is_some_and(|op| {
+                op.opcode == PcodeOpcode::Copy
+                    && op
+                        .inputs
+                        .first()
+                        .is_some_and(|input| input.is_constant && input.constant_val == 0)
+            })
+    }
+
     pub(in crate::nir) fn lower_call(
         &mut self,
         op: &PcodeOp,
@@ -943,6 +1082,9 @@ impl<'a> PreviewBuilder<'a> {
         let def_site = self.lookup_def_site(vn);
         if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
             return Ok(HirExpr::Var(name));
+        }
+        if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
+            return Ok(expr);
         }
         if def_site.is_none() {
             if let Some(param) = self.register_param(vn) {
