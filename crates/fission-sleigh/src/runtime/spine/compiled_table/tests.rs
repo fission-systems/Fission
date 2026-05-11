@@ -45,6 +45,22 @@ fn assert_spec_derived_lift_or_typed_unsupported(
     }
 }
 
+fn assert_spec_derived_lift(
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+) -> Vec<PcodeOp> {
+    let (ops, length, details) = decode_and_lift_with_details(compiled, None, bytes, address)
+        .expect("expected SpecDerived .sla template lift");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!ops.is_empty(), "spec-derived template emitted no p-code");
+    ops
+}
+
 #[test]
 fn sla_template_feature_audit_smoke() {
     require_packaged_ghidra_sla!();
@@ -416,27 +432,33 @@ fn generated_runtime_lifts_fninit_without_compatibility_emitter() {
 }
 
 #[test]
-fn generated_runtime_rejects_or_lifts_cmp_templates_without_compatibility() {
+fn generated_runtime_lifts_cmp_template_without_compatibility() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x83, 0xf9, 0x01];
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1485);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_1485);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntEqual));
 }
 
 #[test]
-fn generated_runtime_rejects_or_lifts_push_templates_without_compatibility() {
+fn generated_runtime_lifts_push_template_without_compatibility() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x41, 0x57];
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1470);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_1470);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Store));
 }
 
 #[test]
-fn generated_runtime_rejects_or_lifts_lea_templates_without_compatibility() {
+fn generated_runtime_lifts_lea_template_without_compatibility() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x04, 0x11];
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_1450);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntZExt));
 }
 
 #[test]
