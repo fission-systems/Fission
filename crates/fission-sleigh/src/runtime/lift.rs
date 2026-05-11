@@ -476,6 +476,50 @@ mod tests {
 
         assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x1004));
     }
+
+    #[test]
+    fn aarch64_madd_lift_preserves_addend_dataflow() {
+        let frontend = RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        let bytes = [0x00, 0x20, 0x0a, 0x1b];
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x100034)
+            .expect("decode madd");
+
+        assert_eq!(len, 4);
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntMult),
+            "MADD must multiply the first two operands"
+        );
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "MADD must add the accumulator operand"
+        );
+    }
+
+    #[test]
+    fn aarch64_udiv_madd_function_lift_preserves_accumulator_path() {
+        let frontend = RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        let bytes = [
+            0xa8, 0x99, 0x99, 0x52, 0x49, 0x01, 0x80, 0x52, 0x2a, 0xa7, 0x80, 0x52, 0x88,
+            0x99, 0xb9, 0x72, 0x08, 0x7c, 0xa8, 0x9b, 0x08, 0xfd, 0x63, 0xd3, 0x08, 0x81,
+            0x09, 0x1b, 0xe9, 0xdd, 0x97, 0x52, 0xa9, 0xd5, 0xbb, 0x72, 0x09, 0x00, 0x09,
+            0x4a, 0x08, 0x05, 0x00, 0x11, 0x28, 0x09, 0xc8, 0x1a, 0x09, 0x6c, 0x89, 0x13,
+            0x08, 0x20, 0x0a, 0x1b, 0xea, 0x1d, 0x80, 0x52, 0xaa, 0x15, 0xa0, 0x72, 0x0a,
+            0x00, 0x0a, 0x4a, 0x29, 0x01, 0x0a, 0x0b, 0x08, 0x01, 0x00, 0x4a, 0x00, 0x7d,
+            0x09, 0x1b, 0x08, 0x00, 0x00, 0x90, 0x00, 0x01, 0x00, 0xb9, 0xc0, 0x03, 0x5f,
+            0xd6,
+        ];
+        let function = frontend
+            .lift_raw_pcode_function(&bytes, 0x100000)
+            .expect("lift function");
+
+        assert!(function.blocks.iter().any(|block| {
+            block
+                .ops
+                .iter()
+                .any(|op| op.address == 0x100034 && op.opcode == PcodeOpcode::IntAdd)
+        }));
+    }
 }
 
 impl RuntimeSleighFrontend {
