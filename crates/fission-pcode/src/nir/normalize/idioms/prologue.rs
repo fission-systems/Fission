@@ -37,12 +37,13 @@ use super::super::*;
 use std::collections::{HashMap, HashSet};
 
 /// Callee-saved register names that can appear after register naming. This
-/// covers x86-64 plus AArch64's preserved GPR set. AArch64 frame/link registers
+/// covers x86-64, AArch64, and ARM32 preserved GPR sets. Frame/link registers
 /// are included here because compiler prologues save and restore them as part
 /// of the same ABI-preserving stack scaffold.
 const CALLEE_SAVED_REGS: &[&str] = &[
-    "rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15", "x19", "x20", "x21", "x22",
-    "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30",
+    "rbx", "rbp", "rsi", "rdi", "r12", "r13", "r14", "r15", "x19", "x20", "x21", "x22", "x23",
+    "x24", "x25", "x26", "x27", "x28", "x29", "x30", "r4", "r5", "r6", "r7", "r8", "r9", "r10",
+    "r11", "lr",
 ];
 
 fn is_callee_saved(name: &str) -> bool {
@@ -50,7 +51,7 @@ fn is_callee_saved(name: &str) -> bool {
 }
 
 fn looks_like_stack_scaffold_name(name: &str) -> bool {
-    name == "sp" || name.starts_with("var_") || name.starts_with("xVar")
+    name == "sp" || name.starts_with("var_") || name.starts_with("xVar") || name.starts_with("uVar")
 }
 
 fn stack_scaffold_ptr_expr(expr: &HirExpr) -> bool {
@@ -542,6 +543,13 @@ mod tests {
         }
     }
 
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
     fn scaffold_store(ptr: &str, rhs: &str) -> HirStmt {
         HirStmt::Assign {
             lhs: HirLValue::Deref {
@@ -627,6 +635,55 @@ mod tests {
                         ty: u64_ty(),
                     },
                     rhs: HirExpr::Var("x20".to_owned()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(
+            func.body,
+            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+        );
+    }
+
+    #[test]
+    fn removes_arm32_uvar_stack_alias_callee_saved_scaffold() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar0".to_owned()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        lhs: Box::new(HirExpr::Var("sp".to_owned())),
+                        rhs: Box::new(HirExpr::Const(4, u32_ty())),
+                        ty: u32_ty(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("uVar0".to_owned())),
+                        ty: u32_ty(),
+                    },
+                    rhs: HirExpr::Var("lr".to_owned()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar1".to_owned()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        lhs: Box::new(HirExpr::Var("uVar0".to_owned())),
+                        rhs: Box::new(HirExpr::Const(1, u32_ty())),
+                        ty: u32_ty(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("uVar1".to_owned())),
+                        ty: u32_ty(),
+                    },
+                    rhs: HirExpr::Var("r11".to_owned()),
                 },
                 HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
             ],

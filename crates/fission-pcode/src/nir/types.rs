@@ -2048,6 +2048,8 @@ impl NirRenderOptions {
             .to_ascii_uppercase();
         let calling_convention = if lang_upper.starts_with("AARCH64:") {
             CallingConvention::AArch64
+        } else if lang_upper.starts_with("ARM:") {
+            CallingConvention::Arm32
         } else if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
             CallingConvention::SystemVAmd64
         } else {

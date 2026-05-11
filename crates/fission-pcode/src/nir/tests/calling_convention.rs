@@ -166,6 +166,55 @@ fn aarch64_return_register_is_named_and_recognized() {
     assert!(!is_primary_return_register(&x0));
 }
 
+// ── ARM32 PCS ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn arm32_r0_to_r3_are_params() {
+    for slot in 0..4usize {
+        let offset = 0x20 + (slot as u64 * 4);
+        let (name, idx) = register_name_with_param(offset, 4, CallingConvention::Arm32).unwrap();
+        assert_eq!(name, format!("param_{}", slot + 1));
+        assert_eq!(idx, Some(slot));
+    }
+}
+
+#[test]
+fn arm32_non_param_registers_are_named() {
+    let (name, idx) = register_name_with_param(0x30, 4, CallingConvention::Arm32).unwrap();
+    assert_eq!(name, "r4");
+    assert_eq!(idx, None);
+    assert_eq!(register_name(0x54, 4), "sp");
+    assert_eq!(register_name(0x58, 4), "lr");
+    assert_eq!(register_name(0x5c, 4), "pc");
+}
+
+#[test]
+fn arm32_param_slots_work_for_32bit_abi_state() {
+    let abi = AbiState::new(CallingConvention::Arm32, false, 4, 0);
+    assert_eq!(abi.param_slot_for_name("r0"), Some(0));
+    assert_eq!(abi.param_slot_for_name("r3"), Some(3));
+    assert_eq!(abi.param_slot_for_name("r4"), None);
+}
+
+#[test]
+fn arm32_return_register_is_named_and_recognized() {
+    let (name, idx) = register_name_with_param(0x20, 4, CallingConvention::Arm32).unwrap();
+    assert_eq!(name, "param_1");
+    assert_eq!(idx, Some(0));
+    let r0 = Varnode {
+        space_id: REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    assert!(is_primary_return_register_for_abi(
+        &r0,
+        CallingConvention::Arm32
+    ));
+    assert!(!is_primary_return_register(&r0));
+}
+
 #[test]
 fn aarch64_return_link_register_input_is_control_target_not_value() {
     let mut options = preview_options();

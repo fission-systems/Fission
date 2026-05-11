@@ -321,6 +321,8 @@ pub enum CallingConvention {
     SystemVAmd64,
     /// AArch64 Procedure Call Standard: first eight integer args in X0-X7/W0-W7.
     AArch64,
+    /// ARM Procedure Call Standard: first four integer args in R0-R3.
+    Arm32,
 }
 
 impl Default for CallingConvention {
@@ -357,6 +359,12 @@ impl CallingConvention {
                 0x4030, // x6/w6 → param_7
                 0x4038, // x7/w7 → param_8
             ],
+            Self::Arm32 => &[
+                0x20, // r0 → param_1
+                0x24, // r1 → param_2
+                0x28, // r2 → param_3
+                0x2c, // r3 → param_4
+            ],
         }
     }
 
@@ -388,6 +396,7 @@ impl CallingConvention {
                 (0x4030, 8), // x6  → param_7
                 (0x4038, 8), // x7  → param_8
             ],
+            Self::Arm32 => &[],
         }
     }
 }
@@ -448,6 +457,43 @@ pub(crate) fn aarch64_gpr_family_index(name: &str) -> Option<usize> {
     (idx < 31).then_some(idx)
 }
 
+pub(crate) fn arm32_ghidra_reg_name(offset: u64, size: u32) -> Option<&'static str> {
+    if size != 4 {
+        return None;
+    }
+    match offset {
+        0x20 => Some("r0"),
+        0x24 => Some("r1"),
+        0x28 => Some("r2"),
+        0x2c => Some("r3"),
+        0x30 => Some("r4"),
+        0x34 => Some("r5"),
+        0x38 => Some("r6"),
+        0x3c => Some("r7"),
+        0x40 => Some("r8"),
+        0x44 => Some("r9"),
+        0x48 => Some("r10"),
+        0x4c => Some("r11"),
+        0x50 => Some("r12"),
+        0x54 => Some("sp"),
+        0x58 => Some("lr"),
+        0x5c => Some("pc"),
+        _ => None,
+    }
+}
+
+pub(crate) fn arm32_gpr_family_index(name: &str) -> Option<usize> {
+    match name {
+        "sp" => Some(13),
+        "lr" => Some(14),
+        "pc" => Some(15),
+        _ => {
+            let idx = name.strip_prefix('r')?.parse::<usize>().ok()?;
+            (idx < 13).then_some(idx)
+        }
+    }
+}
+
 /// Static `param_N` names for up to 8 parameters (enough for AArch64 PCS).
 const PARAM_NAMES: [&str; 8] = [
     "param_1", "param_2", "param_3", "param_4", "param_5", "param_6", "param_7", "param_8",
@@ -468,6 +514,7 @@ pub(crate) fn register_name_with_param(
             _ => "x0",
         },
         CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, _size)?,
+        CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, _size)?,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
         }
@@ -477,6 +524,13 @@ pub(crate) fn register_name_with_param(
             abi.param_offsets().iter().position(|&param_offset| {
                 aarch64_ghidra_reg_name(param_offset, 8)
                     .and_then(aarch64_gpr_family_index)
+                    .is_some_and(|family| family == name_family)
+            })
+        }),
+        CallingConvention::Arm32 => arm32_gpr_family_index(hw_name).and_then(|name_family| {
+            abi.param_offsets().iter().position(|&param_offset| {
+                arm32_ghidra_reg_name(param_offset, 4)
+                    .and_then(arm32_gpr_family_index)
                     .is_some_and(|family| family == name_family)
             })
         }),
@@ -495,6 +549,7 @@ pub(crate) fn register_name_with_param(
 pub(crate) fn register_name(offset: u64, size: u32) -> &'static str {
     x64_ghidra_reg_name(offset)
         .or_else(|| aarch64_ghidra_reg_name(offset, size))
+        .or_else(|| arm32_ghidra_reg_name(offset, size))
         .unwrap_or("reg")
 }
 
@@ -514,6 +569,10 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
         CallingConvention::AArch64 => {
             (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
                 && vn.offset == 0x4000
+        }
+        CallingConvention::Arm32 => {
+            (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
+                && vn.offset == 0x20
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             is_primary_return_register(vn)
@@ -535,6 +594,22 @@ pub(crate) fn primary_return_registers(pointer_size: u32, abi: CallingConvention
                 space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
                 offset: 0x4000,
                 size: pointer_size,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ],
+        CallingConvention::Arm32 => vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x20,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0x20,
+                size: 4,
                 is_constant: false,
                 constant_val: 0,
             },

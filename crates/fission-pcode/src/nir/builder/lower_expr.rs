@@ -295,6 +295,9 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::AArch64 => {
                     aarch64_ghidra_reg_name(key.offset, key.size).and_then(aarch64_gpr_family_index)
                 }
+                CallingConvention::Arm32 => {
+                    arm32_ghidra_reg_name(key.offset, key.size).and_then(arm32_gpr_family_index)
+                }
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                     x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
                 }
@@ -907,6 +910,17 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
+            if self.options.calling_convention == CallingConvention::Arm32
+                && is_register_space_id(vn.space_id)
+            {
+                let name =
+                    register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
+                        .map(|(name, _)| name)
+                        .or_else(|| arm32_ghidra_reg_name(vn.offset, vn.size));
+                if let Some(name) = name {
+                    return Ok(HirExpr::Var(name.to_string()));
+                }
+            }
             if !self.options.is_64bit
                 && is_register_space_id(vn.space_id)
                 && let Some(name) = register_name_32(vn.offset, vn.size)
@@ -914,7 +928,10 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(name.to_string()));
             }
             if is_register_space_id(vn.space_id) {
-                let name = if !self.options.is_64bit || self.suppress_entry_register_params {
+                let name = if (!self.options.is_64bit
+                    && self.options.calling_convention != CallingConvention::Arm32)
+                    || self.suppress_entry_register_params
+                {
                     register_name(vn.offset, vn.size)
                 } else {
                     register_name_with_param(vn.offset, vn.size, self.options.calling_convention)

@@ -6,7 +6,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
-        if !self.options.is_64bit {
+        if !self.options.is_64bit && self.options.calling_convention != CallingConvention::Arm32 {
             return None;
         }
         if self.suppress_entry_register_params {

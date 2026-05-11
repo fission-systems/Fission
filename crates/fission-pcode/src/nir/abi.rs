@@ -1,6 +1,7 @@
 use super::support::{
-    StackBase, aarch64_ghidra_reg_name, aarch64_gpr_family_index, is_register_varnode,
-    register_name_with_param, unique_register_name, x64_ghidra_reg_name,
+    StackBase, aarch64_ghidra_reg_name, aarch64_gpr_family_index, arm32_ghidra_reg_name,
+    arm32_gpr_family_index, is_register_varnode, register_name_with_param, unique_register_name,
+    x64_ghidra_reg_name,
 };
 use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
@@ -18,6 +19,15 @@ fn aarch64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Opt
     abi.param_offsets().iter().position(|&off| {
         aarch64_ghidra_reg_name(off, 8)
             .and_then(aarch64_gpr_family_index)
+            .is_some_and(|family| family == name_family)
+    })
+}
+
+fn arm32_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
+    let name_family = arm32_gpr_family_index(name)?;
+    abi.param_offsets().iter().position(|&off| {
+        arm32_ghidra_reg_name(off, 4)
+            .and_then(arm32_gpr_family_index)
             .is_some_and(|family| family == name_family)
     })
 }
@@ -96,14 +106,14 @@ impl AbiState {
     }
 
     pub(crate) fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if !self.is_64bit {
+        if !self.is_64bit && self.abi != CallingConvention::Arm32 {
             return None;
         }
         self.provider().param_slot_for_varnode(vn)
     }
 
     pub(crate) fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        if !self.is_64bit {
+        if !self.is_64bit && self.abi != CallingConvention::Arm32 {
             return None;
         }
         self.provider().param_slot_for_name(name)
@@ -321,6 +331,7 @@ impl AbiProvider for GenericAbiProvider {
     fn param_slot_for_name(&self, name: &str) -> Option<usize> {
         match self.abi {
             CallingConvention::AArch64 => aarch64_param_slot_for_name_family(name, self.abi),
+            CallingConvention::Arm32 => arm32_param_slot_for_name_family(name, self.abi),
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                 x64_param_slot_for_name_family(name, self.abi)
             }
@@ -331,6 +342,7 @@ impl AbiProvider for GenericAbiProvider {
         let offset = self.abi.param_offsets().get(slot).copied()?;
         match self.abi {
             CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, 8),
+            CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, 4),
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                 x64_ghidra_reg_name(offset)
             }
