@@ -48,6 +48,7 @@ pub(super) fn recover_switch_discriminant(
     switch_expr: &HirExpr,
     options: &NirRenderOptions,
 ) -> Option<RecoveredSwitchSelector> {
+    let switch_expr = peel_callable_target_mask(switch_expr);
     recover_absolute_switch_selector(switch_expr, options)
         .or_else(|| recover_relative_switch_selector(switch_expr, options))
 }
@@ -340,6 +341,33 @@ fn peel_casts(mut expr: &HirExpr) -> &HirExpr {
     expr
 }
 
+fn peel_callable_target_mask(expr: &HirExpr) -> &HirExpr {
+    let expr = peel_casts(expr);
+    let HirExpr::Binary {
+        op: HirBinaryOp::And,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return expr;
+    };
+    if is_callable_target_mask(rhs) {
+        return peel_casts(lhs);
+    }
+    if is_callable_target_mask(lhs) {
+        return peel_casts(rhs);
+    }
+    expr
+}
+
+fn is_callable_target_mask(expr: &HirExpr) -> bool {
+    matches!(
+        peel_casts(expr),
+        HirExpr::Const(0xffff_fffe, _) | HirExpr::Const(-2, _)
+    )
+}
+
 fn extract_const_address(expr: &HirExpr) -> Option<u64> {
     match peel_casts(expr) {
         HirExpr::Const(value, _) if *value >= 0 => Some(*value as u64),
@@ -562,6 +590,25 @@ mod tests {
         assert_eq!(recovered.discriminant, sel);
         assert_eq!(recovered.min_val, 0);
         assert_eq!(recovered.table_base, 0x40b000);
+        assert_eq!(recovered.entry_size, 4);
+    }
+
+    #[test]
+    fn recovers_arm_callable_masked_jump_table_target() {
+        let opts = options_with_section(0x100000, 0x101000);
+        let sel = var("sel");
+        let table_load = load32(add(cst(0x100024), shl(sel.clone(), cst(2))));
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(table_load),
+            rhs: Box::new(cst(0xffff_fffe)),
+            ty: uint64(),
+        };
+        let result = recover_switch_discriminant(&expr, &opts);
+        assert!(result.is_some());
+        let recovered = result.unwrap();
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.table_base, 0x100024);
         assert_eq!(recovered.entry_size, 4);
     }
 
