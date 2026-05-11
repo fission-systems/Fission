@@ -572,6 +572,30 @@ fn generated_runtime_lifts_aarch64_subs_shifted_from_sla_compare_template() {
 }
 
 #[test]
+fn generated_runtime_lifts_riscv_lui_shift_count_at_sla_const_width() {
+    require_packaged_ghidra_sla!();
+    let riscv_spec = spec_root_for_arch("RISCV").join("riscv.lp64d.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&riscv_spec).expect("compile riscv");
+    let bytes = [0xb7, 0x87, 0x35, 0x01]; // lui a5,0x1358
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x100590).expect("decode lui");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "lui");
+
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x100590);
+    let int_left = ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::IntLeft)
+        .unwrap_or_else(|| panic!("expected lui to emit INT_LEFT; ops={ops:?}"));
+    assert!(
+        int_left.inputs.get(1).is_some_and(|input| {
+            input.is_constant && input.constant_val == 12 && input.size == 4
+        }),
+        "expected shift count const 12 to keep SLA varnode size 4; op={int_left:?}"
+    );
+}
+
+#[test]
 fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
     require_packaged_ghidra_sla!();
     let arm_spec = spec_root_for_arch("ARM").join("ARM7_le.slaspec");

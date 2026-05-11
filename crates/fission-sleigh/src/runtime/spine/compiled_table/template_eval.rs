@@ -573,9 +573,15 @@ impl<'c> CompiledTableEmitter<'c> {
                 // Enforce P-code invariants: binary op inputs should generally match in size.
                 // Ghidra's SLEIGH compiler implicitly folds constants to the required size,
                 // but Fission bypasses subconstructors, so we must promote constants here.
+                let is_shift_op = matches!(
+                    op.opcode,
+                    CompiledOpTplOpcode::IntLeft
+                        | CompiledOpTplOpcode::IntRight
+                        | CompiledOpTplOpcode::IntSRight
+                );
                 if lhs.is_constant && rhs.size > lhs.size {
                     lhs.size = rhs.size;
-                } else if rhs.is_constant && lhs.size > rhs.size {
+                } else if !is_shift_op && rhs.is_constant && lhs.size > rhs.size {
                     rhs.size = lhs.size;
                 }
 
