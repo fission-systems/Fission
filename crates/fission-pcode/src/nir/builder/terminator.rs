@@ -23,6 +23,32 @@ fn merge_inferred_branchind_targets(
     }
 }
 
+fn arm32_callable_target_expr(expr: &HirExpr) -> HirExpr {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } if matches!(&**rhs, HirExpr::Const(0xffff_fffe, _) | HirExpr::Const(-2, _)) => {
+            (**lhs).clone()
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } if matches!(&**lhs, HirExpr::Const(0xffff_fffe, _) | HirExpr::Const(-2, _)) => {
+            (**rhs).clone()
+        }
+        _ => expr.clone(),
+    }
+}
+
+fn is_arm32_callable_mask(value: i64) -> bool {
+    value == 0xffff_fffe || value == -2
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn recover_tail_call_expr_from_target_expr(
         &mut self,
@@ -31,20 +57,75 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
         target_expr: &HirExpr,
     ) -> Option<HirExpr> {
-        let HirExpr::Var(target_name) = target_expr else {
-            return None;
+        let resolved_target = if let HirExpr::Var(target_name) = target_expr {
+            self.resolve_address_like_call_target_name(target_name)
+        } else {
+            None
         };
-        let resolved_target = self.resolve_address_like_call_target_name(target_name)?;
+        let target = resolved_target.or_else(|| {
+            (self.options.calling_convention == CallingConvention::Arm32)
+                .then(|| format!("((code *){})", print_expr(&arm32_callable_target_expr(target_expr))))
+        })?;
         let args = if self.pcode.blocks.len() <= 2 {
             self.recover_tail_call_args(block_idx, block, term_idx)
         } else {
             Vec::new()
         };
         Some(HirExpr::Call {
-            target: resolved_target,
+            target,
             args,
             ty: NirType::Unknown,
         })
+    }
+
+    fn recover_tail_call_expr_from_branchind_target(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        switch_var: &Varnode,
+        switch_expr: &HirExpr,
+    ) -> Option<HirExpr> {
+        let target_expr = self
+            .recover_arm32_branchind_callable_target(switch_var)
+            .unwrap_or_else(|| switch_expr.clone());
+        self.recover_tail_call_expr_from_target_expr(block_idx, block, term_idx, &target_expr)
+    }
+
+    fn recover_arm32_branchind_callable_target(&mut self, switch_var: &Varnode) -> Option<HirExpr> {
+        if self.options.calling_convention != CallingConvention::Arm32 {
+            return None;
+        }
+        let (_, op) = self.lookup_def_site(switch_var)?;
+        if op.opcode == PcodeOpcode::IntAnd && op.inputs.len() == 2 {
+            let lhs_mask = const_offset(&op.inputs[0]).is_some_and(is_arm32_callable_mask);
+            let rhs_mask = const_offset(&op.inputs[1]).is_some_and(is_arm32_callable_mask);
+            let source = match (lhs_mask, rhs_mask) {
+                (true, false) => op.inputs[1].clone(),
+                (false, true) => op.inputs[0].clone(),
+                _ => switch_var.clone(),
+            };
+            if let Some(expr) = self.recover_arm32_callable_source_expr(&source) {
+                return Some(expr);
+            }
+            return self.lower_wrapped_varnode(&source, &mut HashSet::new()).ok();
+        }
+        self.recover_arm32_callable_source_expr(switch_var)
+    }
+
+    fn recover_arm32_callable_source_expr(&mut self, source: &Varnode) -> Option<HirExpr> {
+        if let Some((_, op)) = self.lookup_def_site(source)
+            && matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+            && let Some(input) = op.inputs.first().cloned()
+            && is_register_varnode(&input)
+            && let Some(param) = self.register_param(&input)
+        {
+            return Some(HirExpr::Var(param));
+        }
+        self.register_param(source).map(HirExpr::Var)
     }
 
     fn recover_known_external_tail_call_expr(
@@ -521,6 +602,29 @@ impl<'a> PreviewBuilder<'a> {
             .is_some_and(|input| input == target)
     }
 
+    pub(in crate::nir::builder) fn call_is_terminal_branchind_artifact(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if !matches!(
+            op.opcode,
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+        ) || op.output.is_some()
+        {
+            return false;
+        }
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        term_idx > op_idx
+            && block.ops[term_idx].opcode == PcodeOpcode::BranchInd
+            && block.ops[term_idx].address == op.address
+    }
+
     fn return_input_is_stack_target(&self, input: &Varnode) -> bool {
         let Some((_, op)) = self.lookup_def_site(input) else {
             return false;
@@ -968,10 +1072,11 @@ impl<'a> PreviewBuilder<'a> {
                                 targets.push(inferred_target);
                             }
                             if targets.is_empty() {
-                                let tail_call_expr = this.recover_tail_call_expr_from_target_expr(
+                                let tail_call_expr = this.recover_tail_call_expr_from_branchind_target(
                                     idx,
                                     block,
                                     term_idx,
+                                    switch_var,
                                     &switch_expr,
                                 );
                                 this.record_unsupported_inventory_event(

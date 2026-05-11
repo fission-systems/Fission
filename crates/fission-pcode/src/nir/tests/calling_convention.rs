@@ -415,6 +415,111 @@ fn arm32_direct_call_materializes_r0_result() {
 }
 
 #[test]
+fn arm32_branchind_tail_call_recovers_function_pointer_call() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let r0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x24,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r2 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x28,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r3 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x2c,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let target = uniq(0x3000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x10005c,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x10005c,
+                    output: Some(r3.clone()),
+                    inputs: vec![r0.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100060,
+                    output: Some(r0.clone()),
+                    inputs: vec![r1.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100064,
+                    output: Some(r1),
+                    inputs: vec![r2],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x100068,
+                    output: None,
+                    inputs: vec![cst(0x3e, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAnd,
+                    address: 0x100068,
+                    output: Some(target.clone()),
+                    inputs: vec![r3, cst(0xffff_fffe, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x100068,
+                    output: None,
+                    inputs: vec![target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "apply_op", 0x10005c, &options).expect("preview render");
+    assert!(
+        code.contains("return ((code *)param_1)(param_2, param_3);"),
+        "{code}"
+    );
+    assert!(!code.contains("sub_3e"), "{code}");
+    assert!(!code.contains("__fission_branchind"), "{code}");
+}
+
+#[test]
 fn arm32_link_register_target_without_r0_def_is_void_return() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::Arm32;

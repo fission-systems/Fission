@@ -369,6 +369,9 @@ impl<'a> PreviewBuilder<'a> {
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
         ) && let Some(HirExpr::Call { .. }) = target_expr.as_ref()
         {
+            if evidence.opcode == "BranchInd" {
+                return HirStmt::Return(target_expr);
+            }
             return HirStmt::Expr(target_expr.expect("call target expression exists after guard"));
         }
 

@@ -133,6 +133,9 @@ impl<'a> PreviewBuilder<'a> {
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
+                if self.call_is_terminal_branchind_artifact(block, prev_idx) {
+                    continue;
+                }
                 break;
             }
             if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
@@ -206,6 +209,9 @@ impl<'a> PreviewBuilder<'a> {
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
+                if self.call_is_terminal_branchind_artifact(block, prev_idx) {
+                    continue;
+                }
                 break;
             }
             let Some(output) = &prev.output else {
@@ -223,37 +229,41 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 output
             };
-            let expr = match self.lower_varnode(source, &mut HashSet::new()) {
-                Ok(expr) => expr,
-                Err(MlilPreviewError::UnsupportedPattern("opcode"))
-                    if self.surface_call_carrier_name(output).is_some() =>
-                {
-                    HirExpr::Var(
-                        self.surface_call_carrier_name(output)
-                            .expect("surface carrier exists after guard"),
-                    )
-                }
-                Err(err) => {
-                    self.debug_lowering_error(
-                        "call_arg_recovery",
-                        block.start_address,
-                        u64::from(prev.seq_num),
-                        prev.opcode,
-                        &err,
-                    );
-                    if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
-                        self.record_unsupported_inventory_event(
-                            "call_recovery",
-                            Some(output),
-                            Some(prev),
-                            Some(prev.opcode),
-                            Some(block.start_address),
-                            Some(u64::from(prev.seq_num)),
-                            false,
-                            "call_arg_recovery_lowering_failed",
-                        );
+            let expr = if prefer_source_values && let Some(name) = self.surface_call_carrier_name(source) {
+                HirExpr::Var(name)
+            } else {
+                match self.lower_varnode(source, &mut HashSet::new()) {
+                    Ok(expr) => expr,
+                    Err(MlilPreviewError::UnsupportedPattern("opcode"))
+                        if self.surface_call_carrier_name(output).is_some() =>
+                    {
+                        HirExpr::Var(
+                            self.surface_call_carrier_name(output)
+                                .expect("surface carrier exists after guard"),
+                        )
                     }
-                    continue;
+                    Err(err) => {
+                        self.debug_lowering_error(
+                            "call_arg_recovery",
+                            block.start_address,
+                            u64::from(prev.seq_num),
+                            prev.opcode,
+                            &err,
+                        );
+                        if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+                            self.record_unsupported_inventory_event(
+                                "call_recovery",
+                                Some(output),
+                                Some(prev),
+                                Some(prev.opcode),
+                                Some(block.start_address),
+                                Some(u64::from(prev.seq_num)),
+                                false,
+                                "call_arg_recovery_lowering_failed",
+                            );
+                        }
+                        continue;
+                    }
                 }
             };
             recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));

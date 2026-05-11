@@ -222,7 +222,9 @@ impl<'a> PreviewBuilder<'a> {
                             Ok(Some(HirStmt::Assign { lhs, rhs }))
                         }
                         PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
-                            if this.call_is_return_target_artifact(block, op_idx) {
+                            if this.call_is_return_target_artifact(block, op_idx)
+                                || this.call_is_terminal_branchind_artifact(block, op_idx)
+                            {
                                 return Ok(None);
                             }
                             if op.output.is_none() {
