@@ -617,6 +617,37 @@ fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
 }
 
 #[test]
+fn generated_runtime_preserves_arm_conditional_execution_wrapper_pcode() {
+    require_packaged_ghidra_sla!();
+    let arm_spec = spec_root_for_arch("ARM").join("ARM4t_be.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM4t_be");
+    let bytes = [0x30, 0x40, 0x20, 0x01]; // subcc r2,r0,r1
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x100044).expect("decode subcc");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "subcc");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x100044)
+        .expect("lift ARM conditional sub");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    let cbranch = ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::CBranch)
+        .unwrap_or_else(|| panic!("expected conditional wrapper CBRANCH; ops={ops:?}"));
+    assert!(
+        cbranch
+            .inputs
+            .first()
+            .is_some_and(|target| !target.is_constant && target.offset == 0x100048),
+        "expected subcc guard to skip to inst_next; op={cbranch:?}"
+    );
+}
+
+#[test]
 fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let disabled_branch = ["if", "false"].join(" ");

@@ -359,14 +359,29 @@ fn executable_constructor_from_sla_template(
     display_template.constructor_hash = signature_hash;
 
     let mut decode_steps = Vec::new();
-    if let Some(flowthru_operand_index) = sla_template.flowthru_operand_index {
-        if let Some(CompiledOperandSpec::SubtableEvaluation { table_name, .. }) =
-            sla_template.operand_specs.get(flowthru_operand_index)
-        {
-            decode_steps.push(CompiledOperandDecodeStep::DescendSubtable {
-                table_name: table_name.clone(),
-                replace_current: true,
-            });
+    let template_has_own_pcode = sla_template
+        .constructor_template
+        .ops
+        .iter()
+        .any(|op| op.opcode != CompiledOpTplOpcode::Build)
+        || sla_template.named_templates.iter().any(|template| {
+            template.as_ref().is_some_and(|template| {
+                template
+                    .ops
+                    .iter()
+                    .any(|op| op.opcode != CompiledOpTplOpcode::Build)
+            })
+        });
+    if !template_has_own_pcode {
+        if let Some(flowthru_operand_index) = sla_template.flowthru_operand_index {
+            if let Some(CompiledOperandSpec::SubtableEvaluation { table_name, .. }) =
+                sla_template.operand_specs.get(flowthru_operand_index)
+            {
+                decode_steps.push(CompiledOperandDecodeStep::DescendSubtable {
+                    table_name: table_name.clone(),
+                    replace_current: true,
+                });
+            }
         }
     }
     if decode_steps.is_empty() {
