@@ -68,6 +68,20 @@ def exists_all(root: Path, paths: Iterable[str]) -> list[str]:
 
 def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
     fission_files = rust_files(repo, "crates/fission-sleigh/src")
+    sla_native_owner_files = existing_files(
+        repo,
+        [
+            "crates/fission-sleigh/src/compiler/sla/native.rs",
+            "crates/fission-sleigh/src/compiler/ir/lowering.rs",
+            "crates/fission-sleigh/src/runtime/spine/compiled_table/strategy.rs",
+        ],
+    )
+    compiled_table_test_files = existing_files(
+        repo,
+        [
+            "crates/fission-sleigh/src/runtime/spine/compiled_table/tests.rs",
+        ],
+    )
     template_executor_files = existing_files(
         repo,
         [
@@ -86,6 +100,22 @@ def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
     )
     native_model = count_pattern(fission_files, r"\bSlaLanguage\b")
     construct_tpl = count_pattern(fission_files, r"\bConstructTpl\b")
+    native_builder = count_pattern(
+        sla_native_owner_files,
+        r"\bbuild_frontend_from_sla_native_model\b",
+    )
+    subtables_replaced = count_pattern(
+        sla_native_owner_files,
+        r"\bcompiled\.subtables\.clear\(\)",
+    )
+    native_disabled_for_sla_identity = count_pattern(
+        sla_native_owner_files,
+        r"\bsubtable\.sla_subtable_id\s*!=\s*0\b",
+    )
+    spec_derived_runtime_assertions = count_pattern(
+        compiled_table_test_files,
+        r"details\.template_source\s*==\s*Some\(CompiledTemplateSource::SpecDerived\)|assert_eq!\(\s*details\.template_source,\s*Some\(CompiledTemplateSource::SpecDerived\)",
+    )
     legacy_token = count_pattern(fission_files, r"\bCompiledTokenCursorPolicy\b|\bdecode_shared_token_fields\b")
     manual_handle = count_pattern(
         template_executor_files,
@@ -102,13 +132,28 @@ def sleigh_probes(repo: Path, ghidra: Path) -> list[Probe]:
         Probe(
             "sleigh_native_model",
             "SleighLanguage -> SubtableSymbol -> DecisionNode -> Constructor",
-            STATUS_PARTIAL if native_model else STATUS_NOT_STARTED,
+            STATUS_IMPLEMENTED
+            if (
+                native_model
+                and construct_tpl
+                and native_builder
+                and subtables_replaced
+                and native_disabled_for_sla_identity
+                and spec_derived_runtime_assertions
+            )
+            else STATUS_PARTIAL
+            if native_model
+            else STATUS_NOT_STARTED,
             [
                 f"Ghidra reference files found={len(ghidra_refs)}",
                 f"Fission SlaLanguage mentions={native_model}",
                 f"Fission ConstructTpl mentions={construct_tpl}",
+                f"SLA-native frontend builder mentions={native_builder}",
+                f"SLA subtable replacement mentions={subtables_replaced}",
+                f"native backend disabled for SLA identity mentions={native_disabled_for_sla_identity}",
+                f"SpecDerived runtime assertions={spec_derived_runtime_assertions}",
             ],
-            "Promote .sla native identity to generated artifact source of truth.",
+            "Keep expanding row-level SpecDerived parity across runtime-candidate entries; do not reintroduce native-backend or display/debug identity as a success source.",
         ),
         Probe(
             "sleigh_token_cursor",
