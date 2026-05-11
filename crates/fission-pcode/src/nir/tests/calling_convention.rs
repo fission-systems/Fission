@@ -216,6 +216,147 @@ fn arm32_return_register_is_named_and_recognized() {
 }
 
 #[test]
+fn arm32_bx_lr_returns_primary_r0_not_link_target() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let r0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x24,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let lr = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x58,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = uniq(0x2000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100038,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100038,
+                    output: Some(r0.clone()),
+                    inputs: vec![r1, r0],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAnd,
+                    address: 0x10003c,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![lr, cst(0xffff_fffe, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x10003c,
+                    output: None,
+                    inputs: vec![ret_target.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x10003c,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "op_add", 0x100038, &options).expect("preview render");
+    assert!(
+        code.contains("uint op_add(uint param_1, uint param_2)"),
+        "{code}"
+    );
+    assert!(code.contains("return param_2 + param_1;"), "{code}");
+    assert!(!code.contains("sub_"), "{code}");
+    assert!(!code.contains("return lr"), "{code}");
+}
+
+#[test]
+fn arm32_link_register_target_without_r0_def_is_void_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let lr = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x58,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = uniq(0x2000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x10003c,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAnd,
+                    address: 0x10003c,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![lr, cst(0xffff_fffe, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x10003c,
+                    output: None,
+                    inputs: vec![ret_target.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x10003c,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "leaf_void", 0x10003c, &options).expect("preview render");
+    assert!(code.contains("void leaf_void(void)"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("sub_"), "{code}");
+    assert!(!code.contains("return lr"), "{code}");
+}
+
+#[test]
 fn aarch64_return_link_register_input_is_control_target_not_value() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::AArch64;

@@ -115,15 +115,14 @@ impl<'a> PreviewBuilder<'a> {
         let start = block
             .ops
             .iter()
+            .enumerate()
             .take(term_idx)
-            .rposition(|op| {
-                matches!(
-                    op.opcode,
-                    PcodeOpcode::Call
-                        | PcodeOpcode::CallInd
-                        | PcodeOpcode::CallOther
-                        | PcodeOpcode::Store
-                )
+            .rposition(|(idx, op)| {
+                op.opcode == PcodeOpcode::Store
+                    || (matches!(
+                        op.opcode,
+                        PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                    ) && !self.call_is_return_target_artifact(block, idx))
             })
             .map_or(0, |idx| idx + 1);
         block
@@ -138,21 +137,23 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .filter(|output| {
                         is_primary_return_register_for_abi(output, self.options.calling_convention)
-                            && !self.is_aarch64_return_target_copy(op, output)
+                            && !self.is_return_target_copy(op, output)
                     })
                     .map(|output| (op_idx, output.clone()))
             })
     }
 
-    fn is_aarch64_return_target_copy(&self, op: &PcodeOp, output: &Varnode) -> bool {
-        self.options.calling_convention == CallingConvention::AArch64
-            && op.opcode == PcodeOpcode::Copy
+    fn uses_primary_return_registers(&self) -> bool {
+        self.options.is_64bit || self.options.calling_convention == CallingConvention::Arm32
+    }
+
+    fn is_return_target_copy(&self, op: &PcodeOp, output: &Varnode) -> bool {
+        op.opcode == PcodeOpcode::Copy
             && output.space_id == RUST_SLEIGH_REGISTER_SPACE_ID
             && output.offset == 0
-            && op
-                .inputs
-                .first()
-                .is_some_and(|input| is_register_space_id(input.space_id) && input.offset == 0x40f0)
+            && op.inputs.first().is_some_and(|input| {
+                is_return_target_register_for_abi(input, self.options.calling_convention)
+            })
     }
 
     fn lower_primary_return_expr_from_block(
@@ -202,7 +203,7 @@ impl<'a> PreviewBuilder<'a> {
         block.ops.iter().take(term_idx).all(|op| {
             op.output
                 .as_ref()
-                .is_some_and(|output| self.is_aarch64_return_target_copy(op, output))
+                .is_some_and(|output| self.is_return_target_copy(op, output))
         })
     }
 
@@ -421,7 +422,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
-        if self.options.is_64bit
+        if self.uses_primary_return_registers()
             && let Some((_ret_op_idx, ret_vn)) =
                 self.last_primary_return_def_after_barrier(block, term_idx)
         {
@@ -429,12 +430,12 @@ impl<'a> PreviewBuilder<'a> {
                 .lower_wrapped_varnode(&ret_vn, &mut HashSet::new())
                 .map(Some);
         }
-        if self.options.is_64bit
+        if self.uses_primary_return_registers()
             && let Some(expr) = self.predecessor_primary_return_expr(idx)?
         {
             return Ok(Some(expr));
         }
-        if self.options.is_64bit
+        if self.uses_primary_return_registers()
             && let Some(input) = block.ops[term_idx].inputs.last()
             && !self.return_input_is_control_target(input)
         {
@@ -442,7 +443,7 @@ impl<'a> PreviewBuilder<'a> {
                 .lower_wrapped_varnode(input, &mut HashSet::new())
                 .map(Some);
         }
-        if self.options.is_64bit && self.unsupported_indirect_control_count == 0 {
+        if self.uses_primary_return_registers() && self.unsupported_indirect_control_count == 0 {
             return Ok(None);
         }
 
@@ -457,19 +458,67 @@ impl<'a> PreviewBuilder<'a> {
         if self.return_input_is_stack_target(input) {
             return true;
         }
-        if self.options.calling_convention != CallingConvention::AArch64
-            || !is_register_space_id(input.space_id)
-        {
-            return false;
-        }
-        if input.offset == 0x40f0 {
+        if is_return_target_register_for_abi(input, self.options.calling_convention) {
             return true;
         }
         self.lookup_def_site(input).is_some_and(|(_, op)| {
             op.output.as_ref().is_some_and(|output| {
-                output == input && self.is_aarch64_return_target_copy(op, output)
+                output == input
+                    && (self.is_return_target_copy(op, output)
+                        || self.op_is_return_target_derivation(op))
             })
         })
+    }
+
+    fn op_is_return_target_derivation(&self, op: &PcodeOp) -> bool {
+        matches!(
+            op.opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::IntAnd
+        ) && op.inputs.first().is_some_and(|input| {
+            is_return_target_register_for_abi(input, self.options.calling_convention)
+        })
+    }
+
+    pub(in crate::nir::builder) fn call_is_return_target_artifact(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if !matches!(
+            op.opcode,
+            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+        ) {
+            return false;
+        }
+        let Some(target) = op.inputs.first() else {
+            return false;
+        };
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        if term_idx <= op_idx || block.ops[term_idx].opcode != PcodeOpcode::Return {
+            return false;
+        }
+        if self.uses_primary_return_registers()
+            && op.output.is_none()
+            && op.address == block.ops[term_idx].address
+        {
+            return true;
+        }
+        if self.return_input_is_control_target(target) {
+            return true;
+        }
+        block.ops[term_idx]
+            .inputs
+            .last()
+            .is_some_and(|input| input == target)
     }
 
     fn return_input_is_stack_target(&self, input: &Varnode) -> bool {

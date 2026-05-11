@@ -580,6 +580,17 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
     }
 }
 
+pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConvention) -> bool {
+    if !is_register_space_id(vn.space_id) {
+        return false;
+    }
+    match abi {
+        CallingConvention::AArch64 => vn.offset == 0x40f0,
+        CallingConvention::Arm32 => vn.offset == 0x58,
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => false,
+    }
+}
+
 pub(crate) fn primary_return_registers(pointer_size: u32, abi: CallingConvention) -> Vec<Varnode> {
     match abi {
         CallingConvention::AArch64 => vec![
