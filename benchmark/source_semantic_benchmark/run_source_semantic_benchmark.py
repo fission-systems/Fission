@@ -667,6 +667,12 @@ def canonical_address(value: str | int) -> str:
 
 
 def match_function(source: SourceFunction, funcs: list[FissionFunction]) -> tuple[str, FissionFunction | None, list[str]]:
+    literal_exact = [f for f in funcs if f.name == source.name]
+    if len(literal_exact) == 1:
+        return "matched", literal_exact[0], []
+    if len(literal_exact) > 1:
+        return "ambiguous", None, [f"{f.address}:{f.name}" for f in literal_exact[:8]]
+
     src_norm = normalize_name(source.name)
     exact = [f for f in funcs if normalize_name(f.name) == src_norm]
     if len(exact) == 1:
@@ -2756,6 +2762,25 @@ int max(int a, int b) { if (a > b) return a; return b; }
         status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
+        status, matched, candidates = match_function(
+            SourceFunction(
+                name="main",
+                signature="int main()",
+                body="return 0;",
+                return_kind="int",
+                param_kinds=[],
+                param_names=[],
+                line=1,
+            ),
+            [
+                FissionFunction("0x1000", "__main"),
+                FissionFunction("0x2000", "main"),
+            ],
+        )
+        assert status == "matched"
+        assert matched is not None
+        assert matched.address == "0x2000"
+        assert candidates == []
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
