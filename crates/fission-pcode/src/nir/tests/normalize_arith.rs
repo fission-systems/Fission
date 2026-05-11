@@ -239,6 +239,48 @@ fn unsigned_div_shift_recognition_collapses_to_div() {
 }
 
 #[test]
+fn arithmetic_identity_removes_div_by_one() {
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Div,
+        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(HirExpr::Const(
+            1,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )),
+        ty: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return uVar1;");
+}
+
+#[test]
+fn arithmetic_identity_collapses_mod_by_one_to_zero() {
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Mod,
+        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(HirExpr::Const(
+            1,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )),
+        ty: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return 0;");
+}
+
+#[test]
 fn signed_div_idiom_recognition_collapses_to_slash() {
     let base = HirExpr::Var("param_1".to_string());
     let mut stmt = HirStmt::Return(Some(HirExpr::Binary {

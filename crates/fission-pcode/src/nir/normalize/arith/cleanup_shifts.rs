@@ -65,6 +65,18 @@ pub(crate) fn cleanup_arithmetic_wrappers(expr: &HirExpr) -> Option<HirExpr> {
             ..
         } if is_one_const(lhs.as_ref()) => Some((**rhs).clone()),
         HirExpr::Binary {
+            op: HirBinaryOp::Div,
+            lhs,
+            rhs,
+            ..
+        } if is_one_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Mod,
+            lhs,
+            rhs,
+            ..
+        } if is_one_const(rhs.as_ref()) => Some(HirExpr::Const(0, expr_type(lhs))),
+        HirExpr::Binary {
             op: HirBinaryOp::Shl,
             lhs,
             rhs,
