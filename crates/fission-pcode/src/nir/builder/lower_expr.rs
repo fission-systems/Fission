@@ -206,21 +206,31 @@ impl<'a> PreviewBuilder<'a> {
 
     fn lookup_candidate_def_keys(&self, key: &VarnodeKey) -> Vec<VarnodeKey> {
         let mut candidates = vec![key.clone()];
-        if !is_register_space_id(key.space_id) || key.is_constant {
+        if key.is_constant {
             return candidates;
         }
-        candidates.extend(
-            self.def_sites
-                .keys()
-                .filter(|candidate| *candidate != key)
-                .filter(|candidate| {
-                    Self::register_key_covers(candidate, key)
-                        || self.register_key_zero_extends(candidate, key)
-                        || self.register_key_cross_space_covers(candidate, key)
-                        || self.register_key_cross_space_zero_extends(candidate, key)
-                })
-                .cloned(),
-        );
+        if is_register_space_id(key.space_id) {
+            candidates.extend(
+                self.def_sites
+                    .keys()
+                    .filter(|candidate| *candidate != key)
+                    .filter(|candidate| {
+                        Self::register_key_covers(candidate, key)
+                            || self.register_key_zero_extends(candidate, key)
+                            || self.register_key_cross_space_covers(candidate, key)
+                            || self.register_key_cross_space_zero_extends(candidate, key)
+                    })
+                    .cloned(),
+            );
+        } else if is_unique_space_id(key.space_id) {
+            candidates.extend(
+                self.def_sites
+                    .keys()
+                    .filter(|candidate| *candidate != key)
+                    .filter(|candidate| Self::unique_key_covers(candidate, key))
+                    .cloned(),
+            );
+        }
         candidates
     }
 
@@ -303,7 +313,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             };
         }
-        if key.space_id == UNIQUE_SPACE_ID {
+        if is_unique_space_id(key.space_id) {
             let name = unique_register_name(key.offset, key.size)?;
             return crate::arch::x86::x86_gpr_family_index(name);
         }
@@ -311,7 +321,31 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn varnode_covers(candidate: &Varnode, requested: &Varnode) -> bool {
-        Self::register_key_covers(&VarnodeKey::from(candidate), &VarnodeKey::from(requested))
+        let candidate_key = VarnodeKey::from(candidate);
+        let requested_key = VarnodeKey::from(requested);
+        Self::register_key_covers(&candidate_key, &requested_key)
+            || Self::unique_key_covers(&candidate_key, &requested_key)
+    }
+
+    fn unique_key_covers(candidate: &VarnodeKey, requested: &VarnodeKey) -> bool {
+        if candidate.is_constant
+            || requested.is_constant
+            || !is_unique_space_id(candidate.space_id)
+            || !is_unique_space_id(requested.space_id)
+            || candidate.space_id != requested.space_id
+            || candidate.size < requested.size
+        {
+            return false;
+        }
+        let candidate_start = candidate.offset;
+        let requested_start = requested.offset;
+        let Some(candidate_end) = candidate_start.checked_add(u64::from(candidate.size)) else {
+            return false;
+        };
+        let Some(requested_end) = requested_start.checked_add(u64::from(requested.size)) else {
+            return false;
+        };
+        candidate_start <= requested_start && candidate_end >= requested_end
     }
 
     pub(in crate::nir::builder) fn varnode_aliases_value(
@@ -905,7 +939,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(param) = self.register_param(vn) {
                 return Ok(HirExpr::Var(param));
             }
-            if vn.space_id == UNIQUE_SPACE_ID
+            if is_unique_space_id(vn.space_id)
                 && let Some(name) = unique_register_name(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));
@@ -998,7 +1032,7 @@ impl<'a> PreviewBuilder<'a> {
                         classified
                     });
             }
-            let cycle_name = if vn.space_id == UNIQUE_SPACE_ID {
+            let cycle_name = if is_unique_space_id(vn.space_id) {
                 unique_register_name(vn.offset, vn.size)
                     .map_or_else(|| format!("tmp_{:x}", vn.offset), ToString::to_string)
             } else {
@@ -1034,7 +1068,7 @@ impl<'a> PreviewBuilder<'a> {
                     .expect("global name exists after contains_key")
                     .clone(),
             )),
-            None if vn.space_id == UNIQUE_SPACE_ID => {
+            None if is_unique_space_id(vn.space_id) => {
                 Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
             }
             None if self.options.is_mapped_global(vn.offset) => {

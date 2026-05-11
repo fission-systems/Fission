@@ -1,11 +1,16 @@
 use super::*;
 
 pub(crate) const UNIQUE_SPACE_ID: u64 = 3;
+pub(crate) const RUST_SLEIGH_UNIQUE_SPACE_ID: u64 = 2;
 pub(crate) const REGISTER_SPACE_ID: u64 = 1;
 pub(crate) const RUST_SLEIGH_REGISTER_SPACE_ID: u64 = 4;
 
 pub(crate) fn is_register_space_id(space_id: u64) -> bool {
     space_id == REGISTER_SPACE_ID || space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+}
+
+pub(crate) fn is_unique_space_id(space_id: u64) -> bool {
+    space_id == UNIQUE_SPACE_ID || space_id == RUST_SLEIGH_UNIQUE_SPACE_ID
 }
 
 pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {

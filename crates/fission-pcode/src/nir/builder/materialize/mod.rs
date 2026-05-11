@@ -136,11 +136,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let mut body = Vec::new();
         let terminator_index = self.block_terminator_index(block);
-        let block_idx = self
-            .address_to_index
-            .get(&block.start_address)
-            .copied()
-            .unwrap_or(0);
+        let block_idx = self.lowering_block_index(block);
         if Self::explicit_merge_binding_enabled() {
             body.extend(self.synthesize_explicit_merge_bindings_for_block(block)?);
         }
@@ -277,6 +273,19 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         Ok(body)
+    }
+
+    fn lowering_block_index(&self, block: &crate::pcode::PcodeBasicBlock) -> usize {
+        let indexed = block.index as usize;
+        if self.pcode.blocks.get(indexed).is_some_and(|candidate| {
+            candidate.start_address == block.start_address && candidate.ops.len() == block.ops.len()
+        }) {
+            return indexed;
+        }
+        self.address_to_index
+            .get(&block.start_address)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn maybe_materialize_output_stmt(
@@ -971,7 +980,9 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::builder::materialize::test_support::{block, constant, op, pcode_function};
+    use crate::nir::builder::materialize::test_support::{
+        block, block_at, constant, op, pcode_function,
+    };
 
     fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -1058,5 +1069,93 @@ mod tests {
             builder.live_call_result_binding_for_return_register(&ret_eax),
             Some("xVarCall".to_string())
         );
+    }
+
+    #[test]
+    fn lower_block_stmts_uses_block_index_for_duplicate_start_addresses() {
+        let x0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let w0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let ptr = Varnode::constant(0x3000, 8);
+        let first_duplicate = block_at(
+            0x2000,
+            1,
+            vec![op(
+                1,
+                PcodeOpcode::Copy,
+                Some(x0.clone()),
+                vec![constant(3)],
+            )],
+        );
+        let second_duplicate = block_at(
+            0x2000,
+            2,
+            vec![
+                op(2, PcodeOpcode::Copy, Some(x0), vec![constant(7)]),
+                op(3, PcodeOpcode::Store, None, vec![constant(3), ptr, w0]),
+            ],
+        );
+        let pcode = pcode_function(vec![
+            block_at(0x1000, 0, Vec::new()),
+            first_duplicate,
+            second_duplicate.clone(),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let stmts = builder
+            .lower_block_stmts(&second_duplicate)
+            .expect("lower duplicate block");
+
+        assert!(
+            matches!(
+                stmts.as_slice(),
+                [HirStmt::Assign {
+                    rhs: HirExpr::Cast {
+                        expr,
+                        ..
+                    },
+                ..
+            }] if matches!(expr.as_ref(), HirExpr::Const(7, _))
+            ),
+            "{stmts:?}"
+        );
+    }
+
+    #[test]
+    fn lookup_def_site_allows_unique_low_view_of_wide_temp() {
+        let wide = Varnode {
+            space_id: RUST_SLEIGH_UNIQUE_SPACE_ID,
+            offset: 0x40b00,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let low = Varnode {
+            size: 4,
+            ..wide.clone()
+        };
+        let x8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x40, 8);
+        let pcode = pcode_function(vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(wide), vec![constant(7)]),
+                op(1, PcodeOpcode::IntZExt, Some(x8), vec![low.clone()]),
+            ],
+        )]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 1,
+        });
+
+        let (site, producer) = builder
+            .lookup_def_site(&low)
+            .expect("wide unique def covers low view");
+
+        assert_eq!(site.block_idx, 0);
+        assert_eq!(site.op_idx, 0);
+        assert_eq!(producer.seq_num, 0);
     }
 }
