@@ -156,6 +156,95 @@ fn aarch64_return_register_is_named_and_recognized() {
 }
 
 #[test]
+fn aarch64_return_link_register_input_is_control_target_not_value() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x100000,
+                output: None,
+                inputs: vec![cst(0, 8), x30],
+                asm_mnemonic: None,
+            }],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "leaf_void", 0x100000, &options).expect("preview render");
+    assert!(code.contains("void leaf_void(void)"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return x30;"), "{code}");
+}
+
+#[test]
+fn aarch64_return_target_copy_input_is_control_target_not_value() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100000,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![x30],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100000,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "leaf_void", 0x100000, &options).expect("preview render");
+    assert!(code.contains("void leaf_void(void)"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return x30;"), "{code}");
+}
+
+#[test]
 fn aarch64_ret_link_register_copy_is_not_return_value() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::AArch64;

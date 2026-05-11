@@ -436,7 +436,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.options.is_64bit
             && let Some(input) = block.ops[term_idx].inputs.last()
-            && !self.return_input_is_stack_target(input)
+            && !self.return_input_is_control_target(input)
         {
             return self
                 .lower_wrapped_varnode(input, &mut HashSet::new())
@@ -451,6 +451,25 @@ impl<'a> PreviewBuilder<'a> {
             .last()
             .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
             .transpose()
+    }
+
+    fn return_input_is_control_target(&self, input: &Varnode) -> bool {
+        if self.return_input_is_stack_target(input) {
+            return true;
+        }
+        if self.options.calling_convention != CallingConvention::AArch64
+            || !is_register_space_id(input.space_id)
+        {
+            return false;
+        }
+        if input.offset == 0x40f0 {
+            return true;
+        }
+        self.lookup_def_site(input).is_some_and(|(_, op)| {
+            op.output.as_ref().is_some_and(|output| {
+                output == input && self.is_aarch64_return_target_copy(op, output)
+            })
+        })
     }
 
     fn return_input_is_stack_target(&self, input: &Varnode) -> bool {
