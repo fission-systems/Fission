@@ -596,6 +596,27 @@ fn generated_runtime_lifts_aarch64_udiv_from_sla_int_div_template() {
 }
 
 #[test]
+fn generated_runtime_lifts_aarch64_vector_lane_mov_from_operand_value_expression() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+    let bytes = [0x22, 0x64, 0x1c, 0x6e]; // mov v2.s[3], v1.s[3]
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x1000b8).expect("decode mov");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "mov");
+
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x1000b8).expect("lift mov");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(!ops.is_empty(), "vector lane mov emitted no p-code");
+}
+
+#[test]
 fn generated_runtime_lifts_riscv_lui_shift_count_at_sla_const_width() {
     require_packaged_ghidra_sla!();
     let riscv_spec = spec_root_for_arch("RISCV").join("riscv.lp64d.slaspec");

@@ -1426,24 +1426,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 }
             }
             CompiledPatternExpression::OperandValue { index } => {
-                self.decode_operand(*index)?;
-                let handle = self
-                    .handles
-                    .get(*index)
-                    .and_then(|value| value.as_ref())
-                    .ok_or_else(|| {
-                        anyhow!("operand {} was not decoded for pattern expression", index)
-                    })?;
-                let fixed = &handle.fixed;
-                if fixed.offset_space.is_none()
-                    && fixed
-                        .space
-                        .as_ref()
-                        .is_some_and(|space| space.name == "const" || space.index == 0)
-                {
-                    return Ok(fixed.offset_offset as i64);
-                }
-                bail!("operand {index} is not a constant fixed handle for pattern expression")
+                self.eval_operand_value_expression(*index)
             }
             CompiledPatternExpression::Add(lhs, rhs) => {
                 Ok(self.eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?)
@@ -1479,6 +1462,106 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             }
             CompiledPatternExpression::Negate(inner) => Ok(-self.eval_pattern_expression(inner)?),
             CompiledPatternExpression::Not(inner) => Ok(!self.eval_pattern_expression(inner)?),
+        }
+    }
+
+    fn eval_operand_value_expression(&mut self, operand_index: usize) -> Result<i64> {
+        let spec = self
+            .selection
+            .constructor
+            .constructor_template
+            .handles
+            .get(operand_index)
+            .ok_or_else(|| anyhow!("missing operand {operand_index} for pattern expression"))?
+            .spec
+            .clone();
+        let operand_absolute_offset = self.operand_absolute_offset(&spec)?;
+        match &spec {
+            CompiledOperandSpec::SlaTokenField {
+                big_endian,
+                sign_bit,
+                bit_start,
+                bit_end,
+                byte_start,
+                byte_end,
+                shift,
+                ..
+            }
+            | CompiledOperandSpec::SlaVarnodeList {
+                big_endian,
+                sign_bit,
+                bit_start,
+                bit_end,
+                byte_start,
+                byte_end,
+                shift,
+                ..
+            }
+            | CompiledOperandSpec::SlaValueMap {
+                big_endian,
+                sign_bit,
+                bit_start,
+                bit_end,
+                byte_start,
+                byte_end,
+                shift,
+                ..
+            } => Ok(read_sla_token_field_at(
+                self.ctx,
+                operand_absolute_offset,
+                *big_endian,
+                *sign_bit,
+                *bit_start,
+                *bit_end,
+                *byte_start,
+                *byte_end,
+                *shift,
+            )? as i64),
+            CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
+            | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
+            | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
+                self.eval_pattern_expression(expr)
+            }
+            CompiledOperandSpec::ContextFieldExtraction {
+                bit_offset,
+                bit_width,
+                sign_extend,
+            } => {
+                let raw = u64::from(packed_context_bits(
+                    self.context_register,
+                    *bit_offset,
+                    *bit_width,
+                )?);
+                if *sign_extend {
+                    let shift = 64 - bit_width;
+                    Ok(((raw << shift) as i64) >> shift)
+                } else {
+                    Ok(raw as i64)
+                }
+            }
+            CompiledOperandSpec::SlaFixedVarnode { .. }
+            | CompiledOperandSpec::SubtableEvaluation { .. } => {
+                self.decode_operand(operand_index)?;
+                let handle = self
+                    .handles
+                    .get(operand_index)
+                    .and_then(|value| value.as_ref())
+                    .ok_or_else(|| {
+                        anyhow!("operand {operand_index} was not decoded for pattern expression")
+                    })?;
+                let fixed = &handle.fixed;
+                if fixed.offset_space.is_none()
+                    && fixed
+                        .space
+                        .as_ref()
+                        .is_some_and(|space| space.name == "const" || space.index == 0)
+                {
+                    return Ok(fixed.offset_offset as i64);
+                }
+                bail!(
+                    "operand {operand_index} has no evaluable defining expression for pattern expression"
+                )
+            }
         }
     }
 
